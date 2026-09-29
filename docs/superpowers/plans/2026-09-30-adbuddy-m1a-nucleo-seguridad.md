@@ -8505,7 +8505,8 @@ func TestEndToEnd(t *testing.T) {
 		_, redOut, redCode = h.adb("", "shell", "rm", "-rf", "/sdcard/DCIM")
 		close(done)
 	}()
-	waitFor(t, func() bool { return strings.Contains(h.serveErr.String(), "Allow? [y/N]") }, h.serveErr)
+	waitFor(t, func() bool { return strings.Contains(h.serveErr.String(), "Code: ") }, h.serveErr)
+	time.Sleep(1200 * time.Millisecond) // answers in the first second are ignored as typed ahead
 	io.WriteString(h.serveIn, "n\n")
 	<-done
 	if redCode != 126 || !strings.Contains(redOut, "Denied by user: Delete files: -rf /sdcard/DCIM") {
@@ -8660,6 +8661,9 @@ func formatEntry(e journal.Entry) string {
 	if e.UndoneBy != nil {
 		status += ", undone"
 	}
+	if e.Tampered {
+		status += ", ⚠ not written by ADBuddy"
+	}
 	// Everything here may come from the agent or the phone: escape what could
 	// rewrite the terminal.
 	line := fmt.Sprintf("%s %s %-8s %s  [%s] adb %s", e.TS.Local().Format("15:04:05"), lvl, status,
@@ -8788,7 +8792,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			var outMu sync.Mutex
 			session := journal.NewID("s_", time.Now())
 			d := daemon.New(daemon.Options{
-				Classifier: cls, ADB: runner, Journal: journal.Open(workspace.JournalDir(ws)), Confirmer: confirmer,
+				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: confirmer,
 				Serial: active, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
 				OnEntry: func(j journal.Entry) {
 					outMu.Lock()
@@ -8975,7 +8979,11 @@ func newJournalCmd(app *App) *cobra.Command {
 				}
 				session = p.Session
 			}
-			entries, skipped, err := journal.Open(workspace.JournalDir(e.workspace(wsDir))).Load()
+			store := journal.Open(workspace.JournalDir(e.workspace(wsDir)))
+			if secret, err := ipc.ReadSecret(e.dirs.Data); err == nil {
+				store = journal.OpenSigned(workspace.JournalDir(e.workspace(wsDir)), []byte(secret))
+			}
+			entries, skipped, err := store.Load()
 			if err != nil {
 				return NewError("JOURNAL_UNREADABLE", err.Error(), "")
 			}
@@ -9024,19 +9032,22 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/spf13/cobra"
 )
 
 var undoFixes = map[string]string{
-	"NOTHING_TO_UNDO": "See `adbuddy journal` for what was done.",
-	"NOT_FOUND":       "Check the id with `adbuddy journal`.",
-	"NO_INVERSE":      "This change has to be reverted by hand.",
-	"ALREADY_UNDONE":  "Nothing to do.",
-	"NOT_APPLIED":     "Nothing to do: the command never ran.",
-	"UNCERTAIN_STATE": "Check the phone: the command failed or the host stopped while it ran, so its inverse is not run automatically.",
-	"UNDO_FAILED":     "Check the phone and the journal; failed inverses can be retried with `adbuddy undo <id>`.",
+	"NOTHING_TO_UNDO":    "See `adbuddy journal` for what was done.",
+	"NOT_FOUND":          "Check the id with `adbuddy journal`.",
+	"NO_INVERSE":         "This change has to be reverted by hand.",
+	"ALREADY_UNDONE":     "Nothing to do.",
+	"NOT_APPLIED":        "Nothing to do: the command never ran.",
+	"UNTRUSTED_ENTRY":    "The entry was not written by ADBuddy: check the phone and undo it by hand if needed.",
+	"JOURNAL_UNWRITABLE": "Check that the journal folder is writable; the changes listed as undone did happen.",
+	"UNCERTAIN_STATE":    "Check the phone: the command failed or the host stopped while it ran, so its inverse is not run automatically.",
+	"UNDO_FAILED":        "Check the phone and the journal; failed inverses can be retried with `adbuddy undo <id>`.",
 }
 
 func newUndoCmd(app *App) *cobra.Command {
@@ -9067,20 +9078,21 @@ are reported and skipped. Needs ` + "`adbuddy serve`" + ` running.`,
 			if err != nil {
 				return NewError("DAEMON_UNREACHABLE", err.Error(), "")
 			}
-			if exit.Code != 0 && exit.ErrorCode != "UNDO_FAILED" {
+			partial := exit.ErrorCode == "UNDO_FAILED" || exit.ErrorCode == "JOURNAL_UNWRITABLE"
+			if exit.Code != 0 && !partial {
 				return NewError(exit.ErrorCode, exit.Error, undoFixes[exit.ErrorCode])
 			}
 			if app.JSON && exit.Code == 0 {
 				return WriteData(app.Stdout, res)
 			}
 			for _, it := range res.Undone {
-				fmt.Fprintf(app.Stdout, "undone   %s  %s\n", it.ID, it.Description)
+				fmt.Fprintf(app.Stdout, "undone   %s  %s\n", it.ID, classify.Printable(it.Description))
 			}
 			for _, it := range res.Failed {
-				fmt.Fprintf(app.Stdout, "failed   %s  %s: %s\n", it.ID, it.Description, it.Error)
+				fmt.Fprintf(app.Stdout, "failed   %s  %s: %s\n", it.ID, classify.Printable(it.Description), classify.Printable(it.Error))
 			}
 			for _, it := range res.Skipped {
-				fmt.Fprintf(app.Stdout, "skipped  %s  %s (no inverse)\n", it.ID, it.Description)
+				fmt.Fprintf(app.Stdout, "skipped  %s  %s (%s)\n", it.ID, classify.Printable(it.Description), it.Error)
 			}
 			if exit.Code != 0 {
 				return NewError(exit.ErrorCode, exit.Error, undoFixes[exit.ErrorCode])
