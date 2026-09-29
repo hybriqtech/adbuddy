@@ -19,7 +19,7 @@ const (
 type Error struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
-	Fix       string `json:"fix,omitempty"`
+	Fix       string `json:"fix"`
 	Transient bool   `json:"transient"`
 	exit      int
 }

@@ -51,10 +51,24 @@ func NewRoot(app *App) *cobra.Command {
 func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	app := &App{Stdin: stdin, Stdout: stdout, Stderr: stderr, Getenv: os.Getenv}
 	root := NewRoot(app)
+	app.JSON = wantsJSON(args) // errors raised before cobra reads --json still use the envelope
 	root.SetArgs(args)
 	err := root.Execute()
 	if err != nil {
 		WriteFailure(stdout, stderr, app.JSON, err)
 	}
 	return ExitCode(err)
+}
+
+// wantsJSON reports whether --json appears before "--".
+func wantsJSON(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "--json" || a == "--json=true" {
+			return true
+		}
+	}
+	return false
 }

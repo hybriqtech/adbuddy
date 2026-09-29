@@ -97,3 +97,16 @@ func TestHelpListsExitCodes(t *testing.T) {
 		t.Fatalf("exit %d, help %q", code, out)
 	}
 }
+
+func TestJSONErrorsBeforeFlagParsing(t *testing.T) {
+	for _, args := range [][]string{{"frobnicate", "--json"}, {"version", "--nope", "--json"}} {
+		out, errOut, code := run(t, args...)
+		var env struct {
+			OK    bool   `json:"ok"`
+			Error *Error `json:"error"`
+		}
+		if code != ExitUsage || errOut != "" || json.Unmarshal([]byte(out), &env) != nil || env.OK || env.Error == nil || env.Error.Code != "USAGE" {
+			t.Errorf("%v: exit %d stdout %q stderr %q", args, code, out, errOut)
+		}
+	}
+}
