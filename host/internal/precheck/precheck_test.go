@@ -41,7 +41,7 @@ func (f *fakeDevice) Pull(_ context.Context, remote, local string) error {
 
 func kindCmd(p string) string {
 	q := p
-	if strings.ContainsAny(p, " $'") {
+	if strings.ContainsAny(p, " $'\\") {
 		q = "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
 	}
 	return "if [ -d " + q + " ]; then echo dir; elif [ -e " + q + " ] || [ -L " + q + " ]; then echo file; else echo none; fi"
@@ -87,9 +87,16 @@ func TestPhoneErrorRaisesToRed(t *testing.T) {
 }
 
 func TestPmDisable(t *testing.T) {
-	p := Prepare(context.Background(), &fakeDevice{}, op("pm-disable", "pkg", "com.facebook.katana", "user", "0"), classify.Yellow, Env{})
+	const listCmd = "pm list packages -d --user 0 com.facebook.katana"
+	dev := &fakeDevice{answers: map[string]string{listCmd: ""}}
+	p := Prepare(context.Background(), dev, op("pm-disable", "pkg", "com.facebook.katana", "user", "0"), classify.Yellow, Env{})
 	if got := joined(p.Inverse); got != "shell pm enable --user 0 com.facebook.katana" {
 		t.Fatalf("inverse %q", got)
+	}
+	dev.answers[listCmd] = "package:com.facebook.katana\n"
+	p = Prepare(context.Background(), dev, op("pm-disable", "pkg", "com.facebook.katana", "user", "0"), classify.Yellow, Env{})
+	if p.Level != classify.Yellow || p.Inverse != nil {
+		t.Fatalf("already disabled: %+v", p)
 	}
 }
 
@@ -141,6 +148,23 @@ func TestDeviceidle(t *testing.T) {
 	p = Prepare(context.Background(), dev, op("deviceidle", "sign", "-", "pkg", "com.b"), classify.Yellow, Env{})
 	if joined(p.Inverse) != "shell dumpsys deviceidle whitelist +com.b" {
 		t.Fatalf("remove: %+v", p)
+	}
+}
+
+func TestDeviceidleOnlyUserList(t *testing.T) {
+	dev := &fakeDevice{answers: map[string]string{"dumpsys deviceidle whitelist": "system,com.s,1000\n"}}
+	p := Prepare(context.Background(), dev, op("deviceidle", "sign", "+", "pkg", "com.s"), classify.Yellow, Env{})
+	if joined(p.Inverse) != "shell dumpsys deviceidle whitelist -com.s" {
+		t.Fatalf("add: %+v", p)
+	}
+	p = Prepare(context.Background(), dev, op("deviceidle", "sign", "-", "pkg", "com.s"), classify.Yellow, Env{})
+	if p.Inverse != nil || p.Level != classify.Yellow {
+		t.Fatalf("remove: %+v", p)
+	}
+	dev.answers["dumpsys deviceidle whitelist"] = "garbage\n"
+	p = Prepare(context.Background(), dev, op("deviceidle", "sign", "+", "pkg", "com.s"), classify.Yellow, Env{})
+	if p.Level != classify.Red {
+		t.Fatalf("garbage: %+v", p)
 	}
 }
 
@@ -218,7 +242,7 @@ func TestPush(t *testing.T) {
 	env := Env{Cwd: cwd, BackupDir: backups}
 
 	p := Prepare(context.Background(), dev, op("adb-push", "local", "notes.txt", "remote", "/sdcard/Download"), classify.Yellow, env)
-	wantBackup := filepath.Join(backups, "notes.txt")
+	wantBackup := filepath.Join(backups, "original")
 	if p.Level != classify.Yellow || joined(p.Inverse) != "push "+wantBackup+" /sdcard/Download/notes.txt" {
 		t.Fatalf("overwrite: %+v", p)
 	}
@@ -241,6 +265,15 @@ func TestPush(t *testing.T) {
 	p = Prepare(context.Background(), dev, op("adb-push", "local", "nope.txt", "remote", "/sdcard/fresh.txt"), classify.Yellow, env)
 	if p.Level != classify.Red {
 		t.Fatalf("missing local: %+v", p)
+	}
+
+	evil := `/data/local/tmp/..\..\2026-09.jsonl`
+	dev.answers[kindCmd(evil)] = "file\n"
+	dev.pulled[evil] = "journal"
+	p = Prepare(context.Background(), dev, op("adb-push", "local", "notes.txt", "remote", evil), classify.Yellow, env)
+	if p.Level != classify.Yellow || len(p.Backups) != 1 || p.Backups[0] != wantBackup ||
+		joined(p.Inverse) != "push "+wantBackup+" "+evil {
+		t.Fatalf("hostile name: %+v", p)
 	}
 }
 

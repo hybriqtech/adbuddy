@@ -55,7 +55,7 @@ func Prepare(ctx context.Context, dev Device, op *classify.Op, level classify.Le
 	case "settings-put":
 		err = settingsPut(ctx, dev, op.Args, &p)
 	case "pm-disable":
-		p.Inverse = shellArgv(withUser([]string{"pm", "enable"}, op.Args["user"], op.Args["pkg"])...)
+		err = pmDisable(ctx, dev, op.Args, &p)
 	case "pm-uninstall-user":
 		err = pmUninstallUser(ctx, dev, op.Args, &p)
 	case "appops-set":
@@ -160,12 +160,53 @@ func appopsSet(ctx context.Context, dev Device, a map[string]string, p *Prepared
 	return nil
 }
 
+func numeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func pmDisable(ctx context.Context, dev Device, a map[string]string, p *Prepared) error {
+	out, err := run(ctx, dev, withUser([]string{"pm", "list", "packages", "-d"}, a["user"], a["pkg"])...)
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "package:"+a["pkg"] {
+			return nil // already disabled before the change: nothing to undo
+		}
+	}
+	p.Inverse = shellArgv(withUser([]string{"pm", "enable"}, a["user"], a["pkg"])...)
+	return nil
+}
+
 func deviceidle(ctx context.Context, dev Device, a map[string]string, p *Prepared) error {
 	out, err := run(ctx, dev, "dumpsys", "deviceidle", "whitelist")
 	if err != nil {
 		return err
 	}
-	present := strings.Contains(out, ","+a["pkg"]+",")
+	// Lines are category,package,uid. `whitelist +pkg/-pkg` only touches the
+	// user list, so only a "user" line counts as present.
+	present := false
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		f := strings.Split(line, ",")
+		if len(f) != 3 || (f[0] != "system-excidle" && f[0] != "system" && f[0] != "user") || !numeric(f[2]) {
+			return fmt.Errorf("unexpected deviceidle output %q", line)
+		}
+		if f[0] == "user" && f[1] == a["pkg"] {
+			present = true
+		}
+	}
 	switch {
 	case a["sign"] == "+" && !present:
 		p.Inverse = shellArgv("dumpsys", "deviceidle", "whitelist", "-"+a["pkg"])
@@ -302,7 +343,9 @@ func push(ctx context.Context, dev Device, a map[string]string, env Env, p *Prep
 		if err := os.MkdirAll(env.BackupDir, 0o700); err != nil {
 			return err
 		}
-		backup := filepath.Join(env.BackupDir, path.Base(target))
+		// Fixed name: the remote name is chosen on the phone and must never
+		// pick where the backup lands (one backup per journal entry).
+		backup := filepath.Join(env.BackupDir, "original")
 		if err := dev.Pull(ctx, target, backup); err != nil {
 			return fmt.Errorf("backup of %s failed: %w", target, err)
 		}
