@@ -6,8 +6,12 @@ import (
 	"os"
 
 	"github.com/hybriqtech/adbuddy/host/internal/cli"
+	"github.com/hybriqtech/adbuddy/host/internal/shim"
 )
 
 func main() {
+	if shim.IsShim(os.Args[0]) {
+		os.Exit(shim.Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
+	}
 	os.Exit(cli.Main(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }

@@ -43,7 +43,7 @@ func NewRoot(app *App) *cobra.Command {
 	root.SetVersionTemplate("adbuddy {{.Version}}\n")
 	root.PersistentFlags().BoolVar(&app.JSON, "json", false, "print machine-readable JSON on stdout")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return UsageError(err.Error()) })
-	root.AddCommand(newVersionCmd(app))
+	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app))
 	return root
 }
 
