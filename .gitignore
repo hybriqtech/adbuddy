@@ -1,0 +1,36 @@
+# Secrets
+.env*
+!.env.example
+
+# Go (host/)
+/host/dist/
+/host/bin/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Android / Gradle (android/)
+.gradle/
+build/
+/android/local.properties
+/android/app/release/
+*.apk
+*.aab
+*.keystore
+*.jks
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Editors
+.idea/
+*.iml
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
