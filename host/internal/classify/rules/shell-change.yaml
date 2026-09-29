@@ -1,0 +1,39 @@
+# Built-in rules for commands that change the phone (spec §4.2 🟡/🔴, §4.3).
+# Same format as adb.yaml.
+rules:
+  # ── Phone shell: reversible or harmless changes ──────────────────────────
+  - {id: settings.put, cmd: settings, sub: [put], level: yellow, check: settings-put, title: {en: "Change setting {key} to {value}", es: "Cambiar el ajuste {key} a {value}"}}
+  - {id: pm.disable-user, cmd: pm, sub: [disable-user, disable], level: yellow, check: pm-disable, title: {en: "Disable the app {pkg}", es: "Desactivar la app {pkg}"}}
+  - {id: pm.enable, cmd: pm, sub: [enable], level: yellow, title: {en: "Enable the app {args}", es: "Activar la app {args}"}}
+  - {id: pm.uninstall-user, cmd: pm, sub: [uninstall], level: yellow, check: pm-uninstall-user, title: {en: "Uninstall the app {pkg} for user {user}", es: "Desinstalar la app {pkg} para el usuario {user}"}}
+  - {id: pm.install-existing, cmd: pm, sub: [install-existing], level: yellow, title: {en: "Reinstall a system app: {args}", es: "Reinstalar una app del sistema: {args}"}}
+  - {id: appops.set, cmd: appops, sub: [set], level: yellow, check: appops-set, title: {en: "Set permission {op} of {pkg} to {mode}", es: "Poner el permiso {op} de {pkg} en {mode}"}}
+  - {id: deviceidle, cmd: dumpsys, sub: [deviceidle], level: green, check: deviceidle, title: {en: "Battery optimisation exemption {sign}{pkg}", es: "Exención de optimización de batería {sign}{pkg}"}}
+  - {id: fs.mv, cmd: mv, level: yellow, check: mv, title: {en: "Move {src} to {dst}", es: "Mover {src} a {dst}"}}
+  - {id: fs.mkdir, cmd: mkdir, level: yellow, check: mkdir, title: {en: "Create the folder {path}", es: "Crear la carpeta {path}"}}
+  - {id: ui.input, cmd: input, level: yellow, ui: true, title: {en: "Interface action: {args}", es: "Acción en la interfaz: {args}"}}
+  - {id: ui.am-start, cmd: am, sub: [start, start-activity], level: yellow, ui: true, title: {en: "Open {args}", es: "Abrir {args}"}}
+  - {id: ui.monkey, cmd: monkey, level: yellow, ui: true, check: monkey, title: {en: "Open the app {pkg}", es: "Abrir la app {pkg}"}}
+  - {id: am.force-stop, cmd: am, sub: [force-stop, kill], level: yellow, title: {en: "Stop the app {args}", es: "Detener la app {args}"}}
+
+  # ── Phone shell: irreversible or dangerous (named for clearer prompts) ───
+  - {id: fs.rm, cmd: rm, level: red, title: {en: "Delete files: {args}", es: "Borrar ficheros: {args}"}}
+  - {id: fs.rmdir, cmd: rmdir, level: red, title: {en: "Delete folders: {args}", es: "Borrar carpetas: {args}"}}
+  - {id: fs.cp, cmd: cp, level: red, title: {en: "Copy files: {args}", es: "Copiar ficheros: {args}"}}
+  - {id: fs.touch, cmd: touch, level: red, title: {en: "Create or touch files: {args}", es: "Crear o tocar ficheros: {args}"}}
+  - {id: fs.chmod, cmd: chmod, level: red, title: {en: "Change permissions: {args}", es: "Cambiar permisos: {args}"}}
+  - {id: fs.ln, cmd: ln, level: red, title: {en: "Create links: {args}", es: "Crear enlaces: {args}"}}
+  - {id: fs.dd, cmd: dd, level: red, title: {en: "Write raw data: {args}", es: "Escribir datos en bruto: {args}"}}
+  - {id: sys.reboot, cmd: reboot, level: red, title: {en: "Restart the phone {args}", es: "Reiniciar el móvil {args}"}}
+  - {id: sys.setprop, cmd: setprop, level: red, title: {en: "Change the system property {1}", es: "Cambiar la propiedad del sistema {1}"}}
+  - {id: sys.kill, cmd: kill, level: red, title: {en: "Kill processes: {args}", es: "Matar procesos: {args}"}}
+  - {id: sys.svc, cmd: svc, level: red, title: {en: "Change a system service: {args}", es: "Cambiar un servicio del sistema: {args}"}}
+  - {id: sys.sm, cmd: sm, level: red, title: {en: "Change storage: {args}", es: "Cambiar el almacenamiento: {args}"}}
+  - {id: settings.delete, cmd: settings, sub: [delete, reset], level: red, title: {en: "Delete or reset settings: {args}", es: "Borrar o restablecer ajustes: {args}"}}
+  - {id: pm.clear, cmd: pm, sub: [clear], level: red, title: {en: "Erase all data of {args}", es: "Borrar todos los datos de {args}"}}
+  - {id: pm.permissions, cmd: pm, sub: [grant, revoke], level: red, title: {en: "Change a permission: {args}", es: "Cambiar un permiso: {args}"}}
+  - {id: pm.other, cmd: pm, level: red, title: {en: "Change packages: {args}", es: "Cambiar paquetes: {args}"}}
+  - {id: content.write, cmd: content, level: red, title: {en: "Change a content provider: {args}", es: "Cambiar un proveedor de contenido: {args}"}}
+  - {id: am.other, cmd: am, level: red, title: {en: "Activity manager command: {args}", es: "Orden del gestor de actividades: {args}"}}
+  - {id: cmd.other, cmd: cmd, level: red, title: {en: "System service command: {args}", es: "Orden a un servicio del sistema: {args}"}}
+  - {id: wm.write, cmd: wm, level: red, title: {en: "Change the screen: {args}", es: "Cambiar la pantalla: {args}"}}
