@@ -12,6 +12,7 @@ const (
 	ExitUsage     = 2
 	ExitTransient = 75
 	ExitConfig    = 78
+	ExitInterrupt = 130 // stopped with Ctrl+C (128 + SIGINT)
 )
 
 // Error is the structured error every command returns. Human mode prints it on
@@ -39,6 +40,11 @@ func TransientError(code, message, fix string) *Error {
 // ConfigError builds a configuration failure (exit code 78).
 func ConfigError(code, message, fix string) *Error {
 	return &Error{Code: code, Message: message, Fix: fix, exit: ExitConfig}
+}
+
+// Interrupted is returned when the user stops a command with Ctrl+C.
+func Interrupted() *Error {
+	return &Error{Code: "INTERRUPTED", Message: "stopped with Ctrl+C", exit: ExitInterrupt}
 }
 
 // UsageError builds an invalid-usage failure (exit code 2).

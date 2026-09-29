@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
@@ -51,28 +52,45 @@ are reported and skipped. Needs ` + "`adbuddy serve`" + ` running.`,
 			if err != nil {
 				return NewError("DAEMON_UNREACHABLE", err.Error(), "")
 			}
-			partial := exit.ErrorCode == "UNDO_FAILED" || exit.ErrorCode == "JOURNAL_UNWRITABLE"
-			if exit.Code != 0 && !partial {
-				return NewError(exit.ErrorCode, exit.Error, undoFixes[exit.ErrorCode])
+			code := exit.ErrorCode
+			if code == "" {
+				code = "DAEMON_ERROR" // e.g. "unauthorized" after the secret changed
 			}
-			if app.JSON && exit.Code == 0 {
+			failure := NewError(code, exit.Error, undoFixes[code])
+			partial := code == "UNDO_FAILED" || code == "JOURNAL_UNWRITABLE"
+			if exit.Code != 0 && !partial {
+				if code == "NOTHING_TO_UNDO" {
+					printUndoItems(app.Stderr, nil, nil, res.Skipped) // why the last changes were not undone
+				}
+				return failure
+			}
+			if app.JSON {
+				if exit.Code != 0 {
+					return writeFailureData(app.Stdout, failure, res)
+				}
 				return WriteData(app.Stdout, res)
 			}
-			for _, it := range res.Undone {
-				fmt.Fprintf(app.Stdout, "undone   %s  %s\n", it.ID, classify.Printable(it.Description))
-			}
-			for _, it := range res.Failed {
-				fmt.Fprintf(app.Stdout, "failed   %s  %s: %s\n", it.ID, classify.Printable(it.Description), classify.Printable(it.Error))
-			}
-			for _, it := range res.Skipped {
-				fmt.Fprintf(app.Stdout, "skipped  %s  %s (%s)\n", it.ID, classify.Printable(it.Description), it.Error)
-			}
+			printUndoItems(app.Stdout, res.Undone, res.Failed, res.Skipped)
 			if exit.Code != 0 {
-				return NewError(exit.ErrorCode, exit.Error, undoFixes[exit.ErrorCode])
+				return failure
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&session, "session", "", "session for `undo session` (default: the current one)")
 	return cmd
+}
+
+// printUndoItems lists what undo did. Descriptions and errors come from the
+// journal, which the agent can write: they are escaped.
+func printUndoItems(w io.Writer, undone, failed, skipped []daemon.UndoItem) {
+	for _, it := range undone {
+		fmt.Fprintf(w, "undone   %s  %s\n", classify.Printable(it.ID), classify.Printable(it.Description))
+	}
+	for _, it := range failed {
+		fmt.Fprintf(w, "failed   %s  %s: %s\n", classify.Printable(it.ID), classify.Printable(it.Description), classify.Printable(it.Error))
+	}
+	for _, it := range skipped {
+		fmt.Fprintf(w, "skipped  %s  %s (%s)\n", classify.Printable(it.ID), classify.Printable(it.Description), classify.Printable(it.Error))
+	}
 }

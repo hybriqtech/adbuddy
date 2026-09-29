@@ -10,15 +10,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// journalEntry is an entry as `journal --json` prints it: Verified is true
+// only when its signature was checked and is good.
+type journalEntry struct {
+	journal.Entry
+	Verified bool `json:"verified"`
+}
+
 func newJournalCmd(app *App) *cobra.Command {
 	var session, wsDir string
 	var limit int
 	cmd := &cobra.Command{
 		Use:     "journal",
 		Short:   "Show the journal of adb commands and their inverses",
-		Example: "  adbuddy journal\n  adbuddy journal --session\n  adbuddy journal --session s_01J… --json\n  adbuddy journal --limit 0 --json | jq '.data.entries[] | select(.level==\"red\")'",
+		Example: "  adbuddy journal\n  adbuddy journal --session current\n  adbuddy journal --session s_01J… --json\n  adbuddy journal --limit 0 --json | jq '.data.entries[] | select(.level==\"red\")'",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if limit < 0 {
+				return UsageError("--limit must be 0 (all) or a positive number")
+			}
 			e, err := loadEnv(app)
 			if err != nil {
 				return err
@@ -33,9 +43,12 @@ func newJournalCmd(app *App) *cobra.Command {
 				}
 				session = p.Session
 			}
-			store := journal.Open(workspace.JournalDir(e.workspace(wsDir)))
-			if secret, err := ipc.ReadSecret(e.dirs.Data); err == nil {
-				store = journal.OpenSigned(workspace.JournalDir(e.workspace(wsDir)), []byte(secret))
+			dir := workspace.JournalDir(e.workspace(wsDir))
+			store := journal.Open(dir)
+			secret, err := ipc.ReadSecret(e.dirs.Data)
+			signed := err == nil
+			if signed {
+				store = journal.OpenSigned(dir, []byte(secret))
 			}
 			entries, skipped, err := store.Load()
 			if err != nil {
@@ -50,11 +63,15 @@ func newJournalCmd(app *App) *cobra.Command {
 			if limit > 0 && len(out) > limit {
 				out = out[len(out)-limit:]
 			}
-			if out == nil {
-				out = []journal.Entry{}
+			if !signed && len(out) > 0 {
+				fmt.Fprintln(app.Stderr, "⚠ the journal signatures could not be verified (no ipc.secret)")
 			}
 			if app.JSON {
-				return WriteData(app.Stdout, map[string]any{"entries": out, "skippedLines": skipped})
+				list := make([]journalEntry, 0, len(out))
+				for _, j := range out {
+					list = append(list, journalEntry{Entry: j, Verified: signed && !j.Tampered})
+				}
+				return WriteData(app.Stdout, map[string]any{"entries": list, "skippedLines": skipped})
 			}
 			for _, j := range out {
 				fmt.Fprintln(app.Stdout, formatEntry(j))
@@ -68,8 +85,7 @@ func newJournalCmd(app *App) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&session, "session", "", "only this session (without a value: the current one)")
-	cmd.Flags().Lookup("session").NoOptDefVal = "current"
+	cmd.Flags().StringVar(&session, "session", "", "only this session: its id (s_…), or current for the one serve is running now")
 	cmd.Flags().IntVar(&limit, "limit", 50, "show only the last N entries (0 = all)")
 	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: ~/ADBuddy/default)")
 	return cmd

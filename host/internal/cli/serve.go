@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
+	"github.com/hybriqtech/adbuddy/host/internal/agent"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
@@ -58,6 +59,14 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			if serial == "" {
 				serial = e.cfg.Serial
 			}
+			// Another serve would get its workspace rewritten under its agent:
+			// find it before touching anything or waiting for the phone.
+			pctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+			_, perr := ipc.PingDaemon(pctx, e.dirs.Data)
+			cancel()
+			if !errors.Is(perr, ipc.ErrNotRunning) {
+				return alreadyRunning
+			}
 			ws := e.workspace(wsDir)
 			exe, err := os.Executable()
 			if err != nil {
@@ -80,11 +89,13 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			fmt.Fprintf(app.Stderr, "Waiting for the phone on ADBuddy's adb server (port %d)…\n", e.cfg.ADBServerPort)
 			active, err := runner.WaitSerial(ctx, serial, deviceWait)
 			switch {
+			case err != nil && ctx.Err() != nil:
+				return Interrupted()
 			case errors.Is(err, adb.ErrNoDevice):
 				return TransientError("DEVICE_NOT_FOUND", "no phone in state `device` on adb server port "+strconv.Itoa(e.cfg.ADBServerPort),
 					"Turn on wireless debugging on the phone (it must be paired with this PC), then run `adbuddy serve` again.")
 			case errors.Is(err, adb.ErrManyDevices):
-				return NewError("MULTIPLE_DEVICES", "more than one phone is connected", "Pass --serial <serial> (see `adb devices`) or set serial in "+e.dirs.ConfigFile()+".")
+				return NewError("MULTIPLE_DEVICES", "more than one phone is connected", "Pass --serial <serial> (see `adb -P "+strconv.Itoa(e.cfg.ADBServerPort)+" devices`) or set serial in "+e.dirs.ConfigFile()+".")
 			case err != nil:
 				return NewError("ADB_FAILED", err.Error(), "Check the adb path ("+adbPath+").")
 			}
@@ -130,18 +141,18 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				return d.Handle(ctx, req, c)
 			})
 			if errors.Is(err, ipc.ErrAlreadyRunning) {
-				return NewError("ALREADY_RUNNING", "another `adbuddy serve` is already running", "Use that terminal, or stop it (Ctrl+C) first.")
+				return alreadyRunning
 			}
 			if err != nil {
 				return NewError("SOCKET_FAILED", err.Error(), "")
 			}
-			fmt.Fprintf(app.Stderr, "ADBuddy is serving %s (session %s).\nJournal: %s\nIn another terminal run: adbuddy run claude\nPress Ctrl+C to stop.\n\n",
-				active, session, workspace.JournalDir(ws))
-			go func() {
-				<-ctx.Done()
-				srv.Close()
-			}()
-			if err := srv.Serve(); err != nil {
+			agentName := e.cfg.Agent
+			if agentName == "" {
+				agentName = agent.Known[0]
+			}
+			fmt.Fprintf(app.Stderr, "ADBuddy is serving %s (session %s).\nJournal: %s\nIn another terminal run: adbuddy run %s\nPress Ctrl+C to stop.\n\n",
+				active, session, workspace.JournalDir(ws), agentName)
+			if err := serveUntil(ctx, stop, srv); err != nil {
 				return NewError("SOCKET_FAILED", err.Error(), "")
 			}
 			fmt.Fprintln(app.Stderr, "ADBuddy stopped.")
@@ -151,8 +162,26 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 	cmd.Flags().StringVar(&adbPath, "adb", "", "path to the real adb (default: adb_path in config.toml)")
 	cmd.Flags().StringVar(&serial, "serial", "", "the phone to use when several are connected")
 	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: ~/ADBuddy/default)")
-	cmd.Flags().StringVar(&confirmMode, "confirm", "auto", "where to confirm 🔴 commands: auto (this terminal if interactive, else deny), terminal or deny")
+	cmd.Flags().StringVar(&confirmMode, "confirm", "auto", "where to confirm 🔴 commands: auto (this terminal if interactive, else deny), terminal (read the answers from stdin even when it is not interactive, e.g. a pipe) or deny")
 	return cmd
+}
+
+var alreadyRunning = NewError("ALREADY_RUNNING", "another `adbuddy serve` is already running", "Use that terminal, or stop it (Ctrl+C) first.")
+
+// serveUntil serves requests until ctx ends, then waits for the ones in
+// flight: a pending confirmation is journaled as denied and its shim gets
+// its answer before serve exits.
+func serveUntil(ctx context.Context, stop context.CancelFunc, srv *ipc.Server) error {
+	closed := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		srv.Close() // cancels the requests and waits for them
+		close(closed)
+	}()
+	err := srv.Serve()
+	stop() // if Serve failed by itself; a second Ctrl+C then kills the process
+	<-closed
+	return err
 }
 
 // undoneLogPath is the log of undone ids for one journal. It lives in the data

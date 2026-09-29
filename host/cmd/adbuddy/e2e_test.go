@@ -85,7 +85,16 @@ func start(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.env = append(os.Environ(), "ADBUDDY_DATA_DIR="+data, "ADBUDDY_CONFIG_DIR="+filepath.Join(tmp, "cfg"),
+	// Run from inside an agent session, the inherited ADBUDDY_SOURCE=agent
+	// would make serve refuse to start and ANDROID_SERIAL would leak in.
+	var inherited []string
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		if !strings.EqualFold(k, "ADBUDDY_SOURCE") && !strings.EqualFold(k, "ANDROID_SERIAL") {
+			inherited = append(inherited, kv)
+		}
+	}
+	h.env = append(inherited, "ADBUDDY_DATA_DIR="+data, "ADBUDDY_CONFIG_DIR="+filepath.Join(tmp, "cfg"),
 		"FAKEADB_SCRIPT="+script, "FAKEADB_LOG="+h.logPath, "LANG=en_US.UTF-8")
 
 	cmd := exec.Command(adbuddyBin, "serve", "--adb", fakeADB, "--serial", "dev1", "--workspace", h.ws, "--confirm", "terminal")
@@ -205,13 +214,20 @@ func TestEndToEnd(t *testing.T) {
 		OK   bool
 		Data struct {
 			Entries []struct {
-				Level, Status, Description string
-				Inverse                    *struct{ Argv []string }
+				ID, Level, Status, Description string
+				Inverse                        *struct{ Argv []string }
+				Verified                       bool
 			}
 		}
 	}
 	if code != 0 || json.Unmarshal([]byte(out), &env) != nil || !env.OK || len(env.Data.Entries) != 4 {
 		t.Fatalf("journal: %d %q", code, out)
+	}
+	// Every entry was written and signed by serve.
+	for _, e := range env.Data.Entries {
+		if !e.Verified {
+			t.Fatalf("entry %s not verified: %q", e.ID, out)
+		}
 	}
 	yellow := env.Data.Entries[2]
 	if yellow.Level != "yellow" || strings.Join(yellow.Inverse.Argv, " ") != "shell settings put global window_animation_scale 1.0" {

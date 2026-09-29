@@ -33,11 +33,11 @@ go build -o adbuddy ./cmd/adbuddy      # adbuddy.exe on Windows
 3. Look back and undo:
 
    ```sh
-   adbuddy journal            # what was done, with the inverse of each change
-   adbuddy journal --session  # only the current session
-   adbuddy undo               # undo the last change
-   adbuddy undo session       # undo the whole session
-   adbuddy undo j_01J…        # undo one entry
+   adbuddy journal                    # what was done, with the inverse of each change
+   adbuddy journal --session current  # only the current session
+   adbuddy undo                       # undo the last change
+   adbuddy undo session               # undo the whole session
+   adbuddy undo j_01J…                # undo one entry
    ```
 
 `adbuddy env init [--force]` creates or refreshes the environment without starting anything.

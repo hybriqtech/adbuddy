@@ -13,7 +13,7 @@ You are working in an ADBuddy environment. From here you manage the user's Andro
 ## Commands
 
 - `adb …`: the normal adb client, through ADBuddy. The phone is already selected (`ANDROID_SERIAL`): do not pass `-s`, `-d`, `-e`, `-t`, `-H` or `-P`.
-- `adbuddy journal [--session] [--json]`: what has been done, with the inverse of each change.
+- `adbuddy journal [--session current|<id>] [--json]`: what has been done, with the inverse of each change. In `--json` each entry has `"verified"`: only `true` means ADBuddy wrote it.
 - `adbuddy undo [last|<id>|session]`: undo the last change, one journal entry, or the whole session.
 
 ## Risk levels

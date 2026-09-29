@@ -53,17 +53,18 @@ func formatEntry(e journal.Entry) string {
 	if lvl == "" {
 		lvl = "·"
 	}
-	status := e.Status
+	// Everything here may come from the agent or the phone (a forged line
+	// can carry anything, even in its id): escape what could rewrite the
+	// terminal.
+	status := classify.Printable(e.Status)
 	if e.UndoneBy != nil {
 		status += ", undone"
 	}
 	if e.Tampered {
 		status += ", ⚠ not written by ADBuddy"
 	}
-	// Everything here may come from the agent or the phone: escape what could
-	// rewrite the terminal.
 	line := fmt.Sprintf("%s %s %-8s %s  [%s] adb %s", e.TS.Local().Format("15:04:05"), lvl, status,
-		classify.Printable(e.Description), e.ID, classify.Printable(strings.Join(e.Argv, " ")))
+		classify.Printable(e.Description), classify.Printable(e.ID), classify.Printable(strings.Join(e.Argv, " ")))
 	if e.Reason != "" && e.Status != journal.StatusOK {
 		line += "\n    reason: " + classify.Printable(e.Reason)
 	}

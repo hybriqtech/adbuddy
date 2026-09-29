@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"io"
 	"os"
 
@@ -25,6 +26,7 @@ const exitCodesHelp = `Exit codes:
   2    invalid usage
   75   temporary failure, retrying may help
   78   configuration error
+  130  interrupted (Ctrl+C)
 `
 
 // NewRoot builds the command tree.
@@ -49,11 +51,16 @@ func NewRoot(app *App) *cobra.Command {
 
 // Main runs the CLI and returns the process exit code.
 func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return mainContext(context.Background(), args, stdin, stdout, stderr)
+}
+
+// mainContext is Main with a context that tests can cancel (Ctrl+C).
+func mainContext(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	app := &App{Stdin: stdin, Stdout: stdout, Stderr: stderr, Getenv: os.Getenv}
 	root := NewRoot(app)
 	app.JSON = wantsJSON(args) // errors raised before cobra reads --json still use the envelope
 	root.SetArgs(args)
-	err := root.Execute()
+	err := root.ExecuteContext(ctx)
 	if err != nil {
 		WriteFailure(stdout, stderr, app.JSON, err)
 	}

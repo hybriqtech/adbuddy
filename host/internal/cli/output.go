@@ -9,8 +9,8 @@ import (
 
 type envelope struct {
 	OK    bool   `json:"ok"`
-	Data  any    `json:"data,omitempty"`
 	Error *Error `json:"error,omitempty"`
+	Data  any    `json:"data,omitempty"`
 }
 
 // WriteData writes the success envelope {"ok":true,"data":…} as one JSON line.
@@ -34,6 +34,16 @@ func WriteFailure(stdout, stderr io.Writer, jsonMode bool, err error) {
 	if e.Fix != "" {
 		fmt.Fprintf(stderr, "Fix: %s\n", e.Fix)
 	}
+}
+
+// writeFailureData writes a failure that still carries a result as one
+// envelope {"ok":false,"error":…,"data":…} and returns the error's exit code
+// without printing anything else.
+func writeFailureData(w io.Writer, e *Error, data any) error {
+	if err := writeJSON(w, envelope{OK: false, Error: e, Data: data}); err != nil {
+		return err
+	}
+	return &exitCodeError{code: ExitCode(e)}
 }
 
 func writeJSON(w io.Writer, v any) error {
