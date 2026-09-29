@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -369,6 +370,42 @@ func TestUndoRunningMarkKeepsAnInterruptedUndoUncertain(t *testing.T) {
 	}
 	if n := inverses(); n != 2 {
 		t.Fatalf("inverse ran %d times", n)
+	}
+}
+
+// cancelDuringRunADB mimics the ordered stop of `serve`: it cancels the undo's
+// context while the inverse is running and reports it as cut off.
+type cancelDuringRunADB struct {
+	*fakeADB
+	cancel context.CancelFunc
+}
+
+func (a *cancelDuringRunADB) Run(ctx context.Context, dir string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	_, _ = a.fakeADB.Run(ctx, dir, args, stdin, stdout, stderr)
+	a.cancel()
+	return 1, context.Canceled
+}
+
+// M-a: an inverse cut off by the stop leaves the change uncertain, not
+// retriable. The running mark stays and no "failed" line is written.
+func TestUndoCutOffByStopStaysUncertain(t *testing.T) {
+	e := newEnv(t)
+	log := filepath.Join(t.TempDir(), "data", "undone.log")
+	e.d.o.UndoneLog = log
+	e.adb.shell["settings get global a"] = "1\n"
+	e.exec(t, "shell", "settings", "put", "global", "a", "2")
+	id := e.last(t).ID
+	ctx, cancel := context.WithCancel(context.Background())
+	e.d.o.ADB = &cancelDuringRunADB{fakeADB: e.adb, cancel: cancel}
+	if exit := e.d.Handle(ctx, ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{}); exit.Code == 0 {
+		t.Fatalf("want a non-zero exit, got %+v", exit)
+	}
+	if got := string(mustRead(t, log)); got != "running "+id+"\n" {
+		t.Fatalf("log: %q, want only the running mark and no failed line", got)
+	}
+	// A later undo must treat the change as uncertain, not offer a retry.
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: id}, &stream{}); exit.ErrorCode != "UNCERTAIN_STATE" {
+		t.Fatalf("%+v, want UNCERTAIN_STATE", exit)
 	}
 }
 

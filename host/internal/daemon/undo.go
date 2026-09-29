@@ -228,6 +228,13 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 		u.ExitCode = &code
 		if runErr != nil || code != 0 {
+			if ctx.Err() != nil {
+				// The stop cut the inverse off: adb may have applied it before
+				// dying. Leave the running mark (no "failed") so the change
+				// stays uncertain instead of inviting a retry.
+				_ = s.Data(res)
+				return ipc.Exit{Code: 1, ErrorCode: "UNDO_FAILED", Error: fmt.Sprintf("stopped while undoing %s; it is uncertain, check the phone", e.ID)}
+			}
 			u.Status = journal.StatusError
 			msg := strings.TrimSpace(errb.String())
 			if runErr != nil {
