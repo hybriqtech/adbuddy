@@ -1,0 +1,87 @@
+# Built-in rules for read-only commands run by the phone's shell (spec §4.2 🟢).
+# Same format as adb.yaml.
+rules:
+  # ── Phone shell: reading ─────────────────────────────────────────────────
+  - {id: fs.ls, cmd: ls, level: green, anyArgs: true, title: {en: "List files: {args}", es: "Listar ficheros: {args}"}}
+  - {id: fs.cat, cmd: cat, level: green, anyArgs: true, title: {en: "Read files: {args}", es: "Leer ficheros: {args}"}}
+  - {id: fs.stat, cmd: stat, level: green, anyArgs: true, title: {en: "Show file details: {args}", es: "Mostrar detalles de ficheros: {args}"}}
+  - {id: fs.du, cmd: du, level: green, anyArgs: true, title: {en: "Measure folder sizes: {args}", es: "Medir el tamaño de carpetas: {args}"}}
+  - {id: fs.df, cmd: df, level: green, anyArgs: true, title: {en: "Show free space", es: "Mostrar el espacio libre"}}
+  - {id: fs.find, cmd: find, level: green, anyArgs: true, check: find, title: {en: "Search files: {args}", es: "Buscar ficheros: {args}"}}
+  - {id: fs.file, cmd: file, level: green, anyArgs: true, title: {en: "Identify files: {args}", es: "Identificar ficheros: {args}"}}
+  - {id: fs.readlink, cmd: readlink, level: green, anyArgs: true, title: {en: "Resolve a link: {args}", es: "Resolver un enlace: {args}"}}
+  - {id: fs.realpath, cmd: realpath, level: green, anyArgs: true, title: {en: "Resolve a path: {args}", es: "Resolver una ruta: {args}"}}
+  - {id: fs.pwd, cmd: pwd, level: green, title: {en: "Show the current folder", es: "Mostrar la carpeta actual"}}
+  - {id: fs.cd, cmd: cd, level: green, anyArgs: true, title: {en: "Change folder: {args}", es: "Cambiar de carpeta: {args}"}}
+  - {id: fs.md5sum, cmd: md5sum, level: green, anyArgs: true, title: {en: "Compute checksums: {args}", es: "Calcular sumas de verificación: {args}"}}
+  - {id: fs.sha1sum, cmd: sha1sum, level: green, anyArgs: true, title: {en: "Compute checksums: {args}", es: "Calcular sumas de verificación: {args}"}}
+  - {id: fs.sha256sum, cmd: sha256sum, level: green, anyArgs: true, title: {en: "Compute checksums: {args}", es: "Calcular sumas de verificación: {args}"}}
+  - {id: fs.cmp, cmd: cmp, level: green, anyArgs: true, title: {en: "Compare files: {args}", es: "Comparar ficheros: {args}"}}
+  - {id: fs.diff, cmd: diff, level: green, anyArgs: true, title: {en: "Compare files: {args}", es: "Comparar ficheros: {args}"}}
+  - {id: text.echo, cmd: echo, level: green, anyArgs: true, title: {en: "Print text", es: "Mostrar texto"}}
+  - {id: text.printf, cmd: printf, level: green, anyArgs: true, title: {en: "Print text", es: "Mostrar texto"}}
+  - {id: text.head, cmd: head, level: green, anyArgs: true, title: {en: "Read the start of files: {args}", es: "Leer el principio de ficheros: {args}"}}
+  - {id: text.tail, cmd: tail, level: green, anyArgs: true, title: {en: "Read the end of files: {args}", es: "Leer el final de ficheros: {args}"}}
+  - {id: text.wc, cmd: wc, level: green, anyArgs: true, title: {en: "Count lines: {args}", es: "Contar líneas: {args}"}}
+  - {id: text.cut, cmd: cut, level: green, anyArgs: true, title: {en: "Filter text", es: "Filtrar texto"}}
+  - {id: text.tr, cmd: tr, level: green, anyArgs: true, title: {en: "Filter text", es: "Filtrar texto"}}
+  - {id: text.grep, cmd: grep, level: green, anyArgs: true, title: {en: "Search text: {args}", es: "Buscar texto: {args}"}}
+  - {id: text.egrep, cmd: egrep, level: green, anyArgs: true, title: {en: "Search text: {args}", es: "Buscar texto: {args}"}}
+  - {id: text.fgrep, cmd: fgrep, level: green, anyArgs: true, title: {en: "Search text: {args}", es: "Buscar texto: {args}"}}
+  - {id: text.sed, cmd: sed, level: green, anyArgs: true, check: sed, title: {en: "Filter text with sed", es: "Filtrar texto con sed"}}
+  - {id: text.awk, cmd: awk, level: green, anyArgs: true, check: awk, title: {en: "Filter text with awk", es: "Filtrar texto con awk"}}
+  - {id: text.sort, cmd: sort, level: green, anyArgs: true, check: sort, title: {en: "Sort text", es: "Ordenar texto"}}
+  - {id: text.uniq, cmd: uniq, level: green, anyArgs: true, check: uniq, title: {en: "Remove repeated lines", es: "Quitar líneas repetidas"}}
+  - {id: text.tee, cmd: tee, level: green, anyArgs: true, check: tee, title: {en: "Copy output: {args}", es: "Copiar la salida: {args}"}}
+  - {id: text.strings, cmd: strings, level: green, anyArgs: true, title: {en: "Extract text from files", es: "Extraer texto de ficheros"}}
+  - {id: text.od, cmd: od, level: green, anyArgs: true, title: {en: "Dump bytes", es: "Volcar bytes"}}
+  - {id: text.hexdump, cmd: hexdump, level: green, anyArgs: true, title: {en: "Dump bytes", es: "Volcar bytes"}}
+  - {id: text.xxd, cmd: xxd, level: green, anyArgs: true, title: {en: "Dump bytes", es: "Volcar bytes"}}
+  - {id: text.base64, cmd: base64, level: green, anyArgs: true, title: {en: "Encode in base64", es: "Codificar en base64"}}
+  - {id: text.seq, cmd: seq, level: green, anyArgs: true, title: {en: "Print a sequence", es: "Mostrar una secuencia"}}
+  - {id: text.expr, cmd: expr, level: green, anyArgs: true, title: {en: "Evaluate an expression", es: "Evaluar una expresión"}}
+  - {id: sh.true, cmd: "true", level: green, anyArgs: true, title: {en: "Do nothing", es: "No hacer nada"}}
+  - {id: sh.false, cmd: "false", level: green, anyArgs: true, title: {en: "Do nothing", es: "No hacer nada"}}
+  - {id: sh.colon, cmd: ":", level: green, anyArgs: true, title: {en: "Do nothing", es: "No hacer nada"}}
+  - {id: sh.test, cmd: test, level: green, anyArgs: true, title: {en: "Check a condition", es: "Comprobar una condición"}}
+  - {id: sh.bracket, cmd: "[", level: green, anyArgs: true, title: {en: "Check a condition", es: "Comprobar una condición"}}
+  - {id: sh.sleep, cmd: sleep, level: green, anyArgs: true, title: {en: "Wait {args}", es: "Esperar {args}"}}
+  - {id: sh.set, cmd: set, level: green, anyArgs: true, title: {en: "Set shell options", es: "Ajustar opciones de la shell"}}
+  - {id: sh.exit, cmd: exit, level: green, anyArgs: true, title: {en: "End the shell", es: "Terminar la shell"}}
+  - {id: sh.which, cmd: which, level: green, anyArgs: true, title: {en: "Locate a program: {args}", es: "Localizar un programa: {args}"}}
+  - {id: sh.type, cmd: type, level: green, anyArgs: true, title: {en: "Describe a command: {args}", es: "Describir un comando: {args}"}}
+  - {id: sh.basename, cmd: basename, level: green, anyArgs: true, title: {en: "Take a file name", es: "Obtener un nombre de fichero"}}
+  - {id: sh.dirname, cmd: dirname, level: green, anyArgs: true, title: {en: "Take a folder name", es: "Obtener un nombre de carpeta"}}
+  - {id: sys.id, cmd: id, level: green, anyArgs: true, title: {en: "Show the user", es: "Mostrar el usuario"}}
+  - {id: sys.whoami, cmd: whoami, level: green, title: {en: "Show the user", es: "Mostrar el usuario"}}
+  - {id: sys.uname, cmd: uname, level: green, anyArgs: true, title: {en: "Show the kernel version", es: "Mostrar la versión del kernel"}}
+  - {id: sys.uptime, cmd: uptime, level: green, anyArgs: true, title: {en: "Show the uptime", es: "Mostrar el tiempo encendido"}}
+  - {id: sys.date, cmd: date, level: green, check: date, title: {en: "Show the date", es: "Mostrar la fecha"}}
+  - {id: sys.ps, cmd: ps, level: green, anyArgs: true, title: {en: "List processes", es: "Listar procesos"}}
+  - {id: sys.top, cmd: top, level: green, anyArgs: true, title: {en: "Show process activity", es: "Mostrar la actividad de los procesos"}}
+  - {id: sys.pidof, cmd: pidof, level: green, anyArgs: true, title: {en: "Find a process: {args}", es: "Buscar un proceso: {args}"}}
+  - {id: sys.pgrep, cmd: pgrep, level: green, anyArgs: true, title: {en: "Find a process: {args}", es: "Buscar un proceso: {args}"}}
+  - {id: sys.free, cmd: free, level: green, anyArgs: true, title: {en: "Show memory use", es: "Mostrar el uso de memoria"}}
+  - {id: sys.vmstat, cmd: vmstat, level: green, anyArgs: true, title: {en: "Show memory statistics", es: "Mostrar estadísticas de memoria"}}
+  - {id: sys.nproc, cmd: nproc, level: green, title: {en: "Count processors", es: "Contar procesadores"}}
+  - {id: sys.getenforce, cmd: getenforce, level: green, title: {en: "Show the SELinux mode", es: "Mostrar el modo de SELinux"}}
+  - {id: sys.printenv, cmd: printenv, level: green, anyArgs: true, title: {en: "Show environment variables", es: "Mostrar las variables de entorno"}}
+  - {id: sys.getprop, cmd: getprop, level: green, anyArgs: true, title: {en: "Read system properties: {args}", es: "Leer propiedades del sistema: {args}"}}
+  - {id: sys.hostname, cmd: hostname, level: green, check: hostname, title: {en: "Show the host name", es: "Mostrar el nombre del equipo"}}
+  - {id: net.ip, cmd: ip, level: green, anyArgs: true, check: ip, title: {en: "Show network state: {args}", es: "Mostrar el estado de la red: {args}"}}
+  - {id: net.ifconfig, cmd: ifconfig, level: green, check: ifconfig, title: {en: "Show network interfaces", es: "Mostrar las interfaces de red"}}
+  - {id: net.netstat, cmd: netstat, level: green, anyArgs: true, title: {en: "Show network connections", es: "Mostrar las conexiones de red"}}
+  - {id: net.ss, cmd: ss, level: green, anyArgs: true, title: {en: "Show network connections", es: "Mostrar las conexiones de red"}}
+  - {id: net.ping, cmd: ping, level: green, anyArgs: true, title: {en: "Ping {args}", es: "Hacer ping a {args}"}}
+  - {id: android.dumpsys, cmd: dumpsys, level: green, anyArgs: true, check: dumpsys, title: {en: "Read system state: {args}", es: "Leer el estado del sistema: {args}"}}
+  - {id: android.logcat, cmd: logcat, level: green, anyArgs: true, check: logcat, title: {en: "Read the phone's logs", es: "Leer los registros del móvil"}}
+  - {id: android.service, cmd: service, sub: [list, check], level: green, anyArgs: true, title: {en: "List system services", es: "Listar los servicios del sistema"}}
+  - {id: android.content-query, cmd: content, sub: [query], level: green, anyArgs: true, title: {en: "Read a content provider: {args}", es: "Leer un proveedor de contenido: {args}"}}
+  - {id: android.ime-list, cmd: ime, sub: [list], level: green, anyArgs: true, title: {en: "List keyboards", es: "Listar los teclados"}}
+  - {id: android.wm-read, cmd: wm, sub: [size, density], level: green, check: no-extra-args, title: {en: "Read the screen size or density", es: "Leer el tamaño o la densidad de la pantalla"}}
+  - {id: android.screencap, cmd: screencap, level: green, check: screencap, title: {en: "Take a screenshot {path}", es: "Hacer una captura de pantalla {path}"}}
+  - {id: android.uiautomator-dump, cmd: uiautomator, sub: [dump], level: green, check: uiautomator-dump, title: {en: "Read the screen layout {path}", es: "Leer la estructura de la pantalla {path}"}}
+  - {id: settings.read, cmd: settings, sub: [get, list], level: green, anyArgs: true, title: {en: "Read settings: {args}", es: "Leer ajustes: {args}"}}
+  - {id: pm.read, cmd: pm, sub: [list, path, dump, resolve-activity, query-activities, query-services, query-receivers, has-feature, get-install-location, get-max-users, list-users, get-app-links, help], level: green, anyArgs: true, title: {en: "Read package information: {args}", es: "Leer información de paquetes: {args}"}}
+  - {id: appops.read, cmd: appops, sub: [get, query-op], level: green, anyArgs: true, title: {en: "Read app permissions: {args}", es: "Leer permisos de apps: {args}"}}
+  - {id: am.read, cmd: am, sub: [get-current-user, get-config, get-standby-bucket, stack, task], level: green, check: no-extra-args, title: {en: "Read activity state", es: "Leer el estado de las actividades"}}
