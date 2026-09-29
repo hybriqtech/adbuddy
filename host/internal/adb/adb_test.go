@@ -1,0 +1,123 @@
+package adb
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/testutil"
+)
+
+var fakeADB string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "fakeadb")
+	if err != nil {
+		panic(err)
+	}
+	fakeADB, err = testutil.Build("github.com/hybriqtech/adbuddy/host/internal/testutil/fakeadb", dir, "adb")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+func setup(t *testing.T, rules ...testutil.FakeRule) (logPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	script, err := testutil.WriteScript(dir, rules...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logPath = filepath.Join(dir, "log.jsonl")
+	t.Setenv("FAKEADB_SCRIPT", script)
+	t.Setenv("FAKEADB_LOG", logPath)
+	t.Setenv("ANDROID_SERIAL", "someone-else")
+	return logPath
+}
+
+func TestRunAddsSerialAndServerPort(t *testing.T) {
+	logPath := setup(t, testutil.FakeRule{Match: "^shell getprop$", Stdout: "x\n", Stderr: "w", Exit: 3})
+	r := Runner{Path: fakeADB, ServerPort: 5038, Serial: "dev1"}
+	var out, errb bytes.Buffer
+	cwd := t.TempDir()
+	code, err := r.Run(context.Background(), cwd, []string{"shell", "getprop"}, nil, &out, &errb)
+	if err != nil || code != 3 || out.String() != "x\n" || errb.String() != "w" {
+		t.Fatalf("code %d err %v out %q errb %q", code, err, out.String(), errb.String())
+	}
+	calls, _ := testutil.ReadLog(logPath)
+	if len(calls) != 1 || strings.Join(calls[0].Args, " ") != "-s dev1 shell getprop" || calls[0].Port != "5038" {
+		t.Fatalf("calls %+v", calls)
+	}
+	if got, _ := filepath.EvalSymlinks(calls[0].Cwd); got != mustEval(t, cwd) {
+		t.Fatalf("cwd %s want %s", calls[0].Cwd, cwd)
+	}
+}
+
+func mustEval(t *testing.T, p string) string {
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestRunMissingBinary(t *testing.T) {
+	r := Runner{Path: filepath.Join(t.TempDir(), "nope")}
+	if _, err := r.Run(context.Background(), "", []string{"devices"}, nil, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestParseDevices(t *testing.T) {
+	out := "* daemon started successfully\r\nList of devices attached\r\nadb-X-y._adb-tls-connect._tcp\tdevice\r\n1.2.3.4:5555\toffline\r\nemu\tunauthorized\r\n\r\n"
+	ds := ParseDevices(out)
+	if len(ds) != 3 || ds[0].Serial != "adb-X-y._adb-tls-connect._tcp" || ds[0].State != "device" || ds[1].State != "offline" {
+		t.Fatalf("%+v", ds)
+	}
+}
+
+func TestWaitSerial(t *testing.T) {
+	setup(t, testutil.FakeRule{Match: "^devices$", Stdout: "List of devices attached\nA\tdevice\nB\toffline\n"})
+	r := Runner{Path: fakeADB}
+	if s, err := r.WaitSerial(context.Background(), "", time.Second); err != nil || s != "A" {
+		t.Fatalf("%q %v", s, err)
+	}
+	if s, err := r.WaitSerial(context.Background(), "A", time.Second); err != nil || s != "A" {
+		t.Fatalf("%q %v", s, err)
+	}
+	if _, err := r.WaitSerial(context.Background(), "B", 10*time.Millisecond); err != ErrNoDevice {
+		t.Fatalf("offline device: %v", err)
+	}
+	setup(t, testutil.FakeRule{Match: "^devices$", Stdout: "List of devices attached\nA\tdevice\nC\tdevice\n"})
+	if _, err := r.WaitSerial(context.Background(), "", time.Second); err != ErrManyDevices {
+		t.Fatalf("two devices: %v", err)
+	}
+}
+
+func TestShellAndPull(t *testing.T) {
+	logPath := setup(t,
+		testutil.FakeRule{Match: "^shell settings get global k$", Stdout: "1\n"},
+		testutil.FakeRule{Match: "^pull ", Exit: 1, Stderr: "adb: error: remote object does not exist\n"},
+	)
+	r := Runner{Path: fakeADB, Serial: "d"}
+	out, code, err := r.Shell(context.Background(), "settings get global k")
+	if err != nil || code != 0 || out != "1\n" {
+		t.Fatalf("%q %d %v", out, code, err)
+	}
+	if err := r.Pull(context.Background(), "/sdcard/x", filepath.Join(t.TempDir(), "x")); err == nil || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("pull: %v", err)
+	}
+	calls, _ := testutil.ReadLog(logPath)
+	if len(calls) != 2 || calls[0].Joined() != "shell settings get global k" {
+		t.Fatalf("%+v", calls)
+	}
+}
