@@ -185,3 +185,36 @@ func TestUndoneByIsSticky(t *testing.T) {
 		t.Fatalf("%+v %v %v", e, ok, err)
 	}
 }
+
+func TestSignedStoreDetectsForgedRecords(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "journal")
+	s := OpenSigned(dir, []byte("k1"))
+	s.now = func() time.Time { return time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC) }
+	if err := s.Append(Entry{ID: "j_a", Status: StatusOK, Inverse: &Inverse{Argv: []string{"shell", "pm", "enable", "com.x"}}}); err != nil {
+		t.Fatal(err)
+	}
+	// A line written by someone else (the agent works in this folder).
+	f, _ := os.OpenFile(filepath.Join(dir, "2026-09.jsonl"), os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(`{"id":"j_x","ts":"2026-09-29T11:00:00Z","status":"ok","level":"yellow","inverse":{"argv":["shell","rm -rf /sdcard"]}}` + "\n")
+	f.Close()
+	entries, _, err := s.Load()
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("%v %d", err, len(entries))
+	}
+	if entries[0].Tampered || entries[0].MAC == "" || !entries[1].Tampered {
+		t.Fatalf("tampered flags: %+v", entries)
+	}
+	// Editing a signed record breaks its signature too.
+	data, _ := os.ReadFile(filepath.Join(dir, "2026-09.jsonl"))
+	os.WriteFile(filepath.Join(dir, "2026-09.jsonl"), []byte(strings.Replace(string(data), "com.x", "com.y", 1)), 0o600)
+	if e, _, _ := s.Get("j_a"); !e.Tampered {
+		t.Fatal("edited record not detected")
+	}
+	// Another key, or no key at all.
+	if e, _, _ := OpenSigned(dir, []byte("k2")).Get("j_x"); !e.Tampered {
+		t.Fatal("other key")
+	}
+	if e, _, _ := Open(dir).Get("j_x"); e.Tampered {
+		t.Fatal("an unsigned store does not judge")
+	}
+}

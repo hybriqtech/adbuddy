@@ -6,7 +6,10 @@ package journal
 
 import (
 	"bufio"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,17 +62,43 @@ type Entry struct {
 	UndoneBy    *string   `json:"undoneBy"`
 	Undoes      string    `json:"undoes,omitempty"`
 	Reason      string    `json:"reason,omitempty"`
+	MAC         string    `json:"mac,omitempty"` // HMAC-SHA256 of the record, with the installation key
+
+	// Tampered is set by Load when a signing store finds a record whose MAC
+	// does not match: someone else wrote it, so undo must not trust it.
+	Tampered bool `json:"-"`
 }
 
 // Store appends to and reads a journal directory. It is safe for concurrent use.
 type Store struct {
 	dir string
+	key []byte
 	now func() time.Time
 	mu  sync.Mutex
 }
 
-// Open returns the store for dir (created on first write).
+// Open returns the store for dir (created on first write). It neither signs
+// nor verifies records.
 func Open(dir string) *Store { return &Store{dir: dir, now: time.Now} }
+
+// OpenSigned returns a store that signs every record it writes with key and
+// marks as Tampered the records whose signature does not match. The journal
+// lives in the agent's folder; the key lives in ADBuddy's data folder.
+func OpenSigned(dir string, key []byte) *Store {
+	return &Store{dir: dir, key: append([]byte{}, key...), now: time.Now}
+}
+
+// sign returns the record's MAC (computed with MAC empty).
+func (s *Store) sign(e Entry) (string, error) {
+	e.MAC = ""
+	b, err := json.Marshal(e)
+	if err != nil {
+		return "", err
+	}
+	m := hmac.New(sha256.New, s.key)
+	m.Write(b)
+	return hex.EncodeToString(m.Sum(nil)), nil
+}
 
 // Dir is the journal directory.
 func (s *Store) Dir() string { return s.dir }
@@ -106,6 +135,14 @@ func (s *Store) Append(e Entry) error {
 	}
 	if e.TS.IsZero() {
 		e.TS = s.now().UTC()
+	}
+	e.Tampered = false
+	if s.key != nil {
+		mac, err := s.sign(e)
+		if err != nil {
+			return err
+		}
+		e.MAC = mac
 	}
 	line, err := json.Marshal(e)
 	if err != nil {
@@ -160,6 +197,10 @@ func (s *Store) Load() (entries []Entry, skipped int, err error) {
 			if json.Unmarshal([]byte(line), &e) != nil || e.ID == "" {
 				skipped++
 				continue
+			}
+			if s.key != nil {
+				want, err := s.sign(e)
+				e.Tampered = err != nil || !hmac.Equal([]byte(want), []byte(e.MAC))
 			}
 			if i, ok := byID[e.ID]; ok {
 				if e.UndoneBy == nil {
