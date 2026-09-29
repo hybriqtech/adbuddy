@@ -1,8 +1,10 @@
 package ipc
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,9 +16,82 @@ import (
 	"time"
 )
 
+// maxStdin bounds the stdin a request may send.
+const maxStdin = 16 << 20
+
+var errStdinTooLarge = fmt.Errorf("stdin exceeds %d bytes", maxStdin)
+
+// stdinBuffer holds the stdin the client sends. The connection reader never
+// blocks on it, so it always sees the client go away even when the handler
+// is not reading stdin (for example while it waits for a confirmation).
+type stdinBuffer struct {
+	mu   sync.Mutex
+	cond *sync.Cond
+	buf  bytes.Buffer
+	eof  bool
+	err  error
+}
+
+func newStdinBuffer() *stdinBuffer {
+	b := &stdinBuffer{}
+	b.cond = sync.NewCond(&b.mu)
+	return b
+}
+
+// write appends p. It returns false when the request exceeds maxStdin; the
+// handler then gets an error on its next Read. Data after close is dropped.
+func (b *stdinBuffer) write(p []byte) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.eof || b.err != nil {
+		return true
+	}
+	if b.buf.Len()+len(p) > maxStdin {
+		b.err = errStdinTooLarge
+		b.cond.Broadcast()
+		return false
+	}
+	b.buf.Write(p)
+	b.cond.Broadcast()
+	return true
+}
+
+// close ends the stream: nil means a clean EOF; otherwise the first error
+// wins.
+func (b *stdinBuffer) close(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err == nil {
+		b.eof = true
+	} else if b.err == nil {
+		b.err = err
+	}
+	b.cond.Broadcast()
+}
+
+// Read waits for data, EOF or an error. Buffered data comes first, then the
+// error, then io.EOF.
+func (b *stdinBuffer) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for b.buf.Len() == 0 && !b.eof && b.err == nil {
+		b.cond.Wait()
+	}
+	if b.buf.Len() > 0 {
+		return b.buf.Read(p)
+	}
+	if b.err != nil {
+		return 0, b.err
+	}
+	return 0, io.EOF
+}
+
 // Conn is the server side of one request.
 type Conn struct {
-	stdin *io.PipeReader
+	stdin *stdinBuffer
 	mu    sync.Mutex
 	nc    net.Conn
 }
@@ -76,14 +151,20 @@ type Server struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
+	mu      sync.Mutex
+	closed  bool
 }
 
 // Listen creates the socket in dataDir. A leftover socket from a dead daemon
-// is removed; a live one yields ErrAlreadyRunning.
+// is removed; a live one yields ErrAlreadyRunning. secret must be the
+// 64-hex-character installation secret.
 func Listen(dataDir, secret string, h Handler) (*Server, error) {
 	path := SocketPath(dataDir)
 	if len(path) > maxSocketPath {
 		return nil, fmt.Errorf("socket path %s is longer than %d characters; set ADBUDDY_DATA_DIR to a shorter folder", path, maxSocketPath)
+	}
+	if _, err := hex.DecodeString(secret); err != nil || len(secret) != 64 {
+		return nil, errors.New("the IPC secret must be 64 hexadecimal characters")
 	}
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
@@ -121,7 +202,14 @@ func (s *Server) Serve() error {
 			}
 			return err
 		}
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			nc.Close()
+			return nil
+		}
 		s.wg.Add(1)
+		s.mu.Unlock()
 		go func() {
 			defer s.wg.Done()
 			s.handle(nc)
@@ -131,6 +219,9 @@ func (s *Server) Serve() error {
 
 // Close stops accepting, cancels running requests and waits for them.
 func (s *Server) Close() error {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
 	s.cancel()
 	err := s.ln.Close()
 	s.wg.Wait()
@@ -157,30 +248,48 @@ func (s *Server) handle(nc net.Conn) {
 	_ = nc.SetReadDeadline(time.Time{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
-	pr, pw := io.Pipe()
-	c.stdin = pr
+	// Once the request is cancelled, writes to a client that stopped reading
+	// must not block Close forever.
+	context.AfterFunc(ctx, func() { _ = nc.SetWriteDeadline(time.Now().Add(2 * time.Second)) })
+	stdin := newStdinBuffer()
+	c.stdin = stdin
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		defer cancel() // the client went away
 		for {
 			typ, payload, err := ReadFrame(nc)
 			if err != nil {
-				pw.CloseWithError(io.ErrUnexpectedEOF)
+				// The client went away: cancel first, so a child process
+				// never sees a clean end of stdin before the cancellation.
+				cancel()
+				stdin.close(io.ErrUnexpectedEOF)
 				return
 			}
 			switch typ {
 			case FrameStdin:
-				_, _ = pw.Write(payload) // fails once the handler stopped reading
+				if !stdin.write(payload) {
+					cancel() // request too large
+				}
 			case FrameStdinEOF:
-				pw.Close()
+				stdin.close(nil)
 			}
 		}
 	}()
-	exit := s.handler(ctx, req, c)
-	pr.CloseWithError(errors.New("request finished"))
+	exit := s.run(ctx, req, c)
+	stdin.close(errors.New("request finished"))
 	writeExit(c, exit)
 	finish(nc, readerDone)
+}
+
+// run calls the handler and turns a panic into an INTERNAL error, so one
+// failing request does not bring the daemon down.
+func (s *Server) run(ctx context.Context, req Request, c *Conn) (exit Exit) {
+	defer func() {
+		if r := recover(); r != nil {
+			exit = Exit{Code: 1, ErrorCode: "INTERNAL", Error: fmt.Sprint(r)}
+		}
+	}()
+	return s.handler(ctx, req, c)
 }
 
 // finish half-closes the connection and waits for the client to close its

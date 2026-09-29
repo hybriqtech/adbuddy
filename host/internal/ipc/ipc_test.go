@@ -140,7 +140,11 @@ func TestNotRunning(t *testing.T) {
 func TestSecondServerRefusedAndStaleSocketReplaced(t *testing.T) {
 	dir := shortDir(t)
 	s := startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit { return Exit{} })
-	if _, err := Listen(dir, "x", nil); !errors.Is(err, ErrAlreadyRunning) {
+	secret, err := ReadSecret(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Listen(dir, secret, nil); !errors.Is(err, ErrAlreadyRunning) {
 		t.Fatalf("second server: %v", err)
 	}
 	s.Close()
@@ -148,7 +152,7 @@ func TestSecondServerRefusedAndStaleSocketReplaced(t *testing.T) {
 	if err := os.WriteFile(SocketPath(dir), nil, 0o600); err != nil && runtime.GOOS != "windows" {
 		t.Fatal(err)
 	}
-	s2, err := Listen(dir, "x", func(ctx context.Context, req Request, c *Conn) Exit { return Exit{} })
+	s2, err := Listen(dir, secret, func(ctx context.Context, req Request, c *Conn) Exit { return Exit{} })
 	if err != nil {
 		t.Fatalf("stale socket: %v", err)
 	}
@@ -199,5 +203,85 @@ func TestPingDaemon(t *testing.T) {
 func TestSocketPathTooLong(t *testing.T) {
 	if _, err := Listen(strings.Repeat("d", 120), "x", nil); err == nil || !strings.Contains(err.Error(), "ADBUDDY_DATA_DIR") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestListenRejectsInvalidSecrets(t *testing.T) {
+	for _, secret := range []string{"", "x", strings.Repeat("g", 64)} {
+		dir := shortDir(t)
+		s, err := Listen(dir, secret, func(ctx context.Context, req Request, c *Conn) Exit { return Exit{} })
+		if err == nil {
+			s.Close()
+			t.Errorf("secret %q accepted", secret)
+		}
+	}
+}
+
+func TestDisconnectCancelsHandlerThatIgnoresStdin(t *testing.T) {
+	dir := shortDir(t)
+	cancelled := make(chan struct{})
+	startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit {
+		select {
+		case <-ctx.Done():
+			close(cancelled)
+		case <-time.After(5 * time.Second):
+		}
+		return Exit{}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	if _, err := Call(ctx, dir, Request{Kind: KindExec}, strings.NewReader("some input"), io.Discard, io.Discard, nil); err == nil {
+		t.Fatal("call should fail when cancelled")
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler context was not cancelled")
+	}
+}
+
+func TestStdinTooLargeCancels(t *testing.T) {
+	dir := shortDir(t)
+	cancelled := make(chan struct{})
+	startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit {
+		select {
+		case <-ctx.Done():
+			close(cancelled)
+		case <-time.After(5 * time.Second):
+		}
+		return Exit{}
+	})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		Call(context.Background(), dir, Request{Kind: KindExec}, bytes.NewReader(make([]byte, 17<<20)), io.Discard, io.Discard, nil)
+	}()
+	select {
+	case <-cancelled:
+	case <-time.After(3 * time.Second):
+		t.Error("handler context was not cancelled")
+	}
+	<-done
+}
+
+func TestHandlerPanicIsReported(t *testing.T) {
+	dir := shortDir(t)
+	var calls atomic.Int32
+	startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit {
+		if calls.Add(1) == 1 {
+			panic("boom")
+		}
+		return Exit{Code: 3}
+	})
+	exit, err := Call(context.Background(), dir, Request{Kind: KindExec}, nil, io.Discard, io.Discard, nil)
+	if err != nil || exit.Code != 1 || exit.ErrorCode != "INTERNAL" || !strings.Contains(exit.Error, "boom") {
+		t.Fatalf("exit %+v err %v", exit, err)
+	}
+	exit, err = Call(context.Background(), dir, Request{Kind: KindExec}, nil, io.Discard, io.Discard, nil)
+	if err != nil || exit.Code != 3 {
+		t.Fatalf("second request: exit %+v err %v", exit, err)
 	}
 }
