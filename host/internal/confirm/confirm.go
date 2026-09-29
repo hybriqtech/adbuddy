@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,6 +88,7 @@ type Terminal struct {
 	turn   chan struct{}
 	settle time.Duration
 	code   func() string
+	last   string // the previous question's code, never reused next
 }
 
 // NewTerminal reads answers from in and writes questions to out.
@@ -134,6 +136,15 @@ func (t *Terminal) Confirm(ctx context.Context, r Request) Decision {
 		return fromContext(ctx)
 	}
 	code := t.code()
+	for i := 0; code == t.last; i++ {
+		if i == 8 { // a broken source of codes: step to the next one
+			n, _ := strconv.Atoi(code)
+			code = fmt.Sprint((n-10+1+90)%90 + 10)
+			break
+		}
+		code = t.code()
+	}
+	t.last = code
 	fmt.Fprintf(t.out, "\n🔴 Confirmation needed (expires in %s)\n   %s\n   %s\n",
 		time.Until(r.ExpiresAt).Round(time.Second), classify.Printable(r.Title), classify.Printable(r.RawCommand))
 	if r.Detail != "" {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -40,5 +41,17 @@ func TestJournalEmptyJSON(t *testing.T) {
 	out, _, code := run(t, "journal", "--json", "--workspace", t.TempDir())
 	if code != 0 || strings.TrimSpace(out) != `{"ok":true,"data":{"entries":[],"skippedLines":0}}` {
 		t.Fatalf("exit %d, stdout %q", code, out)
+	}
+}
+
+func TestUndoneLogPath(t *testing.T) {
+	data := t.TempDir()
+	a := undoneLogPath(data, filepath.Join(t.TempDir(), "journal"))
+	b := undoneLogPath(data, filepath.Join(t.TempDir(), "journal"))
+	if filepath.Dir(a) != data || !strings.HasPrefix(filepath.Base(a), "undone-") || !strings.HasSuffix(a, ".log") || len(filepath.Base(a)) != len("undone-")+16+len(".log") {
+		t.Fatalf("undone log %q", a)
+	}
+	if a == b {
+		t.Fatalf("two journals share %q", a)
 	}
 }

@@ -71,10 +71,11 @@ type Entry struct {
 
 // Store appends to and reads a journal directory. It is safe for concurrent use.
 type Store struct {
-	dir string
-	key []byte
-	now func() time.Time
-	mu  sync.Mutex
+	dir   string
+	key   []byte
+	scope string // absolute journal folder, part of the signature
+	now   func() time.Time
+	mu    sync.Mutex
 }
 
 // Open returns the store for dir (created on first write). It neither signs
@@ -85,7 +86,11 @@ func Open(dir string) *Store { return &Store{dir: dir, now: time.Now} }
 // marks as Tampered the records whose signature does not match. The journal
 // lives in the agent's folder; the key lives in ADBuddy's data folder.
 func OpenSigned(dir string, key []byte) *Store {
-	return &Store{dir: dir, key: append([]byte{}, key...), now: time.Now}
+	scope, err := filepath.Abs(dir)
+	if err != nil {
+		scope = dir
+	}
+	return &Store{dir: dir, key: append([]byte{}, key...), scope: filepath.Clean(scope), now: time.Now}
 }
 
 // sign returns the record's MAC (computed with MAC empty).
@@ -96,6 +101,7 @@ func (s *Store) sign(e Entry) (string, error) {
 		return "", err
 	}
 	m := hmac.New(sha256.New, s.key)
+	m.Write([]byte(s.scope + "\n")) // a record copied from another environment does not verify
 	m.Write(b)
 	return hex.EncodeToString(m.Sum(nil)), nil
 }

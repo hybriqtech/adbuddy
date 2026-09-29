@@ -218,3 +218,29 @@ func TestSignedStoreDetectsForgedRecords(t *testing.T) {
 		t.Fatal("an unsigned store does not judge")
 	}
 }
+
+func TestSignedRecordsDoNotVerifyInAnotherJournal(t *testing.T) {
+	base := t.TempDir()
+	a := OpenSigned(filepath.Join(base, "a"), []byte("k"))
+	if err := a.Append(Entry{ID: "j_1", Status: StatusOK}); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := filepath.Glob(filepath.Join(base, "a", "*.jsonl"))
+	os.MkdirAll(filepath.Join(base, "b"), 0o700)
+	os.WriteFile(filepath.Join(base, "b", filepath.Base(files[0])), mustReadFile(t, files[0]), 0o600)
+	if e, _, _ := OpenSigned(filepath.Join(base, "b"), []byte("k")).Get("j_1"); !e.Tampered {
+		t.Fatal("a record copied from another journal verified")
+	}
+	if e, _, _ := a.Get("j_1"); e.Tampered {
+		t.Fatal("own record")
+	}
+}
+
+func mustReadFile(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

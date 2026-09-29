@@ -219,3 +219,19 @@ func TestDenyAll(t *testing.T) {
 		t.Fatalf("%v %q", got, out.String())
 	}
 }
+
+func TestConsecutiveQuestionsNeverShareACode(t *testing.T) {
+	pr, pw := io.Pipe()
+	out := &syncBuffer{}
+	term := testTerminal(pr, out, "42", "42", "43")
+	go func() {
+		waitPrompts(t, out, 1)
+		io.WriteString(pw, "n\n")
+		waitPrompts(t, out, 2)
+		io.WriteString(pw, "42\n") // the first question's code
+	}()
+	term.Confirm(context.Background(), req())
+	if got := term.Confirm(context.Background(), req()); got != Deny {
+		t.Fatalf("the previous code approved the next question: %v", got)
+	}
+}

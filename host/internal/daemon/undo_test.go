@@ -277,3 +277,30 @@ func TestUndoStopsWhenItCannotRecordTheUndo(t *testing.T) {
 		t.Fatalf("ran %d inverses after the journal broke", n)
 	}
 }
+
+func TestDeletedJournalLinesCannotRepeatAnUndo(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.UndoneLog = filepath.Join(t.TempDir(), "data", "undone.log")
+	e.adb.shell["settings get global a"] = "1\n"
+	e.exec(t, "shell", "settings", "put", "global", "a", "2")
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{}); exit.Code != 0 {
+		t.Fatalf("%+v", exit)
+	}
+	// The agent deletes every journal line after the change itself.
+	file := filepath.Join(e.store.Dir(), time.Now().UTC().Format("2006-01")+".jsonl")
+	lines := strings.SplitAfter(string(mustRead(t, file)), "\n")
+	os.WriteFile(file, []byte(lines[0]+lines[1]), 0o600) // running + ok of the change
+	exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{})
+	if exit.ErrorCode != "NOTHING_TO_UNDO" {
+		t.Fatalf("undo ran again: %+v", exit)
+	}
+}
+
+func mustRead(t *testing.T, p string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}

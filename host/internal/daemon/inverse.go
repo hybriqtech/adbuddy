@@ -85,7 +85,7 @@ func packageName(s string) bool {
 }
 
 func userID(s string) bool {
-	if s == "current" {
+	if s == "current" || s == "cur" {
 		return true
 	}
 	for _, r := range s {

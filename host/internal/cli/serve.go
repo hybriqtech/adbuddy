@@ -2,11 +2,14 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -111,6 +114,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			d := daemon.New(daemon.Options{
 				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: confirmer,
 				Serial: active, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
+				UndoneLog: undoneLogPath(e.dirs.Data, workspace.JournalDir(ws)),
 				OnEntry: func(j journal.Entry) {
 					outMu.Lock()
 					defer outMu.Unlock()
@@ -149,6 +153,17 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: ~/ADBuddy/default)")
 	cmd.Flags().StringVar(&confirmMode, "confirm", "auto", "where to confirm 🔴 commands: auto (this terminal if interactive, else deny), terminal or deny")
 	return cmd
+}
+
+// undoneLogPath is the log of undone ids for one journal. It lives in the data
+// folder, out of the agent's reach, and is named after the journal's absolute
+// path so each environment keeps its own.
+func undoneLogPath(dataDir, journalDir string) string {
+	if abs, err := filepath.Abs(journalDir); err == nil {
+		journalDir = abs
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(journalDir)))
+	return filepath.Join(dataDir, "undone-"+hex.EncodeToString(sum[:])[:16]+".log")
 }
 
 // loadClassifier reads the user's rules.yaml (if any) on top of the built-in rules.

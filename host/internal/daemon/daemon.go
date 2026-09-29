@@ -16,7 +16,6 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/precheck"
-	"github.com/hybriqtech/adbuddy/host/internal/shq"
 )
 
 // ExitDenied is the shim's exit code when a command is denied, expires or is
@@ -50,7 +49,11 @@ type Options struct {
 	Version        string
 	OnEntry        func(journal.Entry) // final records, for the live view; fields are untrusted, escape before printing; called concurrently
 	OnWarning      func(string)        // problems the person running serve should see; called concurrently
-	Now            func() time.Time
+	// UndoneLog lists the ids already undone, outside the agent's folder, so
+	// deleting journal lines cannot make undo run an inverse twice. Empty in
+	// tests that do not need it.
+	UndoneLog string
+	Now       func() time.Time
 }
 
 // Daemon handles IPC requests.
@@ -139,7 +142,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 		cctx, cancel := context.WithTimeout(ctx, d.o.ConfirmTimeout)
 		decision := d.o.Confirmer.Confirm(cctx, confirm.Request{
-			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: rawCommand(req.Argv),
+			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: classify.DisplayCommand(req.Argv),
 			ExpiresAt: now.Add(d.o.ConfirmTimeout), Special: res.Special,
 		})
 		cancel()
@@ -217,15 +220,4 @@ func (d *Daemon) record(e journal.Entry) {
 		d.o.OnWarning("journal write failed for " + e.ID + ": " + err.Error())
 	}
 	d.o.OnEntry(e)
-}
-
-// rawCommand shows the command as the person should read it. After `shell`
-// adb joins the words with spaces, so they are shown as they are; elsewhere
-// each argument is one word and is quoted when needed.
-func rawCommand(argv []string) string {
-	_, rest := classify.SplitGlobal(argv)
-	if len(rest) > 0 && rest[0] == "shell" {
-		return "adb " + classify.Printable(strings.Join(argv, " "))
-	}
-	return "adb " + classify.Printable(shq.Join(argv...))
 }

@@ -3,8 +3,12 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
@@ -161,6 +165,16 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if session == "" {
 		session = d.o.Session
 	}
+	done, err := readUndoneLog(d.o.UndoneLog)
+	if err != nil {
+		return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNREADABLE", Error: err.Error()}
+	}
+	for i := range entries {
+		if done[entries[i].ID] && entries[i].UndoneBy == nil {
+			id := "(recorded outside the journal)"
+			entries[i].UndoneBy = &id
+		}
+	}
 	plan, skipped, err := SelectUndo(entries, req.Target, session)
 	res := newUndoResult()
 	res.Skipped = append(res.Skipped, skipped...)
@@ -213,6 +227,10 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		u.Status = journal.StatusOK
 		d.record(u)
 		res.Undone = append(res.Undone, item)
+		if err := appendUndoneLog(d.o.UndoneLog, e.ID); err != nil {
+			_ = s.Data(res)
+			return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNWRITABLE", Error: fmt.Sprintf("undid %s but could not record it: %v", e.ID, err)}
+		}
 		orig := e
 		orig.UndoneBy = &u.ID
 		if err := d.o.Journal.Append(orig); err != nil {
@@ -242,4 +260,47 @@ func undoPrefix(lang string) string {
 		return "Deshacer: "
 	}
 	return "Undo: "
+}
+
+// readUndoneLog reads the ids in the undone log ("" = no log).
+func readUndoneLog(path string) (map[string]bool, error) {
+	done := map[string]bool{}
+	if path == "" {
+		return done, nil
+	}
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return done, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if id := strings.TrimSpace(line); id != "" {
+			done[id] = true
+		}
+	}
+	return done, nil
+}
+
+func appendUndoneLog(path, id string) error {
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(id + "\n"); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
