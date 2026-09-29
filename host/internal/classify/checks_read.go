@@ -19,6 +19,7 @@ func init() {
 		"hostname":         checkHostname,
 		"tee":              checkTee,
 		"no-extra-args":    checkNoExtraArgs,
+		"set":              checkSet,
 		"screencap":        checkScreencap,
 		"uiautomator-dump": checkUiautomatorDump,
 	})
@@ -323,4 +324,35 @@ func checkUiautomatorDump(ws []Word) checkResult {
 		return red("unknown uiautomator option")
 	}
 	return newFile(pos)
+}
+
+// checkSet refuses the shell options that turn brace expansion on: with it a
+// word such as {5,'reboot'} becomes two words on the phone.
+func checkSet(ws []Word) checkResult {
+	for i := 1; i < len(ws); i++ {
+		v := ws[i].Value
+		if v == "--" || v == "-" || len(v) < 2 || (v[0] != '-' && v[0] != '+') {
+			return ok() // the rest are positional parameters
+		}
+		on, flags := v[0] == '-', v[1:]
+		if on && strings.Contains(flags, "B") {
+			return red("set -B turns brace expansion on")
+		}
+		k := strings.IndexByte(flags, 'o')
+		if k < 0 {
+			continue
+		}
+		name := flags[k+1:]
+		if name == "" {
+			if i+1 >= len(ws) {
+				return ok() // set -o lists the options
+			}
+			i++
+			name = ws[i].Value
+		}
+		if (on && name == "braceexpand") || (!on && (name == "posix" || name == "sh")) {
+			return red("set " + v[:1] + "o " + name + " turns brace expansion on")
+		}
+	}
+	return ok()
 }

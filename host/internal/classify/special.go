@@ -74,9 +74,13 @@ func specialReason(scope string, ws []Word, level Level) string {
 			return "resets settings, including the connection ones"
 		}
 		if verb == "put" || verb == "delete" {
-			for _, w := range v[2:] {
+			for i, w := range v[2:] {
 				if sensitiveSettings[w] {
 					return "setting " + w + " affects the connection, ADBuddy or the phone's security"
+				}
+				if ws[2+i].Dynamic {
+					// On the phone it may split or expand into a sensitive key.
+					return "a setting only known on the phone could affect the connection, ADBuddy or the phone's security"
 				}
 			}
 		}

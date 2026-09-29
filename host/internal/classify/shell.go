@@ -157,15 +157,11 @@ var cmdAliases = map[string][]string{
 // package, an assignment) is refused: on the phone an unquoted $(…) splits
 // into several words and one of them could become the command.
 func unwrap(ws []Word) (inner []Word, handled bool, reason string) {
-	inner, handled, reason = unwrapWords(ws)
+	inner, start, handled, reason := unwrapWords(ws)
 	if !handled || reason != "" {
 		return inner, handled, reason
 	}
-	own := len(inner)
-	if ws[0].Value == "xargs" {
-		own-- // the word xargs adds for its input is not in ws
-	}
-	for _, w := range ws[1 : len(ws)-own] {
+	for _, w := range ws[1:start] {
 		if w.Dynamic {
 			return nil, true, ws[0].Value + " with an argument only known on the phone"
 		}
@@ -173,39 +169,44 @@ func unwrap(ws []Word) (inner []Word, handled bool, reason string) {
 	return inner, true, ""
 }
 
-func unwrapWords(ws []Word) (inner []Word, handled bool, reason string) {
+// unwrapWords returns the inner command and start, the index in ws where it
+// begins (len(ws) when there is none): ws[1:start] are the wrapper's own
+// words. inner may hold words that are not in ws (xargs adds its own).
+func unwrapWords(ws []Word) (inner []Word, start int, handled bool, reason string) {
 	rest := ws[1:]
+	at := func(r []Word) int { return len(ws) - len(r) }
 	switch ws[0].Value {
 	case "exec", "nohup", "time":
 		if len(rest) > 0 && strings.HasPrefix(rest[0].Value, "-") {
-			return nil, true, ws[0].Value + " with options"
+			return nil, 0, true, ws[0].Value + " with options"
 		}
-		return rest, true, ""
+		return rest, at(rest), true, ""
 	case "nice":
 		if len(rest) > 1 && rest[0].Value == "-n" {
 			rest = rest[2:]
 		} else if len(rest) > 0 && strings.HasPrefix(rest[0].Value, "-") {
 			rest = rest[1:]
 		}
-		return rest, true, ""
+		return rest, at(rest), true, ""
 	case "timeout":
 		for len(rest) > 0 && strings.HasPrefix(rest[0].Value, "-") {
 			switch rest[0].Value {
 			case "-s", "-k":
 				if len(rest) < 2 {
-					return nil, true, "timeout option without value"
+					return nil, 0, true, "timeout option without value"
 				}
 				rest = rest[2:]
 			case "-i", "-v", "--preserve-status", "--foreground":
 				rest = rest[1:]
 			default:
-				return nil, true, "unknown timeout option " + rest[0].Value
+				return nil, 0, true, "unknown timeout option " + rest[0].Value
 			}
 		}
 		if len(rest) == 0 {
-			return nil, true, "timeout without command"
+			return nil, 0, true, "timeout without command"
 		}
-		return rest[1:], true, "" // skip the duration
+		rest = rest[1:] // skip the duration
+		return rest, at(rest), true, ""
 	case "env":
 		for len(rest) > 0 {
 			v := rest[0].Value
@@ -214,43 +215,43 @@ func unwrapWords(ws []Word) (inner []Word, handled bool, reason string) {
 				rest = rest[1:]
 			case v == "-u":
 				if len(rest) < 2 {
-					return nil, true, "env -u without name"
+					return nil, 0, true, "env -u without name"
 				}
 				rest = rest[2:]
 			case strings.HasPrefix(v, "-"):
-				return nil, true, "unknown env option " + v
+				return nil, 0, true, "unknown env option " + v
 			case strings.Contains(v, "="):
 				name := v[:strings.Index(v, "=")]
 				if dangerousVar(name) {
-					return nil, true, "sets " + name
+					return nil, 0, true, "sets " + name
 				}
 				rest = rest[1:]
 			default:
-				return rest, true, ""
+				return rest, at(rest), true, ""
 			}
 		}
-		return nil, true, ""
+		return nil, len(ws), true, ""
 	case "command":
 		if len(rest) > 0 && (rest[0].Value == "-v" || rest[0].Value == "-V") {
-			return nil, true, ""
+			return nil, len(ws), true, ""
 		}
 		if len(rest) > 0 && rest[0].Value == "-p" {
 			rest = rest[1:]
 		}
-		return rest, true, ""
+		return rest, at(rest), true, ""
 	case "run-as":
 		// run-as <package> [--user <id>] <command…>
 		if len(rest) < 2 {
-			return nil, true, "run-as without command opens a shell"
+			return nil, 0, true, "run-as without command opens a shell"
 		}
 		rest = rest[1:]
 		if rest[0].Value == "--user" {
 			if len(rest) < 3 {
-				return nil, true, "run-as without command opens a shell"
+				return nil, 0, true, "run-as without command opens a shell"
 			}
 			rest = rest[2:]
 		}
-		return rest, true, ""
+		return rest, at(rest), true, ""
 	case "xargs":
 		repl := ""
 		for len(rest) > 0 && strings.HasPrefix(rest[0].Value, "-") {
@@ -259,21 +260,22 @@ func unwrapWords(ws []Word) (inner []Word, handled bool, reason string) {
 				rest = rest[1:]
 			case "-n", "-s", "-P", "-L", "-d", "-E":
 				if len(rest) < 2 {
-					return nil, true, "xargs option without value"
+					return nil, 0, true, "xargs option without value"
 				}
 				rest = rest[2:]
 			case "-I":
 				if len(rest) < 2 {
-					return nil, true, "xargs option without value"
+					return nil, 0, true, "xargs option without value"
 				}
 				repl = rest[1].Value
 				rest = rest[2:]
 			default:
-				return nil, true, "unknown xargs option " + v
+				return nil, 0, true, "unknown xargs option " + v
 			}
 		}
+		start := at(rest)
 		if len(rest) == 0 {
-			rest = []Word{{Value: "echo"}}
+			rest = []Word{{Value: "echo"}} // xargs without a command runs echo
 		}
 		inner := make([]Word, len(rest))
 		copy(inner, rest)
@@ -283,9 +285,9 @@ func unwrapWords(ws []Word) (inner []Word, handled bool, reason string) {
 			}
 		}
 		// xargs appends arguments read from stdin: unknown in advance.
-		return append(inner, Word{Value: "<stdin>", Dynamic: true}), true, ""
+		return append(inner, Word{Value: "<stdin>", Dynamic: true}), start, true, ""
 	}
-	return nil, false, ""
+	return nil, 0, false, ""
 }
 
 // evalShell handles `sh [-opts] -c 'script' [args…]`; any other use runs a
@@ -382,14 +384,17 @@ func isDigits(s string) bool {
 
 // wordOf computes the literal value of a word. Anything whose value is only
 // known when the phone's shell runs it — expansions, substitutions, globs,
-// braces, a leading ~ or $'…' — makes the word Dynamic.
+// braces, a leading ~ or $'…' — makes the word Dynamic. Braces and glob
+// classes may span quoted parts: in {5,'reboot'} the parser sees "{5,",
+// 'reboot' and "}", and the phone still expands it into two words.
 func wordOf(w *syntax.Word) Word {
 	var b strings.Builder
+	var st globState
 	dyn := false
 	for i, part := range w.Parts {
 		switch p := part.(type) {
 		case *syntax.Lit:
-			v, d := unescapeUnquoted(p.Value, i == 0)
+			v, d := unescapeUnquoted(p.Value, i == 0, &st)
 			b.WriteString(v)
 			dyn = dyn || d
 		case *syntax.SglQuoted:
@@ -415,22 +420,38 @@ func wordOf(w *syntax.Word) Word {
 	return Word{Value: b.String(), Dynamic: dyn}
 }
 
-func unescapeUnquoted(s string, first bool) (string, bool) {
+// globState carries, across the parts of a word, whether an unquoted { or [
+// has opened a brace expansion or a glob class.
+type globState struct{ brace, bracket bool }
+
+// unescapeUnquoted removes backslashes from an unquoted literal. It reports
+// Dynamic for globs, a leading ~, and a } or ] that closes an unquoted { or [
+// seen earlier in this literal or in an earlier literal of the same word
+// (escaped closers count too, which only errs on the safe side).
+func unescapeUnquoted(s string, first bool, st *globState) (string, bool) {
 	var b strings.Builder
 	dyn := false
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
+		if (ch == '}' && st.brace) || (ch == ']' && st.bracket) {
+			dyn = true // brace expansion or glob class
+		}
 		switch {
 		case ch == '\\' && i+1 < len(s):
 			i++
+			if (s[i] == '}' && st.brace) || (s[i] == ']' && st.bracket) {
+				dyn = true
+			}
 			if s[i] != '\n' {
 				b.WriteByte(s[i])
 			}
 			continue
 		case ch == '*' || ch == '?':
 			dyn = true
-		case ch == '[' && strings.IndexByte(s[i+1:], ']') >= 0, ch == '{' && strings.IndexByte(s[i+1:], '}') >= 0:
-			dyn = true // glob class or brace expansion
+		case ch == '[':
+			st.bracket = true
+		case ch == '{':
+			st.brace = true
 		case ch == '~' && i == 0 && first:
 			dyn = true
 		}

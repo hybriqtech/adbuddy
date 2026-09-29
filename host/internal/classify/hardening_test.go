@@ -326,14 +326,64 @@ func TestDynamicWordsInsideWrappers(t *testing.T) {
 		"xargs -n $(echo 1 reboot) echo",
 		"xargs -I $(echo x reboot) echo",
 		"command -p $(echo rm) /sdcard/x",
+		// xargs without a command: the last word it consumes must be checked too.
+		"xargs -n $(echo 1 reboot)",
+		"echo a | xargs -r -n $(echo 1 reboot)",
+		"echo a | xargs -I $(echo x rm -rf /sdcard/DCIM)",
+		"echo a | xargs -n 1 -I $(echo x reboot)",
 	} {
 		if r := c.Classify(sh(line)); r.Level != Red {
 			t.Errorf("%q: %v, want red", line, r.Level)
 		}
 	}
-	for _, line := range []string{"nice -n 10 ls", "timeout 5 logcat -d", "env LANG=C ls", "run-as com.x ls files", "echo a | xargs -n 1 echo"} {
+	for _, line := range []string{"nice -n 10 ls", "timeout 5 logcat -d", "env LANG=C ls", "run-as com.x ls files", "echo a | xargs -n 1 echo",
+		"xargs", "echo a b | xargs", "echo a | xargs -n 1"} {
 		if r := c.Classify(sh(line)); r.Level != Green {
 			t.Errorf("%q: %v, want green (%s)", line, r.Level, r.Primary.Reason)
 		}
 	}
+}
+
+// On the phone {a,'b'} expands to two words even though the parser splits it
+// into a literal, a quoted part and another literal; the same holds for a
+// glob class [a'b'].
+func TestBracesWithQuotedParts(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		"timeout {5,'reboot'} echo",
+		"nice -n {0,'reboot'} echo",
+		"env {X=1,'reboot'} echo",
+		"timeout {5,\"reboot\"} echo",
+		"timeout {5,'reboot'}'' echo",
+		"timeout [5'x'] echo",
+		"set -o braceexpand; timeout {5,'reboot'} echo",
+		"set -o braceexpand",
+		"set -B",
+		"set -eB",
+		"set +o posix",
+		"set +o sh",
+		"set -e -o braceexpand",
+	} {
+		if r := c.Classify(sh(line)); r.Level != Red {
+			t.Errorf("%q: %v, want red (%s)", line, r.Level, r.Primary.Rule)
+		}
+	}
+	check(t, c, []tc{
+		{sh("settings put global {adb_enabled,'0'} ''"), Red, "", "-", true},
+		{sh("settings put global $(echo adb_enabled) 0"), Red, "", "-", true},
+		// An empty pair of braces is not an expansion, but the classifier
+		// treats any unquoted {…} as dynamic: echo accepts it, find does not.
+		{sh("echo {}"), Green, "text.echo", "-", false},
+		{sh(`find /sdcard -exec ls {} \;`), Red, "", "-", false},
+		{sh("find /sdcard -name {}"), Red, "", "-", false},
+		// Quoted or escaped braces are plain text.
+		{sh("timeout '{5,reboot}' echo"), Green, "", "-", false},
+		{sh(`timeout \{5,reboot\} echo`), Green, "", "-", false},
+		{sh("timeout '{'5,reboot} echo"), Green, "", "-", false},
+		{sh("timeout {5,'reboot}' echo"), Green, "", "-", false},
+		{sh("set -e"), Green, "sh.set", "-", false},
+		{sh("set -o pipefail"), Green, "sh.set", "-", false},
+		{sh("set +o braceexpand"), Green, "sh.set", "-", false},
+		{sh("set -- -B"), Green, "sh.set", "-", false},
+	})
 }

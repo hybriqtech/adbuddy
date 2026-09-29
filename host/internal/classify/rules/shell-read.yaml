@@ -46,7 +46,7 @@ rules:
   - {id: sh.test, cmd: test, level: green, anyArgs: true, title: {en: "Check a condition", es: "Comprobar una condición"}}
   - {id: sh.bracket, cmd: "[", level: green, anyArgs: true, title: {en: "Check a condition", es: "Comprobar una condición"}}
   - {id: sh.sleep, cmd: sleep, level: green, anyArgs: true, title: {en: "Wait {args}", es: "Esperar {args}"}}
-  - {id: sh.set, cmd: set, level: green, anyArgs: true, title: {en: "Set shell options", es: "Ajustar opciones de la shell"}}
+  - {id: sh.set, cmd: set, level: green, anyArgs: true, check: set, title: {en: "Set shell options", es: "Ajustar opciones de la shell"}}
   - {id: sh.exit, cmd: exit, level: green, anyArgs: true, title: {en: "End the shell", es: "Terminar la shell"}}
   - {id: sh.which, cmd: which, level: green, anyArgs: true, title: {en: "Locate a program: {args}", es: "Localizar un programa: {args}"}}
   - {id: sh.type, cmd: type, level: green, anyArgs: true, title: {en: "Describe a command: {args}", es: "Describir un comando: {args}"}}
