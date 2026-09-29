@@ -106,7 +106,7 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		adb:   &fakeADB{shell: map[string]string{}, exits: map[string]int{}, out: map[string]string{}},
 		conf:  &fakeConfirmer{decision: confirm.Allow},
-		store: journal.Open(filepath.Join(t.TempDir(), "journal")),
+		store: journal.OpenSigned(filepath.Join(t.TempDir(), "journal"), []byte("test key")),
 	}
 	e.d = New(Options{Classifier: c, ADB: e.adb, Journal: e.store, Confirmer: e.conf, Serial: "dev1", Session: "s_1", Lang: "en",
 		OnEntry: func(j journal.Entry) { e.entries = append(e.entries, j) }})
@@ -317,5 +317,105 @@ func TestPing(t *testing.T) {
 	json.Unmarshal(s.data[0], &p)
 	if p.Serial != "dev1" || p.Session != "s_1" {
 		t.Fatalf("%+v", p)
+	}
+}
+
+func TestConfirmationDetailAndRawCommandAreEscaped(t *testing.T) {
+	e := newEnv(t)
+	e.conf.decision = confirm.Deny
+	e.exec(t, "shell", "rm -rf /sdcard/DCIM; echo x > '/sdcard/a\x1b[3A\x1b[2K   Read the battery level\x1b[B'")
+	r := e.conf.asked[0]
+	for _, field := range []string{r.Title, r.RawCommand} {
+		if strings.ContainsRune(field, 0x1b) {
+			t.Fatalf("unescaped: %q", field)
+		}
+	}
+	for _, c := range r.Detail {
+		if c < 0x20 && c != '\n' {
+			t.Fatalf("detail keeps control characters: %q", r.Detail)
+		}
+	}
+	e.exec(t, "exec-out", "sh", "-c", "rm -rf /sdcard/DCIM")
+	if got := e.conf.asked[1].RawCommand; got != "adb exec-out sh -c 'rm -rf /sdcard/DCIM'" {
+		t.Fatalf("raw command %q", got)
+	}
+}
+
+func TestAllowedButAbandonedDoesNotRun(t *testing.T) {
+	e := newEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s := &stream{}
+	exit := e.d.Handle(ctx, ipc.Request{Kind: ipc.KindExec, Argv: []string{"shell", "rm", "/sdcard/x"}}, s)
+	if exit.Code != ExitDenied || len(e.adb.ran()) != 0 {
+		t.Fatalf("%+v ran %q", exit, e.adb.ran())
+	}
+	if j := e.last(t); j.Status != journal.StatusDenied || !strings.Contains(j.Reason, "abandoned") {
+		t.Fatalf("%+v", j)
+	}
+}
+
+// slowADB counts how many Run calls overlap.
+type slowADB struct {
+	*fakeADB
+	mu        sync.Mutex
+	now, peak int
+}
+
+func (a *slowADB) Run(ctx context.Context, dir string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	a.mu.Lock()
+	a.now++
+	if a.now > a.peak {
+		a.peak = a.now
+	}
+	a.mu.Unlock()
+	time.Sleep(50 * time.Millisecond)
+	a.mu.Lock()
+	a.now--
+	a.mu.Unlock()
+	return a.fakeADB.Run(ctx, dir, args, stdin, stdout, stderr)
+}
+
+func TestChangesAreSerialised(t *testing.T) {
+	e := newEnv(t)
+	e.adb.shell["settings get global a"] = "1\n"
+	e.adb.shell["settings get global b"] = "1\n"
+	slow := &slowADB{fakeADB: e.adb}
+	e.d.o.ADB = slow
+	var wg sync.WaitGroup
+	for _, k := range []string{"a", "b"} {
+		wg.Add(1)
+		go func(k string) {
+			defer wg.Done()
+			e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindExec, Argv: []string{"shell", "settings", "put", "global", k, "2"}}, &stream{})
+		}(k)
+	}
+	wg.Wait()
+	if slow.peak != 1 {
+		t.Fatalf("%d changes ran at once", slow.peak)
+	}
+}
+
+// failingADB cannot start adb, or is killed by a signal.
+type failingADB struct {
+	*fakeADB
+	code int
+	err  error
+}
+
+func (a *failingADB) Run(context.Context, string, []string, io.Reader, io.Writer, io.Writer) (int, error) {
+	return a.code, a.err
+}
+
+func TestAdbFailures(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.ADB = &failingADB{fakeADB: e.adb, code: -1, err: errors.New("exec: adb not found")}
+	s, exit := e.exec(t, "shell", "getprop")
+	if exit.Code != 1 || !strings.Contains(s.errOut.String(), "could not run adb") || e.last(t).Status != journal.StatusError {
+		t.Fatalf("start failure: %+v %q", exit, s.errOut.String())
+	}
+	e.d.o.ADB = &failingADB{fakeADB: e.adb, code: -1}
+	if _, exit := e.exec(t, "shell", "getprop"); exit.Code != 1 {
+		t.Fatalf("signal: %+v", exit)
 	}
 }

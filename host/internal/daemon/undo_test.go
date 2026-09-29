@@ -3,7 +3,10 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +30,14 @@ func ids(es []journal.Entry) string {
 	return strings.Join(s, ",")
 }
 
+func itemIDs(items []UndoItem) string {
+	var s []string
+	for _, it := range items {
+		s = append(s, it.ID)
+	}
+	return strings.Join(s, ",")
+}
+
 func TestSelectUndo(t *testing.T) {
 	done := "j_u"
 	undone := entry("j_0", "s_1", "yellow", "ok", "shell", "x")
@@ -42,8 +53,11 @@ func TestSelectUndo(t *testing.T) {
 		entry("j_7", "s_2", "yellow", "error", "shell", "e"),
 	}
 	plan, skipped, err := SelectUndo(entries, "last", "")
-	if err != nil || ids(plan) != "j_4" || ids(skipped) != "j_7,j_6,j_5" {
-		t.Fatalf("last: %s | %s | %v", ids(plan), ids(skipped), err)
+	if err != nil || ids(plan) != "j_4" || itemIDs(skipped) != "j_7,j_6,j_5" {
+		t.Fatalf("last: %s | %s | %v", ids(plan), itemIDs(skipped), err)
+	}
+	if skipped[0].Error != skipUncertain || skipped[2].Error != skipNoInverse {
+		t.Fatalf("skip reasons: %+v", skipped)
 	}
 	plan, _, err = SelectUndo(entries, "session", "s_1")
 	if err != nil || ids(plan) != "j_1" {
@@ -116,5 +130,150 @@ func TestUndoFailureIsReported(t *testing.T) {
 		if j.UndoneBy != nil {
 			t.Fatalf("failed undo must not mark %s", j.ID)
 		}
+	}
+}
+
+func TestSelectUndoTrustsOnlySignedRecordsAndFinishedUndos(t *testing.T) {
+	forged := entry("j_f", "s_1", "yellow", "ok", "shell", "settings", "put", "global", "adb_enabled", "0")
+	forged.Tampered = true
+	crashedUndo := journal.Entry{ID: "j_u1", Source: journal.SourceUndo, Status: journal.StatusRunning, Undoes: "j_2"}
+	finishedUndo := journal.Entry{ID: "j_u2", Source: journal.SourceUndo, Status: journal.StatusOK, Undoes: "j_3"}
+	entries := []journal.Entry{
+		entry("j_1", "s_1", "yellow", "ok", "shell", "pm", "enable", "com.a"),
+		entry("j_2", "s_1", "yellow", "ok", "shell", "pm", "enable", "com.b"),
+		entry("j_3", "s_1", "yellow", "ok", "shell", "pm", "enable", "com.c"),
+		crashedUndo, finishedUndo, forged,
+	}
+	plan, skipped, err := SelectUndo(entries, "session", "s_1")
+	if err != nil || ids(plan) != "j_1" || itemIDs(skipped) != "j_f,j_2" {
+		t.Fatalf("plan %s skipped %s err %v", ids(plan), itemIDs(skipped), err)
+	}
+	for target, code := range map[string]string{"j_f": "UNTRUSTED_ENTRY", "j_2": "UNCERTAIN_STATE", "j_3": "ALREADY_UNDONE", "j_u2": "NO_INVERSE"} {
+		if _, _, err := SelectUndo(entries, target, ""); err == nil || err.(*UndoError).Code != code {
+			t.Errorf("%s: %v", target, err)
+		}
+	}
+}
+
+func TestValidInverse(t *testing.T) {
+	backup := filepath.Join("j", "backups", "j_1")
+	good := [][]string{
+		{"shell", "settings", "put", "global", "window_animation_scale", "1.0"},
+		{"shell", "settings", "--user", "0", "put", "secure", "k", "'a b; $(reboot)'"},
+		{"shell", "settings", "delete", "global", "k"},
+		{"shell", "pm", "enable", "--user", "0", "com.facebook.katana"},
+		{"shell", "cmd", "package", "install-existing", "--user", "0", "com.sys"},
+		{"shell", "appops", "set", "com.x", "RUN_IN_BACKGROUND", "ignore"},
+		{"shell", "dumpsys", "deviceidle", "whitelist", "-com.c"},
+		{"shell", "mv", "'/sdcard/new name'", "/sdcard/a"},
+		{"shell", "rmdir", "/sdcard/New"},
+		{"shell", "rm", "-f", "/sdcard/t.png"},
+		{"uninstall", "com.new"},
+		{"push", filepath.Join(backup, "original"), "/sdcard/Download/notes.txt"},
+	}
+	for _, argv := range good {
+		if err := validInverse(argv, backup); err != nil {
+			t.Errorf("%q: %v", argv, err)
+		}
+	}
+	bad := [][]string{
+		{"shell", "rm -rf /sdcard"},
+		{"shell", "rm", "-rf", "/sdcard"},
+		{"shell", "settings", "put", "global", "k", "v;reboot"},
+		{"shell", "pm", "clear", "com.x"},
+		{"shell", "mv", "a", "b"},
+		{"push", "C:/Users/u/.ssh/id_rsa", "/sdcard/x"},
+		{"push", filepath.Join(backup, "original"), "relative"},
+		{"-s", "other", "shell", "pm", "enable", "com.x"},
+		{"tcpip", "5555"},
+		{"uninstall", "-k", "com.x"},
+		{},
+	}
+	for _, argv := range bad {
+		if err := validInverse(argv, backup); err == nil {
+			t.Errorf("accepted %q", argv)
+		}
+	}
+}
+
+func TestUndoRefusesAForgedJournalLine(t *testing.T) {
+	e := newEnv(t)
+	e.adb.shell["settings get global a"] = "1\n"
+	e.exec(t, "shell", "settings", "put", "global", "a", "2")
+	// The agent appends a line of its own to the journal in its folder.
+	file := filepath.Join(e.store.Dir(), time.Now().UTC().Format("2006-01")+".jsonl")
+	f, _ := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0o600)
+	f.WriteString(`{"id":"j_zz","ts":"2099-01-01T00:00:00Z","status":"ok","level":"yellow","source":"agent","inverse":{"argv":["shell","settings","put","global","adb_enabled","0"]}}` + "\n")
+	f.Close()
+	s := &stream{}
+	exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, s)
+	if exit.Code != 0 {
+		t.Fatalf("%+v %q", exit, s.errOut.String())
+	}
+	for _, r := range e.adb.ran() {
+		if strings.Contains(r, "adb_enabled") {
+			t.Fatalf("ran the forged inverse: %q", r)
+		}
+	}
+	var res UndoResult
+	json.Unmarshal(s.data[0], &res)
+	if itemIDs(res.Undone) == "" || itemIDs(res.Skipped) != "j_zz" || res.Skipped[0].Error != skipUntrusted {
+		t.Fatalf("%+v", res)
+	}
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "j_zz"}, &stream{}); exit.ErrorCode != "UNTRUSTED_ENTRY" {
+		t.Fatalf("%+v", exit)
+	}
+}
+
+func TestConcurrentUndosRunTheInverseOnce(t *testing.T) {
+	e := newEnv(t)
+	e.adb.shell["settings get global a"] = "1\n"
+	e.exec(t, "shell", "settings", "put", "global", "a", "2")
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{})
+		}()
+	}
+	wg.Wait()
+	n := 0
+	for _, r := range e.adb.ran() {
+		if r == "shell settings put global a 1" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("inverse ran %d times", n)
+	}
+}
+
+func TestUndoStopsWhenItCannotRecordTheUndo(t *testing.T) {
+	e := newEnv(t)
+	e.adb.shell["settings get global a"] = "1\n"
+	e.adb.shell["settings get global b"] = "1\n"
+	e.exec(t, "shell", "settings", "put", "global", "a", "2")
+	time.Sleep(2 * time.Millisecond)
+	e.exec(t, "shell", "settings", "put", "global", "b", "2")
+	// Break the journal right after the first inverse runs.
+	moved := e.store.Dir() + ".moved"
+	e.d.o.ADB = &installADB{fakeADB: e.adb, after: func() {
+		os.Rename(e.store.Dir(), moved)
+		os.WriteFile(e.store.Dir(), []byte("x"), 0o600)
+	}}
+	s := &stream{}
+	exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "session"}, s)
+	if exit.Code != 1 || exit.ErrorCode != "JOURNAL_UNWRITABLE" {
+		t.Fatalf("%+v", exit)
+	}
+	n := 0
+	for _, r := range e.adb.ran() {
+		if strings.HasPrefix(r, "shell settings put global") && strings.HasSuffix(r, " 1") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("ran %d inverses after the journal broke", n)
 	}
 }

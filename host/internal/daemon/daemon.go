@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
@@ -15,6 +16,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/precheck"
+	"github.com/hybriqtech/adbuddy/host/internal/shq"
 )
 
 // ExitDenied is the shim's exit code when a command is denied, expires or is
@@ -46,13 +48,19 @@ type Options struct {
 	Lang           string
 	ConfirmTimeout time.Duration
 	Version        string
-	OnEntry        func(journal.Entry) // final records, for the live view
-	OnWarning      func(string)        // problems the person running serve should see
+	OnEntry        func(journal.Entry) // final records, for the live view; fields are untrusted, escape before printing; called concurrently
+	OnWarning      func(string)        // problems the person running serve should see; called concurrently
 	Now            func() time.Time
 }
 
 // Daemon handles IPC requests.
-type Daemon struct{ o Options }
+type Daemon struct {
+	o Options
+	// changes serialises commands with an inverse and undo: prechecks read
+	// the phone's state, and another change in between would make the
+	// recorded inverse wrong.
+	changes sync.Mutex
+}
 
 // New returns a Daemon; missing optional fields get defaults.
 func New(o Options) *Daemon {
@@ -94,7 +102,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 
 	g, args := classify.SplitGlobal(req.Argv)
 	if len(g.Forbidden) > 0 {
-		return d.block(e, s, "the adb option "+g.Forbidden[0]+" is not allowed: ADBuddy only talks to the active phone through its own adb server")
+		return d.block(e, s, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed: ADBuddy only talks to the active phone through its own adb server")
 	}
 	for _, serial := range []string{g.Serial, req.Env["ANDROID_SERIAL"]} {
 		if serial != "" && serial != d.o.Serial {
@@ -113,6 +121,8 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 	var prep precheck.Prepared
 	if res.Op != nil {
+		d.changes.Lock()
+		defer d.changes.Unlock()
 		prep = precheck.Prepare(ctx, d.o.ADB, res.Op, level, precheck.Env{Cwd: req.Cwd, BackupDir: d.o.Journal.BackupDir(e.ID)})
 		level, reason = prep.Level, prep.Reason
 		e.Level = level.String()
@@ -125,11 +135,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if level == classify.Red {
 		detail := res.Detail(d.o.Lang)
 		if reason != "" {
-			detail = strings.TrimSpace(detail + "\n" + reason)
+			detail = strings.TrimSpace(detail + "\n" + classify.Printable(reason))
 		}
 		cctx, cancel := context.WithTimeout(ctx, d.o.ConfirmTimeout)
 		decision := d.o.Confirmer.Confirm(cctx, confirm.Request{
-			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: "adb " + classify.Printable(strings.Join(req.Argv, " ")),
+			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: rawCommand(req.Argv),
 			ExpiresAt: now.Add(d.o.ConfirmTimeout), Special: res.Special,
 		})
 		cancel()
@@ -144,6 +154,12 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			e.ExitCode = &code
 			d.record(e)
 			fmt.Fprintln(s.Stderr(), msg)
+			return ipc.Exit{Code: ExitDenied}
+		}
+		if ctx.Err() != nil { // allowed, but the agent is gone: nobody waits for the result
+			code := ExitDenied
+			e.Status, e.Reason, e.ExitCode = journal.StatusDenied, "abandoned by the agent before it ran", &code
+			d.record(e)
 			return ipc.Exit{Code: ExitDenied}
 		}
 	}
@@ -166,6 +182,9 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	case code == 0:
 		e.Status = journal.StatusOK
 	default:
+		if code < 0 { // killed by a signal
+			code = 1
+		}
 		e.Status = journal.StatusError
 	}
 	e.ExitCode = &code
@@ -198,4 +217,15 @@ func (d *Daemon) record(e journal.Entry) {
 		d.o.OnWarning("journal write failed for " + e.ID + ": " + err.Error())
 	}
 	d.o.OnEntry(e)
+}
+
+// rawCommand shows the command as the person should read it. After `shell`
+// adb joins the words with spaces, so they are shown as they are; elsewhere
+// each argument is one word and is quoted when needed.
+func rawCommand(argv []string) string {
+	_, rest := classify.SplitGlobal(argv)
+	if len(rest) > 0 && rest[0] == "shell" {
+		return "adb " + classify.Printable(strings.Join(argv, " "))
+	}
+	return "adb " + classify.Printable(shq.Join(argv...))
 }
