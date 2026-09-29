@@ -114,11 +114,21 @@ func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 		}
 		return c.evalWords(ws[1:], depth)
 	case "cmd":
-		if len(ws) > 1 && !ws[1].Dynamic {
-			if alias, ok := cmdAliases[ws[1].Value]; ok {
-				return c.evalWords(append(lits(alias), ws[2:]...), depth)
+		rest := ws[1:]
+		for len(rest) > 0 && !rest[0].Dynamic && rest[0].Value == "-w" { // -w: wait for the service
+			rest = rest[1:]
+		}
+		if len(rest) > 0 && (rest[0].Dynamic || strings.HasPrefix(rest[0].Value, "-")) {
+			f := redFinding("cmd.option", "cmd with an option or a service only known on the phone", vals, textUnknown)
+			f.Special = true
+			return []Finding{f}
+		}
+		if len(rest) > 0 {
+			if alias, ok := cmdAliases[rest[0].Value]; ok {
+				return c.evalWords(append(lits(alias), rest[1:]...), depth)
 			}
 		}
+		ws = append([]Word{ws[0]}, rest...)
 	}
 	if inner, handled, reason := unwrap(ws); handled {
 		if reason != "" {

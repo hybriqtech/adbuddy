@@ -434,18 +434,23 @@ func titleFor(t Text, vars map[string]string, rejected bool) Text {
 }
 
 // subOf is the first argument that is not an option (skipping "--user N").
+// A dynamic word up to the subcommand makes it unknown: on the phone an
+// unquoted $(…) may split into options and a different verb.
 func subOf(ws []Word) string {
 	for i := 1; i < len(ws); i++ {
+		if ws[i].Dynamic {
+			return ""
+		}
 		v := ws[i].Value
 		if v == "--user" {
 			i++
+			if i < len(ws) && ws[i].Dynamic {
+				return ""
+			}
 			continue
 		}
 		if strings.HasPrefix(v, "-") {
 			continue
-		}
-		if ws[i].Dynamic {
-			return ""
 		}
 		return v
 	}

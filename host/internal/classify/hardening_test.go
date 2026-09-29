@@ -280,3 +280,33 @@ func TestPullNeverWritesAgentConfiguration(t *testing.T) {
 		t.Errorf("photo: %v", r.Level)
 	}
 }
+
+func TestDynamicWordsBeforeTheVerb(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		"settings --user $(echo 0 put global adb_enabled 0) get",
+		"settings -$(echo -user 0 put global adb_enabled) get x",
+		"cmd settings --user $(echo 0 put global adb_enabled 0) get",
+		"pm $(echo uninstall) com.x.y",
+		"appops $(echo set) com.x OP deny",
+		"cmd $(echo settings) put global adb_enabled 0",
+	} {
+		if r := c.Classify(sh(line)); r.Level != Red {
+			t.Errorf("%q: %v, want red", line, r.Level)
+		}
+	}
+	u := mustNew(t, "rules:\n  - {id: u.cmd, cmd: cmd, level: green}\n")
+	for _, line := range []string{
+		"cmd -w activity force-stop com.android.systemui",
+		"cmd -w settings put global adb_enabled 0",
+		"cmd -w package uninstall --user 0 com.android.shell",
+		"cmd --foo settings put global k v",
+	} {
+		if r := u.Classify(sh(line)); r.Level != Red || !r.Special {
+			t.Errorf("%q: %v special=%v, want red special", line, r.Level, r.Special)
+		}
+	}
+	if r := c.Classify(sh("cmd -w package list packages")); r.Level != Green {
+		t.Errorf("cmd -w package list: %v", r.Level)
+	}
+}
