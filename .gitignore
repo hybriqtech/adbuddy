@@ -39,3 +39,6 @@ desktop.ini
 spikes/out/
 spikes/**/out/
 spikes/s3-pty/work/.claude/
+
+# Informes locales del trabajo nocturno
+/.superpowers/overnight-*.md
