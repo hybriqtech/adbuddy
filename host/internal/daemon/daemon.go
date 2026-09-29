@@ -76,6 +76,8 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 	switch req.Kind {
 	case ipc.KindExec:
 		return d.exec(ctx, req, s)
+	case ipc.KindUndo:
+		return d.undo(ctx, req, s)
 	case ipc.KindPing:
 		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.o.Serial, Journal: d.o.Journal.Dir()})
 		return ipc.Exit{}
