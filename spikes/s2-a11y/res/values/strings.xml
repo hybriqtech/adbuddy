@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ADBuddy S2 probe</string>
+    <string name="service_label">ADBuddy S2 probe</string>
+    <string name="service_description">Spike desechable de ADBuddy: comprueba si este servicio se puede activar por adb. Solo escribe en logcat.</string>
+</resources>

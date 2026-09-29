@@ -34,3 +34,8 @@ captures/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Spikes de M0 (salidas locales, pueden contener capturas del móvil)
+spikes/out/
+spikes/**/out/
+spikes/s3-pty/work/.claude/

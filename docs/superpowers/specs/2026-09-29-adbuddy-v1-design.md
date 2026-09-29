@@ -1,7 +1,7 @@
 # ADBuddy v1 · Diseño
 
 - **Fecha:** 2026-09-29
-- **Estado:** aprobado en conversación, pendiente de revisar por escrito
+- **Estado:** aprobado; actualizado con resultados de M0 (2026-09-29)
 - **Repo:** `hybriqtech/adbuddy` · licencia Apache-2.0
 
 ## 1. Qué es y para quién
@@ -70,6 +70,7 @@ PC (Windows / macOS / Linux)                     Móvil (Android 11+)
 | Vista híbrida del chat | Solo espejo de terminal; solo burbujas | Burbujas donde hay adaptador (Claude Code en la v1) y terminal para el resto |
 | Confirmar solo lo destructivo | Confirmar cualquier cambio; no confirmar nada | Equilibrio entre seguridad y fluidez en tareas largas |
 | Distribución: GitHub + IzzyOnDroid primero, Google Play después | Play desde el día 1 | Play restringe la accesibilidad y los ajustes de desarrollador; lo abordaremos con la app madura |
+| Onboarding: primero emparejar y después instalar la app desde el host con `adb install` | Instalar primero el APK desde el móvil (QR del APK) | Según el anuncio de Google, la instalación por adb está exenta de la verificación de desarrolladores (§12). En S2 (§11, 1 muestra) no dejó la app con "ajuste restringido" ni mostró aviso de Play Protect |
 | Go para el host | Node, Python, Rust | Binario único sin runtime, compilación sencilla para los tres sistemas y parser de shell maduro (`mvdan.cc/sh`) |
 
 ## 3. Instalación y conexión
@@ -77,34 +78,35 @@ PC (Windows / macOS / Linux)                     Móvil (Android 11+)
 ### 3.1 Primera vez (`adbuddy setup`, que también se lanza si ejecutas `adbuddy` sin configurar)
 
 1. **Herramientas.** El host usa **siempre su propia copia** de platform-tools e ignora el `adb` del sistema, para controlar la versión (adb Wi-Fi 2.0 requiere la 37 o superior). Si no la tiene o está desactualizada, la descarga de `dl.google.com/android/repository/platform-tools-latest-<os>.zip` en su carpeta de datos y comprueba el checksum.
-2. **QR 1, la app.** El terminal muestra un QR con la URL del APK de la última release de GitHub (y el enlace de IzzyOnDroid). El móvil lo escanea con la cámara y lo instala.
-3. **Guía en la app.**
-   - Activar las opciones de desarrollador: instrucciones visuales y apertura del ajuste "Acerca del teléfono".
-   - Activar la depuración inalámbrica: se abren las opciones de desarrollador señalando el ajuste.
-   - La app indica que marques **"Permitir siempre en esta red"**, que la convierte en red de confianza.
-4. **QR 2, el emparejamiento.**
+2. **Guía en el terminal.** La app aún no está instalada, así que la guía la da el host.
+   - El terminal explica cómo activar las opciones de desarrollador y la depuración inalámbrica, y muestra un QR a una página con capturas para seguirla en el móvil.
+   - Indica que marques **"Permitir siempre en esta red"**, que la convierte en red de confianza.
+3. **Emparejamiento (QR de pareja).**
    - El host genera `WIFI:T:ADB;S:ADBuddy-<rand>;P:<pwd>;;` y lo muestra.
    - En el móvil: *Depuración inalámbrica → Emparejar con código QR*.
    - El host localiza por mDNS el servicio `_adb-tls-pairing._tcp` de esa instancia y ejecuta `adb pair`.
    - **Alternativa:** `adbuddy setup --code`, que pide IP:puerto y el código de 6 cifras.
-5. **Conexión** por mDNS (`_adb-tls-connect._tcp`).
-6. **Comprobar la app.** Si la app no está instalada, el host ofrece instalarla él con `adb install`.
-7. **Consentimiento en la app.**
-   1. El host llama a `content call … requestSetup` y la app muestra qué va a hacer el PC y por qué.
+4. **Conexión** por mDNS (`_adb-tls-connect._tcp`).
+5. **Instalar la app.** El host instala el APK de la última release de GitHub con `adb install`. Si ya está instalada, se salta este paso.
+   - Es la vía principal: según el anuncio de Google, la instalación por adb está exenta de la verificación de desarrolladores (§12); además, no deja la app con "ajuste restringido" y no mostró aviso de Play Protect en la prueba (S2, 1 muestra).
+   - **Alternativa:** un QR con la URL del APK de GitHub (y el enlace de IzzyOnDroid) para instalarla desde el móvil. En la prueba salió el aviso de Play Protect y la app quedó con "ajuste restringido", lo que en Android 17 no impidió el paso 6 (S2).
+6. **Consentimiento en la app.**
+   1. El host abre la app, llama a `content call … requestSetup` y la app muestra qué va a hacer el PC y por qué.
    2. Cuando aceptas, el host:
       - concede `WRITE_SECURE_SETTINGS` (`pm grant`);
-      - añade el servicio de accesibilidad a `enabled_accessibility_services` **sin quitar los que ya hubiera**;
+      - añade el servicio de accesibilidad a `enabled_accessibility_services` **sin quitar los que ya hubiera** y pone `accessibility_enabled=1`;
       - opcionalmente, da acceso a las notificaciones (`cmd notification allow_listener`).
-8. **Túnel del chat:** `adb reverse tcp:<port> tcp:<port>` y entrega del token (§5.2).
-9. **Perfil del dispositivo.** Se guardan en `device.json` y en `AGENTS.md`: modelo, fabricante, versión de Android y SDK, resolución y densidad, launcher por defecto, idioma, y si es un móvil de Google o de otro fabricante.
-10. **Agente.** El host detecta en el PATH `claude`, `codex`, `gemini` y `opencode`, recomienda Claude Code y guarda la elección.
-11. **Entorno.** Se crea el entorno de trabajo (§7), arranca el daemon y se abre la primera sesión. Opcionalmente se activan el arranque con el sistema y "mantener el PC despierto".
+   3. Activar la accesibilidad por adb funciona incluso con la app instalada desde el navegador ("ajuste restringido" en `deny`). Validado en Android 17 con 1 dispositivo (S2). Queda para M2 probar a añadir el servicio a una lista con otros servicios ya activos: en la prueba la lista estaba vacía (`null`). Si falla, se usa el paso manual de §9.
+7. **Túnel del chat:** `adb reverse tcp:<port> tcp:<port>` y entrega del token (§5.2).
+8. **Perfil del dispositivo.** Se guardan en `device.json` y en `AGENTS.md`: modelo, fabricante, versión de Android y SDK, resolución y densidad, launcher por defecto, idioma, y si es un móvil de Google o de otro fabricante.
+9. **Agente.** El host detecta en el PATH `claude`, `codex`, `gemini` y `opencode`, recomienda Claude Code y guarda la elección.
+10. **Entorno.** Se crea el entorno de trabajo (§7), arranca el daemon y se abre la primera sesión. Opcionalmente se activan el arranque con el sistema y "mantener el PC despierto".
 
 ### 3.2 Día a día
 
 - El daemon arranca con el sistema, si lo activaste, y reconecta:
   - **Android 17 (adb Wi-Fi 2.0):** el móvil se conecta solo en redes de confianza.
-  - **Android 11-16:** si activas "Mantener la depuración activa", la app vuelve a poner `adb_wifi_enabled` cuando Android lo apaga al cambiar de red. En redes que no son de confianza, Android muestra su propio aviso para permitirlo, así que la app no necesita saber qué red es (ni pedir permiso de ubicación). El host encuentra el móvil por mDNS.
+  - **Android 11-16:** si activas "Mantener la depuración activa", la app vuelve a poner `adb_wifi_enabled` cuando Android lo apaga al cambiar de red, salvo mientras "Cortar acceso" esté activo (§4.6). En redes que no son de confianza, Android muestra su propio aviso para permitirlo, así que la app no necesita saber qué red es (ni pedir permiso de ubicación). El host encuentra el móvil por mDNS.
 - **Varios móviles:** puedes emparejar varios, pero solo hay **uno activo por sesión** (`adbuddy device use <nombre>`).
 - **Servidor adb propio.** El host usa su propio servidor adb en un puerto distinto (`ANDROID_ADB_SERVER_PORT`, por defecto 5038) para no chocar con Android Studio ni con otra versión de adb.
 
@@ -112,11 +114,15 @@ PC (Windows / macOS / Linux)                     Móvil (Android 11+)
 
 Tailscale es opcional y se recomienda en la documentación y en la app.
 
-- **Con cualquier Wi-Fi y Tailscale:** mientras estás en casa, la app informa al host de su IP de Tailscale (interfaz `tun`) y el host la guarda. Fuera, si no encuentra el móvil por mDNS, prueba esa IP.
-- **Solo con datos móviles.** Android no permite la depuración inalámbrica sin Wi-Fi. Diseño previsto:
-  - Un interruptor **"Modo remoto"** en la app pide al host que ejecute `adb tcpip 5555` antes de salir. Así adbd escucha en un puerto fijo en todas las interfaces hasta el siguiente reinicio, y el host se conecta a `<ip-tailscale>:5555`.
-  - Al desactivarlo, se vuelve al modo normal.
-  - **Pendiente de validar con el spike S1 (§11).**
+- **Con cualquier Wi-Fi y Tailscale:** mientras estás en casa, la app informa al host de su IP de Tailscale (interfaz `tun`) y el host la guarda. Fuera, si no encuentra el móvil por mDNS, prueba esa IP. **No validado en S1:** con la depuración inalámbrica el puerto es aleatorio y mDNS no cruza Tailscale, así que requiere el modo `tcpip` o que la app informe del puerto. Se concreta en M5.
+- **Solo con datos móviles.** Android no permite la depuración inalámbrica sin Wi-Fi. Validado en S1 (§11) con Wi-Fi y con solo datos móviles:
+  - Un interruptor **"Modo remoto"** en la app pide al host que ejecute `adb tcpip 5555` antes de salir, con el móvil aún en una Wi-Fi con depuración inalámbrica. Así adbd escucha en un puerto fijo en todas las interfaces hasta el siguiente reinicio, y el host se conecta a `<ip-tailscale>:5555`.
+  - **Latencia de un comando:** 120-165 ms con Wi-Fi y 213 ms con solo datos (1 muestra, con mala cobertura).
+  - **Capturas:** por datos son lentas (unos 84 KB/s; 1 muestra, mala cobertura). En modo remoto, `adbuddy screenshot` usa por defecto escala reducida y formato comprimido.
+  - **Cambios de red:** el puerto sobrevive a Wi-Fi → datos → Wi-Fi. No se probó si una sesión abierta sobrevive al paso Wi-Fi → datos, así que el host reconecta a `<ip-tailscale>:5555` automáticamente.
+  - **Al desactivarlo,** el host ejecuta `adb usb`: el puerto se cierra (`service.adb.tcp.port=0`) y se conserva la depuración inalámbrica.
+  - **Caducidad:** el modo remoto caduca solo (p. ej., a las 12 h) y el host lo cierra.
+  - **Invariante del host:** al conectar, si `getprop service.adb.tcp.port` no está vacío ni es `0` y el modo remoto no está activado, el host ejecuta `adb usb`, que reinicia adbd y corta la conexión un instante (ver "Reactivar" en §4.6).
 - **Alternativa manual:** la app muestra la IP y el puerto actuales, y tú ejecutas `adbuddy connect <ip:puerto>`.
 - **Riesgo del modo remoto:** el puerto 5555 queda abierto en redes públicas. Sigue exigiendo que la clave del PC esté autorizada, pero la app lo advierte y propone desactivarlo al volver a casa.
 
@@ -168,6 +174,8 @@ Tailscale es opcional y se recomienda en la documentación y en la app.
 | `dumpsys deviceidle whitelist +pkg` | 🟡 | – | `whitelist -pkg` |
 | `input …`, `am start …`, `keyevent`, `monkey -p pkg 1` | 🟡 **sin inverso** | app en primer plano (§4.6) | – (se registra como acción de interfaz) |
 
+**Citar los valores para el shell remoto.** `adb shell` concatena los argumentos en una sola línea de comandos. Por eso, todo comando `adb shell` que construya el host, y en particular los inversos de `settings put` con el valor anterior, tiene que citar los valores: un `$`, un `;` o un espacio corromperían el valor o permitirían inyectar comandos.
+
 **Límite honesto:** las acciones de interfaz no se pueden deshacer, y un toque puede confirmar algo destructivo dentro de una app. Para mitigarlo:
 
 - el contexto obliga al agente a pedir confirmación en el chat antes de aceptar diálogos destructivos dentro de apps;
@@ -208,7 +216,15 @@ Tailscale es opcional y se recomienda en la documentación y en la app.
 - **El PIN o la contraseña del móvil nunca se piden ni se guardan.**
 - **Botón de parada, en dos niveles:**
   - **Pausar** (app o notificación): el daemon bloquea todos los comandos del shim y envía `Esc` y Ctrl+C al PTY del agente. Se puede reanudar.
-  - **Cortar acceso:** la app pone `adb_wifi_enabled=0` y `adb_enabled=0` gracias a `WRITE_SECURE_SETTINGS`. Esto corta también el modo `tcpip` y no depende de que el PC colabore. "Reactivar" deshace ambos. *(Se valida en el spike S1.)*
+  - **Cortar acceso:** la app pone `adb_wifi_enabled=0` y después `adb_enabled=0` gracias a `WRITE_SECURE_SETTINGS`. No depende de que el PC colabore. Validado en S1 (§11):
+    - `adb_wifi_enabled=0` **no** corta el modo `tcpip`: el puerto 5555 sigue aceptando conexiones nuevas;
+    - `adb_wifi_enabled=0` más `adb_enabled=0` lo corta todo (conexión rechazada).
+  - **Reactivar** deshace ambos ajustes. Pero si el modo `tcpip` estaba activo, el puerto 5555 **vuelve a abrirse solo**, porque dura hasta reiniciar, y la app no puede cerrarlo sin el host (`adb usb`). Por eso:
+    - el host aplica su invariante al conectar (§3.3): si `getprop service.adb.tcp.port` no está vacío ni es `0` y el modo remoto no está activado, ejecuta `adb usb`, que reinicia adbd y corta la conexión un instante;
+    - tras "Reactivar", la app avisa: "el puerto remoto sigue abierto hasta que el PC se conecte", y ofrece reiniciar el móvil como alternativa;
+    - el modo remoto caduca solo y el host lo cierra (§3.3).
+
+    El 5555 sigue exigiendo que la clave del PC esté autorizada. En S1, "Reactivar" se probó con los interruptores de Ajustes, no desde la app.
 - **Sin doble confirmación.**
   - En el entorno se preconfigura que el agente no pida permiso para `adb` ni `adbuddy`: en Claude Code con `.claude/settings.json` (`permissions.allow: ["Bash(adb:*)","Bash(adbuddy:*)"]`); en Codex y otros, con su equivalente si lo tienen.
   - El resto de permisos del agente (editar ficheros, otros comandos) se mantiene.
@@ -219,7 +235,12 @@ Tailscale es opcional y se recomienda en la documentación y en la app.
 
 ### 5.1 Sesión
 
-- **Una sola sesión por host,** ejecutada en un PTY: `creack/pty` en Unix y ConPTY en Windows, *pendiente de validar con el spike S3*.
+- **Una sola sesión por host,** ejecutada en un PTY:
+  - **Windows:** ConPTY con `UserExistsError/conpty` (v0.1.4). Validado en S3 (§11): 8/8 checks (Unicode, multilínea con bracketed paste, redimensionar, Esc y `/exit`). `node-pty` queda descartado.
+  - **Unix:** `creack/pty`, a validar en M3.
+- **Confianza de la carpeta.** Claude Code muestra un diálogo de confianza en las carpetas nuevas con **"No, exit" por defecto**: un Enter a ciegas cierra la sesión. El host preconfía el entorno antes de lanzar el agente. Pista sin verificar: en S3 `projects[<raíz git>].hasTrustDialogAccepted` (en `~/.claude.json`) estaba a `true` y el diálogo apareció igualmente en una subcarpeta; además, el entorno `~/ADBuddy/<dispositivo>/` no es un repo git. Alternativa observada en S3: detectar el diálogo y elegir "Yes" explícitamente. Por concretar en M3/M4.
+- **Entorno explícito.** El host lanza el agente con una lista de variables permitidas. Incluye las de sistema, autenticación y proxy del usuario (p. ej., `PATH`, `HOME`/`USERPROFILE`, `APPDATA`, las de autenticación `ANTHROPIC_*`, `HTTP(S)_PROXY`/`NO_PROXY` y `CLAUDE_CONFIG_DIR`) y excluye las de sesión (`CLAUDECODE*`, `CLAUDE_CODE_*`, `CLAUDE_EFFORT` y `CLAUDE_PID`). Así se respeta la configuración global sin arrastrar la sesión que lanzó el host. La lista se concreta en M3. En S3, lanzado desde otra sesión de Claude Code, el agente usó el esfuerzo de la sesión padre, probablemente por esas variables heredadas.
+- **Configuración global del agente.** La sesión respeta la configuración global del usuario (hooks, modo de permisos y modelo). Lo propio de ADBuddy va en `.claude/settings.json` del entorno y se combina con la global (§5.4).
 - **Comandos:**
   - `adbuddy`: arranca el daemon si hace falta y se conecta a la sesión;
   - `adbuddy attach` / `detach`: conectar o soltar la terminal del PC;
@@ -289,13 +310,14 @@ Todos los mensajes llevan el sobre `{"v":1,"seq":<n>,"type":"…","ts":"…","pa
   - `Stop`: pone el estado en `idle` y aporta `last_assistant_message`.
   - `Notification`: `permission_prompt`, `idle_prompt` y `agent_needs_input` pasan a `waiting`.
   - `PermissionRequest`: emite `permission.request` y espera la `permission.reply` del móvil (o de la terminal) hasta 10 minutos. Responde con `hookSpecificOutput.decision.behavior = allow|deny`. "Sí, siempre" añade la regla a `permissions.allow`.
+- **Hooks globales del usuario.** Estos hooks se combinan con los de la configuración global (§5.1). Si el usuario tiene hooks globales `PermissionRequest` o `PreToolUse`, pueden entrar en conflicto con los de ADBuddy (por ejemplo, si ambos responden a la misma petición de permiso). La documentación lo explica.
 - **Mensajes.** Se sigue el `transcript_path` (JSONL) y se transforma en `chat.message` y `tool.activity`. El formato del transcript no es una API pública, así que va en un módulo aislado con tests de versión. **Si falla el parseo,** se degrada a mostrar solo `last_assistant_message` en cada `Stop`, más la vista de terminal.
-- **Entrada.** El texto del móvil se inyecta en el PTY con *bracketed paste* (`ESC[200~ … ESC[201~`) seguido de `\r`.
+- **Entrada.** El texto del móvil se inyecta en el PTY con *bracketed paste* (`ESC[200~ … ESC[201~`) seguido de `\r`. Validado en S3 con texto multilínea y Unicode.
 - **Codex:** adaptador equivalente en la v1.1, a partir de sus ficheros de sesión y su configuración de notificaciones.
 
 ### 5.5 Vista de terminal (el resto de agentes)
 
-- **Dibujo:** xterm.js (MIT) en un WebView alimentado por `terminal.output`.
+- **Dibujo:** xterm.js (MIT) en un WebView alimentado por `terminal.output`. S3 lo confirma: la salida es una TUI con repintados parciales, truecolor y enlaces OSC 8, así que hace falta un emulador VT real; quitar las secuencias ANSI no basta.
 - **Entrada:** campo de texto y teclas rápidas: Esc, Ctrl+C, ↑, ↓, Tab, Enter, 1, 2 y 3.
 - **Detección del estado "esperando":** sin salida durante 4 s (configurable) tras haber actividad.
 
@@ -330,7 +352,7 @@ Todos los mensajes llevan el sobre `{"v":1,"seq":<n>,"type":"…","ts":"…","pa
 | Componente | Función |
 |---|---|
 | `MainActivity` (Compose) | Pantallas: Onboarding, Chat, Actividad, Ajustes y Acerca de |
-| `BridgeService` (foreground, `specialUse`) | Cliente WebSocket, notificaciones, reconexión y reactivación de la depuración inalámbrica en Android 11-16 |
+| `BridgeService` (foreground, `specialUse`) | Cliente WebSocket, notificaciones, reconexión y reactivación de la depuración inalámbrica en Android 11-16 (nunca con "Cortar acceso" activo) |
 | `TokenProvider` (ContentProvider exportado) | `handshake`, `requestSetup`, `getSetupConsent` y `ping`; solo acepta el UID de shell |
 | `AgentAccessibilityService` | Árbol de interfaz compacto, clic y texto (`ACTION_CLICK`, `ACTION_SET_TEXT`), paquete en primer plano y superposición |
 | `AgentNotificationListener` (opcional) | Notificaciones actuales para `adbuddy notifications` |
@@ -342,7 +364,7 @@ Todos los mensajes llevan el sobre `{"v":1,"seq":<n>,"type":"…","ts":"…","pa
 
 **Pantallas**
 
-- **Onboarding:** pasos con progreso: app instalada → opciones de desarrollador → depuración inalámbrica → emparejar (escanear el QR del PC) → consentimiento → apps protegidas → acceso a notificaciones (opcional) → listo.
+- **Onboarding:** la app se abre ya instalada y emparejada por el host (§3.1). Pasos con progreso: consentimiento → apps protegidas → acceso a notificaciones (opcional) → listo. Si se instaló por la vía alternativa (QR del APK), el emparejamiento sigue igualmente la guía del terminal (§3.1).
 - **Chat:** cabecera con agente, estado, conexión (red local o Tailscale) y Pausar. Burbujas o terminal. Barra con adjuntar (+), captura y enviar. Tarjetas de permiso y confirmación en línea.
 - **Actividad:** el diario en directo con 🟢🟡🔴, filtros por nivel y sesión, y detalle con el comando y su inverso. Solo lectura en la v1.
 - **Ajustes:** apps protegidas, acceso a notificaciones, modo remoto, mantener la depuración activa (Android 11-16), idioma, y Acerca de con la licencia y **"Apoya el proyecto"** (GitHub Sponsors y Ko-fi, discreto).
@@ -351,13 +373,15 @@ Todos los mensajes llevan el sobre `{"v":1,"seq":<n>,"type":"…","ts":"…","pa
 
 | Comando | Qué hace | Respaldo si la app no responde |
 |---|---|---|
-| `adbuddy screen [--json]` | Lista compacta de elementos: `id`, texto o descripción, límites y si es pulsable, editable o desplazable. Unos 100 ms | `uiautomator dump`, de 2 a 4 s |
+| `adbuddy screen [--json]` | Lista compacta de elementos: `id`, texto o descripción, límites y si es pulsable, editable o desplazable. 31-129 ms en el móvil según la pantalla (pocas muestras, S2), más el transporte | `uiautomator dump`, de 2 a 4 s. Solo si el servicio de ADBuddy no está vinculado (§6, abajo) |
 | `adbuddy tap "<texto>" \| --id <id> \| --xy x,y` | Clic sobre el elemento | `input tap` con los límites |
 | `adbuddy type "<texto>"` | Escribe en el campo con foco, con Unicode completo | `input text`, solo ASCII, con aviso |
-| `adbuddy screenshot [--scale 0.5] [-o f.png]` | Captura reducida | – (la hace el host) |
+| `adbuddy screenshot [--scale 0.5] [-o f.png]` | Captura reducida. En modo remoto, por defecto con escala reducida y formato comprimido (§3.3) | – (la hace el host) |
 | `adbuddy foreground` | Paquete y actividad en primer plano | `dumpsys activity activities` |
 | `adbuddy notifications` | Notificaciones actuales (opcional) | – |
 | `adbuddy send`, `undo`, `journal` | Ver §4.4 y §5.6 | – |
+
+**Leer la pantalla con el servicio (S2, §11).** Tarda 31-129 ms en el móvil según la pantalla (pocas muestras, S2) frente a unos 2,5 s de `uiautomator dump`: del orden de 10 veces más rápido incluso sumando el transporte (120-165 ms). Además, `uiautomator dump` **desconecta temporalmente** el servicio de accesibilidad, así que nunca se usa con el servicio activo: el host comprueba por adb (`dumpsys accessibility`) que el servicio de ADBuddy no está vinculado antes de usar `uiautomator dump`.
 
 ## 7. Entorno del agente y paquete de contexto
 
@@ -428,10 +452,10 @@ Las rutas exactas de skills y contexto de Codex, Gemini CLI y OpenCode se verifi
 | Apps con `FLAG_SECURE` | Capturas en negro. El árbol de accesibilidad sí funciona, salvo en campos protegidos, y las apps protegidas siguen bloqueadas |
 | El agente no está instalado | El host lo detecta y muestra cómo instalarlo. No lo instala, porque cada agente requiere iniciar sesión |
 | Otro servidor adb en marcha | Nuestro servidor usa su propio puerto (5038), así que no hay conflicto |
-| La accesibilidad no se activa por adb (ajuste restringido) | La app guía por *Info de la app → ⋮ → Permitir ajustes restringidos* y lo activas a mano |
+| La accesibilidad no se activa por adb (ajuste restringido) | Respaldo: en el flujo normal no hace falta, porque el host la activa por adb (§3.1, S2). Sirve si una versión futura de Android o un fabricante cierran esa vía. La app guía por *Info de la app → ⋮ → Permitir ajustes restringidos* y lo activas a mano. Texto observado en Android 17: "Controlada por ajustes restringidos" y el diálogo "Se ha denegado el acceso a la aplicación". Ruta manual no verificada en Android 17 |
 | Advanced Protection de Android activado | ADBuddy avisa de que no puede funcionar (bloquea la accesibilidad y la instalación fuera de Play) |
 | El diario no se puede escribir | Se bloquea todo lo 🟡 y 🔴 |
-| La app no está conectada | Las ayudas usan su respaldo por adb. Las confirmaciones, la terminal del PC o se rechazan |
+| La app no está conectada | Las ayudas usan su respaldo por adb (en `screen`, solo si el servicio de ADBuddy no está vinculado, §6). Las confirmaciones, la terminal del PC o se rechazan |
 | La confirmación caduca | Se rechaza (código 126) y queda registrado como `timeout` |
 
 ## 10. Tests y calidad
@@ -457,11 +481,11 @@ Las rutas exactas de skills y contexto de Codex, Gemini CLI y OpenCode se verifi
 
 ## 11. Riesgos a validar primero (spikes, código desechable)
 
-| Id | Pregunta | Si falla |
-|---|---|---|
-| S1 | ¿`adb tcpip 5555` funciona por Tailscale con datos móviles en Android 17? ¿Sobrevive a cambios de red? ¿"Cortar acceso" (`adb_enabled=0`) corta también ese modo? | El modo remoto queda limitado a "cualquier Wi-Fi + Tailscale" con conexión manual, y se documenta |
-| S2 | ¿Se puede activar el servicio de accesibilidad de un APK instalado fuera de Play con `settings put secure enabled_accessibility_services` en Android 13-17, pese al ajuste restringido? | Paso manual guiado en el onboarding (ver §9) |
-| S3 | ¿Funciona bien Claude Code dentro de un PTY de Go con ConPTY en Windows, incluidos colores, tamaño y bracketed paste? | Evaluar otra librería de PTY o un proceso auxiliar en Node (`node-pty`) solo para Windows |
+| Id | Pregunta | Si falla | Resultado (2026-09-29) |
+|---|---|---|---|
+| S1 | ¿`adb tcpip 5555` funciona por Tailscale con datos móviles en Android 17? ¿Sobrevive a cambios de red? ¿"Cortar acceso" (`adb_enabled=0`) corta también ese modo? | El modo remoto queda limitado a "cualquier Wi-Fi + Tailscale" con conexión manual, y se documenta | **Sí, con matices.** Funciona con Wi-Fi (120-165 ms) y con solo datos (213 ms, 1 muestra). El puerto sobrevive a Wi-Fi → datos → Wi-Fi. Lo validado por Tailscale fue en modo `tcpip`. `adb_wifi_enabled=0` no corta el modo `tcpip`; con `adb_wifi_enabled=0` + `adb_enabled=0` sí. Al reactivar, el 5555 se reabre solo (§3.3, §4.6). [Informe](../../spikes/s1-modo-remoto.md) |
+| S2 | ¿Se puede activar el servicio de accesibilidad de un APK instalado fuera de Play con `settings put secure enabled_accessibility_services` en Android 13-17, pese al ajuste restringido? | Paso manual guiado en el onboarding (ver §9) | **Sí en Android 17** (1 dispositivo; Android 13-16 sin probar), con `adb install` y desde el navegador. Onboarding invertido con instalación por adb (§3.1). El servicio lee la pantalla en 31-129 ms según la pantalla (pocas muestras) frente a unos 2,5 s de `uiautomator dump` (§6). [Informe](../../spikes/s2-accesibilidad.md) |
+| S3 | ¿Funciona bien Claude Code dentro de un PTY de Go con ConPTY en Windows, incluidos colores, tamaño y bracketed paste? | Evaluar otra librería de PTY o un proceso auxiliar en Node (`node-pty`) solo para Windows | **Sí:** 8/8 checks con `UserExistsError/conpty`. Hay que preconfiar la carpeta, lanzar con entorno explícito y respetar la configuración global (§5.1). [Informe](../../spikes/s3-pty-windows.md) |
 
 Validado el 2026-09-29: `adb reverse` por depuración inalámbrica funciona en ambos sentidos (Pixel 9 Pro XL, Android 17, adb 37.0.1).
 
@@ -477,6 +501,7 @@ Validado el 2026-09-29: `adb reverse` por depuración inalámbrica funciona en a
   - script `curl … | sh` para Linux.
 - **Firma de binarios en Windows:** solicitar SignPath Foundation (gratuito para proyectos open source) para evitar el aviso de SmartScreen.
 - **App:** releases de GitHub más IzzyOnDroid desde la v1; el repositorio oficial de F-Droid (compilación reproducible) y Google Play, más adelante.
+- **Verificación de desarrolladores de Google.** Se aplica a las instalaciones fuera de Play en Brasil, Indonesia, Singapur y Tailandia desde el 30-09-2026, y en todo el mundo en 2027 (fuente: https://www.androidauthority.com/android-sideloading-changes-timeline-3679204/). La instalación por adb está exenta, así que no bloquea la v1 (§3.1). hybriqtech se registrará como desarrollador verificado antes de publicar en Google Play, o antes del despliegue global de 2027 si llega antes.
 - **Licencia:** Apache-2.0.
 - **Donaciones:** GitHub Sponsors en hybriqtech y Ko-fi, enlazados en el README y en "Acerca de". Sin avisos insistentes.
 - **Privacidad:** cero telemetría y cero servidores propios. Solo hablan con internet el agente elegido, Tailscale (si lo usas) y la descarga de platform-tools y releases.
@@ -487,8 +512,8 @@ Validado el 2026-09-29: `adb reverse` por depuración inalámbrica funciona en a
 | Hito | Contenido | Resultado usable |
 |---|---|---|
 | M0 | Spikes S1-S3 | Decisiones confirmadas o ajustadas |
-| M1 | Host base: descarga de adb, emparejamiento (QR y código), perfil, entorno y contexto mínimo, shim, clasificador, diario, `undo`, confirmación en la terminal del PC | Cualquier agente gestiona el móvil de forma segura desde el PC |
-| M2 | App base: onboarding, `TokenProvider`, `BridgeService` y WS, panel de confianza (notificación y actividad), confirmaciones en el móvil, Pausar y Cortar acceso | El móvil ve y controla lo que hace el agente |
+| M1 | Host base: descarga de adb, guía de activación en el terminal y URL de la página de ayuda con capturas (§3.1 paso 2; servida desde GitHub Pages o el README del repo, sin servidores propios, §12), emparejamiento (QR y código), perfil, entorno y contexto mínimo, shim, clasificador, diario, `undo`, confirmación en la terminal del PC | Cualquier agente gestiona el móvil de forma segura desde el PC |
+| M2 | App base: instalación de la app con `adb install` y pasos 5-7 de §3.1, validar la activación de la accesibilidad por adb en un Android 13-15 de otro fabricante (S2 solo cubrió Android 17; §1, criterio 4), onboarding, `TokenProvider`, `BridgeService` y WS, panel de confianza (notificación y actividad), confirmaciones en el móvil, Pausar y Cortar acceso | El móvil ve y controla lo que hace el agente |
 | M3 | Chat: daemon con PTY y `attach`, vista de terminal, envío de mensajes, adjuntos en los dos sentidos, notificaciones y burbuja | Chat con cualquier agente desde el móvil |
 | M4 | Adaptador de Claude Code: hooks, transcript en burbujas, permisos con botones | La experiencia completa con el agente recomendado |
 | M5 | Ayudas al agente (accesibilidad y superposición, notificaciones opcionales) y modo remoto | Más rápido, con Unicode, y usable fuera de casa |
