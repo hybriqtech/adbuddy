@@ -121,3 +121,29 @@ func TestShellAndPull(t *testing.T) {
 		t.Fatalf("%+v", calls)
 	}
 }
+
+func TestRunIsolatesTheAdbServer(t *testing.T) {
+	logPath := setup(t)
+	t.Setenv("ANDROID_SERIAL", "someone-else")
+	t.Setenv("ANDROID_ADB_SERVER_PORT", "9999")
+	t.Setenv("ADB_SERVER_SOCKET", "tcp:localhost:5037")
+	t.Setenv("ANDROID_ADB_SERVER_ADDRESS", "192.0.2.9")
+	r := Runner{Path: fakeADB, ServerPort: 5038, Serial: "dev1"}
+	if _, err := r.Run(context.Background(), "", []string{"devices"}, nil, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	r = Runner{Path: fakeADB, ServerPort: 0}
+	if _, err := r.Run(context.Background(), "", []string{"devices"}, nil, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	calls, _ := testutil.ReadLog(logPath)
+	if len(calls) != 2 {
+		t.Fatalf("calls %+v", calls)
+	}
+	if c := calls[0]; c.Port != "5038" || c.Serial != "" || c.Socket != "" || c.Address != "" {
+		t.Fatalf("first call leaks the environment: %+v", c)
+	}
+	if c := calls[1]; c.Port != "" || c.Serial != "" || c.Socket != "" || c.Address != "" {
+		t.Fatalf("port 0 call leaks the environment: %+v", c)
+	}
+}

@@ -52,10 +52,13 @@ func WriteScript(dir string, rules ...FakeRule) (string, error) {
 
 // FakeCall is one logged call of the fake adb.
 type FakeCall struct {
-	Args  []string `json:"args"`
-	Port  string   `json:"port"`
-	Cwd   string   `json:"cwd"`
-	Stdin string   `json:"stdin"`
+	Args    []string `json:"args"`
+	Port    string   `json:"port"`
+	Cwd     string   `json:"cwd"`
+	Stdin   string   `json:"stdin"`
+	Serial  string   `json:"serial"`
+	Socket  string   `json:"socket"`
+	Address string   `json:"address"`
 }
 
 // Joined returns the arguments without "-s SERIAL", joined by spaces.

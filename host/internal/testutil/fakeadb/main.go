@@ -58,7 +58,7 @@ func main() {
 	}
 	if path := os.Getenv("FAKEADB_LOG"); path != "" {
 		cwd, _ := os.Getwd()
-		line, _ := json.Marshal(map[string]any{"args": args, "port": os.Getenv("ANDROID_ADB_SERVER_PORT"), "cwd": cwd, "stdin": string(stdin)})
+		line, _ := json.Marshal(map[string]any{"args": args, "port": os.Getenv("ANDROID_ADB_SERVER_PORT"), "cwd": cwd, "stdin": string(stdin), "serial": os.Getenv("ANDROID_SERIAL"), "socket": os.Getenv("ADB_SERVER_SOCKET"), "address": os.Getenv("ANDROID_ADB_SERVER_ADDRESS")})
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
 			f.Write(append(line, '\n'))

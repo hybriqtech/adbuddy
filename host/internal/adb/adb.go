@@ -40,7 +40,7 @@ func (r Runner) env() []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		k := kv[:max(strings.IndexByte(kv, '='), 0)]
-		if strings.EqualFold(k, "ANDROID_SERIAL") || strings.EqualFold(k, "ANDROID_ADB_SERVER_PORT") {
+		if isolated(k) {
 			continue
 		}
 		env = append(env, kv)
@@ -170,4 +170,17 @@ func (r Runner) WaitSerial(ctx context.Context, want string, timeout time.Durati
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+// isolated reports whether the variable k could send adb to another server or
+// device than ADBuddy's private one: the device (ANDROID_SERIAL) and the
+// server (port, address, socket). All of them are dropped from the inherited
+// environment; only the configured port is set again.
+func isolated(k string) bool {
+	for _, name := range []string{"ANDROID_SERIAL", "ANDROID_ADB_SERVER_PORT", "ANDROID_ADB_SERVER_ADDRESS", "ADB_SERVER_SOCKET"} {
+		if strings.EqualFold(k, name) {
+			return true
+		}
+	}
+	return false
 }
