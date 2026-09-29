@@ -165,14 +165,21 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if session == "" {
 		session = d.o.Session
 	}
-	done, err := readUndoneLog(d.o.UndoneLog)
+	logged, err := readUndoneLog(d.o.UndoneLog)
 	if err != nil {
 		return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNREADABLE", Error: err.Error()}
 	}
 	for i := range entries {
-		if done[entries[i].ID] && entries[i].UndoneBy == nil {
+		if logged[entries[i].ID] == undoneDone && entries[i].UndoneBy == nil {
 			id := "(recorded outside the journal)"
 			entries[i].UndoneBy = &id
+		}
+	}
+	for id, st := range logged {
+		if st == undoneRunning {
+			// An undo that started and never finished, even if the journal
+			// lost its record: SelectUndo treats the change as uncertain.
+			entries = append(entries, journal.Entry{Source: journal.SourceUndo, Undoes: id, Status: journal.StatusRunning})
 		}
 	}
 	plan, skipped, err := SelectUndo(entries, req.Target, session)
@@ -200,9 +207,17 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			Argv: e.Inverse.Argv, Level: "yellow", Rule: "undo", Description: undoPrefix(d.o.Lang) + e.Description, Undoes: e.ID,
 		}
 		item.UndoID = u.ID
+		// The mark goes first, outside the agent's reach: if the host dies
+		// after the inverse, the change stays uncertain even when the agent
+		// deletes the journal lines.
+		if err := appendUndoneLog(d.o.UndoneLog, "running "+e.ID); err != nil {
+			_ = s.Data(res)
+			return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNWRITABLE", Error: fmt.Sprintf("the undo log cannot be written (%v); undid %d change(s) before stopping", err, len(res.Undone))}
+		}
 		running := u
 		running.Status = journal.StatusRunning
 		if err := d.o.Journal.Append(running); err != nil {
+			_ = appendUndoneLog(d.o.UndoneLog, "failed "+e.ID) // nothing ran; if this fails too, it stays uncertain
 			_ = s.Data(res)
 			return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNWRITABLE", Error: fmt.Sprintf("the journal cannot be written (%v); undid %d change(s) before stopping", err, len(res.Undone))}
 		}
@@ -221,6 +236,8 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			u.Reason, item.Error = msg, msg
 			res.Failed = append(res.Failed, item)
 			d.record(u)
+			// It may be retried; if this mark cannot be written it stays uncertain.
+			_ = appendUndoneLog(d.o.UndoneLog, "failed "+e.ID)
 			fmt.Fprintf(s.Stderr(), "✗ %s: %s\n", classify.Printable(e.Description), classify.Printable(msg))
 			continue
 		}
@@ -262,28 +279,43 @@ func undoPrefix(lang string) string {
 	return "Undo: "
 }
 
-// readUndoneLog reads the ids in the undone log ("" = no log).
-func readUndoneLog(path string) (map[string]bool, error) {
-	done := map[string]bool{}
+// States in the undone log. Its lines are "running <id>" (written and synced
+// before the inverse runs), "<id>" (undone) and "failed <id>" (the inverse
+// failed, so the change may be undone again).
+const (
+	undoneRunning = "running"
+	undoneDone    = "done"
+)
+
+// readUndoneLog reads the undone log ("" = no log) into the state of each id.
+func readUndoneLog(path string) (map[string]string, error) {
+	state := map[string]string{}
 	if path == "" {
-		return done, nil
+		return state, nil
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return done, nil
+		return state, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if id := strings.TrimSpace(line); id != "" {
-			done[id] = true
+		f := strings.Fields(line)
+		switch {
+		case len(f) == 1:
+			state[f[0]] = undoneDone
+		case len(f) == 2 && f[0] == "running" && state[f[1]] != undoneDone:
+			state[f[1]] = undoneRunning
+		case len(f) == 2 && f[0] == "failed" && state[f[1]] == undoneRunning:
+			delete(state, f[1])
 		}
 	}
-	return done, nil
+	return state, nil
 }
 
-func appendUndoneLog(path, id string) error {
+// appendUndoneLog appends one line to the undone log and syncs it.
+func appendUndoneLog(path, line string) error {
 	if path == "" {
 		return nil
 	}
@@ -294,7 +326,7 @@ func appendUndoneLog(path, id string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := f.WriteString(id + "\n"); err != nil {
+	if _, err := f.WriteString(line + "\n"); err != nil {
 		f.Close()
 		return err
 	}

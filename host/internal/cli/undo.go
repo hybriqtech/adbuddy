@@ -60,7 +60,11 @@ are reported and skipped. Needs ` + "`adbuddy serve`" + ` running.`,
 			partial := code == "UNDO_FAILED" || code == "JOURNAL_UNWRITABLE"
 			if exit.Code != 0 && !partial {
 				if code == "NOTHING_TO_UNDO" {
-					printUndoItems(app.Stderr, nil, nil, res.Skipped) // why the last changes were not undone
+					// Tell why the last changes were not undone.
+					if app.JSON {
+						return writeFailureData(app.Stdout, failure, res)
+					}
+					printUndoItems(app.Stderr, nil, nil, res.Skipped)
 				}
 				return failure
 			}

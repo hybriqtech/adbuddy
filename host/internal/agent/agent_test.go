@@ -91,10 +91,15 @@ func main() {
 		t.Fatalf("missing agent: %v", err)
 	}
 	// Killed by a signal: ExitCode() is -1 on Unix, which must not become 255.
-	code, err = Run(context.Background(), Options{Agent: "fakeagent", Dir: ws, BinDir: binDir, Serial: "dev1", Environ: append(os.Environ(), "FAKEAGENT_KILL=1")})
-	if err != nil || code != 1 {
-		t.Fatalf("killed agent: code %d err %v", code, err)
-	}
+	t.Run("killed by a signal", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("on Windows Kill ends the process with exit code 1, not -1: the signal path is only exercised on Unix")
+		}
+		code, err := Run(context.Background(), Options{Agent: "fakeagent", Dir: ws, BinDir: binDir, Serial: "dev1", Environ: append(os.Environ(), "FAKEAGENT_KILL=1")})
+		if err != nil || code != 1 {
+			t.Fatalf("killed agent: code %d err %v", code, err)
+		}
+	})
 	// Without an absolute bin folder the current directory would come first in PATH.
 	for _, bad := range []string{"", "rel/bin"} {
 		if _, err := Run(context.Background(), Options{Agent: "fakeagent", Dir: ws, BinDir: bad, Serial: "dev1", Environ: os.Environ()}); err == nil || err == ErrNotFound {

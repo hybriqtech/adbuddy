@@ -49,9 +49,9 @@ type Options struct {
 	Version        string
 	OnEntry        func(journal.Entry) // final records, for the live view; fields are untrusted, escape before printing; called concurrently
 	OnWarning      func(string)        // problems the person running serve should see; called concurrently
-	// UndoneLog lists the ids already undone, outside the agent's folder, so
-	// deleting journal lines cannot make undo run an inverse twice. Empty in
-	// tests that do not need it.
+	// UndoneLog lists the undos started, finished or failed (see
+	// readUndoneLog), outside the agent's folder, so deleting journal lines
+	// cannot make undo run an inverse twice. Empty in tests that do not need it.
 	UndoneLog string
 	Now       func() time.Time
 }

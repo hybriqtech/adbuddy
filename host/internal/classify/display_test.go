@@ -8,6 +8,8 @@ func TestDisplayCommandShowsWhatThePhoneRuns(t *testing.T) {
 		"adb exec-out screencap -p; reboot":                 {"exec-out", "screencap -p; reboot"},
 		"adb exec-out sh -c 'rm -rf /sdcard/DCIM'":          {"exec-out", "sh", "-c", "rm -rf /sdcard/DCIM"},
 		"adb wait-for-device shell echo hi; reboot":         {"wait-for-device", "shell", "echo hi; reboot"},
+		"adb exec-in cat > /sdcard/x; reboot":               {"exec-in", "cat > /sdcard/x; reboot"},
+		"adb exec-in cp /dev/stdin '/sdcard/a b'":           {"exec-in", "cp", "/dev/stdin", "/sdcard/a b"},
 		"adb wait-for-device exec-out screencap -p; reboot": {"wait-for-device", "exec-out", "screencap -p; reboot"},
 		"adb push 'my notes.txt' /sdcard/x":                 {"push", "my notes.txt", "/sdcard/x"},
 		"adb -s dev1 shell ls":                              {"-s", "dev1", "shell", "ls"},

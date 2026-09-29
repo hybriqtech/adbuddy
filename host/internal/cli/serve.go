@@ -64,8 +64,14 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			pctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
 			_, perr := ipc.PingDaemon(pctx, e.dirs.Data)
 			cancel()
-			if !errors.Is(perr, ipc.ErrNotRunning) {
+			switch {
+			case perr == nil:
 				return alreadyRunning
+			case !errors.Is(perr, ipc.ErrNotRunning):
+				// Something owns the socket but does not answer as a host
+				// (another secret, a timeout…): do not take it over.
+				return NewError("DAEMON_UNREACHABLE", "the ADBuddy socket does not answer: "+perr.Error(),
+					"Stop the other `adbuddy serve` or delete "+ipc.SocketPath(e.dirs.Data)+" if none is running.")
 			}
 			ws := e.workspace(wsDir)
 			exe, err := os.Executable()
@@ -170,7 +176,9 @@ var alreadyRunning = NewError("ALREADY_RUNNING", "another `adbuddy serve` is alr
 
 // serveUntil serves requests until ctx ends, then waits for the ones in
 // flight: a pending confirmation is journaled as denied and its shim gets
-// its answer before serve exits.
+// its answer before serve exits. Stopping also cancels a 🟡 change that is
+// running: its adb is killed and the entry ends as `error`, so it counts as
+// uncertain and is never undone automatically; check the phone by hand.
 func serveUntil(ctx context.Context, stop context.CancelFunc, srv *ipc.Server) error {
 	closed := make(chan struct{})
 	go func() {
@@ -186,7 +194,10 @@ func serveUntil(ctx context.Context, stop context.CancelFunc, srv *ipc.Server) e
 
 // undoneLogPath is the log of undone ids for one journal. It lives in the data
 // folder, out of the agent's reach, and is named after the journal's absolute
-// path so each environment keeps its own.
+// path so each environment keeps its own. Like the journal's signature, the
+// name depends on how that path is written (case, links): another spelling
+// finds another log, but it also changes the signature's scope, so the old
+// records stop verifying and undo refuses them instead of repeating them.
 func undoneLogPath(dataDir, journalDir string) string {
 	if abs, err := filepath.Abs(journalDir); err == nil {
 		journalDir = abs

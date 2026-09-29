@@ -85,6 +85,11 @@ func Open(dir string) *Store { return &Store{dir: dir, now: time.Now} }
 // OpenSigned returns a store that signs every record it writes with key and
 // marks as Tampered the records whose signature does not match. The journal
 // lives in the agent's folder; the key lives in ADBuddy's data folder.
+//
+// The signature covers the folder's path as filepath.Abs writes it, without
+// resolving links or case: the same folder written another way (C:\x and c:\x
+// on Windows, or through a symlink) makes authentic records show as "not
+// written by ADBuddy". That is a false alarm, never a forged record accepted.
 func OpenSigned(dir string, key []byte) *Store {
 	scope, err := filepath.Abs(dir)
 	if err != nil {

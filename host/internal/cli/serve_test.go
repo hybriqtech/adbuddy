@@ -182,6 +182,19 @@ func TestServeAlreadyRunning(t *testing.T) {
 	}
 }
 
+// A socket that answers but not with a ping is not reported as another serve
+// running: the error says what failed and how to clear the socket.
+func TestServeDaemonUnreachable(t *testing.T) {
+	data := isolate(t)
+	fakeDaemon(t, data, nil, ipc.Exit{Code: 1, ErrorCode: "UNAUTHORIZED", Error: "unauthorized"})
+	ws := filepath.Join(t.TempDir(), "ws")
+	_, errOut, code := run(t, "serve", "--adb", filepath.Join(t.TempDir(), "no-adb"), "--workspace", ws)
+	if code != ExitFailure || !strings.Contains(errOut, "DAEMON_UNREACHABLE") || !strings.Contains(errOut, "unauthorized") ||
+		!strings.Contains(errOut, ipc.SocketPath(data)) || strings.Contains(errOut, "ALREADY_RUNNING") || exists(ws) {
+		t.Fatalf("exit %d, workspace created %v, stderr %q", code, exists(ws), errOut)
+	}
+}
+
 // Ctrl+C while waiting for the phone is not an adb failure.
 func TestServeInterruptedWhileWaitingForThePhone(t *testing.T) {
 	isolate(t)

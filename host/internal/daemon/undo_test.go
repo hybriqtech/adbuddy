@@ -304,3 +304,113 @@ func mustRead(t *testing.T, p string) []byte {
 	}
 	return b
 }
+
+// The undone log gets "running <id>" before the inverse runs. If the host
+// dies before "<id>" follows, deleting the journal lines does not let the
+// agent repeat that inverse: the change stays uncertain. "failed <id>" means
+// the inverse failed and the change can be undone again.
+func TestUndoRunningMarkKeepsAnInterruptedUndoUncertain(t *testing.T) {
+	e := newEnv(t)
+	log := filepath.Join(t.TempDir(), "data", "undone.log")
+	e.d.o.UndoneLog = log
+	e.adb.shell["settings get global a"] = "1\n"
+	e.exec(t, "shell", "settings", "put", "global", "a", "2")
+	id := e.last(t).ID
+	var seen string
+	e.d.o.ADB = &installADB{fakeADB: e.adb, after: func() {
+		b, _ := os.ReadFile(log)
+		seen = string(b)
+	}}
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{}); exit.Code != 0 {
+		t.Fatalf("%+v", exit)
+	}
+	if seen != "running "+id+"\n" {
+		t.Fatalf("log while the inverse ran: %q", seen)
+	}
+	if got := string(mustRead(t, log)); got != "running "+id+"\n"+id+"\n" {
+		t.Fatalf("log after the undo: %q", got)
+	}
+	inverses := func() int {
+		n := 0
+		for _, r := range e.adb.ran() {
+			if r == "shell settings put global a 1" {
+				n++
+			}
+		}
+		return n
+	}
+
+	// The host died after the inverse: only the mark is left, and the agent
+	// deletes every journal line after the change itself.
+	os.WriteFile(log, []byte("running "+id+"\n"), 0o600)
+	file := filepath.Join(e.store.Dir(), time.Now().UTC().Format("2006-01")+".jsonl")
+	lines := strings.SplitAfter(string(mustRead(t, file)), "\n")
+	os.WriteFile(file, []byte(lines[0]+lines[1]), 0o600)
+	s := &stream{}
+	exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, s)
+	var res UndoResult
+	if len(s.data) > 0 {
+		json.Unmarshal(s.data[len(s.data)-1], &res)
+	}
+	if exit.ErrorCode != "NOTHING_TO_UNDO" || itemIDs(res.Skipped) != id || res.Skipped[0].Error != skipUncertain {
+		t.Fatalf("%+v %+v", exit, res)
+	}
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: id}, &stream{}); exit.ErrorCode != "UNCERTAIN_STATE" {
+		t.Fatalf("%+v", exit)
+	}
+	if n := inverses(); n != 1 {
+		t.Fatalf("inverse ran %d times", n)
+	}
+
+	// The inverse failed: the change can be undone again.
+	os.WriteFile(log, []byte("running "+id+"\nfailed "+id+"\n"), 0o600)
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{}); exit.Code != 0 {
+		t.Fatalf("%+v", exit)
+	}
+	if n := inverses(); n != 2 {
+		t.Fatalf("inverse ran %d times", n)
+	}
+}
+
+// A failed inverse is logged as failed, so it can be retried.
+func TestUndoLogsAFailedInverse(t *testing.T) {
+	e := newEnv(t)
+	log := filepath.Join(t.TempDir(), "data", "undone.log")
+	e.d.o.UndoneLog = log
+	e.adb.shell["settings get global a"] = "1\n"
+	e.exec(t, "shell", "settings", "put", "global", "a", "2")
+	id := e.last(t).ID
+	e.adb.exits["shell settings put global a 1"] = 1
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{}); exit.ErrorCode != "UNDO_FAILED" {
+		t.Fatalf("%+v", exit)
+	}
+	if got := string(mustRead(t, log)); got != "running "+id+"\nfailed "+id+"\n" {
+		t.Fatalf("log: %q", got)
+	}
+	delete(e.adb.exits, "shell settings put global a 1")
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{}); exit.Code != 0 {
+		t.Fatalf("retry: %+v", exit)
+	}
+}
+
+// Without the running mark on disk the inverse does not run.
+func TestUndoNeedsTheRunningMark(t *testing.T) {
+	e := newEnv(t)
+	log := filepath.Join(t.TempDir(), "undone.log")
+	if err := os.WriteFile(log, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(log, 0o400)
+	t.Cleanup(func() { os.Chmod(log, 0o600) })
+	e.d.o.UndoneLog = log
+	e.adb.shell["settings get global a"] = "1\n"
+	e.exec(t, "shell", "settings", "put", "global", "a", "2")
+	before := len(e.adb.ran())
+	exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{})
+	if exit.ErrorCode != "JOURNAL_UNWRITABLE" || len(e.adb.ran()) != before {
+		t.Fatalf("%+v, ran %q", exit, e.adb.ran()[before:])
+	}
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, &stream{}); exit.ErrorCode != "JOURNAL_UNWRITABLE" {
+		t.Fatalf("the change was marked although nothing ran: %+v", exit)
+	}
+}

@@ -58,4 +58,16 @@ func TestUndoNothingToUndoShowsSkipped(t *testing.T) {
 	if code != ExitFailure || skipped < 0 || failure < skipped || strings.Contains(errOut, "\x1b") {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
 	}
+	// With --json the skipped changes go in the envelope, and nothing else.
+	out, errOut, code := run(t, "undo", "--json")
+	var env struct {
+		OK    bool
+		Error *Error
+		Data  *daemon.UndoResult
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || code != ExitFailure || strings.Count(out, "\n") != 1 || env.OK ||
+		env.Error == nil || env.Error.Code != "NOTHING_TO_UNDO" || env.Data == nil || len(env.Data.Skipped) != 1 ||
+		env.Data.Skipped[0].ID != "j_3" || strings.Contains(errOut, "skipped  j_3") {
+		t.Fatalf("exit %d, stdout %q, stderr %q: %v", code, out, errOut, err)
+	}
 }
