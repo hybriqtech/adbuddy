@@ -5,11 +5,15 @@ package confirm
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"strings"
 	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
 )
 
 // Request is what the person sees. Title and Detail come from the rules,
@@ -56,33 +60,72 @@ type DenyAll struct{ Out io.Writer }
 
 func (d DenyAll) Confirm(_ context.Context, r Request) Decision {
 	if d.Out != nil {
-		fmt.Fprintf(d.Out, "🔴 Denied (no terminal to confirm in): %s\n", r.Title)
+		fmt.Fprintf(d.Out, "🔴 Denied (no terminal to confirm in): %s\n", classify.Printable(r.Title))
 	}
 	return Deny
 }
 
-// Terminal asks one question at a time on a terminal.
+// settleTime: lines that arrive earlier than this after a question is shown
+// were typed before it (or for a previous one) and never answer it.
+const settleTime = time.Second
+
+// maxLine bounds what is kept of one line of input; the rest is discarded.
+const maxLine = 256
+
+type line struct {
+	text string
+	at   time.Time
+}
+
+// Terminal asks one question at a time on a terminal. To allow a command the
+// person types the short code shown with that question: a "y" typed ahead, or
+// an answer meant for another question, can never approve it.
 type Terminal struct {
-	out   io.Writer
-	lines chan string
-	eof   chan struct{}
-	turn  chan struct{}
+	out    io.Writer
+	lines  chan line
+	eof    chan struct{}
+	turn   chan struct{}
+	settle time.Duration
+	code   func() string
 }
 
 // NewTerminal reads answers from in and writes questions to out.
 func NewTerminal(in io.Reader, out io.Writer) *Terminal {
-	t := &Terminal{out: out, lines: make(chan string, 16), eof: make(chan struct{}), turn: make(chan struct{}, 1)}
-	go func() {
-		sc := bufio.NewScanner(in)
-		for sc.Scan() {
-			t.lines <- sc.Text()
-		}
-		close(t.eof)
-	}()
+	t := &Terminal{out: out, lines: make(chan line, 16), eof: make(chan struct{}), turn: make(chan struct{}, 1),
+		settle: settleTime, code: randomCode}
+	go t.read(in)
 	return t
 }
 
-// Confirm asks and waits for "y" or "n".
+func (t *Terminal) read(in io.Reader) {
+	br := bufio.NewReaderSize(in, maxLine)
+	for {
+		frag, err := br.ReadSlice('\n')
+		text := string(frag)
+		for errors.Is(err, bufio.ErrBufferFull) { // an over-long line: keep the start only
+			_, err = br.ReadSlice('\n')
+		}
+		if len(text) > 0 {
+			t.lines <- line{text: text, at: time.Now()}
+		}
+		if err != nil {
+			close(t.eof)
+			return
+		}
+	}
+}
+
+// randomCode returns a two-digit code, 10-99.
+func randomCode() string {
+	n, err := rand.Int(rand.Reader, big.NewInt(90))
+	if err != nil {
+		return "73" // never reached: crypto/rand does not fail on supported systems
+	}
+	return fmt.Sprint(n.Int64() + 10)
+}
+
+// Confirm shows the question and waits for its code (allow) or anything else
+// (deny).
 func (t *Terminal) Confirm(ctx context.Context, r Request) Decision {
 	select {
 	case t.turn <- struct{}{}:
@@ -90,48 +133,53 @@ func (t *Terminal) Confirm(ctx context.Context, r Request) Decision {
 	case <-ctx.Done():
 		return fromContext(ctx)
 	}
-	// Anything typed before the question appeared must not answer it.
-	for drained := false; !drained; {
-		select {
-		case <-t.lines:
-		default:
-			drained = true
-		}
-	}
-	fmt.Fprintf(t.out, "\n🔴 Confirmation needed (expires in %s)\n   %s\n   %s\n", time.Until(r.ExpiresAt).Round(time.Second), r.Title, r.RawCommand)
+	code := t.code()
+	fmt.Fprintf(t.out, "\n🔴 Confirmation needed (expires in %s)\n   %s\n   %s\n",
+		time.Until(r.ExpiresAt).Round(time.Second), classify.Printable(r.Title), classify.Printable(r.RawCommand))
 	if r.Detail != "" {
-		fmt.Fprintf(t.out, "   Why: %s\n", strings.ReplaceAll(r.Detail, "\n", "\n        "))
+		var parts []string
+		for _, l := range strings.Split(r.Detail, "\n") {
+			parts = append(parts, classify.Printable(l))
+		}
+		fmt.Fprintf(t.out, "   Why: %s\n", strings.Join(parts, "\n        "))
 	}
 	if r.Special {
 		fmt.Fprintf(t.out, "   ⚠ This may cut the connection with the phone or affect ADBuddy.\n")
 	}
+	fmt.Fprintf(t.out, "   To allow it type %s and press Enter; anything else denies it.\nCode: ", code)
+	shown := time.Now()
 	for {
-		fmt.Fprint(t.out, "Allow? [y/N]: ")
 		select {
-		case line := <-t.lines:
-			switch strings.ToLower(strings.TrimSpace(line)) {
-			case "y", "yes", "s", "si", "sí":
+		case l := <-t.lines:
+			if l.at.Before(shown.Add(t.settle)) {
+				continue // typed before the question, or too fast to have read it
+			}
+			if ctx.Err() != nil {
+				return t.expired(ctx)
+			}
+			if strings.TrimSpace(l.text) == code {
 				fmt.Fprintln(t.out, "→ allowed")
 				return Allow
-			case "", "n", "no":
-				fmt.Fprintln(t.out, "→ denied")
-				return Deny
-			default:
-				fmt.Fprintln(t.out, "Please answer y or n.")
 			}
+			fmt.Fprintln(t.out, "→ denied")
+			return Deny
 		case <-t.eof:
 			fmt.Fprintln(t.out, "\n→ denied (no more input)")
 			return Deny
 		case <-ctx.Done():
-			d := fromContext(ctx)
-			if d == Timeout {
-				fmt.Fprintln(t.out, "\n→ expired, denied")
-			} else {
-				fmt.Fprintln(t.out, "\n→ abandoned by the agent")
-			}
-			return d
+			return t.expired(ctx)
 		}
 	}
+}
+
+func (t *Terminal) expired(ctx context.Context) Decision {
+	d := fromContext(ctx)
+	if d == Timeout {
+		fmt.Fprintln(t.out, "\n→ expired, denied")
+	} else {
+		fmt.Fprintln(t.out, "\n→ abandoned by the agent")
+	}
+	return d
 }
 
 func fromContext(ctx context.Context) Decision {
