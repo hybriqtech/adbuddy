@@ -1,0 +1,42 @@
+# Built-in rules for adb commands (spec §4.2).
+#
+# A rule matches a command name (cmd) and, optionally, its first non-option
+# argument (sub); a rule with sub wins over one without. The user's
+# rules.yaml uses the same format and wins over these. Anything without a
+# rule is 🔴. The fixed protections (connection, ADBuddy itself) live in
+# special.go and no rule can lower them.
+rules:
+  # ── adb commands ─────────────────────────────────────────────────────────
+  - {id: adb.devices, scope: adb, cmd: devices, level: green, title: {en: "List the connected devices", es: "Listar los dispositivos conectados"}}
+  - {id: adb.version, scope: adb, cmd: version, level: green, title: {en: "Show the adb version", es: "Mostrar la versión de adb"}}
+  - {id: adb.help, scope: adb, cmd: help, level: green, title: {en: "Show adb help", es: "Mostrar la ayuda de adb"}}
+  - {id: adb.get-state, scope: adb, cmd: get-state, level: green, title: {en: "Show the device state", es: "Mostrar el estado del dispositivo"}}
+  - {id: adb.get-serialno, scope: adb, cmd: get-serialno, level: green, title: {en: "Show the device serial number", es: "Mostrar el número de serie del dispositivo"}}
+  - {id: adb.get-devpath, scope: adb, cmd: get-devpath, level: green, title: {en: "Show the device path", es: "Mostrar la ruta del dispositivo"}}
+  - {id: adb.start-server, scope: adb, cmd: start-server, level: green, title: {en: "Start the adb server", es: "Arrancar el servidor adb"}}
+  - {id: adb.wait-for, scope: adb, cmd: wait-for, level: green, title: {en: "Wait for the device", es: "Esperar al dispositivo"}}
+  - {id: adb.features, scope: adb, cmd: features, level: green, title: {en: "List the device features", es: "Listar las funciones del dispositivo"}}
+  - {id: adb.host-features, scope: adb, cmd: host-features, level: green, title: {en: "List the adb server features", es: "Listar las funciones del servidor adb"}}
+  - {id: adb.mdns, scope: adb, cmd: mdns, sub: [check, services], level: green, title: {en: "Show the devices found on the network", es: "Mostrar los dispositivos encontrados en la red"}}
+  - {id: adb.pull, scope: adb, cmd: pull, level: green, anyArgs: true, title: {en: "Copy from the phone to the PC: {args}", es: "Copiar del móvil al PC: {args}"}}
+  - {id: adb.bugreport, scope: adb, cmd: bugreport, level: green, anyArgs: true, title: {en: "Save a bug report on the PC", es: "Guardar un informe de errores en el PC"}}
+  - {id: adb.logcat, scope: adb, cmd: logcat, level: green, anyArgs: true, check: logcat, title: {en: "Read the phone's logs", es: "Leer los registros del móvil"}}
+  - {id: adb.jdwp, scope: adb, cmd: jdwp, level: green, title: {en: "List debuggable processes", es: "Listar los procesos depurables"}}
+  - {id: adb.reverse, scope: adb, cmd: reverse, level: green, check: list-only, title: {en: "Port redirection from the phone to the PC: {args}", es: "Redirección de puertos del móvil al PC: {args}"}}
+  - {id: adb.forward, scope: adb, cmd: forward, level: green, check: list-only, title: {en: "Port redirection from the PC to the phone: {args}", es: "Redirección de puertos del PC al móvil: {args}"}}
+  - {id: adb.install, scope: adb, cmd: install, level: yellow, check: install, title: {en: "Install the app {apk}", es: "Instalar la app {apk}"}}
+  - {id: adb.install-multiple, scope: adb, cmd: install-multiple, level: yellow, check: install, title: {en: "Install the app {apk} (split APKs)", es: "Instalar la app {apk} (APK divididos)"}}
+  - {id: adb.push, scope: adb, cmd: push, level: yellow, check: push, title: {en: "Copy {local} to the phone as {remote}", es: "Copiar {local} al móvil como {remote}"}}
+  - {id: adb.uninstall, scope: adb, cmd: uninstall, level: red, title: {en: "Uninstall {args}", es: "Desinstalar {args}"}}
+  - {id: adb.connect, scope: adb, cmd: connect, level: red, title: {en: "Connect to another device: {args}", es: "Conectar con otro dispositivo: {args}"}}
+  - {id: adb.pair, scope: adb, cmd: pair, level: red, title: {en: "Pair a device: {args}", es: "Emparejar un dispositivo: {args}"}}
+  - {id: adb.sync, scope: adb, cmd: sync, level: red, title: {en: "Overwrite phone folders with the PC copy", es: "Sobrescribir carpetas del móvil con la copia del PC"}}
+  - {id: adb.sideload, scope: adb, cmd: sideload, level: red, title: {en: "Install a system update", es: "Instalar una actualización del sistema"}}
+  - {id: adb.restore, scope: adb, cmd: restore, level: red, title: {en: "Restore a backup over the phone's data", es: "Restaurar una copia sobre los datos del móvil"}}
+  - {id: adb.remount, scope: adb, cmd: remount, level: red, title: {en: "Make the system partitions writable", es: "Hacer escribibles las particiones del sistema"}}
+  - {id: adb.kill-server, scope: adb, cmd: kill-server, level: red, title: {en: "Stop the adb server", es: "Parar el servidor adb"}}
+  - {id: adb.disconnect, scope: adb, cmd: disconnect, level: red, title: {en: "Disconnect the phone", es: "Desconectar el móvil"}}
+  - {id: adb.usb, scope: adb, cmd: usb, level: red, title: {en: "Restart adbd in USB mode", es: "Reiniciar adbd en modo USB"}}
+  - {id: adb.tcpip, scope: adb, cmd: tcpip, level: red, title: {en: "Open adb on a network port: {args}", es: "Abrir adb en un puerto de red: {args}"}}
+  - {id: adb.reboot, scope: adb, cmd: reboot, level: red, title: {en: "Restart the phone {args}", es: "Reiniciar el móvil {args}"}}
+  - {id: adb.root, scope: adb, cmd: root, level: red, title: {en: "Restart adbd as root", es: "Reiniciar adbd como root"}}
