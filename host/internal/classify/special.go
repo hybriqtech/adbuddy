@@ -1,6 +1,9 @@
 package classify
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // ADBuddyPackage is the Android app's package name.
 const ADBuddyPackage = "tech.hybriq.adbuddy"
@@ -88,7 +91,8 @@ func specialReason(scope string, ws []Word, level Level) string {
 			}
 		}
 	case "content":
-		if level != Green && strings.Contains(strings.Join(v, " "), "content://settings") {
+		// Uri.getAuthority() decodes %xx, so compare the decoded words.
+		if level != Green && strings.Contains(strings.ToLower(percentDecode(strings.Join(v, " "))), "settings") {
 			return "changes system settings directly, including the connection ones"
 		}
 	case "cmd":
@@ -153,4 +157,20 @@ func touchesCriticalApp(name string, ws []Word, v []string) bool {
 		}
 	}
 	return false
+}
+
+// percentDecode decodes %xx escapes, leaving malformed ones as they are.
+func percentDecode(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) {
+			if n, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(n))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }

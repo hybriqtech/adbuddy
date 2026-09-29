@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -51,7 +52,7 @@ func (r Result) Detail(lang string) string {
 		}
 		line := f.Title.In(lang)
 		if f.Reason != "" {
-			line += " (" + f.Reason + ")"
+			line += " (" + Printable(f.Reason) + ")"
 		}
 		if !seen[line] {
 			seen[line] = true
@@ -273,8 +274,7 @@ func Printable(s string) string {
 			b.WriteString(`\r`)
 		case r == '\t':
 			b.WriteString(`\t`)
-		case r < 0x20, r == 0x7f, r >= 0x80 && r < 0xa0, r >= 0x200b && r <= 0x200f,
-			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069, r == 0xfeff, r == utf8.RuneError:
+		case unicode.IsControl(r), unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp), r == utf8.RuneError:
 			fmt.Fprintf(&b, `\u%04x`, r)
 		default:
 			b.WriteRune(r)
@@ -371,6 +371,14 @@ func (c *Classifier) evalWith(rs ruleSet, scope string, ws []Word) Finding {
 				return f
 			}
 		}
+	}
+	if r.Check != "" && r.AnyArgs && hasDynamic(ws[1:]) {
+		// Checks look for dangerous words; a word only known on the phone
+		// could be one of them.
+		f.Level, f.Reason = Red, "arguments only known on the phone"
+		f.Title = render(textDynamic, vars)
+		applySpecial(scope, ws, &f)
+		return f
 	}
 	if r.Check != "" {
 		res := checks[r.Check](ws)

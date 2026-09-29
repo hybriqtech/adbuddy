@@ -138,6 +138,7 @@ var cmdAliases = map[string][]string{
 	"appops":     {"appops"},
 	"settings":   {"settings"},
 	"deviceidle": {"dumpsys", "deviceidle"},
+	"activity":   {"am"},
 }
 
 // unwrap strips commands that run another command. handled=false means ws is

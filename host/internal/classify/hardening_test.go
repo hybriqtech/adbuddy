@@ -199,3 +199,84 @@ func TestUserRulesCannotLowerShellProtections(t *testing.T) {
 		t.Fatal("a user rule borrowed a change check")
 	}
 }
+
+func TestPullFolderContentsAndWindowsNames(t *testing.T) {
+	c := mustNew(t, "")
+	for _, argv := range [][]string{
+		{"pull", "/sdcard/."}, {"pull", "/sdcard/.", "."}, {"pull", "/"}, {"pull", "/sdcard/./"}, {"pull", "."},
+		{"pull", "/sdcard/x", "CLAUDE.md."}, {"pull", "/sdcard/x", "AGENTS.md "}, {"pull", "/sdcard/x", "CLAUDE~1.MD"},
+		{"pull", "/sdcard/CLAUDE.md."},
+	} {
+		if r := c.Classify(argv); r.Level != Red {
+			t.Errorf("%q: %v, want red", argv, r.Level)
+		}
+	}
+	if r := c.Classify([]string{"pull", "/sdcard/Download/", "."}); r.Level != Green {
+		t.Errorf("pull folder by name: %v (%s)", r.Level, r.Primary.Reason)
+	}
+}
+
+func TestDynamicWordsInCheckedReads(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		"logcat -d$(echo c)",
+		"logcat $(echo -c)",
+		`logcat -d "$(printf -- --fi=/sdcard/DCIM/x.jpg)"`,
+		"dumpsys $(echo battery) $(echo unplug)",
+		"ip link $(echo set) wlan0 $(echo down)",
+		"find /sdcard $(echo -delete)",
+		"sort $(echo -o) /sdcard/x /proc/version",
+	} {
+		if r := c.Classify(sh(line)); r.Level != Red {
+			t.Errorf("%q: %v, want red", line, r.Level)
+		}
+	}
+	for _, line := range []string{"logcat -d '*:S' 'ActivityManager:I'", "ls $HOME", "cat /sdcard/*.txt"} {
+		if r := c.Classify(sh(line)); r.Level != Green {
+			t.Errorf("%q: %v, want green (%s)", line, r.Level, r.Primary.Reason)
+		}
+	}
+}
+
+func TestDetailAndPrintableEscapeEverythingInvisible(t *testing.T) {
+	c := mustNew(t, "")
+	r := c.Classify([]string{"pull", "/sdcard/x", "a\x1b[2K\nOK: just reads‮/../../x"})
+	d := r.Detail("en")
+	for _, bad := range []string{"\x1b", "\n", "‮"} {
+		if strings.Contains(d, bad) {
+			t.Fatalf("detail keeps %q: %q", bad, d)
+		}
+	}
+	for _, r := range []rune{0x061c, 0x2060, 0x00ad, 0x2028, 0x2029, 0xe0041} {
+		if got := Printable(string(r)); got == string(r) {
+			t.Errorf("U+%04X not escaped", r)
+		}
+	}
+}
+
+func TestContentSettingsEncodedAndCmdActivity(t *testing.T) {
+	c := mustNew(t, "rules:\n  - {id: u.content, cmd: content, level: yellow}\n  - {id: u.cmd, cmd: cmd, level: green}\n")
+	check(t, c, []tc{
+		{sh("content insert --uri content://%73ettings/global --bind name:s:adb_enabled --bind value:s:0"), Red, "u.content", "", true},
+		{sh("cmd activity force-stop com.android.systemui"), Red, "", "", true},
+	})
+	b := mustNew(t, "")
+	check(t, b, []tc{
+		{sh("content insert --uri content://%73ettings/global --bind name:s:adb_enabled --bind value:s:0"), Red, "", "", true},
+	})
+}
+
+func TestPullNeverWritesAgentConfiguration(t *testing.T) {
+	c := mustNew(t, "")
+	for _, argv := range [][]string{
+		{"pull", "/sdcard/CLAUDE.local.md"}, {"pull", "/sdcard/opencode.json"}, {"pull", "/sdcard/x", "GEMINI.md"},
+		{"pull", "/sdcard/x", "inbox/x"}, {"pull", "/sdcard/settings.toml"}, {"pull", "/sdcard/x.yaml"},
+	} {
+		if r := c.Classify(argv); r.Level != Red {
+			t.Errorf("%q: %v, want red", argv, r.Level)
+		}
+	}
+	if r := c.Classify([]string{"pull", "/sdcard/DCIM/Camera/IMG_1.jpg", "photos/IMG_1.jpg"}); r.Level != Green {
+		t.Errorf("photo: %v", r.Level)
+	}
+}

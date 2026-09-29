@@ -173,8 +173,13 @@ func checkPush(ws []Word) checkResult {
 // protectedTargets are the environment's own files: `adb pull` must not
 // overwrite them (they steer the agent and its permissions).
 var protectedTargets = map[string]bool{
-	"agents.md": true, "claude.md": true, "notes.md": true, "device.json": true, "journal": true,
+	"journal": true, "inbox": true, "outbox": true,
 }
+
+// protectedExts: at the top of the environment, files with these extensions
+// are context or configuration for some agent (AGENTS.md, CLAUDE.local.md,
+// opencode.json, device.json…).
+var protectedExts = []string{".md", ".json", ".jsonc", ".toml", ".yaml", ".yml"}
 
 // safeLocalTarget accepts a relative path inside the working directory that
 // does not touch hidden files or folders (.claude, .adbuddy…) or the
@@ -185,14 +190,35 @@ func safeLocalTarget(p string) bool {
 		return false
 	}
 	for i, part := range strings.Split(path.Clean(p), "/") {
-		if part == ".." || (strings.HasPrefix(part, ".") && part != ".") {
-			return false
+		if part == ".." || (strings.HasPrefix(part, ".") && part != ".") || strings.Contains(part, "~") {
+			return false // hidden, parent, or a Windows short name such as CLAUDE~1.MD
 		}
-		if i == 0 && protectedTargets[strings.ToLower(part)] {
-			return false
+		// Windows ignores trailing dots and spaces: "CLAUDE.md. " is CLAUDE.md.
+		if i == 0 {
+			name := strings.ToLower(strings.TrimRight(part, ". "))
+			if protectedTargets[name] {
+				return false
+			}
+			for _, ext := range protectedExts {
+				if strings.HasSuffix(name, ext) {
+					return false
+				}
+			}
 		}
 	}
 	return true
+}
+
+// remoteBase is the name a pulled file or folder gets on the PC. A remote
+// ending in "." (or the root) may copy the folder's contents straight into
+// the target, so it has no safe name.
+func remoteBase(remote string) (string, bool) {
+	r := strings.ReplaceAll(remote, `\`, "/")
+	base := path.Base(strings.TrimRight(r, "/"))
+	if base == "." || base == ".." || base == "/" || base == "" || strings.HasSuffix(strings.TrimRight(r, "/"), "/.") {
+		return "", false
+	}
+	return base, true
 }
 
 // adb pull REMOTE [LOCAL] and adb bugreport [PATH] only read the phone, but
@@ -213,11 +239,16 @@ func checkPullTarget(ws []Word) checkResult {
 	switch {
 	case ws[0].Value == "bugreport" && len(pos) <= 1:
 		targets = pos
-	case ws[0].Value == "pull" && len(pos) == 1:
-		targets = []string{path.Base(strings.TrimRight(strings.ReplaceAll(pos[0], `\`, "/"), "/"))}
-	case ws[0].Value == "pull" && len(pos) == 2:
-		// If LOCAL is an existing folder the file lands inside it.
-		targets = []string{pos[1], path.Join(strings.ReplaceAll(pos[1], `\`, "/"), path.Base(strings.TrimRight(pos[0], "/")))}
+	case ws[0].Value == "pull" && (len(pos) == 1 || len(pos) == 2):
+		base, named := remoteBase(pos[0])
+		if !named {
+			return red("pulls a folder's contents without a folder name")
+		}
+		targets = []string{base}
+		if len(pos) == 2 {
+			// If LOCAL is an existing folder the file lands inside it.
+			targets = []string{pos[1], path.Join(strings.ReplaceAll(pos[1], `\`, "/"), base)}
+		}
 	default:
 		return red("several sources or targets")
 	}
