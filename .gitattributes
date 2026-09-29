@@ -1,2 +1,10 @@
 # Los scripts de shell deben conservar LF en Windows (core.autocrlf=true rompe `source` con \r)
 *.sh text eol=lf
+
+# host/: LF siempre (gofmt no acepta CRLF y core.autocrlf=true lo pondría)
+host/**/*.go text eol=lf
+host/go.mod text eol=lf
+host/go.sum text eol=lf
+host/**/*.yaml text eol=lf
+host/**/*.md text eol=lf
+.github/**/*.yml text eol=lf
