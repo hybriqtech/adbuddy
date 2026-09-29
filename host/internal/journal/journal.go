@@ -96,7 +96,7 @@ func (s *Store) openAppend() (*os.File, error) {
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return nil, err
 	}
-	return os.OpenFile(s.file(), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	return os.OpenFile(s.file(), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600)
 }
 
 // Append writes e as one line and syncs it to disk.
@@ -116,6 +116,12 @@ func (s *Store) Append(e Entry) error {
 	f, err := s.openAppend()
 	if err != nil {
 		return err
+	}
+	if st, err := f.Stat(); err == nil && st.Size() > 0 {
+		last := make([]byte, 1)
+		if _, err := f.ReadAt(last, st.Size()-1); err == nil && last[0] != '\n' {
+			line = append([]byte{'\n'}, line...) // close a line torn by a crash
+		}
 	}
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		f.Close()
@@ -156,6 +162,9 @@ func (s *Store) Load() (entries []Entry, skipped int, err error) {
 				continue
 			}
 			if i, ok := byID[e.ID]; ok {
+				if e.UndoneBy == nil {
+					e.UndoneBy = entries[i].UndoneBy // set once, never cleared
+				}
 				entries[i] = e
 				continue
 			}

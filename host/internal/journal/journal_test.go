@@ -144,3 +144,44 @@ func TestNewID(t *testing.T) {
 		t.Fatal("ids must differ")
 	}
 }
+
+func TestAppendAfterTornLine(t *testing.T) {
+	s := fixedStore(t, time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC))
+	if err := s.Append(Entry{ID: "j_a", Status: StatusOK}); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(s.Dir(), "2026-09.jsonl"), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"id":"j_x","st`)
+	f.Close()
+	if err := s.Append(Entry{ID: "j_b", Status: StatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+	entries, skipped, err := s.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 1 || len(entries) != 2 || entries[0].ID != "j_a" || entries[1].ID != "j_b" {
+		t.Fatalf("skipped %d, entries %+v", skipped, entries)
+	}
+}
+
+func TestUndoneByIsSticky(t *testing.T) {
+	s := fixedStore(t, time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC))
+	u := "j_u"
+	for _, e := range []Entry{
+		{ID: "j_a", Status: StatusRunning},
+		{ID: "j_a", Status: StatusRunning, UndoneBy: &u},
+		{ID: "j_a", Status: StatusOK},
+	} {
+		if err := s.Append(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e, ok, err := s.Get("j_a")
+	if err != nil || !ok || e.UndoneBy == nil || *e.UndoneBy != "j_u" || e.Status != StatusOK {
+		t.Fatalf("%+v %v %v", e, ok, err)
+	}
+}
