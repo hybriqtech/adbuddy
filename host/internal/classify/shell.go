@@ -152,8 +152,28 @@ var cmdAliases = map[string][]string{
 }
 
 // unwrap strips commands that run another command. handled=false means ws is
-// not a wrapper; a non-empty reason means it cannot be analysed.
+// not a wrapper; a non-empty reason means it cannot be analysed. A dynamic
+// word the wrapper itself consumes (an option, its value, a duration, a
+// package, an assignment) is refused: on the phone an unquoted $(…) splits
+// into several words and one of them could become the command.
 func unwrap(ws []Word) (inner []Word, handled bool, reason string) {
+	inner, handled, reason = unwrapWords(ws)
+	if !handled || reason != "" {
+		return inner, handled, reason
+	}
+	own := len(inner)
+	if ws[0].Value == "xargs" {
+		own-- // the word xargs adds for its input is not in ws
+	}
+	for _, w := range ws[1 : len(ws)-own] {
+		if w.Dynamic {
+			return nil, true, ws[0].Value + " with an argument only known on the phone"
+		}
+	}
+	return inner, true, ""
+}
+
+func unwrapWords(ws []Word) (inner []Word, handled bool, reason string) {
 	rest := ws[1:]
 	switch ws[0].Value {
 	case "exec", "nohup", "time":

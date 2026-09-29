@@ -310,3 +310,30 @@ func TestDynamicWordsBeforeTheVerb(t *testing.T) {
 		t.Errorf("cmd -w package list: %v", r.Level)
 	}
 }
+
+func TestDynamicWordsInsideWrappers(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		"nice -n $(echo 0 settings put global adb_enabled 0) echo",
+		"nice -$(echo n 0 pm uninstall --user 0 com.x) echo",
+		"timeout $(echo 5 pm uninstall --user 0 com.x) echo",
+		"T='5 reboot'; timeout $T echo",
+		"timeout -s $(echo KILL 5 reboot) 5 echo",
+		"env -u $(echo X reboot) echo",
+		"env X=$(echo 1 pm uninstall --user 0 com.x) echo",
+		"run-as $(echo com.x rm -rf files) echo",
+		"run-as com.x --user $(echo 0 rm -rf files) echo",
+		"xargs -n $(echo 1 reboot) echo",
+		"xargs -I $(echo x reboot) echo",
+		"command -p $(echo rm) /sdcard/x",
+	} {
+		if r := c.Classify(sh(line)); r.Level != Red {
+			t.Errorf("%q: %v, want red", line, r.Level)
+		}
+	}
+	for _, line := range []string{"nice -n 10 ls", "timeout 5 logcat -d", "env LANG=C ls", "run-as com.x ls files", "echo a | xargs -n 1 echo"} {
+		if r := c.Classify(sh(line)); r.Level != Green {
+			t.Errorf("%q: %v, want green (%s)", line, r.Level, r.Primary.Reason)
+		}
+	}
+}
