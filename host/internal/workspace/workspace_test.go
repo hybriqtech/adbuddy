@@ -127,3 +127,61 @@ func TestInvalidClaudeSettingsIsNotClobbered(t *testing.T) {
 		t.Fatal("file was changed")
 	}
 }
+
+func TestNullClaudeSettingsIsNotClobbered(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".claude"), 0o700)
+	os.WriteFile(filepath.Join(dir, ".claude", "settings.json"), []byte("null"), 0o600)
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "x")}); err == nil || !strings.Contains(err.Error(), "not a JSON object") {
+		t.Fatalf("%v", err)
+	}
+	if read(t, filepath.Join(dir, ".claude", "settings.json")) != "null" {
+		t.Fatal("file was changed")
+	}
+}
+
+func TestClaudeSettingsWriteLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "x")}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, ".claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "settings.json" {
+		t.Fatalf("entries %v", entries)
+	}
+	if !json.Valid([]byte(read(t, filepath.Join(dir, ".claude", "settings.json")))) {
+		t.Fatal("invalid JSON")
+	}
+}
+
+func TestClaudeSettingsWithBOM(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, ".claude"), 0o700)
+	os.WriteFile(filepath.Join(dir, ".claude", "settings.json"), []byte("\xEF\xBB\xBF{\"model\":\"opus\"}"), 0o600)
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "x")}); err != nil {
+		t.Fatal(err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal([]byte(read(t, filepath.Join(dir, ".claude", "settings.json"))), &s); err != nil || s["model"] != "opus" {
+		t.Fatalf("%v %v", err, s)
+	}
+}
+
+func TestAgentsCoversHostDownAndUndo(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "x")}); err != nil {
+		t.Fatal(err)
+	}
+	a := read(t, filepath.Join(dir, "AGENTS.md"))
+	for _, want := range []string{"ADBuddy host not running", "tell the user what you undid"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("AGENTS.md lacks %q", want)
+		}
+	}
+	if strings.Contains(a, "adbuddy setup") {
+		t.Error("must not mention setup")
+	}
+}

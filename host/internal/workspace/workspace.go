@@ -65,7 +65,7 @@ func Init(o Options) (Result, error) {
 	}
 	profile := o.Profile
 	if profile == "" {
-		profile = "Not collected yet: run `adbuddy setup`."
+		profile = "Not collected yet."
 	}
 	agents, _ := templates.ReadFile("templates/AGENTS.md")
 	agents = bytes.Replace(agents, []byte(ProfileMarker), []byte(strings.TrimSpace(profile)), 1)
@@ -127,6 +127,8 @@ func writeFile(path string, data []byte, overwrite bool) (changed, created bool,
 	return true, false, os.WriteFile(path, data, 0o600)
 }
 
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 // AllowRules are the permissions ADBuddy pre-approves in Claude Code (spec §4.6).
 var AllowRules = []string{"Bash(adb:*)", "Bash(adbuddy:*)"}
 
@@ -141,8 +143,11 @@ func mergeClaudeSettings(path string) (changed, created bool, err error) {
 	case err != nil:
 		return false, false, err
 	default:
-		if err := json.Unmarshal(data, &settings); err != nil {
+		if err := json.Unmarshal(bytes.TrimPrefix(data, utf8BOM), &settings); err != nil {
 			return false, false, fmt.Errorf("%s is not valid JSON (%v); fix it or delete it", path, err)
+		}
+		if settings == nil {
+			return false, false, fmt.Errorf("%s is not a JSON object; fix it or delete it", path)
 		}
 	}
 	perms, _ := settings["permissions"].(map[string]any)
@@ -179,7 +184,26 @@ func mergeClaudeSettings(path string) (changed, created bool, err error) {
 	if err != nil {
 		return false, false, err
 	}
-	return true, created, os.WriteFile(path, append(out, '\n'), 0o600)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*")
+	if err != nil {
+		return false, false, err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(append(out, '\n')); err != nil {
+		tmp.Close()
+		return false, false, err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return false, false, err
+	}
+	if err := tmp.Close(); err != nil {
+		return false, false, err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return false, false, err
+	}
+	return true, created, nil
 }
 
 // copyIfDifferent copies src to dst unless dst already has the same content.
