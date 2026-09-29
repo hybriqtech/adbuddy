@@ -29,6 +29,9 @@ func IsShim(argv0 string) bool {
 // forwardedEnv are the variables the daemon needs from the caller.
 var forwardedEnv = []string{"ANDROID_SERIAL", "ADBUDDY_SOURCE"}
 
+// getwd is os.Getwd, replaceable in tests.
+var getwd = os.Getwd
+
 // Main runs the shim and returns its exit code.
 func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
 	dirs, err := paths.Default(getenv)
@@ -36,7 +39,13 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(
 		fmt.Fprintln(stderr, "adbuddy:", err)
 		return 1
 	}
-	cwd, _ := os.Getwd()
+	cwd, err := getwd()
+	if err != nil {
+		// Without it adb and the prechecks would resolve relative paths
+		// in the daemon's own directory.
+		fmt.Fprintln(stderr, "adbuddy: cannot read the working directory:", err)
+		return 1
+	}
 	env := map[string]string{}
 	for _, k := range forwardedEnv {
 		if v := getenv(k); v != "" {
@@ -58,6 +67,18 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(
 	}
 	if exit.Error != "" {
 		fmt.Fprintln(stderr, "adbuddy:", exit.Error)
+	}
+	return exitCode(exit)
+}
+
+// exitCode never fails open: an error is never 0, and a code outside 0-255
+// (256 exits 0 on Unix) becomes 1.
+func exitCode(exit ipc.Exit) int {
+	switch {
+	case exit.Code < 0 || exit.Code > 255:
+		return 1
+	case exit.Code == 0 && exit.Error != "":
+		return 1
 	}
 	return exit.Code
 }

@@ -5,9 +5,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -35,8 +37,8 @@ func InstallHint(name string) string {
 func dropped(key string) bool {
 	k := strings.ToUpper(key)
 	switch {
-	case k == "CLAUDECODE", strings.HasPrefix(k, "CLAUDECODE_"), strings.HasPrefix(k, "CLAUDE_CODE_"),
-		k == "CLAUDE_EFFORT", k == "CLAUDE_PID",
+	case strings.HasPrefix(k, "CLAUDECODE"), strings.HasPrefix(k, "CLAUDE_CODE_"),
+		k == "CLAUDE_EFFORT", k == "CLAUDE_PID", k == "AI_AGENT",
 		k == "ANDROID_SERIAL", k == "ANDROID_ADB_SERVER_PORT", k == "ADBUDDY_SOURCE":
 		return true
 	}
@@ -94,6 +96,11 @@ type Options struct {
 // Run starts the agent with inherited stdio and waits for it. Ctrl+C belongs
 // to the agent: ADBuddy ignores it while the agent runs.
 func Run(ctx context.Context, o Options) (int, error) {
+	// A relative or empty bin folder would put the current directory first
+	// in the agent's PATH.
+	if !filepath.IsAbs(o.BinDir) {
+		return 0, fmt.Errorf("the bin folder must be an absolute path (got %q)", o.BinDir)
+	}
 	path, err := exec.LookPath(o.Agent)
 	if err != nil {
 		return 0, ErrNotFound
@@ -108,7 +115,10 @@ func Run(ctx context.Context, o Options) (int, error) {
 	err = cmd.Run()
 	var ee *exec.ExitError
 	if errors.As(err, &ee) {
-		return ee.ExitCode(), nil
+		if code := ee.ExitCode(); code >= 0 {
+			return code, nil
+		}
+		return 1, nil // killed by a signal: -1 would exit 255 (4294967295 on Windows)
 	}
 	if err != nil {
 		return 0, err

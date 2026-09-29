@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,5 +146,42 @@ func TestRunIsolatesTheAdbServer(t *testing.T) {
 	}
 	if c := calls[1]; c.Port != "" || c.Serial != "" || c.Socket != "" || c.Address != "" {
 		t.Fatalf("port 0 call leaks the environment: %+v", c)
+	}
+}
+
+// A caller's stdin that never reaches EOF (a pipe nobody closes) must not
+// keep Run waiting once adb has exited.
+func TestRunReturnsWhenStdinNeverCloses(t *testing.T) {
+	setup(t, testutil.FakeRule{Match: "^devices$", Stdout: "List of devices attached\n"})
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { pw.Close() })
+	r := Runner{Path: fakeADB, ServerPort: 5038}
+	type result struct {
+		code int
+		err  error
+	}
+	done := make(chan result, 1)
+	var out bytes.Buffer
+	go func() {
+		code, err := r.Run(context.Background(), "", []string{"devices"}, pr, &out, io.Discard)
+		done <- result{code, err}
+	}()
+	select {
+	case res := <-done:
+		if res.code != 0 || res.err != nil || !strings.Contains(out.String(), "List of devices") {
+			t.Fatalf("code %d err %v out %q", res.code, res.err, out.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run still waiting for stdin 2 s after adb exited")
+	}
+}
+
+func TestRunForwardsStdin(t *testing.T) {
+	setup(t, testutil.FakeRule{Match: "^shell cat$", EchoStdin: true, Exit: 4})
+	r := Runner{Path: fakeADB, ServerPort: 5038, Serial: "dev1"}
+	var out bytes.Buffer
+	code, err := r.Run(context.Background(), "", []string{"shell", "cat"}, strings.NewReader("hello\n"), &out, io.Discard)
+	if code != 4 || err != nil || out.String() != "hello\n" {
+		t.Fatalf("code %d err %v out %q", code, err, out.String())
 	}
 }

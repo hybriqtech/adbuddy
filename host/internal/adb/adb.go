@@ -53,18 +53,55 @@ func (r Runner) env() []string {
 
 // Run runs adb with the given streams and returns its exit code. err is only
 // set when adb could not be started or was killed.
+//
+// stdin is copied through a pipe of Run's own: os/exec would otherwise wait
+// for its copying goroutine, and a caller's stdin that never reaches EOF (a
+// pipe nobody closes) would keep Run waiting after adb has exited. The copy
+// is abandoned when adb exits; it ends by itself when the read returns.
 func (r Runner) Run(ctx context.Context, dir string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	cmd := r.Command(ctx, dir, args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
-	err := cmd.Run()
-	var ee *exec.ExitError
-	if errors.As(err, &ee) && ctx.Err() == nil {
-		return ee.ExitCode(), nil
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	var in, feed *os.File
+	if stdin != nil {
+		var err error
+		if in, feed, err = os.Pipe(); err != nil {
+			return -1, err
+		}
+		cmd.Stdin = in
 	}
-	if err != nil {
+	if err := cmd.Start(); err != nil {
+		if in != nil {
+			in.Close()
+			feed.Close()
+		}
 		return -1, err
 	}
-	return 0, nil
+	if in != nil {
+		in.Close() // adb has its own copy
+		go func() {
+			_, _ = io.Copy(feed, stdin)
+			feed.Close()
+		}()
+	}
+	err := cmd.Wait()
+	if feed != nil {
+		feed.Close() // a copy still waiting on stdin fails its next write
+	}
+	var ee *exec.ExitError
+	switch {
+	case err == nil:
+		return 0, nil
+	case ctx.Err() != nil:
+		return -1, err
+	case errors.As(err, &ee):
+		return ee.ExitCode(), nil
+	case cmd.ProcessState != nil && cmd.ProcessState.Exited():
+		// exec.ErrWaitDelay: adb exited but something it started kept
+		// stdout or stderr open; adb's own code is still the answer.
+		return cmd.ProcessState.ExitCode(), nil
+	default:
+		return -1, err
+	}
 }
 
 // Output runs adb and returns stdout, stderr and the exit code.

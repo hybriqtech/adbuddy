@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/hybriqtech/adbuddy/host/internal/agent"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
@@ -53,7 +54,10 @@ be running in another terminal. The exit code is the agent's.`,
 			if err != nil {
 				return NewError("DAEMON_UNREACHABLE", err.Error(), "Restart `adbuddy serve`.")
 			}
-			ws := e.workspace(wsDir)
+			ws, err := filepath.Abs(e.workspace(wsDir))
+			if err != nil {
+				return NewError("WORKSPACE_FAILED", err.Error(), "")
+			}
 			exe, err := os.Executable()
 			if err != nil {
 				return NewError("EXECUTABLE_UNKNOWN", err.Error(), "")
