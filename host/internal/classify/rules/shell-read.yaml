@@ -19,7 +19,7 @@ rules:
   - {id: fs.cmp, cmd: cmp, level: green, anyArgs: true, title: {en: "Compare files: {args}", es: "Comparar ficheros: {args}"}}
   - {id: fs.diff, cmd: diff, level: green, anyArgs: true, title: {en: "Compare files: {args}", es: "Comparar ficheros: {args}"}}
   - {id: text.echo, cmd: echo, level: green, anyArgs: true, title: {en: "Print text", es: "Mostrar texto"}}
-  - {id: text.printf, cmd: printf, level: green, anyArgs: true, title: {en: "Print text", es: "Mostrar texto"}}
+  - {id: text.printf, cmd: printf, level: green, anyArgs: true, check: printf, title: {en: "Print text", es: "Mostrar texto"}}
   - {id: text.head, cmd: head, level: green, anyArgs: true, title: {en: "Read the start of files: {args}", es: "Leer el principio de ficheros: {args}"}}
   - {id: text.tail, cmd: tail, level: green, anyArgs: true, title: {en: "Read the end of files: {args}", es: "Leer el final de ficheros: {args}"}}
   - {id: text.wc, cmd: wc, level: green, anyArgs: true, title: {en: "Count lines: {args}", es: "Contar líneas: {args}"}}

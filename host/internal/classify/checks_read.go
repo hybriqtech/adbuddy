@@ -20,6 +20,7 @@ func init() {
 		"tee":              checkTee,
 		"no-extra-args":    checkNoExtraArgs,
 		"set":              checkSet,
+		"printf":           checkPrintf,
 		"screencap":        checkScreencap,
 		"uiautomator-dump": checkUiautomatorDump,
 	})
@@ -326,6 +327,24 @@ func checkUiautomatorDump(ws []Word) checkResult {
 	return newFile(pos)
 }
 
+// checkPrintf refuses `printf -v VAR …`, which stores the output in a shell
+// variable instead of printing it and can therefore set PATH and friends.
+func checkPrintf(ws []Word) checkResult {
+	for i := 1; i < len(ws); i++ {
+		v := ws[i].Value
+		if v == "--" {
+			break
+		}
+		if v == "-v" {
+			return red("printf -v writes to a shell variable")
+		}
+		if !strings.HasPrefix(v, "-") {
+			break // the format string; the rest are arguments
+		}
+	}
+	return ok()
+}
+
 // checkSet refuses the shell options that turn brace expansion on: with it a
 // word such as {5,'reboot'} becomes two words on the phone.
 func checkSet(ws []Word) checkResult {
@@ -335,6 +354,10 @@ func checkSet(ws []Word) checkResult {
 			return ok() // the rest are positional parameters
 		}
 		on, flags := v[0] == '-', v[1:]
+		if strings.Contains(flags, "A") {
+			// set -A / +A assigns to an array variable, e.g. set -A PATH ….
+			return red("set " + v[:1] + "A assigns to a variable")
+		}
 		if on && strings.Contains(flags, "B") {
 			return red("set -B turns brace expansion on")
 		}

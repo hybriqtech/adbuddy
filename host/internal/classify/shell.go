@@ -36,9 +36,34 @@ func (c *Classifier) classifyScript(src string, depth int) []Finding {
 				out = append(out, f)
 			}
 		case *syntax.DeclClause:
-			for _, a := range n.Args {
-				if a.Name != nil && (a.Value != nil || a.Array != nil) && dangerousVar(a.Name.Value) {
-					out = append(out, redFinding("shell.assign", "sets "+a.Name.Value, []string{n.Variant.Value, a.Name.Value}, textAssign))
+			out = append(out, checkDeclClause(n)...)
+		case *syntax.WordIter:
+			// The loop variable of `for NAME in …` / `select NAME in …`.
+			if n.Name != nil && dangerousVar(n.Name.Value) {
+				out = append(out, redFinding("shell.assign", "sets "+n.Name.Value, []string{n.Name.Value}, textAssign))
+			}
+		case *syntax.ParamExp:
+			// ${X=…} and ${X:=…} assign to X as a side effect.
+			if n.Exp != nil && n.Param != nil && dangerousVar(n.Param.Value) &&
+				(n.Exp.Op == syntax.AssignUnset || n.Exp.Op == syntax.AssignUnsetOrNull) {
+				out = append(out, redFinding("shell.assign", "sets "+n.Param.Value, []string{n.Param.Value}, textAssign))
+			}
+		case *syntax.BinaryArithm:
+			if isArithAssign(n.Op) {
+				out = append(out, checkArithTarget(n.X)...)
+			}
+		case *syntax.UnaryArithm:
+			if n.Op == syntax.Inc || n.Op == syntax.Dec {
+				out = append(out, checkArithTarget(n.X)...)
+			}
+		case *syntax.LetClause:
+			// An unquoted `let PATH=1` is parsed into arithmetic nodes the
+			// walker already sees. A quoted or expanded argument (let 'PATH=1',
+			// let $x) is kept as a word that mksh re-lexes as arithmetic on the
+			// phone, hiding its target: fail closed.
+			for _, e := range n.Exprs {
+				if _, isWord := e.(*syntax.Word); isWord {
+					out = append(out, redFinding("shell.assign", "let with an expression only known on the phone", []string{"let"}, textAssign))
 				}
 			}
 		case *syntax.FuncDecl:
@@ -76,6 +101,77 @@ func dangerousVar(name string) bool {
 		return true
 	}
 	return false
+}
+
+// checkDeclClause classifies a declare clause (typeset, export, local,
+// readonly, declare or nameref). It fails closed: red for the nameref
+// variant, for a `-n` option in any combination (which turns a name into a
+// reference to another variable), for any argument whose variable name is not
+// a static literal (quoted, computed or a $(…) that could expand to an
+// assignment), and for an assignment to a dangerous variable.
+func checkDeclClause(d *syntax.DeclClause) []Finding {
+	var out []Finding
+	red := func(reason string, words ...string) {
+		out = append(out, redFinding("shell.assign", reason, words, textAssign))
+	}
+	if d.Variant.Value == "nameref" {
+		red("nameref makes a variable a reference to another", d.Variant.Value)
+	}
+	for _, a := range d.Args {
+		switch {
+		case a.Name == nil:
+			// A naked argument with no parsed name: an option, or a value
+			// whose name part was quoted or computed on the phone.
+			w := wordOf(a.Value)
+			switch {
+			case w.Dynamic:
+				red("declare argument only known on the phone", d.Variant.Value)
+			case strings.HasPrefix(w.Value, "-"):
+				if strings.ContainsRune(w.Value[1:], 'n') {
+					red("typeset -n makes a variable a reference to another", w.Value)
+				}
+			case strings.HasPrefix(w.Value, "+"):
+				// +x, +n… only remove attributes; harmless.
+			default:
+				// e.g. typeset "PATH"=/x: the name was quoted, so it is not
+				// a static literal the classifier can trust.
+				red("declare with a quoted or computed variable name", w.Value)
+			}
+		case (a.Value != nil || a.Array != nil) && dangerousVar(a.Name.Value):
+			red("sets "+a.Name.Value, d.Variant.Value, a.Name.Value)
+		}
+	}
+	return out
+}
+
+// isArithAssign reports the assignment operators inside arithmetic (=, +=, …).
+func isArithAssign(op syntax.BinAritOperator) bool {
+	switch op {
+	case syntax.Assgn, syntax.AddAssgn, syntax.SubAssgn, syntax.MulAssgn, syntax.QuoAssgn,
+		syntax.RemAssgn, syntax.AndAssgn, syntax.OrAssgn, syntax.XorAssgn, syntax.ShlAssgn,
+		syntax.ShrAssgn, syntax.AndBoolAssgn, syntax.OrBoolAssgn, syntax.XorBoolAssgn, syntax.PowAssgn:
+		return true
+	}
+	return false
+}
+
+// checkArithTarget flags an arithmetic assignment (=, +=, ++, --) whose target
+// is a dangerous variable, or whose target is not a plain static name (so it
+// could resolve to one on the phone). A normal counter such as i=i+1 or i++ is
+// left alone.
+func checkArithTarget(x syntax.ArithmExpr) []Finding {
+	w, ok := x.(*syntax.Word)
+	if !ok {
+		return []Finding{redFinding("shell.assign", "arithmetic assignment to a name only known on the phone", []string{"$((…))"}, textAssign)}
+	}
+	got := wordOf(w)
+	if got.Dynamic {
+		return []Finding{redFinding("shell.assign", "arithmetic assignment to a name only known on the phone", []string{"$((…))"}, textAssign)}
+	}
+	if dangerousVar(got.Value) {
+		return []Finding{redFinding("shell.assign", "sets "+got.Value, []string{got.Value}, textAssign)}
+	}
+	return nil
 }
 
 // trustedDirs hold the phone's own programs: /system/bin/rm is still rm.
@@ -388,6 +484,17 @@ func isDigits(s string) bool {
 // classes may span quoted parts: in {5,'reboot'} the parser sees "{5,",
 // 'reboot' and "}", and the phone still expands it into two words.
 func wordOf(w *syntax.Word) Word {
+	// A word that is exactly [ ] { or } is a command name or a plain literal,
+	// not a brace expansion or glob class: keep it static so `[ … ]` stays a
+	// recognised command.
+	if len(w.Parts) == 1 {
+		if lit, ok := w.Parts[0].(*syntax.Lit); ok {
+			switch lit.Value {
+			case "[", "]", "{", "}":
+				return Word{Value: lit.Value}
+			}
+		}
+	}
 	var b strings.Builder
 	var st globState
 	dyn := false
@@ -425,9 +532,10 @@ func wordOf(w *syntax.Word) Word {
 type globState struct{ brace, bracket bool }
 
 // unescapeUnquoted removes backslashes from an unquoted literal. It reports
-// Dynamic for globs, a leading ~, and a } or ] that closes an unquoted { or [
-// seen earlier in this literal or in an earlier literal of the same word
-// (escaped closers count too, which only errs on the safe side).
+// Dynamic for globs, a leading ~, an unquoted { or [ (which may open a brace
+// expansion or a glob class), and a } or ] that closes one seen earlier in
+// this literal or in an earlier literal of the same word (escaped closers
+// count too, which only errs on the safe side).
 func unescapeUnquoted(s string, first bool, st *globState) (string, bool) {
 	var b strings.Builder
 	dyn := false
@@ -449,9 +557,13 @@ func unescapeUnquoted(s string, first bool, st *globState) (string, bool) {
 		case ch == '*' || ch == '?':
 			dyn = true
 		case ch == '[':
+			// An unquoted [ or { may open a glob class or a brace expansion,
+			// whether or not a closer follows: treat the word as dynamic.
 			st.bracket = true
+			dyn = true
 		case ch == '{':
 			st.brace = true
+			dyn = true
 		case ch == '~' && i == 0 && first:
 			dyn = true
 		}

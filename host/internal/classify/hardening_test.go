@@ -355,6 +355,7 @@ func TestBracesWithQuotedParts(t *testing.T) {
 		"env {X=1,'reboot'} echo",
 		"timeout {5,\"reboot\"} echo",
 		"timeout {5,'reboot'}'' echo",
+		"timeout {5,'reboot}' echo", // an unquoted { is dynamic even with no unquoted closer
 		"timeout [5'x'] echo",
 		"set -o braceexpand; timeout {5,'reboot'} echo",
 		"set -o braceexpand",
@@ -380,10 +381,84 @@ func TestBracesWithQuotedParts(t *testing.T) {
 		{sh("timeout '{5,reboot}' echo"), Green, "", "-", false},
 		{sh(`timeout \{5,reboot\} echo`), Green, "", "-", false},
 		{sh("timeout '{'5,reboot} echo"), Green, "", "-", false},
-		{sh("timeout {5,'reboot}' echo"), Green, "", "-", false},
 		{sh("set -e"), Green, "sh.set", "-", false},
 		{sh("set -o pipefail"), Green, "sh.set", "-", false},
 		{sh("set +o braceexpand"), Green, "sh.set", "-", false},
 		{sh("set -- -B"), Green, "sh.set", "-", false},
 	})
+}
+
+// TestEveryWayToAssignAVariable checks that a dangerous variable (one that
+// changes which program or library runs) cannot be set through any shell
+// construct the parser understands: loops, declare clauses, arithmetic,
+// parameter expansion with assignment, `set -A` and `printf -v`.
+func TestEveryWayToAssignAVariable(t *testing.T) {
+	c := mustNew(t, "")
+	red := []string{
+		// for / select loops
+		"for PATH in /data/local/tmp; do ls; done",
+		"for LD_PRELOAD in /data/local/tmp/x.so; do ls; done",
+		"for IFS in x; do ls; done",
+		"select PATH in /tmp; do ls; done",
+		"for PATH; do ls; done", // iterates the positional parameters
+		// declare clauses (typeset/export/local/readonly/declare/nameref)
+		"typeset $(echo PATH=/data/local/tmp); ls",
+		"export $(echo PATH=/data/local/tmp); ls",
+		"typeset \"PATH\"=/data/local/tmp; ls",
+		"export PA\"TH\"=/data/local/tmp; ls",
+		"local PATH=/tmp; ls",
+		"declare PATH=/tmp; ls",
+		"readonly PATH=/tmp; ls",
+		"typeset -n r=PATH; r=/data/local/tmp; ls",
+		"typeset -xn r=PATH; ls",
+		"x=PATH; typeset -n r=$x; r=/data/local/tmp; ls",
+		"nameref r=PATH; r=/tmp; ls",
+		// arithmetic
+		": $((PATH=1)); ls",
+		"echo $((PATH=1)); ls",
+		"echo $((PATH+=1)); ls",
+		"[[ $((PATH=5)) ]]; ls",
+		"let PATH=1; ls",
+		"let 'PATH=1'; ls",       // quoted let re-lexed as arithmetic on the phone
+		"let \"PATH=1\"; ls",     // same, double-quoted
+		"let $x; ls",             // let with an expression only known on the phone
+		"echo $((y=PATH=1)); ls", // a nested arithmetic assignment
+		"(( PATH=1 )); ls",
+		"PATH[0]=/tmp; ls", // an array-element assignment
+		"PATH+=/tmp; ls",   // an append assignment
+		// parameter expansion with assignment
+		"ls ${PATH:=/data/local/tmp}",
+		"echo ${PATH=/x}; ls",
+		"x=${PATH:=/tmp}",
+		"echo \"${IFS:=x}\"; ls",
+		// set -A / printf -v
+		"set -A PATH /tmp; ls",
+		"set +A PATH /tmp; ls",
+		"printf -v PATH /tmp; ls",
+	}
+	for _, line := range red {
+		if r := c.Classify(sh(line)); r.Level != Red {
+			t.Errorf("%q: %v, want red (%s: %s)", line, r.Level, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+	green := []string{
+		"for i in 1 2; do ls; done",
+		"typeset i=1; ls",
+		"export LANG=C; ls",
+		"typeset -x PATH; ls", // does not change PATH's value
+		"readonly PATH; ls",
+		"echo $((1+2))",
+		"echo $((i++))",
+		"((i=i+1))",
+		"echo ${#PATH}",
+		"echo ${x:-y}",
+		"echo ${PATH/x/y}",
+		"[ -e /sdcard/x ]",
+		"x=$(ls)",
+	}
+	for _, line := range green {
+		if r := c.Classify(sh(line)); r.Level != Green {
+			t.Errorf("%q: %v, want green (%s: %s)", line, r.Level, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
 }
