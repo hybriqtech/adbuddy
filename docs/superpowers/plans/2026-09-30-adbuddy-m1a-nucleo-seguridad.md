@@ -6891,7 +6891,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 		cctx, cancel := context.WithTimeout(ctx, d.o.ConfirmTimeout)
 		decision := d.o.Confirmer.Confirm(cctx, confirm.Request{
-			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: "adb " + strings.Join(req.Argv, " "),
+			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: "adb " + classify.Printable(strings.Join(req.Argv, " ")),
 			ExpiresAt: now.Add(d.o.ConfirmTimeout), Special: res.Special,
 		})
 		cancel()
@@ -7039,17 +7039,19 @@ func TestSelectUndo(t *testing.T) {
 		entry("j_2", "s_1", "green", "ok"),
 		entry("j_3", "s_1", "yellow", "denied", "shell", "b"),
 		entry("j_4", "s_2", "yellow", "ok", "shell", "c"),
-		entry("j_5", "s_2", "yellow", "ok"), // UI action, no inverse
+		entry("j_5", "s_2", "yellow", "ok"),                    // UI action, no inverse
+		entry("j_6", "s_2", "yellow", "running", "shell", "d"), // the host stopped mid-command
+		entry("j_7", "s_2", "yellow", "error", "shell", "e"),
 	}
 	plan, skipped, err := SelectUndo(entries, "last", "")
-	if err != nil || ids(plan) != "j_4" || ids(skipped) != "j_5" {
+	if err != nil || ids(plan) != "j_4" || ids(skipped) != "j_7,j_6,j_5" {
 		t.Fatalf("last: %s | %s | %v", ids(plan), ids(skipped), err)
 	}
 	plan, _, err = SelectUndo(entries, "session", "s_1")
 	if err != nil || ids(plan) != "j_1" {
 		t.Fatalf("session: %s %v", ids(plan), err)
 	}
-	for target, code := range map[string]string{"j_0": "ALREADY_UNDONE", "j_3": "NOT_APPLIED", "j_5": "NO_INVERSE", "j_9": "NOT_FOUND"} {
+	for target, code := range map[string]string{"j_0": "ALREADY_UNDONE", "j_3": "NOT_APPLIED", "j_5": "NO_INVERSE", "j_6": "UNCERTAIN_STATE", "j_7": "UNCERTAIN_STATE", "j_9": "NOT_FOUND"} {
 		if _, _, err := SelectUndo(entries, target, ""); err == nil || err.(*UndoError).Code != code {
 			t.Errorf("%s: %v", target, err)
 		}
@@ -7166,19 +7168,22 @@ type UndoError struct{ Code, Message string }
 
 func (e *UndoError) Error() string { return e.Code + ": " + e.Message }
 
-func applied(e journal.Entry) bool {
+// isChange: a 🟡/🔴 command that ran or may have run, and is not undone yet.
+func isChange(e journal.Entry) bool {
 	switch e.Status {
 	case journal.StatusOK, journal.StatusError, journal.StatusRunning:
-		return true
+	default:
+		return false
 	}
-	return false
+	return e.Source != journal.SourceUndo && e.Level != "green" && e.UndoneBy == nil
 }
 
-func isChange(e journal.Entry) bool {
-	return e.Source != journal.SourceUndo && e.Level != "green" && applied(e) && e.UndoneBy == nil
+// undoable: only changes that finished with exit code 0. The inverse of a
+// command that failed or never finished (the host stopped) could undo
+// something else, so those are reported and left to the person.
+func undoable(e journal.Entry) bool {
+	return isChange(e) && e.Status == journal.StatusOK && e.Inverse != nil
 }
-
-func undoable(e journal.Entry) bool { return isChange(e) && e.Inverse != nil }
 
 // SelectUndo picks the entries to undo, newest first. target is "last",
 // "session" or an entry id; session is the session for "session".
@@ -7219,7 +7224,9 @@ func SelectUndo(entries []journal.Entry, target, session string) (plan, skipped 
 		switch {
 		case e.UndoneBy != nil:
 			return nil, nil, &UndoError{"ALREADY_UNDONE", e.ID + " was already undone by " + *e.UndoneBy}
-		case !applied(e):
+		case e.Status == journal.StatusError || e.Status == journal.StatusRunning:
+			return nil, nil, &UndoError{"UNCERTAIN_STATE", e.ID + " did not finish cleanly (" + e.Status + "): check the phone and undo it by hand if needed"}
+		case e.Status != journal.StatusOK:
 			return nil, nil, &UndoError{"NOT_APPLIED", e.ID + " never ran (" + e.Status + ")"}
 		case e.Inverse == nil:
 			return nil, nil, &UndoError{"NO_INVERSE", e.ID + " (" + e.Description + ") has no inverse and cannot be undone"}
@@ -8601,6 +8608,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/paths"
@@ -8652,12 +8660,15 @@ func formatEntry(e journal.Entry) string {
 	if e.UndoneBy != nil {
 		status += ", undone"
 	}
-	line := fmt.Sprintf("%s %s %-8s %s  [%s] adb %s", e.TS.Local().Format("15:04:05"), lvl, status, e.Description, e.ID, strings.Join(e.Argv, " "))
+	// Everything here may come from the agent or the phone: escape what could
+	// rewrite the terminal.
+	line := fmt.Sprintf("%s %s %-8s %s  [%s] adb %s", e.TS.Local().Format("15:04:05"), lvl, status,
+		classify.Printable(e.Description), e.ID, classify.Printable(strings.Join(e.Argv, " ")))
 	if e.Reason != "" && e.Status != journal.StatusOK {
-		line += "\n    reason: " + e.Reason
+		line += "\n    reason: " + classify.Printable(e.Reason)
 	}
 	if e.Inverse != nil && e.UndoneBy == nil && e.Source != journal.SourceUndo {
-		line += "\n    undo: adb " + strings.Join(e.Inverse.Argv, " ")
+		line += "\n    undo: adb " + classify.Printable(strings.Join(e.Inverse.Argv, " "))
 	}
 	return line
 }
@@ -9024,6 +9035,7 @@ var undoFixes = map[string]string{
 	"NO_INVERSE":      "This change has to be reverted by hand.",
 	"ALREADY_UNDONE":  "Nothing to do.",
 	"NOT_APPLIED":     "Nothing to do: the command never ran.",
+	"UNCERTAIN_STATE": "Check the phone: the command failed or the host stopped while it ran, so its inverse is not run automatically.",
 	"UNDO_FAILED":     "Check the phone and the journal; failed inverses can be retried with `adbuddy undo <id>`.",
 }
 
