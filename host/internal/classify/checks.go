@@ -1,6 +1,7 @@
 package classify
 
 import (
+	"path"
 	"strings"
 )
 
@@ -38,10 +39,11 @@ func register(m map[string]checkFunc) {
 
 func init() {
 	register(map[string]checkFunc{
-		"logcat":    checkLogcat,
-		"list-only": checkListOnly,
-		"install":   checkInstall,
-		"push":      checkPush,
+		"logcat":      checkLogcat,
+		"list-only":   checkListOnly,
+		"install":     checkInstall,
+		"push":        checkPush,
+		"pull-target": checkPullTarget,
 	})
 }
 
@@ -87,16 +89,50 @@ func indexOf(ws []Word, s string) int {
 	return -1
 }
 
-// logcat is 🟢 unless it clears, resizes, prunes or writes files.
+// logcat options that only read. logcat uses getopt_long, which also accepts
+// unambiguous abbreviations of long options (--cl = --clear), so only these
+// exact spellings are 🟢; any other option is 🔴.
+var (
+	logcatShortFlags  = "dsLgSDB" // no value
+	logcatShortValues = "vbtTem"  // take a value
+	logcatLongFlags   = map[string]bool{"--dividers": true, "--last": true, "--statistics": true, "--binary": true}
+	logcatLongValues  = map[string]bool{"--buffer": true, "--format": true, "--max-count": true, "--pid": true, "--regex": true, "--uid": true}
+)
+
+// logcat is 🟢 only with read-only options: clearing, resizing, pruning,
+// rotating or writing files is 🔴.
 func checkLogcat(ws []Word) checkResult {
-	for _, w := range ws[1:] {
-		v := w.Value
+	for i := 1; i < len(ws); i++ {
+		v := ws[i].Value
 		switch {
-		case v == "--clear" || v == "--buffer-size" || strings.HasPrefix(v, "--buffer-size=") ||
-			v == "--prune" || strings.HasPrefix(v, "--prune=") || v == "--file" || strings.HasPrefix(v, "--file="):
-			return red("logcat " + v + " changes the logs or writes files")
-		case strings.HasPrefix(v, "-") && !strings.HasPrefix(v, "--") && strings.ContainsAny(v[1:], "cGPf"):
-			return red("logcat " + v + " changes the logs or writes files")
+		case !strings.HasPrefix(v, "-"):
+			continue // a filter spec such as ActivityManager:I or *:S
+		case strings.HasPrefix(v, "--"):
+			name, _, hasValue := strings.Cut(v, "=")
+			switch {
+			case logcatLongFlags[name] && !hasValue:
+			case logcatLongValues[name]:
+				if !hasValue {
+					i++
+				}
+			default:
+				return red("logcat option " + v + " may change the logs or write files")
+			}
+		default:
+			// A cluster of short options, e.g. -d, -dv time, -vtime.
+			for j := 1; j < len(v); j++ {
+				c := v[j]
+				if strings.IndexByte(logcatShortFlags, c) >= 0 {
+					continue
+				}
+				if strings.IndexByte(logcatShortValues, c) >= 0 {
+					if j == len(v)-1 {
+						i++ // the value is the next word
+					}
+					break
+				}
+				return red("logcat option " + v + " may change the logs or write files")
+			}
 		}
 	}
 	return ok()
@@ -132,4 +168,63 @@ func checkPush(ws []Word) checkResult {
 		return red("push to a relative path")
 	}
 	return change(newOp("adb-push", "local", pos[0], "remote", pos[1]))
+}
+
+// protectedTargets are the environment's own files: `adb pull` must not
+// overwrite them (they steer the agent and its permissions).
+var protectedTargets = map[string]bool{
+	"agents.md": true, "claude.md": true, "notes.md": true, "device.json": true, "journal": true,
+}
+
+// safeLocalTarget accepts a relative path inside the working directory that
+// does not touch hidden files or folders (.claude, .adbuddy…) or the
+// environment's own files.
+func safeLocalTarget(p string) bool {
+	p = strings.ReplaceAll(p, `\`, "/")
+	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, ":") {
+		return false
+	}
+	for i, part := range strings.Split(path.Clean(p), "/") {
+		if part == ".." || (strings.HasPrefix(part, ".") && part != ".") {
+			return false
+		}
+		if i == 0 && protectedTargets[strings.ToLower(part)] {
+			return false
+		}
+	}
+	return true
+}
+
+// adb pull REMOTE [LOCAL] and adb bugreport [PATH] only read the phone, but
+// they write on the PC without the agent's own permission prompt: 🟢 only
+// inside the environment and away from its control files.
+func checkPullTarget(ws []Word) checkResult {
+	var pos []string
+	for _, w := range ws[1:] {
+		switch v := w.Value; {
+		case v == "-a":
+		case strings.HasPrefix(v, "-"):
+			return red("unknown option " + v)
+		default:
+			pos = append(pos, v)
+		}
+	}
+	var targets []string
+	switch {
+	case ws[0].Value == "bugreport" && len(pos) <= 1:
+		targets = pos
+	case ws[0].Value == "pull" && len(pos) == 1:
+		targets = []string{path.Base(strings.TrimRight(strings.ReplaceAll(pos[0], `\`, "/"), "/"))}
+	case ws[0].Value == "pull" && len(pos) == 2:
+		// If LOCAL is an existing folder the file lands inside it.
+		targets = []string{pos[1], path.Join(strings.ReplaceAll(pos[1], `\`, "/"), path.Base(strings.TrimRight(pos[0], "/")))}
+	default:
+		return red("several sources or targets")
+	}
+	for _, t := range targets {
+		if !safeLocalTarget(t) {
+			return red("writes outside the environment or over its own files: " + t)
+		}
+	}
+	return ok()
 }

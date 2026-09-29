@@ -1,6 +1,7 @@
 package classify
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -85,21 +86,49 @@ func (c *Classifier) UserRuleCount() int { return len(c.rules.user) }
 // Classify classifies adb arguments with the global options already removed
 // (see SplitGlobal).
 func (c *Classifier) Classify(argv []string) Result {
-	if len(argv) == 0 {
-		return aggregate([]Finding{{Rule: "adb.help", Level: Green, Title: Text{EN: "Show adb help", ES: "Mostrar la ayuda de adb"}}})
+	return aggregate(c.classifyAdb(argv))
+}
+
+func (c *Classifier) classifyAdb(argv []string) []Finding {
+	switch {
+	case len(argv) == 0:
+		return []Finding{{Rule: "adb.help", Level: Green, Title: Text{EN: "Show adb help", ES: "Mostrar la ayuda de adb"}}}
+	case argv[0] == "shell":
+		return c.classifyShellCommand(argv[1:], true)
+	case argv[0] == "exec-out":
+		return c.classifyExecOut(argv[1:])
+	case strings.HasPrefix(argv[0], "wait-for-") && len(argv) > 1:
+		// adb runs the rest of the line once the device is there.
+		return append([]Finding{c.evalRule("adb", lits(argv[:1]))}, c.classifyAdb(argv[1:])...)
 	}
-	switch argv[0] {
-	case "shell":
-		return aggregate(c.classifyShellCommand(argv[1:], true))
-	case "exec-out":
-		return aggregate(c.classifyShellCommand(argv[1:], false))
+	return []Finding{c.evalRule("adb", lits(argv))}
+}
+
+// classifyExecOut rebuilds the line exactly as adb does for exec-out: the
+// first argument as is and every other one single-quoted (adb's escape_arg).
+func (c *Classifier) classifyExecOut(args []string) []Finding {
+	if len(args) == 0 {
+		return []Finding{redFinding("shell.interactive", "exec-out without a command", args, textInteractive)}
 	}
-	return aggregate([]Finding{c.evalRule("adb", lits(argv))})
+	line := args[0]
+	for _, a := range args[1:] {
+		line += " " + adbEscapeArg(a)
+	}
+	if strings.TrimSpace(line) == "" {
+		return []Finding{redFinding("shell.interactive", "exec-out without a command", args, textInteractive)}
+	}
+	return c.classifyScript(line, 0)
+}
+
+// adbEscapeArg quotes like adb's escape_arg: always single quotes, with each
+// ' written as close-quote, backslash-quote, open-quote.
+func adbEscapeArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // classifyShellCommand handles `adb shell [options] [command…]`. adb joins
-// the command words with spaces and the phone runs them with `sh -c`, so the
-// joined line is what gets parsed.
+// the command words with spaces, without quoting ("just like ssh"), and the
+// phone runs them with `sh -c`, so the joined line is what gets parsed.
 func (c *Classifier) classifyShellCommand(args []string, options bool) []Finding {
 	i := 0
 	for options && i < len(args) && strings.HasPrefix(args[i], "-") {
@@ -222,12 +251,36 @@ func values(ws []Word) []string {
 
 // display shortens a command for titles.
 func display(ws []string) string {
-	s := strings.Join(ws, " ")
+	s := Printable(strings.Join(ws, " "))
 	if utf8.RuneCountInString(s) > 80 {
 		r := []rune(s)
 		s = string(r[:79]) + "…"
 	}
 	return s
+}
+
+// Printable escapes what could hide or rewrite text on a terminal: control
+// characters (ANSI sequences start with one), DEL, bidirectional overrides
+// and zero-width characters. Everything the agent chose that a person will
+// read (titles, the raw command, the journal view) goes through it.
+func Printable(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20, r == 0x7f, r >= 0x80 && r < 0xa0, r >= 0x200b && r <= 0x200f,
+			r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069, r == 0xfeff, r == utf8.RuneError:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func baseVars(ws []Word) map[string]string {
@@ -237,7 +290,7 @@ func baseVars(ws []Word) map[string]string {
 		vars["args"] = display(vals[1:])
 	}
 	for i, v := range vals {
-		vars[strconv.Itoa(i)] = v
+		vars[strconv.Itoa(i)] = Printable(v)
 	}
 	return vars
 }
@@ -261,12 +314,47 @@ func redFinding(rule, reason string, words []string, title Text) Finding {
 // evalRule looks up the rule for a command and applies its check and the
 // fixed protections.
 func (c *Classifier) evalRule(scope string, ws []Word) Finding {
+	f := c.evalWith(c.rules, scope, ws)
+	if len(c.rules.user) == 0 || f.Special {
+		return f
+	}
+	// The fixed protections are judged with the built-in rules alone, so a
+	// user rule can lower a level but never a protection.
+	b := c.evalWith(ruleSet{builtin: c.rules.builtin}, scope, ws)
+	switch {
+	case b.Special:
+		f.Level, f.Special, f.Op, f.Reason = Red, true, nil, joinReason(b.Reason, f.Reason)
+	case f.Level < Red && b.Level != Green && hasDynamic(ws):
+		f.Level, f.Special, f.Op = Red, true, nil
+		f.Reason = joinReason("arguments only known on the phone could name ADBuddy or a critical app", f.Reason)
+	}
+	return f
+}
+
+func hasDynamic(ws []Word) bool {
+	for _, w := range ws {
+		if w.Dynamic {
+			return true
+		}
+	}
+	return false
+}
+
+func joinReason(a, b string) string {
+	if b == "" {
+		return a
+	}
+	return a + "; " + b
+}
+
+// evalWith evaluates one command with a rule set.
+func (c *Classifier) evalWith(rs ruleSet, scope string, ws []Word) Finding {
 	vals := values(ws)
 	name := ws[0].Value
 	if scope == "adb" && strings.HasPrefix(name, "wait-for-") {
 		name = "wait-for"
 	}
-	r, ok := c.rules.find(scope, name, subOf(ws))
+	r, ok := rs.find(scope, name, subOf(ws))
 	if !ok {
 		f := redFinding("unknown", "unknown command", vals, textUnknown)
 		applySpecial(scope, ws, &f)
@@ -290,7 +378,7 @@ func (c *Classifier) evalRule(scope string, ws []Word) Finding {
 			f.Level, f.Reason = res.level, res.reason
 		}
 		for k, v := range res.vars {
-			vars[k] = v
+			vars[k] = Printable(v)
 		}
 		if res.op != nil && f.Level != Red {
 			f.Op = res.op
@@ -303,18 +391,36 @@ func (c *Classifier) evalRule(scope string, ws []Word) Finding {
 
 var placeholder = regexp.MustCompile(`\{[a-z0-9]+\}`)
 
-// titleFor renders a rule title. Placeholders without a value are dropped; if
-// a check rejected the arguments, the generic "Run: {cmd}" is clearer.
+// titleFor renders a rule title. Placeholders of the template without a value
+// are dropped (the values themselves are never scanned, so an argument such
+// as "{x}" stays as typed); if a check rejected the arguments, the generic
+// "Run: {cmd}" is clearer.
 func titleFor(t Text, vars map[string]string, rejected bool) Text {
-	out := render(t, vars)
-	if !placeholder.MatchString(out.EN + out.ES) {
-		return out
+	var missing []string
+	for _, m := range placeholder.FindAllString(t.EN+t.ES, -1) {
+		if _, ok := vars[m[1:len(m)-1]]; !ok {
+			missing = append(missing, m[1:len(m)-1])
+		}
+	}
+	if len(missing) == 0 {
+		return render(t, vars)
 	}
 	if rejected {
 		return render(Text{EN: "Run: {cmd}", ES: "Ejecutar: {cmd}"}, vars)
 	}
+	const gap = "\x00"
+	withGaps := map[string]string{}
+	for k, v := range vars {
+		withGaps[k] = v
+	}
+	for _, k := range missing {
+		withGaps[k] = gap
+	}
+	out := render(t, withGaps)
 	clean := func(s string) string {
-		return strings.Join(strings.Fields(placeholder.ReplaceAllString(s, "")), " ")
+		s = strings.ReplaceAll(s, " "+gap, "")
+		s = strings.ReplaceAll(s, gap+" ", "")
+		return strings.ReplaceAll(s, gap, "")
 	}
 	return Text{EN: clean(out.EN), ES: clean(out.ES)}
 }

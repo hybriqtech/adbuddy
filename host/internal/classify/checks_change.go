@@ -15,65 +15,135 @@ func init() {
 		"mv":                checkMv,
 		"mkdir":             checkMkdir,
 		"monkey":            checkMonkey,
+		"am-start":          checkAmStart,
 	})
 }
 
-// settings [--user U] put [--user U] NAMESPACE KEY VALUE
+// validUser accepts the user ids a change can be undone for: a number or
+// "current". "all" and "-1" mean every user and are never reversible.
+func validUser(u string) bool {
+	return u == "current" || u == "cur" || isDigits(u)
+}
+
+// packageName rejects UIDs ("10234", "u0a234") and special user names that
+// appops and pm also accept: the change would hit every package of a UID.
+func packageName(s string) bool {
+	if !strings.Contains(s, ".") || strings.HasPrefix(s, "-") || isDigits(s) {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// userOpt reads an optional "--user U" at ws[i]. Android reads --user only
+// in fixed positions, so any other place makes the command 🔴.
+func userOpt(ws []Word, i int) (user string, next int, valid bool) {
+	if i < len(ws) && ws[i].Value == "--user" {
+		if i+1 >= len(ws) || !validUser(ws[i+1].Value) {
+			return "", i, false
+		}
+		return ws[i+1].Value, i + 2, true
+	}
+	return "", i, true
+}
+
+// settings [--user U] put [--user U] NAMESPACE KEY VALUE (one --user at most)
 func checkSettingsPut(ws []Word) checkResult {
-	put := indexOf(ws, "put")
-	if put < 0 {
-		return red("cannot read settings arguments")
+	user1, i, valid := userOpt(ws, 1)
+	if !valid || i >= len(ws) || !strings.EqualFold(ws[i].Value, "put") {
+		return red("settings put with --user in an unexpected place")
 	}
-	pos, user, good := positional(ws, put+1)
-	if pre, u, _ := positional(ws[:put], 1); len(pre) == 0 && u != "" {
-		user = u
+	user2, i, valid := userOpt(ws, i+1)
+	if !valid || (user1 != "" && user2 != "") {
+		return red("settings put with --user in an unexpected place")
 	}
-	if !good || len(pos) != 3 {
+	rest := values(ws[i:])
+	if len(rest) != 3 {
 		return red("settings put with extra or missing arguments")
 	}
-	if pos[0] != "system" && pos[0] != "secure" && pos[0] != "global" {
-		return red("unknown settings namespace " + pos[0])
+	for _, v := range rest {
+		if strings.HasPrefix(v, "-") {
+			return red("settings put with options after the namespace")
+		}
 	}
-	op := newOp("settings-put", "ns", pos[0], "key", pos[1], "value", pos[2])
-	if user != "" {
-		op.Args["user"] = user
+	if rest[0] != "system" && rest[0] != "secure" && rest[0] != "global" {
+		return red("unknown settings namespace " + rest[0])
+	}
+	op := newOp("settings-put", "ns", rest[0], "key", rest[1], "value", rest[2])
+	if u := user1 + user2; u != "" {
+		op.Args["user"] = u
 	}
 	return change(op)
 }
 
-// pm disable-user|disable [--user U] PACKAGE
+// pm disable-user|disable [--user U] PACKAGE: pm reads --user only as the
+// first option and ignores words after the package.
 func checkPmDisable(ws []Word) checkResult {
-	pos, user, good := positional(ws, 2)
-	if !good || len(pos) != 1 {
+	user, i, valid := userOpt(ws, 2)
+	if !valid || len(ws) != i+1 || !packageName(ws[i].Value) {
 		return red("pm disable with unexpected arguments")
 	}
-	op := newOp("pm-disable", "pkg", pos[0])
+	op := newOp("pm-disable", "pkg", ws[i].Value)
 	if user != "" {
 		op.Args["user"] = user
 	}
 	return change(op)
 }
 
-// pm uninstall [-k] --user U PACKAGE. Without --user it removes the app for
-// every user: never reversible.
+// pm uninstall [-k] --user U PACKAGE: options before the package, the
+// package last. Without --user it removes the app for every user.
 func checkPmUninstallUser(ws []Word) checkResult {
-	pos, user, good := positional(ws, 2, "-k")
-	if !good || len(pos) != 1 {
+	user, keep := "", false
+	i := 2
+	for i < len(ws) && strings.HasPrefix(ws[i].Value, "-") {
+		switch ws[i].Value {
+		case "-k":
+			keep = true
+			i++
+		case "--user":
+			if user != "" || i+1 >= len(ws) || !validUser(ws[i+1].Value) {
+				return red("pm uninstall for every user or with an unexpected --user")
+			}
+			user = ws[i+1].Value
+			i += 2
+		default:
+			return red("pm uninstall with unexpected options")
+		}
+	}
+	if len(ws) != i+1 || !packageName(ws[i].Value) {
 		return red("pm uninstall with unexpected arguments")
 	}
 	if user == "" {
 		return red("uninstalls the app for every user")
 	}
-	return change(newOp("pm-uninstall-user", "pkg", pos[0], "user", user))
+	op := newOp("pm-uninstall-user", "pkg", ws[i].Value, "user", user)
+	if keep {
+		op.Args["keep"] = "1"
+	}
+	return change(op)
 }
 
-// appops set [--user U] PACKAGE OP MODE
+// appops set [--user U] PACKAGE OP MODE: --user only before the package, and
+// a package name (not a UID).
 func checkAppopsSet(ws []Word) checkResult {
-	pos, user, good := positional(ws, 2)
-	if !good || len(pos) != 3 {
+	user, i, valid := userOpt(ws, 2)
+	rest := values(ws[i:])
+	if !valid || len(rest) != 3 {
 		return red("appops set with unexpected arguments")
 	}
-	op := newOp("appops-set", "pkg", pos[0], "op", pos[1], "mode", pos[2])
+	if !packageName(rest[0]) {
+		return red("appops set on a UID changes every app that shares it")
+	}
+	for _, v := range rest[1:] {
+		if strings.HasPrefix(v, "-") {
+			return red("appops set with unexpected options")
+		}
+	}
+	op := newOp("appops-set", "pkg", rest[0], "op", rest[1], "mode", rest[2])
 	if user != "" {
 		op.Args["user"] = user
 	}
@@ -123,4 +193,18 @@ func checkMonkey(ws []Word) checkResult {
 		return checkResult{level: Green, vars: map[string]string{"pkg": v[2]}}
 	}
 	return red("monkey sending random events")
+}
+
+// am start is a harmless interface action, except for intents that place a
+// call, restart or wipe the phone, or uninstall an app.
+func checkAmStart(ws []Word) checkResult {
+	for _, w := range ws[2:] {
+		u := strings.ToUpper(w.Value)
+		for _, bad := range []string{"ACTION.CALL", "CALL_PRIVILEGED", "CALL_EMERGENCY", "REBOOT", "SHUTDOWN", "MASTER_CLEAR", "FACTORY_RESET", "ACTION.DELETE", "UNINSTALL_PACKAGE"} {
+			if strings.Contains(u, bad) {
+				return red("the intent " + w.Value + " can call, restart, wipe or uninstall")
+			}
+		}
+	}
+	return ok()
 }

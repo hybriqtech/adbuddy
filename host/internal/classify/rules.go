@@ -3,7 +3,9 @@ package classify
 import (
 	"bytes"
 	"embed"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"sort"
 	"strings"
@@ -66,6 +68,13 @@ func builtinRules() ([]Rule, error) {
 	return all, nil
 }
 
+// opChecks produce an Op (a change with an inverse). Attached by a user rule
+// to another command they would record a wrong inverse.
+var opChecks = map[string]bool{
+	"settings-put": true, "pm-disable": true, "pm-uninstall-user": true, "appops-set": true, "deviceidle": true,
+	"mv": true, "mkdir": true, "install": true, "push": true, "screencap": true, "uiautomator-dump": true,
+}
+
 type ruleFile struct {
 	Rules []Rule `yaml:"rules"`
 }
@@ -77,15 +86,24 @@ func parseRules(data []byte, user bool) ([]Rule, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&f); err != nil {
-		if err.Error() == "EOF" {
+		if errors.Is(err, io.EOF) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, errors.New("rules must be a single YAML document (found a second one after ---)")
 	}
 	for i := range f.Rules {
 		r := &f.Rules[i]
 		if r.ID == "" || r.Cmd == "" {
 			return nil, fmt.Errorf("rule #%d: id and cmd are required", i+1)
+		}
+		for _, s := range r.Sub {
+			if strings.TrimSpace(s) == "" {
+				return nil, fmt.Errorf("rule %s: empty sub", r.ID)
+			}
 		}
 		if r.Scope == "" {
 			r.Scope = "shell"
@@ -101,6 +119,9 @@ func parseRules(data []byte, user bool) ([]Rule, error) {
 		if r.Check != "" {
 			if _, ok := checks[r.Check]; !ok {
 				return nil, fmt.Errorf("rule %s: unknown check %q", r.ID, r.Check)
+			}
+			if user && opChecks[r.Check] {
+				return nil, fmt.Errorf("rule %s: check %q describes a change with an undo and only built-in rules can use it", r.ID, r.Check)
 			}
 		}
 		if r.Title.EN == "" {

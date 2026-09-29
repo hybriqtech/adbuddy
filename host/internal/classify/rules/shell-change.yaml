@@ -12,7 +12,7 @@ rules:
   - {id: fs.mv, cmd: mv, level: yellow, check: mv, title: {en: "Move {src} to {dst}", es: "Mover {src} a {dst}"}}
   - {id: fs.mkdir, cmd: mkdir, level: yellow, check: mkdir, title: {en: "Create the folder {path}", es: "Crear la carpeta {path}"}}
   - {id: ui.input, cmd: input, level: yellow, ui: true, title: {en: "Interface action: {args}", es: "Acción en la interfaz: {args}"}}
-  - {id: ui.am-start, cmd: am, sub: [start, start-activity], level: yellow, ui: true, title: {en: "Open {args}", es: "Abrir {args}"}}
+  - {id: ui.am-start, cmd: am, sub: [start, start-activity], level: yellow, ui: true, check: am-start, title: {en: "Open {args}", es: "Abrir {args}"}}
   - {id: ui.monkey, cmd: monkey, level: yellow, ui: true, check: monkey, title: {en: "Open the app {pkg}", es: "Abrir la app {pkg}"}}
   - {id: am.force-stop, cmd: am, sub: [force-stop, kill], level: yellow, title: {en: "Stop the app {args}", es: "Detener la app {args}"}}
 

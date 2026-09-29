@@ -52,17 +52,21 @@ func specialReason(scope string, ws []Word, level Level) string {
 		if r, ok := adbAlwaysRed[name]; ok {
 			return r
 		}
-		if name == "reverse" && len(v) > 1 && strings.HasPrefix(v[1], "--remove") {
-			return "may remove ADBuddy's chat tunnel"
-		}
-		if name == "uninstall" && mentionsADBuddy(v) {
+		switch {
+		case strings.HasPrefix(name, "reboot"):
+			return "restarts the phone"
+		case name == "remount":
+			return "may restart the phone"
+		case name == "reverse" && !(len(v) == 2 && v[1] == "--list"):
+			return "may change ADBuddy's chat tunnel"
+		case level != Green && mentionsADBuddy(v):
 			return "affects the ADBuddy app"
 		}
 		return ""
 	}
 	switch name {
 	case "settings":
-		verb := subOf(ws)
+		verb := strings.ToLower(subOf(ws)) // settings compares verbs ignoring case
 		if verb == "reset" {
 			return "resets settings, including the connection ones"
 		}
@@ -74,8 +78,18 @@ func specialReason(scope string, ws []Word, level Level) string {
 			}
 		}
 	case "svc":
-		if len(v) > 1 && (v[1] == "wifi" || v[1] == "power") {
-			return "may cut the Wi-Fi connection or turn the phone off"
+		if len(v) > 1 && (v[1] == "wifi" || v[1] == "power" || (v[1] == "usb" && len(v) > 2 && strings.HasPrefix(v[2], "set"))) {
+			return "may cut the connection or turn the phone off"
+		}
+	case "ip", "ifconfig":
+		for _, w := range v[1:] {
+			if w == "down" || w == "del" || w == "delete" || w == "flush" || w == "set" {
+				return "may cut the network"
+			}
+		}
+	case "content":
+		if level != Green && strings.Contains(strings.Join(v, " "), "content://settings") {
+			return "changes system settings directly, including the connection ones"
 		}
 	case "cmd":
 		if len(v) > 1 && (v[1] == "wifi" || v[1] == "connectivity") && level != Green {
@@ -92,12 +106,49 @@ func specialReason(scope string, ws []Word, level Level) string {
 	if level != Green && mentionsADBuddy(v) {
 		return "affects the ADBuddy app"
 	}
+	if level != Green && touchesCriticalApp(name, ws, v) {
+		return "affects an app the phone needs to stay connected or to start"
+	}
 	return ""
 }
 
 func mentionsADBuddy(v []string) bool {
 	for _, s := range v {
 		if strings.Contains(s, ADBuddyPackage) {
+			return true
+		}
+	}
+	return false
+}
+
+// criticalPackages break the connection, the shell or the phone's start when
+// disabled, removed, cleared or killed.
+var criticalPackages = map[string]bool{
+	"android": true, "com.android.shell": true, "com.android.providers.settings": true,
+	"com.android.systemui": true, "com.android.phone": true, "com.android.settings": true,
+}
+
+func criticalPackage(w string) bool {
+	pkg, _, _ := strings.Cut(w, "/") // a component: pkg/.Class
+	return criticalPackages[pkg] || strings.Contains(pkg, "networkstack") ||
+		strings.HasPrefix(pkg, "com.android.wifi") || strings.HasPrefix(pkg, "com.google.android.wifi") ||
+		strings.HasPrefix(pkg, "com.android.server.wifi")
+}
+
+// touchesCriticalApp: package management, app ops and killing apps; opening
+// an app (am start) is fine.
+func touchesCriticalApp(name string, ws []Word, v []string) bool {
+	switch name {
+	case "pm", "appops":
+	case "am":
+		if s := subOf(ws); s != "force-stop" && s != "kill" && s != "crash" {
+			return false
+		}
+	default:
+		return false
+	}
+	for _, w := range v[1:] {
+		if criticalPackage(w) {
 			return true
 		}
 	}

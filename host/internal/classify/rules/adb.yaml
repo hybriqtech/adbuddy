@@ -18,8 +18,8 @@ rules:
   - {id: adb.features, scope: adb, cmd: features, level: green, title: {en: "List the device features", es: "Listar las funciones del dispositivo"}}
   - {id: adb.host-features, scope: adb, cmd: host-features, level: green, title: {en: "List the adb server features", es: "Listar las funciones del servidor adb"}}
   - {id: adb.mdns, scope: adb, cmd: mdns, sub: [check, services], level: green, title: {en: "Show the devices found on the network", es: "Mostrar los dispositivos encontrados en la red"}}
-  - {id: adb.pull, scope: adb, cmd: pull, level: green, anyArgs: true, title: {en: "Copy from the phone to the PC: {args}", es: "Copiar del móvil al PC: {args}"}}
-  - {id: adb.bugreport, scope: adb, cmd: bugreport, level: green, anyArgs: true, title: {en: "Save a bug report on the PC", es: "Guardar un informe de errores en el PC"}}
+  - {id: adb.pull, scope: adb, cmd: pull, level: green, check: pull-target, title: {en: "Copy from the phone to the PC: {args}", es: "Copiar del móvil al PC: {args}"}}
+  - {id: adb.bugreport, scope: adb, cmd: bugreport, level: green, check: pull-target, title: {en: "Save a bug report on the PC", es: "Guardar un informe de errores en el PC"}}
   - {id: adb.logcat, scope: adb, cmd: logcat, level: green, anyArgs: true, check: logcat, title: {en: "Read the phone's logs", es: "Leer los registros del móvil"}}
   - {id: adb.jdwp, scope: adb, cmd: jdwp, level: green, title: {en: "List debuggable processes", es: "Listar los procesos depurables"}}
   - {id: adb.reverse, scope: adb, cmd: reverse, level: green, check: list-only, title: {en: "Port redirection from the phone to the PC: {args}", es: "Redirección de puertos del móvil al PC: {args}"}}
