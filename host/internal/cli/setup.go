@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -29,8 +31,8 @@ import (
 // HelpURL is the step-by-step guide with pictures (GitHub Pages, docs/setup).
 const HelpURL = "https://hybriqtech.github.io/adbuddy/setup/"
 
-// Waiting times of setup.
-const (
+// Waiting times of setup (variables so tests can shorten them).
+var (
 	knownPhoneWait  = 25 * time.Second // a paired phone reconnects to a fresh adb server in 15-20 s
 	pairingWait     = 3 * time.Minute
 	connectWait     = time.Minute
@@ -104,6 +106,20 @@ environment. Run it again at any time; it skips what is already done.`,
 					}
 				}
 
+				// serve, run and journal read config.toml from any folder:
+				// relative paths are saved as absolute ones.
+				if adbFlag != "" {
+					if adbFlag, err = absExecutable(adbFlag); err != nil {
+						return UsageError("--adb: " + err.Error())
+					}
+				}
+				wsDir := wsFlag
+				if wsDir != "" {
+					if wsDir, err = filepath.Abs(wsDir); err != nil {
+						return UsageError("--workspace: " + err.Error())
+					}
+				}
+
 				// 1. Tools.
 				adbPath := adbFlag
 				if adbPath == "" {
@@ -133,8 +149,9 @@ environment. Run it again at any time; it skips what is already done.`,
 				}
 
 				// 3-4. Guide and pairing.
+				guid := ""
 				if serial == "" {
-					guid, err := pair(ctx, app, runner, useCode, ask, say)
+					guid, err = pair(ctx, app, runner, useCode, ask, say)
 					if err != nil {
 						return err
 					}
@@ -171,8 +188,17 @@ environment. Run it again at any time; it skips what is already done.`,
 					return err
 				}
 
-				// 7. Environment and configuration.
-				ws := wsFlag
+				// 7. Environment and configuration. The saved serial is the
+				// phone's stable name, not the address it used this time.
+				saved := stableSerial(guid, serial)
+				if saved == "" {
+					say("Note: not saving the serial %s in the configuration: it is an address that changes when wireless debugging restarts. Pair again with `adbuddy setup` to save the phone's name.\n", classify.Printable(serial))
+				}
+				samePhone := e.cfg.Serial != "" && (e.cfg.Serial == saved || e.cfg.Serial == serial)
+				ws := wsDir
+				if ws == "" && samePhone {
+					ws = e.cfg.Workspace // the environment chosen before
+				}
 				if ws == "" {
 					ws = filepath.Join(e.home, "ADBuddy", prof.Name)
 				}
@@ -187,7 +213,7 @@ environment. Run it again at any time; it skips what is already done.`,
 					return NewError("WORKSPACE_FAILED", err.Error(), "")
 				}
 				cfg := e.cfg
-				cfg.Serial, cfg.Workspace, cfg.Agent = serial, ws, chosen
+				cfg.Serial, cfg.Workspace, cfg.Agent = saved, ws, chosen
 				if adbFlag != "" {
 					cfg.ADBPath = adbFlag
 				}
@@ -195,7 +221,10 @@ environment. Run it again at any time; it skips what is already done.`,
 					return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")
 				}
 
-				res := setupResult{Device: prof, Serial: serial, Workspace: ws, Agent: chosen, ADB: adbPath}
+				res := setupResult{Device: prof, Serial: saved, Workspace: ws, Agent: chosen, ADB: adbPath}
+				if res.Serial == "" {
+					res.Serial = serial
+				}
 				if app.JSON {
 					return WriteData(app.Stdout, res)
 				}
@@ -293,6 +322,11 @@ func chooseAgent(app *App, flag, current string, yes bool, ask func(string) (str
 		}
 		return agent.Known[0], nil
 	}
+	if current != "" && !containsAgent(found, current) {
+		// The user chose it before: never swap it silently.
+		say("Note: %s is not in PATH; keeping it as the agent (%s). Pass --agent to use another one.\n", current, agent.InstallHint(current))
+		return current, nil
+	}
 	def := found[0].Name
 	if current != "" && containsAgent(found, current) {
 		def = current
@@ -327,6 +361,41 @@ func containsAgent(found []agent.Found, name string) bool {
 		}
 	}
 	return false
+}
+
+// stableSerial is the serial to save for the phone: its mDNS name
+// (<guid>._adb-tls-connect._tcp), which survives a new wireless debugging
+// port, even when this time it connected with `adb connect ip:port`. An
+// ip:port without a known guid yields "": that serial would stop working.
+func stableSerial(guid, active string) string {
+	if guid != "" {
+		return guid + "." + pairing.ConnectType
+	}
+	if isAddress(active) {
+		return ""
+	}
+	return active
+}
+
+// isAddress reports whether serial is IP:port (a TCP connection).
+func isAddress(serial string) bool {
+	host, _, err := net.SplitHostPort(serial)
+	if err != nil {
+		return false
+	}
+	_, err = netip.ParseAddr(host)
+	return err == nil
+}
+
+// absExecutable makes an --adb path absolute; a bare name ("adb") is looked
+// up in PATH first.
+func absExecutable(p string) (string, error) {
+	if !strings.ContainsAny(p, `/\`) {
+		if found, err := exec.LookPath(p); err == nil {
+			p = found
+		}
+	}
+	return filepath.Abs(p)
 }
 
 func fileExists(path string) bool {

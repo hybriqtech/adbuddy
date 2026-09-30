@@ -135,17 +135,19 @@ type Device struct {
 	State  string // device, offline, unauthorized…
 }
 
-// ParseDevices parses the output of `adb devices`.
+// ParseDevices parses the output of `adb devices` ("serial\tstate" lines).
+// It splits on the tab, since an mDNS serial may have a space
+// ("adb-<guid> (2)._adb-tls-connect._tcp").
 func ParseDevices(out string) []Device {
 	var ds []Device
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "List of devices") || strings.HasPrefix(line, "*") {
+	for _, line := range strings.Split(strings.ReplaceAll(out, "\r", ""), "\n") {
+		if strings.HasPrefix(line, "List of devices") || strings.HasPrefix(line, "*") {
 			continue
 		}
-		f := strings.Fields(line)
-		if len(f) >= 2 {
-			ds = append(ds, Device{Serial: f[0], State: f[1]})
+		serial, rest, ok := strings.Cut(line, "\t")
+		state := strings.Fields(rest)
+		if ok && serial != "" && len(state) > 0 {
+			ds = append(ds, Device{Serial: serial, State: state[0]})
 		}
 	}
 	return ds

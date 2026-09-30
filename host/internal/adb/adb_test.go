@@ -84,6 +84,20 @@ func TestParseDevices(t *testing.T) {
 	if len(ds) != 3 || ds[0].Serial != "adb-X-y._adb-tls-connect._tcp" || ds[0].State != "device" || ds[1].State != "offline" {
 		t.Fatalf("%+v", ds)
 	}
+	// mDNS renames a clash to "name (2)": the serial has a space, and the
+	// state comes after the tab.
+	ds = ParseDevices("List of devices attached\nadb-X-y (2)._adb-tls-connect._tcp\tdevice\n")
+	if len(ds) != 1 || ds[0].Serial != "adb-X-y (2)._adb-tls-connect._tcp" || ds[0].State != "device" {
+		t.Fatalf("serial with a space: %+v", ds)
+	}
+}
+
+func TestWaitSerialWithASpace(t *testing.T) {
+	setup(t, testutil.FakeRule{Match: "^devices$", Stdout: "List of devices attached\nadb-X-y (2)._adb-tls-connect._tcp\tdevice\n"})
+	r := Runner{Path: fakeADB}
+	if s, err := r.WaitSerial(context.Background(), "adb-X-y (2)._adb-tls-connect._tcp", time.Second); err != nil || s != "adb-X-y (2)._adb-tls-connect._tcp" {
+		t.Fatalf("%q %v", s, err)
+	}
 }
 
 func TestWaitSerial(t *testing.T) {

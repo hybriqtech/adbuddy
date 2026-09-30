@@ -258,3 +258,144 @@ func TestSetupInterruptedWhileWaitingForThePhone(t *testing.T) {
 		})
 	}
 }
+
+// loadSetupConfig reads the config.toml setup wrote.
+func loadSetupConfig(t *testing.T, e setupEnv) config.Config {
+	t.Helper()
+	cfg, err := config.Load(filepath.Join(e.cfgDir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// setVar sets a package variable for one test.
+func setVar[T any](t *testing.T, p *T, v T) {
+	t.Helper()
+	old := *p
+	*p = v
+	t.Cleanup(func() { *p = old })
+}
+
+// A relative --workspace or --adb is saved as an absolute path: serve, run
+// and journal read config.toml from any folder.
+func TestSetupSavesAbsolutePaths(t *testing.T) {
+	e := newSetupEnv(t, phoneRules())
+	dir := t.TempDir()
+	t.Chdir(dir)
+	relADB, err := filepath.Rel(dir, fakeADB(t))
+	if err != nil {
+		t.Skip("the fake adb is on another volume:", err)
+	}
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", relADB, "--workspace", "relws")
+	if code != 0 {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	cfg := loadSetupConfig(t, e)
+	if !filepath.IsAbs(cfg.Workspace) || !sameDir(cfg.Workspace, filepath.Join(dir, "relws")) {
+		t.Fatalf("workspace %q", cfg.Workspace)
+	}
+	if !filepath.IsAbs(cfg.ADBPath) || !sameDir(cfg.ADBPath, fakeADB(t)) {
+		t.Fatalf("adb_path %q", cfg.ADBPath)
+	}
+}
+
+// Running setup again with the same phone keeps the environment chosen
+// before; another phone gets its own.
+func TestSetupAgainKeepsTheWorkspace(t *testing.T) {
+	e := newSetupEnv(t, phoneRules())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	custom := filepath.Join(t.TempDir(), "custom")
+	if _, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", custom); code != 0 {
+		t.Fatalf("first setup: exit %d stderr %q", code, errOut)
+	}
+	if _, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t)); code != 0 || !strings.Contains(errOut, "already paired") {
+		t.Fatalf("second setup: exit %d stderr %q", code, errOut)
+	}
+	if cfg := loadSetupConfig(t, e); cfg.Workspace != custom {
+		t.Fatalf("workspace moved to %q", cfg.Workspace)
+	}
+
+	// Another phone: the configured one is not around, this one is paired.
+	cfg := loadSetupConfig(t, e)
+	cfg.Serial = "adb-OTHER-ccc._adb-tls-connect._tcp"
+	if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	setVar(t, &knownPhoneWait, 0)
+	if _, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t)); code != 0 {
+		t.Fatalf("other phone: exit %d stderr %q", code, errOut)
+	}
+	if cfg := loadSetupConfig(t, e); cfg.Workspace != filepath.Join(home, "ADBuddy", "pixel-9-pro-xl") {
+		t.Fatalf("other phone's workspace %q", cfg.Workspace)
+	}
+}
+
+// The saved serial is the phone's mDNS name, which survives a new wireless
+// debugging port, even when this time it connected with `adb connect ip:port`.
+func TestSetupSavesTheStableSerial(t *testing.T) {
+	rules := append([]testutil.FakeRule{
+		{Match: "^devices$", Stdout: "List of devices attached\n192.0.2.10:41000\tdevice\n"},
+		{Match: "^mdns services$", Stdout: "List of discovered mdns services\nadb-AAA-bbb\t_adb-tls-connect._tcp\t192.0.2.10:41000\n"},
+		{Match: `^connect 192\.0\.2\.10:41000$`, Stdout: "connected to 192.0.2.10:41000\n"},
+	}, phoneRules()...)
+	e := newSetupEnv(t, rules)
+	setVar(t, &autoConnectWait, 0)
+	out, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws, "--json")
+	if code != 0 {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if cfg := loadSetupConfig(t, e); cfg.Serial != "adb-AAA-bbb._adb-tls-connect._tcp" {
+		t.Fatalf("serial %q", cfg.Serial)
+	}
+	if strings.Contains(out, "192.0.2.10") {
+		t.Fatalf("stdout reports the address: %s", out)
+	}
+}
+
+// A phone known only by ip:port (no guid to name it) is not saved: that
+// serial stops working when wireless debugging picks a new port.
+func TestSetupDoesNotSaveAnAddressAsSerial(t *testing.T) {
+	rules := append([]testutil.FakeRule{
+		{Match: "^devices$", Stdout: "List of devices attached\n192.0.2.10:41000\tdevice\n"},
+	}, phoneRules()...)
+	e := newSetupEnv(t, rules)
+	cfg := config.Default()
+	cfg.Serial = "192.0.2.10:41000"
+	if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != 0 {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if cfg := loadSetupConfig(t, e); cfg.Serial != "" {
+		t.Fatalf("serial %q", cfg.Serial)
+	}
+	if !strings.Contains(errOut, "not saving") {
+		t.Fatalf("no warning: %q", errOut)
+	}
+}
+
+// The configured agent is kept, with a note, when it is not in PATH and
+// --agent is not given.
+func TestSetupKeepsTheConfiguredAgent(t *testing.T) {
+	e := newSetupEnv(t, phoneRules())
+	cfg := config.Default()
+	cfg.Serial, cfg.Agent = "adb-AAA-bbb._adb-tls-connect._tcp", "codex"
+	if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	_, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != 0 {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if got := loadSetupConfig(t, e).Agent; got != "codex" {
+		t.Fatalf("agent %q", got)
+	}
+	if !strings.Contains(errOut, "codex is not in PATH") {
+		t.Fatalf("no note: %q", errOut)
+	}
+}
