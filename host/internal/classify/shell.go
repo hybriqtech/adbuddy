@@ -313,7 +313,7 @@ func (c *Classifier) evalWords(ws []Word, sc scope) []Finding {
 		if name == "r" || !fcLists(ws[1:]) {
 			return []Finding{unanalysable("shell.script", "fc runs commands from the shell history", vals, textScript)}
 		}
-	case "env", "read", "getopts", "set", "printf":
+	case "env", "read", "getopts", "set", "printf", "unset":
 		if why := setsHiddenVar(ws); why != "" {
 			return []Finding{unanalysable("shell.script", why, vals, textScript)}
 		}
@@ -390,6 +390,9 @@ func integerArgs(ws []Word) []Finding {
 		switch {
 		case w.Dynamic:
 			out = append(out, unanalysable("shell.script", "integer with a name only known on the phone", []string{"integer", w.Value}, textScript))
+		case strings.Contains(w.Value, "["):
+			// integer a[i] evaluates i, $(…) included.
+			out = append(out, unanalysable("shell.script", "integer of an array element, whose index is evaluated as arithmetic", []string{"integer", w.Value}, textScript))
 		case dangerousVar(w.Value):
 			out = append(out, assignFinding(w.Value, []string{"integer", w.Value}))
 		}
@@ -590,7 +593,10 @@ func trapRunsCode(args []Word) bool {
 
 // setsHiddenVar reports why env, read, getopts, set -A or printf -v assigns
 // a variable that hides code or a file (see hiddenVar), or a variable whose
-// name is only known on the phone, which may be one; "" if none does.
+// name is only known on the phone, which may be one; "" if none does. For
+// read, getopts, set -A and unset, a name with [ is an array element, whose
+// index mksh evaluates as arithmetic, $(…) included: it cannot be analysed
+// either.
 func setsHiddenVar(ws []Word) string {
 	why := func(cmd, name string) string {
 		if codeVars[name] {
@@ -621,8 +627,22 @@ func setsHiddenVar(ws []Word) string {
 			if w.Dynamic {
 				return ws[0].Value + " into a variable only known on the phone"
 			}
-			if name, _, _ := strings.Cut(w.Value, "?"); hiddenVar(name) {
+			name, _, _ := strings.Cut(w.Value, "?")
+			if hiddenVar(name) {
 				return why(ws[0].Value, name)
+			}
+			if strings.Contains(name, "[") {
+				return ws[0].Value + " into an array element, whose index is evaluated as arithmetic"
+			}
+		}
+	case "unset":
+		// unset [-fv] name…: unsetting a[i] evaluates i.
+		for _, w := range ws[1:] {
+			switch {
+			case w.Dynamic:
+				return "unset of a variable only known on the phone"
+			case strings.Contains(w.Value, "["):
+				return "unset of an array element, whose index is evaluated as arithmetic"
 			}
 		}
 	case "set":
@@ -637,6 +657,8 @@ func setsHiddenVar(ws []Word) string {
 					return "set -A into a variable only known on the phone"
 				} else if hiddenVar(n.Value) {
 					return why("set -A", n.Value)
+				} else if strings.Contains(n.Value, "[") {
+					return "set -A into an array element, whose index is evaluated as arithmetic"
 				}
 				return ""
 			}

@@ -282,3 +282,21 @@ func TestAgentsCoversDoctorAndBoundedCommands(t *testing.T) {
 		}
 	}
 }
+
+// T3 fix 6: comparing command output as a number needs confirmation, so
+// AGENTS.md tells the agent to compare it as text.
+func TestAgentsSaysCompareCommandOutputAsText(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "x")}); err != nil {
+		t.Fatal(err)
+	}
+	a := read(t, filepath.Join(dir, "AGENTS.md"))
+	for _, want := range []string{
+		"Compare command output as text: `[ \"$(getprop sys.boot_completed)\" = 1 ]`, not `-eq`",
+		"numeric comparisons of command output need confirmation",
+	} {
+		if !strings.Contains(a, want) {
+			t.Errorf("AGENTS.md lacks %q", want)
+		}
+	}
+}

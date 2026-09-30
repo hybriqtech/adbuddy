@@ -60,7 +60,10 @@ type varInfo struct {
 	nonNumeric bool // some assignment is not provably a number
 	unknown    bool // set from input or in a way the classifier cannot read
 	integer    bool // typeset -i, integer, or one of mkshIntegerVars
-	values     []*syntax.Word
+	// justified: typeset -L, -R or -Z cut or pad the value, so a number
+	// such as 16#ab may be read back as the name ab.
+	justified bool
+	values    []*syntax.Word
 }
 
 // varTable holds every assignment in a script, whatever its order: a
@@ -106,7 +109,7 @@ func (t *varTable) numeric(name string) bool {
 		return false
 	}
 	vi := t.info[name]
-	if vi == nil || !vi.assigned || vi.unknown {
+	if vi == nil || !vi.assigned || vi.unknown || vi.justified {
 		return false
 	}
 	return vi.integer || !vi.nonNumeric
@@ -141,11 +144,12 @@ func collectVars(f *syntax.File, tainted map[string]bool) *varTable {
 				t.word(n.Name.Value, n.Value)
 			}
 		case *syntax.DeclClause:
-			if declaresInteger(n.Variant.Value, n.Args) {
-				for _, a := range n.Args {
-					if a.Name != nil {
-						t.get(a.Name.Value).integer = true
-					}
+			integer, justified := declaresInteger(n.Variant.Value, n.Args), declaresJustified(n.Args)
+			for _, a := range n.Args {
+				if a.Name != nil {
+					vi := t.get(a.Name.Value)
+					vi.integer = vi.integer || integer
+					vi.justified = vi.justified || justified
 				}
 			}
 		case *syntax.CallExpr:
@@ -198,6 +202,21 @@ func declaresInteger(variant string, args []*syntax.Assign) bool {
 	return false
 }
 
+// declaresJustified reports a declaration with -L, -R or -Z, with or
+// without a width and alone or combined (typeset -R2, typeset -iZ3…).
+func declaresJustified(args []*syntax.Assign) bool {
+	for _, a := range args {
+		if a.Name != nil || a.Value == nil {
+			continue
+		}
+		if v := wordOf(a.Value); !v.Dynamic && (strings.HasPrefix(v.Value, "-") || strings.HasPrefix(v.Value, "+")) &&
+			strings.ContainsAny(v.Value[1:], "LRZ") {
+			return true
+		}
+	}
+	return false
+}
+
 // call records what a simple command assigns: the NAME=value words of env,
 // integer or a declaration run through a wrapper (builtin typeset …), and
 // the names that read, getopts, set -A or printf -v set.
@@ -220,25 +239,34 @@ func (t *varTable) call(ce *syntax.CallExpr) {
 	if !decl && !reads {
 		return
 	}
-	integer := false
+	integer, justified := false, false
 	for _, v := range static {
-		if v == "integer" {
+		switch v {
+		case "integer":
 			integer = true
+		case "read":
+			t.setUnknown("REPLY") // read with no name sets REPLY
+		case "getopts":
+			t.setUnknown("OPTARG")
 		}
 	}
-	if decl && !integer {
+	if decl {
 		var opts []*syntax.Assign
 		for _, w := range ce.Args {
 			opts = append(opts, &syntax.Assign{Naked: true, Value: w})
 		}
-		integer = declaresInteger("", opts)
+		integer = integer || declaresInteger("", opts)
+		justified = declaresJustified(opts)
+	}
+	mark := func(name string) {
+		vi := t.get(name)
+		vi.integer = vi.integer || integer
+		vi.justified = vi.justified || justified
 	}
 	for _, w := range ce.Args[1:] {
 		if name, val, ok := splitAssignWord(w); ok && decl {
 			t.word(name, val)
-			if integer {
-				t.get(name).integer = true
-			}
+			mark(name)
 			continue
 		}
 		v := wordOf(w)
@@ -250,8 +278,8 @@ func (t *varTable) call(ce *syntax.CallExpr) {
 				t.setUnknown(name)
 			}
 		}
-		if integer && isName(v.Value) {
-			t.get(v.Value).integer = true
+		if decl && isName(v.Value) {
+			mark(v.Value)
 		}
 	}
 }
@@ -528,21 +556,43 @@ func baseOnly(text string) bool {
 // testFindings checks the arguments of test or [ (mksh's builtin): the
 // operands of -eq, -ne, -lt, -le, -gt and -ge are arithmetic, and a word
 // that splits on the phone could become one of those operators with its
-// operands.
+// operands. A word only known on the phone and not proven to be a number,
+// with an operand on each side, may be one of those operators too
+// (op=-eq; [ "$x" "$op" 1 ]): its neighbours must then be numbers, unless
+// they are static operators that mksh cannot read as an operand.
 func (t *varTable) testFindings(ws []Word) []Finding {
+	// The operands are ws[first:last]: not the command name, nor the
+	// closing ] of [.
+	first, last := 1, len(ws)
+	if ws[0].Value == "[" && last > 1 && !ws[last-1].Dynamic && ws[last-1].Value == "]" {
+		last--
+	}
 	var bad []string
+	seen := map[int]bool{}
+	flag := func(j int) {
+		if !seen[j] {
+			seen[j] = true
+			bad = append(bad, ws[j].Value)
+		}
+	}
 	for i := 1; i < len(ws); i++ {
 		w := ws[i]
 		if w.node != nil && !t.splitSafe(w.node) {
-			bad = append(bad, w.Value)
+			flag(i)
 			continue
 		}
-		if w.Dynamic || !intTestOp[w.Value] {
-			continue
-		}
-		for _, j := range []int{i - 1, i + 1} {
-			if j >= 1 && j < len(ws) && !t.wordArith(ws[j]) {
-				bad = append(bad, ws[j].Value)
+		switch {
+		case !w.Dynamic && intTestOp[w.Value]:
+			for _, j := range []int{i - 1, i + 1} {
+				if j >= 1 && j < len(ws) && !t.wordArith(ws[j]) {
+					flag(j)
+				}
+			}
+		case w.Dynamic && i > first && i+1 < last && !t.wordArith(w):
+			for _, j := range []int{i - 1, i + 1} {
+				if !t.testOperatorWord(ws[j]) && !t.wordArith(ws[j]) {
+					flag(j)
+				}
 			}
 		}
 	}
@@ -550,6 +600,29 @@ func (t *varTable) testFindings(ws []Word) []Finding {
 		return nil
 	}
 	return []Finding{arithFinding(ws[0].Value + " " + strings.Join(bad, " "))}
+}
+
+// testOperatorWord reports a static operator of test or [ that mksh cannot
+// evaluate as an arithmetic operand: =, !=, !, ( and ) are syntax errors
+// there. -a and -o are not: as operands they read the variables a and o,
+// so they only count when the script and its enclosing shells never set
+// those variables (the value then comes from adbd's environment).
+func (t *varTable) testOperatorWord(w Word) bool {
+	if w.Dynamic {
+		return false
+	}
+	switch w.Value {
+	case "=", "!=", "!", "(", ")":
+		return true
+	case "-a", "-o":
+		name := w.Value[1:]
+		if t == nil {
+			return true
+		}
+		vi := t.info[name]
+		return !t.tainted[name] && (vi == nil || !vi.assigned)
+	}
+	return false
 }
 
 // argsFindings checks commands whose arguments mksh evaluates as

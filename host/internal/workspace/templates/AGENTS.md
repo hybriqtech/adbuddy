@@ -26,7 +26,7 @@ You are working in an ADBuddy environment. From here you manage the user's Andro
 
 ## Rules
 
-1. Look before you touch: read the current state (`dumpsys`, `settings get`, `pm list packages`…) before changing anything.
+1. Look before you touch: read the current state (`dumpsys`, `settings get`, `pm list packages`…) before changing anything. Compare command output as text: `[ "$(getprop sys.boot_completed)" = 1 ]`, not `-eq`; numeric comparisons of command output need confirmation.
 2. Prefer the reversible form: disable (`pm disable-user --user 0 <pkg>`) before uninstalling, `pm uninstall --user 0 <pkg>` before a full uninstall, and `mv` into a folder instead of `rm`.
 3. One change per command. ADBuddy can only undo commands that make a single change: a chain such as `a; b` with two changes needs the user's confirmation and has no inverse.
 4. Use absolute paths on the phone (`/sdcard/…`).

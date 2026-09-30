@@ -225,3 +225,163 @@ func TestCommandsThatRunTheirArgumentAreUnwrapped(t *testing.T) {
 		{sh("script -q -c ls /dev/null"), Green, "fs.ls", "", false},
 	})
 }
+
+// T3 fix 6 (I-1): a word only known on the phone can be an integer
+// operator of test or [: its neighbours are then evaluated as arithmetic.
+func TestDynamicTestOperatorIsSpecial(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		// The cases of the brief.
+		`x='a[$(reboot)]'; op=-eq; [ "$x" "$op" 1 ]`,
+		`x='a[$(reboot)]'; op=-eq; test "$x" "$op" 1`,
+		`sh -c '[ "$1" "$2" "$3" ]' _ 'a[$(reboot)]' -eq 1`,
+		// Other forms.
+		`x='a[$(reboot)]'; [ "$x" "$(echo -eq)" 1 ]`,
+		`[ "$X" "$OP" 1 ]`,
+		`x='a[$(reboot)]'; op=-eq; [ 1 "$op" "$x" ]`,
+		`x='a[$(reboot)]'; op=-eq; [ "$x" = 1 -o "$x" "$op" 1 ]`,
+		// A static word next to it is evaluated too: -n reads the variable n.
+		`n='a[$(reboot)]'; op=-eq; [ -n "$op" 1 ]`,
+		// -a and -o read the variables a and o when they are operands.
+		`a='x[$(reboot)]'; op=-eq; [ -a "$op" 1 ]`,
+		`o='x[$(reboot)]'; op=-eq; [ 1 "$op" -o ]`,
+		// [[ ]] only takes literal operators: a dynamic one does not parse.
+		`x='a[$(reboot)]'; op=-eq; [[ $x $op 1 ]]`,
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special || !hasRule(r, "shell.script") && !hasRule(r, "shell.parse") {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+	for _, line := range []string{
+		// The cases of the brief keep their level.
+		`[ "$a" = "$b" ]`,
+		`[ -f "$F" ]`,
+		`[ "$x" != "" ]`,
+		`test -n "$x"`,
+		// Static operators next to a dynamic word.
+		`[ "$a" = x -a "$b" = y ]`,
+		`[ "$a" != x -o "$b" = y ]`,
+		`[ ! "$a" = x ]`,
+		`[ \( "$a" = x \) ]`,
+		// A dynamic word proven to be a number is no operator.
+		`i=1; [ 1 -eq "$i" ]`,
+		`i=1; n=2; [ "$n" -gt "$i" ]`,
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Green || r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want green", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+}
+
+// T3 fix 6 (I-2): typeset -L, -R and -Z cut or pad the value, so a number
+// such as 16#ab can become the name ab.
+func TestJustifiedVariableIsNotNumeric(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		// The cases of the brief.
+		"typeset -R2 x=16#ab; ab='a[$(reboot)]'; echo $((x))",
+		"x=0xab; typeset -R2 x; ab='a[$(reboot)]'; echo $((x))",
+		`typeset -R2 x=16#ab; ab='a[$(reboot)]'; [ "$x" -eq 1 ]`,
+		// Every option and declaration.
+		"typeset -L2 x=16#ab; echo $((x))",
+		"typeset -Z x=16#ab; echo $((x))",
+		"typeset -R x=16#ab; echo $((x))",
+		"typeset -iR2 x=16#ab; echo $((x))",
+		"typeset -i -R2 x=16#ab; echo $((x))",
+		"typeset -xZ3 x=16#ab; echo $((x))",
+		"export -R2 x=16#ab; echo $((x))",
+		"readonly -R2 x=16#ab; echo $((x))",
+		"f() { local -R2 x=16#ab; echo $((x)); }",
+		"integer -R2 x=16#ab; echo $((x))",
+		"builtin typeset -R2 x=16#ab; echo $((x))",
+		"x=16#ab; export -L2 x; echo $((x))",
+		"x=16#ab; echo $((x)); typeset -R2 x",
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special || !hasRule(r, "shell.script") {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special shell.script", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+	for _, line := range []string{
+		"typeset -i x=16#ab; echo $((x))",
+		"typeset -x x=16#ab; echo $((x))",
+		"typeset -R2 s=ab; echo $s",
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Green || r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want green", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+}
+
+// T3 fix 6 (M-1, M-2): unset, read, getopts, integer and set -A evaluate the
+// index of an array element they name, and read and getopts set REPLY and
+// OPTARG from input.
+func TestArrayNamesAndImplicitVariablesAreSpecial(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		// The cases of the review.
+		"unset 'a[$(reboot)]'",
+		"read 'a[$(reboot)]'",
+		"getopts a 'a[$(reboot)]'",
+		"integer 'a[$(reboot)]'",
+		"set -A 'a[$(reboot)]' 1",
+		`x='a[$(reboot)]'; unset "$x"`,
+		"echo 'a[$(reboot)]' | { read; echo $((REPLY)); REPLY=0; }",
+		// Other forms.
+		"unset -v 'a[$(reboot)]'",
+		"unset $X",
+		"read -r 'a[$(reboot)]'",
+		"read 'a[$(reboot)]?prompt'",
+		"integer 'a[$(reboot)]=1'",
+		"set +A 'a[$(reboot)]' 1",
+		"getopts a o; echo $((OPTARG)); OPTARG=0",
+		"read -r; echo $((REPLY))",
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+	for _, k := range []struct {
+		line  string
+		level Level
+	}{
+		{"unset x", Red},
+		{"read -r line", Red},
+		{"getopts ab o", Red},
+		{"set -A a 1 2", Red},
+		{"integer i=1", Red},
+	} {
+		r := c.Classify(sh(k.line))
+		if r.Level != k.level || r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want %v not special", k.line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.level)
+		}
+	}
+}
+
+// T3 fix 6: AGENTS.md tells the agent to compare command output as text,
+// which stays green.
+func TestComparingCommandOutputAsTextIsGreen(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		`[ "$(getprop sys.boot_completed)" = 1 ]`,
+		`until [ "$(getprop sys.boot_completed)" = 1 ]; do sleep 1; done`,
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Green || r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want green", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+	for _, line := range []string{
+		`[ "$(getprop sys.boot_completed)" -eq 1 ]`,
+		`c=$(getprop x); echo $((c+1))`,
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+}
