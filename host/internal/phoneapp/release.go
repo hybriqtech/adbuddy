@@ -30,9 +30,15 @@ var ErrChecksum = errors.New("the APK does not match its SHA-256")
 
 // Download fetches the latest APK into dir, checks it against the published
 // SHA-256 and returns its path. base is ReleaseURL (or a test server).
+// Without a client or a deadline in ctx it takes at most downloadTimeout.
 func Download(ctx context.Context, client *http.Client, base, dir string) (string, error) {
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: downloadTimeout}
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, downloadTimeout)
+		defer cancel()
 	}
 	sum, err := get(ctx, client, base+APKName+".sha256", 1024)
 	if err != nil {

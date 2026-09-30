@@ -9,6 +9,8 @@ package phoneapp
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,22 +33,46 @@ const (
 	SecureWrites = "android.permission.WRITE_SECURE_SETTINGS"
 )
 
+// Time limits. Every adb command gets its own, derived from the caller's
+// context, so a phone that stops answering cannot hang setup or serve.
+// Variables so the tests can shorten them.
+var (
+	cmdTimeout       = 15 * time.Second // any adb command but install
+	installTimeout   = 3 * time.Minute  // adb install
+	handshakeTimeout = 15 * time.Second // the whole Handshake: write and pings
+	consentGrace     = 15 * time.Second // AskConsent: at most timeout + this
+	downloadTimeout  = 5 * time.Minute  // Download without a deadline or client
+)
+
 // ADB runs adb against the active phone (an adb.Runner with Serial set).
 type ADB interface {
 	Run(ctx context.Context, dir string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
 }
 
-func run(ctx context.Context, a ADB, args ...string) (string, error) {
+// runFor runs one adb command with at most d to finish.
+func runFor(ctx context.Context, a ADB, d time.Duration, stdin io.Reader, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
 	var out, errb bytes.Buffer
-	code, err := a.Run(ctx, "", args, nil, &out, &errb)
+	code, err := a.Run(ctx, "", args, stdin, &out, &errb)
 	if err != nil {
-		return "", err
+		if cerr := ctx.Err(); cerr != nil && !errors.Is(err, cerr) {
+			return "", fmt.Errorf("adb %s: %w (%v)", args[0], cerr, err)
+		}
+		return "", fmt.Errorf("adb %s: %w", args[0], err)
 	}
 	text := strings.ReplaceAll(out.String(), "\r", "")
 	if code != 0 {
+		if cerr := ctx.Err(); cerr != nil {
+			return text, fmt.Errorf("adb %s: %w", args[0], cerr)
+		}
 		return text, fmt.Errorf("adb %s: exit %d: %s", args[0], code, strings.TrimSpace(errb.String()+" "+text))
 	}
 	return text, nil
+}
+
+func run(ctx context.Context, a ADB, args ...string) (string, error) {
+	return runFor(ctx, a, cmdTimeout, nil, args...)
 }
 
 func shell(ctx context.Context, a ADB, words ...string) (string, error) {
@@ -54,23 +80,30 @@ func shell(ctx context.Context, a ADB, words ...string) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
-// InstalledVersion returns the app's versionName, or "" when it is not installed.
+// InstalledVersion returns the app's versionName, or "" when it is not
+// installed for user 0 (after `pm uninstall -k --user 0` dumpsys still lists
+// the package, with "User 0: … installed=false").
 func InstalledVersion(ctx context.Context, a ADB) (string, error) {
 	out, err := shell(ctx, a, "dumpsys", "package", Package)
 	if err != nil {
 		return "", err
 	}
+	version := ""
 	for _, line := range strings.Split(out, "\n") {
-		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "versionName="); ok {
-			return v, nil
+		line = strings.TrimSpace(line)
+		if v, ok := strings.CutPrefix(line, "versionName="); ok && version == "" {
+			version = v
+		}
+		if strings.HasPrefix(line, "User 0:") && strings.Contains(line, " installed=false") {
+			return "", nil
 		}
 	}
-	return "", nil
+	return version, nil
 }
 
 // Install installs (or updates, keeping data) the APK at path.
 func Install(ctx context.Context, a ADB, path string) error {
-	out, err := run(ctx, a, "install", "-r", path)
+	out, err := runFor(ctx, a, installTimeout, nil, "install", "-r", path)
 	if err != nil {
 		return err
 	}
@@ -125,9 +158,12 @@ var ErrConsentDenied = errors.New("setup was refused in the app")
 // ErrConsentTimeout means nobody answered in time.
 var ErrConsentTimeout = errors.New("no answer in the app")
 
-// AskConsent opens the consent screen (spec §3.1 step 6.1) and waits for the answer.
+// AskConsent opens the consent screen (spec §3.1 step 6.1) and waits for the
+// answer. It takes at most timeout + consentGrace, even if adb hangs.
 func AskConsent(ctx context.Context, a ADB, hostName string, timeout, every time.Duration) error {
-	if _, err := Call(ctx, a, "requestSetup", "host:s:"+hostName); err != nil {
+	ctx, cancel := context.WithTimeout(ctx, timeout+consentGrace)
+	defer cancel()
+	if _, err := Call(ctx, a, "requestSetup", "host:s:"+HostName(hostName)); err != nil {
 		return err
 	}
 	if _, err := shell(ctx, a, "am", "start", "-n", Activity, "-a", SetupAction); err != nil {
@@ -139,11 +175,14 @@ func AskConsent(ctx context.Context, a ADB, hostName string, timeout, every time
 		if err != nil {
 			return err
 		}
-		switch Consent(res["consent"]) {
+		switch c := Consent(res["consent"]); c {
 		case ConsentGranted:
 			return nil
 		case ConsentDenied:
 			return ErrConsentDenied
+		case ConsentPending:
+		default:
+			return fmt.Errorf("unexpected consent from the app: %q", c)
 		}
 		if time.Now().After(deadline) {
 			return ErrConsentTimeout
@@ -166,8 +205,14 @@ func Grant(ctx context.Context, a ADB) error {
 // its foreground service when the host hands over the token and keep the
 // channel open while the screen is off (Android 12+ restricts both).
 func AllowBackground(ctx context.Context, a ADB) error {
-	_, err := shell(ctx, a, "dumpsys", "deviceidle", "whitelist", "+"+Package)
-	return err
+	out, err := shell(ctx, a, "dumpsys", "deviceidle", "whitelist", "+"+Package)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(out, "Added:") {
+		return fmt.Errorf("dumpsys deviceidle: %s", out)
+	}
+	return nil
 }
 
 // EnableAccessibility adds the app's service to the enabled ones without
@@ -188,16 +233,42 @@ func EnableAccessibility(ctx context.Context, a ADB) (previous string, err error
 	return previous, err
 }
 
+// A11yEnabled reports whether the app's accessibility service is in list
+// (the value of enabled_accessibility_services), in its long form
+// (pkg/pkg.a11y.X) or its short one (pkg/.a11y.X), ignoring case.
+func A11yEnabled(list string) bool {
+	return hasComponent(list, A11yService)
+}
+
+// hasComponent reports whether the colon-separated list holds svc, in either
+// form, ignoring case.
+func hasComponent(list, svc string) bool {
+	want := longComponent(svc)
+	for _, s := range strings.Split(list, ":") {
+		if strings.EqualFold(longComponent(strings.TrimSpace(s)), want) {
+			return true
+		}
+	}
+	return false
+}
+
+// longComponent turns "pkg/.Cls" into "pkg/pkg.Cls"; anything else is kept.
+func longComponent(c string) string {
+	if pkg, cls, ok := strings.Cut(c, "/"); ok && strings.HasPrefix(cls, ".") {
+		return pkg + "/" + pkg + cls
+	}
+	return c
+}
+
 // MergeServices adds svc to a colon-separated list of components ("null"
-// or empty = none) unless it is already there.
+// or empty = none) unless it is already there, in either form. For the app's
+// service that is A11yEnabled(list).
 func MergeServices(list, svc string) string {
 	if list == "" || list == "null" {
 		return svc
 	}
-	for _, s := range strings.Split(list, ":") {
-		if strings.EqualFold(s, svc) {
-			return list
-		}
+	if hasComponent(list, svc) {
+		return list
 	}
 	return list + ":" + svc
 }
@@ -224,35 +295,53 @@ func TunnelOpen(ctx context.Context, a ADB, port int) (bool, error) {
 	return false, nil
 }
 
+// tokenRe is the shape of the host's token: 32 random bytes in hex.
+var tokenRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 // Handshake hands the token and port to the app (spec §5.2). They travel on
 // stdin (`content write`), never in a command line: on the PC and on the
 // phone other processes, the agent's included, can read command lines, and
 // with the token the agent could answer its own confirmations.
+//
+// Each handshake carries a new nonce, and it only counts once ping returns
+// that nonce and the port: after the first setup ping always had the right
+// port, even when the app had not stored the new token. It takes at most
+// handshakeTimeout.
 func Handshake(ctx context.Context, a ADB, token string, port int, hostName string) error {
-	body, err := json.Marshal(map[string]any{"token": token, "port": port, "host": hostName})
+	if !tokenRe.MatchString(token) {
+		return errors.New("handshake: the token is not 64 lowercase hex digits")
+	}
+	if port < 1024 || port > 65535 {
+		return fmt.Errorf("handshake: port %d out of range", port)
+	}
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return err
+	}
+	nonce := hex.EncodeToString(raw[:])
+	body, err := json.Marshal(map[string]any{"token": token, "port": port, "host": HostName(hostName), "nonce": nonce})
 	if err != nil {
 		return err
 	}
-	var out, errb bytes.Buffer
+	ctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
+	defer cancel()
 	cmd := shq.Join("content", "write", "--uri", "content://"+Authority+"/handshake")
-	code, err := a.Run(ctx, "", []string{"shell", cmd}, bytes.NewReader(body), &out, &errb)
-	if err != nil {
-		return err
-	}
-	if code != 0 {
-		return fmt.Errorf("the app refused the handshake: %s", strings.TrimSpace(errb.String()))
+	if _, err := runFor(ctx, a, cmdTimeout, bytes.NewReader(body), "shell", cmd); err != nil {
+		return fmt.Errorf("the app refused the handshake: %w", err)
 	}
 	// Whether the app took it is checked with ping: `content write` does not
 	// always report errors in its exit code.
 	// The app stores the handshake on its own thread once the pipe closes:
 	// give it a moment before deciding it did not take it.
 	var got string
+	fresh := false
 	for i := 0; i < pingTries; i++ {
 		res, err := Call(ctx, a, "ping")
 		if err != nil {
 			return err
 		}
-		if got = res["port"]; got == strconv.Itoa(port) {
+		got, fresh = res["port"], res["nonce"] == nonce
+		if got == strconv.Itoa(port) && fresh {
 			return nil
 		}
 		select {
@@ -261,7 +350,7 @@ func Handshake(ctx context.Context, a ADB, token string, port int, hostName stri
 		case <-time.After(pingEvery):
 		}
 	}
-	return fmt.Errorf("the app did not take the handshake (port %q)", got)
+	return fmt.Errorf("the app did not take the handshake (port %q, this handshake's nonce: %v)", got, fresh)
 }
 
 // How long Handshake waits for the app to take the token.
