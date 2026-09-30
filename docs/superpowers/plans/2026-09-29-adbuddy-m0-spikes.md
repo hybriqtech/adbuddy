@@ -33,7 +33,7 @@
 - **Android SDK:** `/c/Users/Jose/AppData/Local/Android/Sdk` (build-tools `34.0.0`, platform `android-30`).
 - **JDK:** `/c/Users/Jose/AppData/Local/Android/jdk-17.0.20.1+1`
 - **Claude Code:** `C:\Users\Jose\.local\bin\claude.exe`
-- **Tailscale:** PC `rtx5080` = `100.111.119.69`; móvil `pixel-9-pro-xl` = `<ip-tailnet>`.
+- **Tailscale:** PC `rtx5080` = `<ip-tailnet-pc>`; móvil `pixel-9-pro-xl` = `<ip-tailnet>`.
 - **Shell: Git Bash.**
   - `MSYS_NO_PATHCONV=1` para comandos adb con rutas del móvil (lo exporta `spikes/env.sh`).
   - `cygpath -w` para las rutas que se pasan a herramientas Java o Windows.
