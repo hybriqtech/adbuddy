@@ -76,7 +76,7 @@ Pairing with the QR code needs the same network (it uses mDNS). If `setup` sees 
 
 Anything that could cut the connection or disable ADBuddy (Wi-Fi, debugging settings, `adb tcpip`/`usb`/`disconnect`/`kill-server`, touching the ADBuddy app) is always 🔴, whatever your own rules say.
 
-`adb shell` lines are parsed like the phone's shell does, and the most dangerous part wins. ADBuddy only reads the shell it lists: plain commands, `;`, `&&`, `||`, pipes, `if`, `for … in`, `while`, `( )`, `{ }`, `[ … ]`, `$(…)`, `sh -c`, `su -c`, redirections to `/dev/null` and variables of the script's own, with lower-case names. Anything else (`[[ ]]`, `(( ))`, `case`, functions, `typeset`, `export`, arrays, upper-case variables, builtins such as `trap` or `eval`) is not analysed: it is 🔴 and cannot be allowed for the whole session.
+`adb shell` lines are parsed like the phone's shell does, and the most dangerous part wins. ADBuddy only reads the shell it lists: plain commands, `;`, `&&`, `||`, pipes, `if`, `for … in`, `while`, `until`, here-docs, `!`, `( )`, `{ }`, `[ … ]`, `$(…)`, `sh -c`, `su -c`, redirections to `/dev/null`, redirections between descriptors (`2>&1`) and variables of the script's own, with lower-case names (reading upper-case ones, such as `$EXTERNAL_STORAGE`, is fine). Anything else (`[[ ]]`, `(( ))`, `case`, functions, `typeset`, `export`, arrays, assigning upper-case variables, builtins such as `trap` or `eval`) is not analysed: it is 🔴 and cannot be allowed for the whole session. A write to a file (`> /sdcard/x`) is an ordinary 🔴 that you can allow for the session.
 
 ## Configuration
 

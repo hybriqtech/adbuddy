@@ -6,6 +6,7 @@ Notas que hay que incorporar cuando se escriban esos planes (desde el 2026-09-29
 
 Spec: `docs/superpowers/specs/2026-09-30-adbuddy-m2.5-clasificador-lista-blanca-design.md` (§7). M2.5a (clasificador con lista blanca, corpus como datos, oráculo de mksh y arnés del emulador) está hecho.
 
+- **La imagen `android-37.0` google_apis no sirve para los tests de la app:** con el emulador 37.1.11, `surfaceflinger` aborta cada 9-15 s desde el arranque (`Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma`, hilo `RegionSampling`) y Android reinicia su sistema en bucle; pasa con `-gpu swiftshader_indirect`, `host` y `guest` y desactivando GLDMA/GLDMA2. El oráculo de M2.5a lo esquiva parando el sistema (`su 0 stop`), pero la app necesita el sistema en marcha. Hay que probar otra imagen (por ejemplo `android-36` google_apis o una `*_atd`), y eso es una instalación que decide el usuario.
 - **Tests instrumentados** (`connectedDebugAndroidTest`) y **tests del host contra el emulador** (paquete `host/internal/emutest`, con `ADBUDDY_EMULATOR_SERIAL`, que `scripts/emulator.sh start` ya exporta).
 - **Validaciones manuales de M2 que se automatizan:** 1 (`TokenProvider` y el uid del shell), 2 (`content write` por stdin), 3 (servicio en primer plano desde el proveedor), 6 (Cortar acceso y Reactivar) y 10 (`ContentObserver` de `adb_wifi_enabled`). La 7 (extremo a extremo), solo si sale sin tocar el protocolo ni la app.
 - **Primera tarea del plan:** comprobar si el emulador sobrevive a `adb_enabled=0` y vuelve al reactivar; de eso depende cómo se automatiza la 6.
@@ -20,6 +21,16 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 - `[[ ]]` con operadores de texto y de fichero;
 - nombres de variable en mayúsculas que no sean de la shell ni del entorno (hoy solo minúsculas: `PKG=…` pide confirmación);
 - `print`, `wait`, `unset` de nombres propios.
+
+## Aplazados de M2.5a (revisión final)
+
+- `checkDumpsys` no mira la primera palabra tras `dumpsys`: `dumpsys --reset` o `dumpsys set` siguen 🟢 (heredado de M2; `checks_read.go`).
+- El oráculo cuenta como "no se ejecuta" una centinela que dispara más de 1 s después de acabar el caso. Lo que queda en segundo plano ya es 🔴 especial por construcción, pero el oráculo no lo demuestra.
+- El grabador no mata procesos de otros usuarios que sobreviven a un caso (solo darían falsos "se ejecutó") ni borra el fichero de sesión antes de cada caso.
+- Si salta el `-timeout` de Go durante la grabación, el sistema Android del emulador queda parado (`su 0 start` para arrancarlo).
+- Muchos "no se ejecuta" del oráculo dependen de la imagen (`su` de AOSP frente a Magisk, `busybox`, `script`…): hoy todos son 🔴 especial, pero si se admiten en la lista blanca hay que regrabar en otra imagen.
+- `emulator.yml`: el paso de grabar pasaría con "no tests to run" si se renombra `TestRecordOracle`; y los límites (60 min de test, 90 de job) se pueden bajar cuando se vea lo que tarda en CI.
+- `xargs -n1` y `xargs -I{}` (opción y valor pegados) piden confirmación como especiales.
 
 ## M3 · Chat: daemon con PTY
 
