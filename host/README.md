@@ -54,6 +54,18 @@ go build -o adbuddy ./cmd/adbuddy      # adbuddy.exe on Windows
 
 `adbuddy env init [--force]` creates or refreshes the environment without starting anything.
 
+## Remote (Tailscale or another network)
+
+ADBuddy finds the phone by mDNS, which only works on the same network. Over Tailscale (or a Wi-Fi that blocks mDNS) connect by IP address and port instead:
+
+1. Pair with the code: `adbuddy setup --code`. On that screen (Wireless debugging → Pair device with pairing code) Android shows the phone's Tailscale IP when Tailscale is on; type that IP and port and the 6-digit code.
+2. Give the connection address, the IP:port on the main Wireless debugging screen: either with `adbuddy setup --code --connect 100.64.0.5:41234`, or type it when setup asks "Connection address" (only at a terminal). Without either, setup fails with `DEVICE_NOT_FOUND` as before.
+3. Later, when the address changes, connect again with `adbuddy connect <ip:port>`. It checks that the phone at that address is the one you set up (`WRONG_PHONE` otherwise, and nothing is saved) and saves the address in `config.toml`; `adbuddy serve` and `adbuddy setup` try it when mDNS does not find the phone.
+
+The connection port changes each time wireless debugging is turned on again: `serve` then fails with `DEVICE_NOT_FOUND` and asks you to run `adbuddy connect <new ip:port>`.
+
+Pairing with the QR code needs the same network (it uses mDNS). If `setup` sees no phone with wireless debugging on the network after a few seconds, it says so and suggests `adbuddy setup --code`.
+
 ## Risk levels
 
 | Level | Examples | What happens |
@@ -74,6 +86,7 @@ Anything that could cut the connection or disable ADBuddy (Wi-Fi, debugging sett
 adb_path = ""                # empty: ADBuddy's own platform-tools (installed by setup)
 adb_server_port = 5038       # ADBuddy's own adb server
 serial = ""                  # only needed with several phones
+address = ""                 # set by setup and `adbuddy connect`: the last IP:port that worked (e.g. over Tailscale)
 workspace = ""               # set by setup: ~/ADBuddy/<phone model>; `run` and `journal` follow the running `serve`
 confirm_timeout = "2m"
 language = "es"              # descriptions in the journal: en or es

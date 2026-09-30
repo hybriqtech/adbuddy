@@ -94,17 +94,34 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 
 			runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
 			fmt.Fprintf(app.Stderr, "Waiting for the phone on ADBuddy's adb server (port %d)…\n", e.cfg.ADBServerPort)
-			active, err := findPhone(ctx, runner, serial, deviceWait)
+			// The phone that mDNS does not find (Tailscale, another network) is
+			// tried at the address that worked last time.
+			addr := ""
+			if serial == e.cfg.Serial {
+				addr = e.cfg.Address
+			}
+			const reconnect = "run `adbuddy connect <new ip:port>` with the IP address and port on the phone's Wireless debugging screen, then `adbuddy serve` again."
+			active, used, verified, err := findKnownPhone(ctx, runner, serial, addr, deviceWait, app.Stderr)
 			switch {
 			case err != nil && ctx.Err() != nil:
 				return Interrupted()
+			case hasCode(err, "WRONG_PHONE"):
+				return NewError("WRONG_PHONE", AsError(err).Message, "That address is another phone now: "+reconnect)
+			case hasCode(err, "DEVICE_NOT_FOUND") || hasCode(err, "CONNECT_FAILED"):
+				return TransientError("DEVICE_NOT_FOUND", "the phone did not show up by itself, and its saved address does not answer: "+AsError(err).Message,
+					"The port changes each time wireless debugging is turned on: "+reconnect)
+			case hasCode(err, "DEVICE_UNREADABLE"):
+				return err
 			case errors.Is(err, adb.ErrNoDevice):
 				return TransientError("DEVICE_NOT_FOUND", "no phone in state `device` on adb server port "+strconv.Itoa(e.cfg.ADBServerPort),
-					"Turn on wireless debugging on the phone and keep it on the same Wi-Fi as this PC; if it was never paired, run `adbuddy setup`.")
+					"Turn on wireless debugging on the phone and keep it on the same Wi-Fi as this PC; if it was never paired, run `adbuddy setup`; on another network (e.g. Tailscale), run `adbuddy connect <ip:port>`.")
 			case errors.Is(err, adb.ErrManyDevices):
 				return NewError("MULTIPLE_DEVICES", "more than one phone is connected", "Pass --serial <serial> (see `adb -P "+strconv.Itoa(e.cfg.ADBServerPort)+" devices`) or set serial in "+e.dirs.ConfigFile()+".")
 			case err != nil:
 				return NewError("ADB_FAILED", err.Error(), "Check the adb path ("+adbPath+").")
+			}
+			if used != "" && !verified {
+				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s).\n", used, unverifiedWhy(serial))
 			}
 			runner.Serial = active
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.

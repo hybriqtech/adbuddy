@@ -1,0 +1,316 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+	"github.com/hybriqtech/adbuddy/host/internal/testutil"
+)
+
+// remoteRules: a phone paired with the code that mDNS never finds (the PC
+// is on Tailscale): `adb devices` lists it only by its address, and serialno
+// is what the phone at that address reports.
+func remoteRules(serialno string) []testutil.FakeRule {
+	return append(append(addrRules(serialno),
+		testutil.FakeRule{Match: "^mdns services$", Stdout: "List of discovered mdns services\n"},
+		testutil.FakeRule{Match: "^disconnect "},
+	), phoneRules()...)
+}
+
+// shortWaits makes the mDNS waits of setup and serve short.
+func shortWaits(t *testing.T) {
+	setVar(t, &codeConnectWait, 50*time.Millisecond)
+	setVar(t, &codeAutoConnectWait, 0)
+	setVar(t, &connectWait, 50*time.Millisecond)
+	setVar(t, &autoConnectWait, 0)
+	setVar(t, &knownPhoneWait, 50*time.Millisecond)
+	setVar(t, &deviceWait, 50*time.Millisecond)
+	setVar(t, &pairingWait, 200*time.Millisecond)
+}
+
+func TestSetupCodeWithConnect(t *testing.T) {
+	shortWaits(t)
+	e := newSetupEnv(t, remoteRules("AAA"))
+	out, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--connect", tsAddr, "--adb", fakeADB(t), "--workspace", e.ws, "--json")
+	if code != 0 {
+		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	var env struct{ Data setupResult }
+	if err := json.Unmarshal([]byte(out), &env); err != nil || env.Data.Serial != phoneSerial || env.Data.Active != tsAddr || env.Data.Address != tsAddr {
+		t.Fatalf("stdout %s (%v)", out, err)
+	}
+	if cfg := loadSetupConfig(t, e); cfg.Serial != phoneSerial || cfg.Address != tsAddr {
+		t.Fatalf("config %+v", cfg)
+	}
+	if !phoneCallsUse(t, e.log, tsAddr) {
+		t.Fatalf("calls to the phone not sent to %s: %q", tsAddr, loggedCalls(t, e.log))
+	}
+	calls := strings.Join(loggedCalls(t, e.log), "|")
+	if !strings.Contains(calls, "shell getprop ro.serialno") || !strings.Contains(calls, "shell getprop service.adb.tcp.port") {
+		t.Fatalf("identity or invariant not checked: %q", calls)
+	}
+}
+
+// At a terminal, setup asks for the address when mDNS does not find the phone.
+func TestSetupCodeAsksForTheAddress(t *testing.T) {
+	shortWaits(t)
+	setVar(t, &isTerminal, func(any) bool { return true })
+	e := newSetupEnv(t, remoteRules("AAA"))
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n"+tsAddr+"\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != 0 || !strings.Contains(errOut, "Connection address (IP:port on the Wireless debugging screen)") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if cfg := loadSetupConfig(t, e); cfg.Serial != phoneSerial || cfg.Address != tsAddr {
+		t.Fatalf("config %+v", cfg)
+	}
+}
+
+// Another phone at the address given: WRONG_PHONE, and nothing is saved.
+func TestSetupConnectToAnotherPhone(t *testing.T) {
+	shortWaits(t)
+	e := newSetupEnv(t, remoteRules("ZZZ"))
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--connect", tsAddr, "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitFailure || !strings.Contains(errOut, "WRONG_PHONE") || !strings.Contains(errOut, wrongPhoneFix) {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if exists(filepath.Join(e.cfgDir, "config.toml")) || exists(e.ws) {
+		t.Fatal("saved after WRONG_PHONE")
+	}
+}
+
+// Without --connect nor a terminal, the phone not found is DEVICE_NOT_FOUND,
+// and the fix tells about --connect.
+func TestSetupCodeWithoutAnAddress(t *testing.T) {
+	shortWaits(t)
+	e := newSetupEnv(t, remoteRules("AAA"))
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitTransient || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, "--connect") || strings.Contains(errOut, "Connection address") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	for _, c := range loggedCalls(t, e.log) {
+		if strings.HasPrefix(c, "connect ") {
+			t.Fatalf("connected without an address: %q", c)
+		}
+	}
+}
+
+func TestSetupConnectFlagMustBeIPAndPort(t *testing.T) {
+	e := newSetupEnv(t, remoteRules("AAA"))
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--connect", "phone.local:41234", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitUsage || !strings.Contains(errOut, "--connect") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if calls := loggedCalls(t, e.log); len(calls) > 0 {
+		t.Fatalf("adb called %q", calls)
+	}
+}
+
+// saveKnownPhone writes config.toml for a phone set up before, reached last
+// time at tsAddr.
+func saveKnownPhone(t *testing.T, cfgDir string) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.Serial, cfg.Address = phoneSerial, tsAddr
+	if err := config.Save(filepath.Join(cfgDir, "config.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A known phone that mDNS does not find is reached at its saved address.
+func TestSetupKnownPhoneAtItsAddress(t *testing.T) {
+	shortWaits(t)
+	e := newSetupEnv(t, remoteRules("AAA"))
+	saveKnownPhone(t, e.cfgDir)
+	_, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != 0 || !strings.Contains(errOut, "already paired") || strings.Contains(errOut, "Prepare your phone") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if cfg := loadSetupConfig(t, e); cfg.Serial != phoneSerial || cfg.Address != tsAddr {
+		t.Fatalf("config %+v", cfg)
+	}
+	if !phoneCallsUse(t, e.log, tsAddr) {
+		t.Fatalf("calls to the phone not sent to %s: %q", tsAddr, loggedCalls(t, e.log))
+	}
+}
+
+// serveOnce runs serve until it is serving (then stops it) or fails, and
+// returns its exit code, stderr and what it answered to a ping.
+func serveOnce(t *testing.T, rules []testutil.FakeRule, cfg config.Config) (int, string, ipc.Ping) {
+	t.Helper()
+	data := isolate(t)
+	if err := config.Save(filepath.Join(os.Getenv("ADBUDDY_CONFIG_DIR"), "config.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	invariantRunner(t, rules...)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out, errb syncBuffer
+	var ping ipc.Ping
+	pinged := make(chan struct{})
+	serving := make(chan struct{})
+	cancelWhen(t, &errb, "ADBuddy is serving", func() { close(serving) })
+	go func() {
+		defer close(pinged)
+		defer cancel()
+		select {
+		case <-serving:
+			ping, _ = ipc.PingDaemon(context.Background(), data)
+		case <-ctx.Done():
+		}
+	}()
+	done := make(chan int, 1)
+	go func() {
+		done <- mainContext(ctx, []string{"serve", "--adb", fakeADB(t), "--workspace", filepath.Join(t.TempDir(), "ws"), "--confirm", "deny"}, strings.NewReader(""), &out, &errb)
+	}()
+	var code int
+	select {
+	case code = <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("serve did not stop")
+	}
+	cancel()
+	<-pinged
+	return code, errb.String(), ping
+}
+
+// serve reaches the phone at its saved address when mDNS does not find it;
+// the journal keeps knowing it by its stable name.
+func TestServeUsesTheSavedAddress(t *testing.T) {
+	shortWaits(t)
+	cfg := config.Default()
+	cfg.Serial, cfg.Address = phoneSerial, tsAddr
+	code, errOut, ping := serveOnce(t, remoteRules("AAA"), cfg)
+	if code != 0 || !strings.Contains(errOut, "ADBuddy is serving "+tsAddr+" ") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if ping.Serial != tsAddr || ping.Identity != phoneSerial {
+		t.Fatalf("ping %+v: want serial %s and identity %s", ping, tsAddr, phoneSerial)
+	}
+}
+
+// A saved address that no longer answers (the port changes when wireless
+// debugging is turned on again): the error says to run `adbuddy connect`.
+func TestServeSavedAddressGone(t *testing.T) {
+	shortWaits(t)
+	cfg := config.Default()
+	cfg.Serial, cfg.Address = phoneSerial, tsAddr
+	rules := []testutil.FakeRule{
+		{Match: "^connect ", Stdout: "failed to connect to '" + tsAddr + "': Connection refused\n"},
+		{Match: "^devices$", Stdout: phoneGone},
+		{Match: "^mdns services$", Stdout: "List of discovered mdns services\n"},
+	}
+	code, errOut, _ := serveOnce(t, rules, cfg)
+	if code != ExitTransient || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, "adbuddy connect <new ip:port>") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	// The address of another phone is not used either.
+	code, errOut, _ = serveOnce(t, remoteRules("ZZZ"), cfg)
+	if code != ExitFailure || !strings.Contains(errOut, "WRONG_PHONE") || !strings.Contains(errOut, "adbuddy connect <new ip:port>") {
+		t.Fatalf("other phone: exit %d stderr %q", code, errOut)
+	}
+}
+
+// In QR mode, a network where no phone announces wireless debugging gets one
+// hint about --code (Tailscale, or a Wi-Fi that blocks mDNS).
+func TestSetupQRHintWhenNoPhoneIsVisible(t *testing.T) {
+	setVar(t, &qrHintDelay, 50*time.Millisecond)
+	setVar(t, &pairingWait, 600*time.Millisecond)
+	const hint = "I can't see any phone with wireless debugging on this network. If the phone is on another network (for example Tailscale) or this Wi-Fi blocks mDNS, press Ctrl+C and run `adbuddy setup --code`."
+	for name, c := range map[string]struct {
+		mdns string
+		want int
+	}{
+		"nothing":     {"List of discovered mdns services\n", 1},
+		"other phone": {"List of discovered mdns services\nadb-OTHER-ccc\t_adb-tls-connect._tcp\t192.0.2.20:41000\n", 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newSetupEnv(t, []testutil.FakeRule{{Match: "^start-server$"}, {Match: "^mdns services$", Stdout: c.mdns}})
+			_, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+			if code != ExitTransient || !strings.Contains(errOut, "PAIRING_TIMEOUT") {
+				t.Fatalf("exit %d stderr %q", code, errOut)
+			}
+			if n := strings.Count(errOut, hint); n != c.want {
+				t.Fatalf("hint %d times, want %d: %q", n, c.want, errOut)
+			}
+		})
+	}
+}
+
+// Ctrl+C in the new waits (the address prompt, adb connect, serve's try of
+// the saved address) exits with 130.
+func TestInterruptedWhileConnectingByAddress(t *testing.T) {
+	shortWaits(t)
+	hang := []testutil.FakeRule{{Match: "^connect ", SleepMs: 20000}}
+	cases := map[string]struct {
+		rules    []testutil.FakeRule
+		args     []string
+		terminal bool
+		known    bool
+		cancelOn string
+	}{
+		"prompt":  {rules: remoteRules("AAA"), args: []string{"setup", "--code"}, terminal: true, cancelOn: "Connection address"},
+		"connect": {rules: append(hang, remoteRules("AAA")...), args: []string{"setup", "--code", "--connect", tsAddr}, cancelOn: "Connecting to " + tsAddr},
+		"serve":   {rules: append(hang, remoteRules("AAA")...), args: []string{"serve", "--confirm", "deny"}, known: true, cancelOn: "Connecting to " + tsAddr},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if c.terminal {
+				setVar(t, &isTerminal, func(any) bool { return true })
+			}
+			e := newSetupEnv(t, c.rules)
+			t.Setenv("ADBUDDY_DATA_DIR", shortDir(t))
+			if c.known {
+				saveKnownPhone(t, e.cfgDir)
+			}
+			r, w := io.Pipe()
+			t.Cleanup(func() { w.Close() })
+			go io.WriteString(w, "192.0.2.10:37000\n123456\n")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var out, errb syncBuffer
+			cancelWhen(t, &errb, c.cancelOn, cancel)
+			args := append(append([]string{}, c.args...), "--adb", fakeADB(t), "--workspace", e.ws)
+			done := make(chan int, 1)
+			go func() { done <- mainContext(ctx, args, r, &out, &errb) }()
+			select {
+			case code := <-done:
+				if code != ExitInterrupt || !strings.Contains(errb.String(), "INTERRUPTED") {
+					t.Fatalf("exit %d, stderr %q", code, errb.String())
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("did not stop")
+			}
+		})
+	}
+}
+
+// A saved address that failed is not kept when setup pairs the phone again
+// and finds it by mDNS.
+func TestSetupDropsASavedAddressThatFailed(t *testing.T) {
+	shortWaits(t)
+	setVar(t, &connectWait, 3*time.Second)
+	rules := append([]testutil.FakeRule{
+		{Match: "^start-server$"},
+		{Match: "^connect ", Stdout: "failed to connect to '" + tsAddr + "': Connection refused\n"},
+		{Match: "^devices$", Stdout: phoneGone, Times: 2},
+		{Match: "^devices$", Stdout: phoneOnline},
+		{Match: "^mdns services$", Stdout: "List of discovered mdns services\n"},
+	}, phoneRules()...)
+	e := newSetupEnv(t, rules)
+	saveKnownPhone(t, e.cfgDir)
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != 0 || !strings.Contains(errOut, "Paired") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if cfg := loadSetupConfig(t, e); cfg.Serial != phoneSerial || cfg.Address != "" {
+		t.Fatalf("config %+v", cfg)
+	}
+}

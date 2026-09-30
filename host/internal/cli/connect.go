@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"runtime"
@@ -166,4 +167,29 @@ func connectAddr(ctx context.Context, runner adb.Runner, addr, guid string) (act
 		return "", false, NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
 	}
 	return active, true, nil
+}
+
+// findKnownPhone finds the phone saved as serial (see findPhone) and, when
+// it does not show up and addr is set (the address that worked last time,
+// or --connect), connects to it there and checks it is that phone. used is
+// the address it was reached at ("" if it came back by itself); verified
+// tells whether its identity could be checked there.
+func findKnownPhone(ctx context.Context, runner adb.Runner, serial, addr string, wait time.Duration, log io.Writer) (active, used string, verified bool, err error) {
+	active, err = findPhone(ctx, runner, serial, wait)
+	if err == nil || addr == "" || ctx.Err() != nil || !errors.Is(err, adb.ErrNoDevice) {
+		return active, "", false, err
+	}
+	fmt.Fprintf(log, "Connecting to %s (the address saved last time)…\n", addr)
+	guid, _ := pairing.GuidOf(serial)
+	active, verified, err = connectAddr(ctx, runner, addr, guid)
+	if err != nil {
+		return "", "", false, err
+	}
+	return active, addr, verified, nil
+}
+
+// hasCode reports whether err is an *Error with that code.
+func hasCode(err error, code string) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Code == code
 }

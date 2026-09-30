@@ -39,6 +39,11 @@ var (
 	connectWait     = time.Minute
 	autoConnectWait = 20 * time.Second
 	startServerWait = 30 * time.Second // bounds `adb start-server`
+	// With --code, mDNS is given less time before the address is asked for or
+	// --connect is used: over Tailscale it never finds the phone.
+	codeConnectWait     = 10 * time.Second
+	codeAutoConnectWait = 5 * time.Second
+	qrHintDelay         = 10 * time.Second // when to say that no phone is visible while a QR code waits
 )
 
 const phoneGuide = `Prepare your phone (only once):
@@ -55,11 +60,12 @@ type setupResult struct {
 	Active    string         `json:"active"` // the serial adb lists the phone with this session
 	Workspace string         `json:"workspace"`
 	Agent     string         `json:"agent"`
+	Address   string         `json:"address"` // saved in config.toml: the last IP:port that worked, "" if none
 	ADB       string         `json:"adb"`
 }
 
 func newSetupCmd(app *App) *cobra.Command {
-	var adbFlag, agentFlag, wsFlag string
+	var adbFlag, agentFlag, wsFlag, connectFlag string
 	var useCode, yes bool
 	cmd := &cobra.Command{
 		Use:   "setup",
@@ -67,8 +73,11 @@ func newSetupCmd(app *App) *cobra.Command {
 		Long: `Set up ADBuddy step by step: download Android platform-tools (checked against
 Google's checksum), pair the phone over wireless debugging with a QR code (or
 with --code), connect, read the phone's profile, pick the agent and create the
-environment. Run it again at any time; it skips what is already done.`,
-		Example: "  adbuddy setup\n  adbuddy setup --code\n  adbuddy setup --agent codex --yes",
+environment. Run it again at any time; it skips what is already done.
+
+Over Tailscale or another network without mDNS, pair with --code and give the
+connection address with --connect (or type it when asked).`,
+		Example: "  adbuddy setup\n  adbuddy setup --code\n  adbuddy setup --code --connect 100.64.0.5:41234\n  adbuddy setup --agent codex --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Ctrl+C at any step (a download, a wait for the phone, a
@@ -80,6 +89,9 @@ environment. Run it again at any time; it skips what is already done.`,
 			err := func() error {
 				if app.Getenv("ADBUDDY_SOURCE") == "agent" {
 					return NewError("AGENT_SESSION", "`adbuddy setup` cannot be run from the agent's session", "Run it yourself in a terminal.")
+				}
+				if connectFlag != "" && !validPairAddr(connectFlag) {
+					return UsageError(fmt.Sprintf("--connect: %q is not an IP address and port: type them as the phone shows them on its Wireless debugging screen (e.g. 100.64.0.5:41234)", classify.Printable(connectFlag)))
 				}
 				e, err := loadEnv(app)
 				if err != nil {
@@ -155,17 +167,31 @@ environment. Run it again at any time; it skips what is already done.`,
 
 				// 2. A phone paired before comes back on its own, maybe under
 				// another serial than the saved one (see findPhone).
-				serial, guid := "", ""
+				// When mDNS does not find it, it is tried at --connect or at
+				// the address saved last time.
+				serial, guid, usedAddr := "", "", ""
+				savedFailed := false // the saved address answered with an error: not kept
 				if e.cfg.Serial != "" {
+					known := connectFlag
+					if known == "" {
+						known = e.cfg.Address
+					}
 					say("Looking for your phone…\n")
-					s, err := findPhone(ctx, runner, e.cfg.Serial, knownPhoneWait)
+					s, used, verified, err := findKnownPhone(ctx, runner, e.cfg.Serial, known, knownPhoneWait, app.Stderr)
 					if ctx.Err() != nil {
 						return ctx.Err() // Ctrl+C: no guide nor QR code
 					}
-					if err == nil {
-						serial = s
+					savedFailed = err != nil && known != ""
+					switch {
+					case err == nil:
+						serial, usedAddr = s, used
 						guid, _ = pairing.GuidOf(e.cfg.Serial) // keeps the saved name
+						if used != "" && !verified {
+							say("Note: could not check that the phone at %s is the one you set up (%s).\n", used, unverifiedWhy(e.cfg.Serial))
+						}
 						say("Found it: already paired.\n")
+					case hasCode(err, "WRONG_PHONE"):
+						say("Note: %s is another phone now; pairing again.\n", known)
 					}
 				}
 
@@ -176,9 +202,41 @@ environment. Run it again at any time; it skips what is already done.`,
 						return err
 					}
 					say("Paired. Connecting…\n")
-					serial, err = pairing.Connect(ctx, runner, guid, connectWait, autoConnectWait, time.Second)
+					// With --code the phone may be out of mDNS's reach
+					// (Tailscale): if an address can be had, it is asked for sooner.
+					wait, auto := connectWait, autoConnectWait
+					canAsk := isTerminal(app.Stdin)
+					if useCode && (connectFlag != "" || canAsk) {
+						wait, auto = codeConnectWait, codeAutoConnectWait
+					}
+					serial, err = pairing.Connect(ctx, runner, guid, wait, auto, time.Second)
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
 					if err != nil {
-						return TransientError("DEVICE_NOT_FOUND", "the paired phone did not connect: "+err.Error(), "Check that wireless debugging is still on, then run `adbuddy setup` again.")
+						addr := connectFlag
+						if addr == "" && canAsk {
+							say("The phone did not show up on this network by itself (mDNS does not reach it, e.g. over Tailscale).\n")
+							if addr, err = ask("Connection address (IP:port on the Wireless debugging screen): "); err != nil {
+								return err
+							}
+							if !validPairAddr(addr) {
+								return UsageError(fmt.Sprintf("%q is not an IP address and port: type them as the phone shows them on its Wireless debugging screen", classify.Printable(addr)))
+							}
+						}
+						if addr == "" {
+							return TransientError("DEVICE_NOT_FOUND", "the paired phone did not connect: "+err.Error(),
+								"Check that wireless debugging is still on, then run `adbuddy setup` again; if the phone is on another network (e.g. Tailscale), add --connect <ip:port> with the IP address and port on its Wireless debugging screen.")
+						}
+						say("Connecting to %s…\n", addr)
+						s, verified, err := connectAddr(ctx, runner, addr, guid)
+						if err != nil {
+							return err
+						}
+						if !verified {
+							say("Note: could not check that the phone at %s is the one just paired.\n", addr)
+						}
+						serial, usedAddr = s, addr
 					}
 				}
 				runner.Serial = serial
@@ -229,6 +287,15 @@ environment. Run it again at any time; it skips what is already done.`,
 				}
 				cfg := e.cfg
 				cfg.Serial, cfg.Workspace, cfg.Agent = saved, ws, chosen
+				// The address that worked this time; else the one saved for this
+				// phone, which may still work (a Tailscale IP while on Wi-Fi).
+				cfg.Address = usedAddr
+				if cfg.Address == "" && isAddress(serial) {
+					cfg.Address = serial
+				}
+				if cfg.Address == "" && samePhone && !savedFailed {
+					cfg.Address = e.cfg.Address
+				}
 				if adbArg != "" {
 					cfg.ADBPath = adbArg
 				}
@@ -236,7 +303,7 @@ environment. Run it again at any time; it skips what is already done.`,
 					return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")
 				}
 
-				res := setupResult{Device: prof, Serial: saved, Active: serial, Workspace: ws, Agent: chosen, ADB: adbPath}
+				res := setupResult{Device: prof, Serial: saved, Active: serial, Address: cfg.Address, Workspace: ws, Agent: chosen, ADB: adbPath}
 				if app.JSON {
 					return WriteData(app.Stdout, res)
 				}
@@ -254,6 +321,7 @@ environment. Run it again at any time; it skips what is already done.`,
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "agent to use: claude, codex, gemini, opencode…")
 	cmd.Flags().StringVar(&wsFlag, "workspace", "", "agent environment (default: ~/ADBuddy/<phone model>)")
 	cmd.Flags().BoolVar(&useCode, "code", false, "pair with IP:port and the 6-digit code instead of a QR code")
+	cmd.Flags().StringVar(&connectFlag, "connect", "", "connect by this IP:port when mDNS does not find the phone (Tailscale or another network), as its Wireless debugging screen shows it")
 	cmd.Flags().BoolVar(&yes, "yes", false, "accept the recommended choices without asking")
 	return cmd
 }
@@ -310,7 +378,9 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 	}
 	say("On the phone: Wireless debugging → Pair device with QR code, and scan:\n%s", art)
 	say("Waiting for the phone (up to %s)…\n", pairingWait)
+	stopHint := qrHint(ctx, runner, say)
 	guid, err := pairing.PairQR(ctx, runner, q, pairingWait)
+	stopHint()
 	if errors.Is(err, pairing.ErrTimeout) {
 		return "", TransientError("PAIRING_TIMEOUT", "the phone did not answer the QR code in time", "Check that phone and PC are on the same Wi-Fi and run `adbuddy setup` again, or use `adbuddy setup --code`.")
 	}
@@ -489,4 +559,38 @@ func findPhone(ctx context.Context, runner adb.Runner, serial string, wait time.
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// noPhoneHint is said once when a QR code waits and no phone announces
+// wireless debugging on the network: the QR code needs mDNS.
+const noPhoneHint = "I can't see any phone with wireless debugging on this network. If the phone is on another network (for example Tailscale) or this Wi-Fi blocks mDNS, press Ctrl+C and run `adbuddy setup --code`.\n"
+
+// qrHint looks at the network once, after qrHintDelay, and says noPhoneHint
+// if no `_adb-tls-*` service (of this phone or any other) shows up. Setup
+// keeps waiting either way. The returned stop ends the look and waits for
+// it, so nothing is said after the wait for the QR code is over.
+func qrHint(ctx context.Context, runner adb.Runner, say func(string, ...any)) (stop func()) {
+	hctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t := time.NewTimer(qrHintDelay)
+		defer t.Stop()
+		select {
+		case <-hctx.Done():
+			return
+		case <-t.C:
+		}
+		ss, err := pairing.Services(hctx, runner)
+		if err != nil || hctx.Err() != nil {
+			return
+		}
+		for _, s := range ss {
+			if strings.HasPrefix(s.Type, "_adb-tls-") {
+				return
+			}
+		}
+		say("%s", noPhoneHint)
+	}()
+	return func() { cancel(); <-done }
 }

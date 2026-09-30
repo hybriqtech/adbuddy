@@ -55,8 +55,17 @@ Ejecuta `adbuddy setup --code`:
 
 ![Captura pendiente: Emparejar dispositivo con código de sincronización](../img/pending.svg){: width="240"}
 
+### Si el móvil está en otra red (Tailscale)
+
+El código QR solo funciona en la misma red. Por Tailscale, o en una Wi-Fi que bloquea mDNS:
+
+1. Ejecuta `adbuddy setup --code` y empareja como arriba: con Tailscale activo, el cuadro de emparejamiento muestra la IP de Tailscale del móvil.
+2. Cuando setup pida la **Connection address** (dirección de conexión), escribe la dirección IP y el puerto de la pantalla principal de Depuración inalámbrica (o pásala de entrada: `adbuddy setup --code --connect <ip:puerto>`).
+3. El puerto cambia cada vez que se vuelve a activar la depuración inalámbrica. Cuando `adbuddy serve` no llegue al móvil, ejecuta `adbuddy connect <nueva ip:puerto>` con la dirección que muestre el móvil en ese momento.
+
 ## Si algo falla
 
+- **"I can't see any phone with wireless debugging on this network"** (no veo ningún móvil con la depuración inalámbrica en esta red): mientras espera el código QR, el PC no ve ningún móvil con la depuración inalámbrica. Si el móvil está en otra red (por ejemplo, Tailscale) o la Wi-Fi bloquea mDNS, pulsa Ctrl+C y ejecuta `adbuddy setup --code` (mira el apartado anterior).
 - **El móvil no aparece:** comprueba que los dos están en la misma Wi-Fi, que la depuración inalámbrica sigue activa (Android la apaga al cambiar de red, salvo en redes de confianza) y que la red no aísla a sus clientes (las redes de invitados suelen hacerlo).
 - **Se acabó el tiempo (`PAIRING_TIMEOUT`):** el móvil tiene unos 3 minutos para escanear el código QR desde que aparece. Vuelve a ejecutar `adbuddy setup`; se salta lo que ya está hecho.
 - **"Wrong password" (contraseña incorrecta):** el código cambia cada vez que se abre el cuadro; usa el que se ve en ese momento.

@@ -55,8 +55,17 @@ Run `adbuddy setup --code` instead:
 
 ![Pending screenshot: Pair device with pairing code](img/pending.svg){: width="240"}
 
+### If the phone is on another network (Tailscale)
+
+The QR code only works on the same network. Over Tailscale, or on a Wi-Fi that blocks mDNS:
+
+1. Run `adbuddy setup --code` and pair as above: with Tailscale on, the pairing popup shows the phone's Tailscale IP.
+2. When setup asks for the **Connection address**, type the IP address and port on the main Wireless debugging screen (or pass it up front: `adbuddy setup --code --connect <ip:port>`).
+3. The port changes every time wireless debugging is turned on again. When `adbuddy serve` cannot reach the phone, run `adbuddy connect <new ip:port>` with the address the phone shows now.
+
 ## Troubleshooting
 
+- **"I can't see any phone with wireless debugging on this network"**: while the QR code waits, the PC sees no phone with wireless debugging at all. If the phone is on another network (for example Tailscale) or the Wi-Fi blocks mDNS, press Ctrl+C and run `adbuddy setup --code` (see above).
 - **The phone never shows up**: check that both are on the same Wi-Fi, that wireless debugging is still on (Android turns it off when you change network unless the network is trusted) and that the network does not isolate its clients (guest networks often do).
 - **Setup timed out (`PAIRING_TIMEOUT`)**: the phone has about 3 minutes to scan the QR code from the moment it appears. Run `adbuddy setup` again; it skips what is already done.
 - **"Wrong password"**: the pairing code changes every time the popup opens; use the current one.
