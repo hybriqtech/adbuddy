@@ -3,14 +3,20 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+	"github.com/hybriqtech/adbuddy/host/internal/platformtools"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
 
@@ -51,6 +57,8 @@ func newSetupEnv(t *testing.T, rules []testutil.FakeRule) setupEnv {
 	t.Setenv("ADBUDDY_CONFIG_DIR", e.cfgDir)
 	t.Setenv("ADBUDDY_DATA_DIR", filepath.Join(dir, "data"))
 	t.Setenv("ADBUDDY_SOURCE", "")
+	// No test reaches Google: a download fails at once unless a test serves one.
+	t.Setenv("ADBUDDY_REPOSITORY_URL", "http://127.0.0.1:1/")
 	// A fake "claude" in PATH, and nothing else.
 	bin := filepath.Join(dir, "bin")
 	os.MkdirAll(bin, 0o700)
@@ -190,25 +198,125 @@ func TestSetupFailsCleanly(t *testing.T) {
 
 func TestSetupReportsDownloadFailure(t *testing.T) {
 	newSetupEnv(t, phoneRules())
-	t.Setenv("ADBUDDY_REPOSITORY_URL", "http://127.0.0.1:1/")
 	_, errOut, code := runWithInput(t, "", "setup")
 	if code != ExitTransient || !strings.Contains(errOut, "TOOLS_DOWNLOAD_FAILED") {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
 }
 
-func TestBareAdbuddyStartsSetupWhenNotConfigured(t *testing.T) {
+// A download that does not match Google's checksum is not a network hiccup:
+// retrying does not help.
+func TestSetupReportsChecksumMismatch(t *testing.T) {
 	newSetupEnv(t, phoneRules())
-	t.Setenv("ADBUDDY_REPOSITORY_URL", "http://127.0.0.1:1/")
-	_, errOut, code := runWithInput(t, "")
-	if code != ExitTransient || !strings.Contains(errOut, "not set up yet") {
+	archive := []byte("not the real platform-tools")
+	manifest := fmt.Sprintf(`<?xml version='1.0' encoding='utf-8'?>
+<sdk:sdk-repository xmlns:sdk="http://schemas.android.com/sdk/android/repo/repository2/03" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <channel id="channel-0">stable</channel>
+  <remotePackage path="platform-tools">
+    <revision><major>37</major><minor>0</minor><micro>0</micro></revision>
+    <channelRef ref="channel-0"/>
+    <archives><archive><complete><size>%d</size><checksum type="sha1">%s</checksum><url>pt.zip</url></complete><host-os>%s</host-os></archive></archives>
+  </remotePackage>
+</sdk:sdk-repository>`, len(archive), strings.Repeat("0", 40), platformtools.HostOS(runtime.GOOS))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/"+platformtools.ManifestName) {
+			io.WriteString(w, manifest)
+			return
+		}
+		w.Write(archive)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("ADBUDDY_REPOSITORY_URL", srv.URL+"/repo/")
+	_, errOut, code := runWithInput(t, "", "setup")
+	if code != ExitFailure || !strings.Contains(errOut, "TOOLS_CHECKSUM_MISMATCH") || strings.Contains(errOut, "internet connection") {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
+}
+
+// adb start-server failing: its own words, made printable, and never "<nil>".
+func TestSetupReportsStartServerFailure(t *testing.T) {
+	e := newSetupEnv(t, []testutil.FakeRule{{Match: "^start-server$", Exit: 1, Stderr: "cannot bind 'tcp:5038'\x1b[2J\n"}})
+	_, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitFailure || !strings.Contains(errOut, "ADB_FAILED") || !strings.Contains(errOut, "cannot bind") ||
+		strings.Contains(errOut, "<nil>") || strings.Contains(errOut, "\x1b") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	// An adb that does not answer in time is reported, not waited for.
+	setVar(t, &startServerWait, time.Nanosecond)
+	_, errOut, code = runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitFailure || !strings.Contains(errOut, "ADB_FAILED") || !strings.Contains(errOut, "did not answer") {
+		t.Fatalf("timeout: exit %d stderr %q", code, errOut)
+	}
+}
+
+// setup does not rewrite the environment and config.toml under a running serve.
+func TestSetupRefusesWhileServeRuns(t *testing.T) {
+	e := newSetupEnv(t, phoneRules())
+	data := shortDir(t)
+	t.Setenv("ADBUDDY_DATA_DIR", data)
+	fakeDaemon(t, data, nil, ipc.Exit{})
+	_, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitFailure || !strings.Contains(errOut, "ALREADY_RUNNING") || !strings.Contains(errOut, "adbuddy serve") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if calls, _ := testutil.ReadLog(e.log); len(calls) > 0 || exists(e.ws) || exists(filepath.Join(e.cfgDir, "config.toml")) {
+		t.Fatalf("setup went on: adb calls %d", len(calls))
+	}
+}
+
+// `adbuddy` alone starts setup only for a person at a terminal; a script, a
+// CI job or --json gets NOT_CONFIGURED (78) and nothing is downloaded.
+func TestBareAdbuddyStartsSetupOnlyInATerminal(t *testing.T) {
+	newSetupEnv(t, phoneRules())
+	for _, args := range [][]string{nil, {"--json"}} {
+		out, errOut, code := runWithInput(t, "", args...)
+		if code != ExitConfig || !strings.Contains(out+errOut, "NOT_CONFIGURED") || strings.Contains(errOut, "starting") || strings.Contains(errOut, "platform-tools") {
+			t.Fatalf("%v without a terminal: exit %d stdout %q stderr %q", args, code, out, errOut)
+		}
+	}
+	setVar(t, &isTerminal, func(any) bool { return true })
+	if out, errOut, code := runWithInput(t, "", "--json"); code != ExitConfig || !strings.Contains(out, "NOT_CONFIGURED") {
+		t.Fatalf("--json at a terminal: exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	_, errOut, code := runWithInput(t, "")
+	if code != ExitTransient || !strings.Contains(errOut, "not set up yet") || !strings.Contains(errOut, "TOOLS_DOWNLOAD_FAILED") {
+		t.Fatalf("at a terminal: exit %d stderr %q", code, errOut)
+	}
+
 	e := newSetupEnv(t, phoneRules())
 	config.Save(filepath.Join(e.cfgDir, "config.toml"), config.Default())
 	out, _, code := runWithInput(t, "")
 	if code != 0 || !strings.Contains(out, "Usage:") {
 		t.Fatalf("configured: exit %d stdout %q", code, out)
+	}
+}
+
+// The address of --code is checked before anything is asked or run.
+func TestSetupCodeAddressMustBeIPAndPort(t *testing.T) {
+	for _, bad := range []string{"192.0.2.10", "phone.local:37000", "192.0.2.10:0", "192.0.2.10:65536", "192.0.2.10:-1", "192.0.2.10:port"} {
+		e := newSetupEnv(t, phoneRules())
+		_, errOut, code := runWithInput(t, bad+"\n123456\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+		if code != ExitUsage || !strings.Contains(errOut, "IP address and port") || strings.Contains(errOut, "pairing code: ") {
+			t.Fatalf("%q: exit %d stderr %q", bad, code, errOut)
+		}
+		for _, c := range loggedCalls(t, e.log) {
+			if strings.HasPrefix(c, "pair") {
+				t.Fatalf("%q: adb pair called", bad)
+			}
+		}
+	}
+}
+
+// The help of serve and env init tells where the defaults come from.
+func TestHelpTellsTheDefaults(t *testing.T) {
+	out, _, _ := run(t, "serve", "--help")
+	for _, want := range []string{"adb_path in config.toml, else the adb installed by adbuddy setup", "workspace in config.toml, else ~/ADBuddy/default"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("serve --help lacks %q", want)
+		}
+	}
+	if out, _, _ := run(t, "env", "init", "--help"); !strings.Contains(out, "workspace in config.toml, else ~/ADBuddy/default") {
+		t.Errorf("env init --help: %s", out)
 	}
 }
 

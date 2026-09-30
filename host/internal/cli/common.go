@@ -70,8 +70,9 @@ func sameDir(a, b string) bool {
 	return a == b
 }
 
-// isTerminal reports whether f is an interactive terminal (including mintty).
-func isTerminal(v any) bool {
+// isTerminal reports whether v is an interactive terminal (including mintty).
+// It is a variable so tests can pretend there is one.
+var isTerminal = func(v any) bool {
 	f, ok := v.(*os.File)
 	return ok && (isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd()))
 }

@@ -185,3 +185,83 @@ func TestAgentsCoversHostDownAndUndo(t *testing.T) {
 		t.Error("must not mention setup")
 	}
 }
+
+// Force replaces a planted link with a regular file: the file it points to
+// is never written.
+func TestInitForceDoesNotFollowLinks(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ws")
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "victim.txt")
+	if err := os.WriteFile(target, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		p := filepath.Join(dir, name)
+		os.Remove(p)
+		if err := os.Symlink(target, p); err != nil {
+			t.Skip("cannot create symbolic links here:", err)
+		}
+	}
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1"), Profile: "Phone X", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, target); got != "keep me" {
+		t.Fatalf("the link's target was written: %q", got)
+	}
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		st, err := os.Lstat(filepath.Join(dir, name))
+		if err != nil || !st.Mode().IsRegular() {
+			t.Fatalf("%s: %v %v", name, st, err)
+		}
+	}
+	if !strings.Contains(read(t, filepath.Join(dir, "AGENTS.md")), "Phone X") {
+		t.Fatal("AGENTS.md not rewritten")
+	}
+}
+
+// A dangling link where a new file goes is not followed either.
+func TestInitDoesNotFollowDanglingLinks(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ws")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "created-elsewhere.txt")
+	if err := os.Symlink(target, filepath.Join(dir, "NOTES.md")); err != nil {
+		t.Skip("cannot create symbolic links here:", err)
+	}
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(target); err == nil {
+		t.Fatal("the dangling link was followed")
+	}
+}
+
+// A hard link (no privilege needed, also on Windows) shares its content with
+// another file: Force replaces the name instead of writing through it.
+func TestInitForceDoesNotWriteThroughHardLinks(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ws")
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "victim.txt")
+	if err := os.WriteFile(target, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "AGENTS.md")
+	os.Remove(p)
+	if err := os.Link(target, p); err != nil {
+		t.Skip("cannot create hard links here:", err)
+	}
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1"), Profile: "Phone X", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, target); got != "keep me" {
+		t.Fatalf("written through the hard link: %q", got)
+	}
+	if !strings.Contains(read(t, p), "Phone X") {
+		t.Fatal("AGENTS.md not rewritten")
+	}
+}

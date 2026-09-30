@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -37,6 +38,7 @@ var (
 	pairingWait     = 3 * time.Minute
 	connectWait     = time.Minute
 	autoConnectWait = 20 * time.Second
+	startServerWait = 30 * time.Second // bounds `adb start-server`
 )
 
 const phoneGuide = `Prepare your phone (only once):
@@ -106,14 +108,22 @@ environment. Run it again at any time; it skips what is already done.`,
 					}
 				}
 
+				// setup rewrites the environment and config.toml, and may run
+				// `adb usb`: never under a running serve and its agent.
+				if running, err := serveRunning(ctx, e.dirs.Data); err != nil {
+					return err
+				} else if running {
+					return NewError("ALREADY_RUNNING", "`adbuddy serve` is running", "Stop `adbuddy serve` first (Ctrl+C in its terminal), then run `adbuddy setup` again.")
+				}
+
 				// serve, run and journal read config.toml from any folder:
 				// relative paths are saved as absolute ones.
-				if adbFlag != "" {
-					if adbFlag, err = absExecutable(adbFlag); err != nil {
+				adbArg, wsDir := adbFlag, wsFlag
+				if adbArg != "" {
+					if adbArg, err = absExecutable(adbArg); err != nil {
 						return UsageError("--adb: " + err.Error())
 					}
 				}
-				wsDir := wsFlag
 				if wsDir != "" {
 					if wsDir, err = filepath.Abs(wsDir); err != nil {
 						return UsageError("--workspace: " + err.Error())
@@ -121,21 +131,25 @@ environment. Run it again at any time; it skips what is already done.`,
 				}
 
 				// 1. Tools.
-				adbPath := adbFlag
+				adbPath := adbArg
 				if adbPath == "" {
 					adbPath = e.cfg.ADBPath
 				}
 				if adbPath == "" {
 					say("Getting Android platform-tools…\n")
 					res, err := platformtools.Installer{DataDir: e.dirs.Data, BaseURL: repositoryURL(app), GOOS: runtime.GOOS, Log: app.Stderr}.Ensure(ctx)
-					if err != nil {
+					switch {
+					case errors.Is(err, platformtools.ErrChecksum):
+						// Not a network hiccup: the same file would come again.
+						return NewError("TOOLS_CHECKSUM_MISMATCH", err.Error(), "Run `adbuddy setup` again later; if it keeps failing, pass --adb <path to adb 37 or newer> and report it at https://github.com/hybriqtech/adbuddy/issues.")
+					case err != nil:
 						return TransientError("TOOLS_DOWNLOAD_FAILED", err.Error(), "Check the internet connection and run `adbuddy setup` again, or pass --adb <path to adb 37 or newer>.")
 					}
 					adbPath = res.ADB
 				}
 				runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
-				if _, errOut, code, err := runner.Output(ctx, "start-server"); err != nil || code != 0 {
-					return NewError("ADB_FAILED", fmt.Sprintf("cannot start ADBuddy's adb server: %v %s", err, strings.TrimSpace(errOut)), "Check "+adbPath+".")
+				if err := startServer(ctx, runner); err != nil {
+					return err
 				}
 
 				// 2. A phone paired before comes back on its own.
@@ -211,8 +225,8 @@ environment. Run it again at any time; it skips what is already done.`,
 				}
 				cfg := e.cfg
 				cfg.Serial, cfg.Workspace, cfg.Agent = saved, ws, chosen
-				if adbFlag != "" {
-					cfg.ADBPath = adbFlag
+				if adbArg != "" {
+					cfg.ADBPath = adbArg
 				}
 				if err := config.Save(e.dirs.ConfigFile(), cfg); err != nil {
 					return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")
@@ -268,6 +282,9 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 		addr, err := ask("In Wireless debugging → Pair device with pairing code, type the IP address and port: ")
 		if err != nil {
 			return "", err
+		}
+		if !validPairAddr(addr) {
+			return "", UsageError(fmt.Sprintf("%q is not an IP address and port: type them as the phone shows them under Pair device with pairing code", classify.Printable(addr)))
 		}
 		code, err := ask("Wi-Fi pairing code: ")
 		if err != nil {
@@ -382,6 +399,41 @@ func isAddress(serial string) bool {
 	}
 	_, err = netip.ParseAddr(host)
 	return err == nil
+}
+
+// validPairAddr accepts only IP:port with a port in 1-65535.
+func validPairAddr(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if _, err := netip.ParseAddr(host); err != nil {
+		return false
+	}
+	p, err := strconv.ParseUint(port, 10, 16)
+	return err == nil && p >= 1
+}
+
+// startServer starts ADBuddy's adb server, waiting at most startServerWait.
+func startServer(ctx context.Context, runner adb.Runner) error {
+	sctx, cancel := context.WithTimeout(ctx, startServerWait)
+	defer cancel()
+	_, errOut, code, err := runner.Output(sctx, "start-server")
+	switch {
+	case ctx.Err() != nil:
+		return ctx.Err() // Ctrl+C becomes INTERRUPTED
+	case sctx.Err() != nil:
+		return NewError("ADB_FAILED", fmt.Sprintf("adb start-server did not answer in %s", startServerWait), "Check "+runner.Path+", or stop other adb servers and try again.")
+	case err != nil:
+		return NewError("ADB_FAILED", "cannot start ADBuddy's adb server: "+err.Error(), "Check "+runner.Path+".")
+	case code != 0:
+		msg := classify.Printable(strings.TrimSpace(errOut))
+		if msg == "" {
+			msg = "no message"
+		}
+		return NewError("ADB_FAILED", fmt.Sprintf("cannot start ADBuddy's adb server: exit %d: %s", code, msg), "Check "+runner.Path+".")
+	}
+	return nil
 }
 
 // absExecutable makes an --adb path absolute; a bare name ("adb") is looked

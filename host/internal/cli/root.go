@@ -49,9 +49,14 @@ func NewRoot(app *App) *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return UsageError(err.Error()) })
 	setup := newSetupCmd(app)
 	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app), setup)
-	// `adbuddy` alone starts the setup the first time (spec §3.1).
+	// `adbuddy` alone starts the setup the first time (spec §3.1), but only
+	// for a person at a terminal: a script, a CI job or an agent would get a
+	// download, a background adb server and a long wait for a QR code.
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if dirs, err := paths.Default(app.Getenv); err == nil && !fileExists(dirs.ConfigFile()) {
+			if app.JSON || !isTerminal(app.Stdin) || !isTerminal(app.Stderr) {
+				return ConfigError("NOT_CONFIGURED", "ADBuddy is not set up yet", "Run `adbuddy setup`.")
+			}
 			fmt.Fprintln(app.Stderr, "ADBuddy is not set up yet: starting `adbuddy setup`.")
 			setup.SetContext(cmd.Context())
 			return setup.RunE(setup, nil)

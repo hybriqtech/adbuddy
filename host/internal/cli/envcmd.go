@@ -50,7 +50,7 @@ func newEnvCmd(app *App) *cobra.Command {
 			return nil
 		},
 	}
-	initCmd.Flags().StringVar(&dir, "dir", "", "environment directory (default: ~/ADBuddy/default)")
+	initCmd.Flags().StringVar(&dir, "dir", "", "environment directory (default: workspace in config.toml, else ~/ADBuddy/default)")
 	initCmd.Flags().BoolVar(&force, "force", false, "rewrite AGENTS.md and CLAUDE.md (NOTES.md is never touched)")
 	env.AddCommand(initCmd)
 	return env

@@ -67,17 +67,10 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			}
 			// Another serve would get its workspace rewritten under its agent:
 			// find it before touching anything or waiting for the phone.
-			pctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
-			_, perr := ipc.PingDaemon(pctx, e.dirs.Data)
-			cancel()
-			switch {
-			case perr == nil:
+			if running, err := serveRunning(cmd.Context(), e.dirs.Data); err != nil {
+				return err
+			} else if running {
 				return alreadyRunning
-			case !errors.Is(perr, ipc.ErrNotRunning):
-				// Something owns the socket but does not answer as a host
-				// (another secret, a timeout…): do not take it over.
-				return NewError("DAEMON_UNREACHABLE", "the ADBuddy socket does not answer: "+perr.Error(),
-					"Stop the other `adbuddy serve` or delete "+ipc.SocketPath(e.dirs.Data)+" if none is running.")
 			}
 			ws, err := filepath.Abs(e.workspace(wsDir))
 			if err != nil {
@@ -181,14 +174,31 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&adbPath, "adb", "", "path to the real adb (default: adb_path in config.toml)")
+	cmd.Flags().StringVar(&adbPath, "adb", "", "path to the real adb (default: adb_path in config.toml, else the adb installed by adbuddy setup)")
 	cmd.Flags().StringVar(&serial, "serial", "", "the phone to use when several are connected")
-	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: ~/ADBuddy/default)")
+	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: workspace in config.toml, else ~/ADBuddy/default)")
 	cmd.Flags().StringVar(&confirmMode, "confirm", "auto", "where to confirm 🔴 commands: auto (this terminal if interactive, else deny), terminal (read the answers from stdin even when it is not interactive, e.g. a pipe) or deny")
 	return cmd
 }
 
 var alreadyRunning = NewError("ALREADY_RUNNING", "another `adbuddy serve` is already running", "Use that terminal, or stop it (Ctrl+C) first.")
+
+// serveRunning reports whether a serve answers on the data folder's socket.
+// A socket owned by something that does not answer as a host (another
+// secret, a timeout…) is an error: it must not be taken over.
+func serveRunning(ctx context.Context, dataDir string) (bool, error) {
+	pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	_, err := ipc.PingDaemon(pctx, dataDir)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ipc.ErrNotRunning):
+		return false, nil
+	}
+	return false, NewError("DAEMON_UNREACHABLE", "the ADBuddy socket does not answer: "+err.Error(),
+		"Stop the other `adbuddy serve` or delete "+ipc.SocketPath(dataDir)+" if none is running.")
+}
 
 // serveUntil serves requests until ctx ends, then waits for the ones in
 // flight: a pending confirmation is journaled as denied and its shim gets

@@ -114,17 +114,45 @@ func (r *Result) note(name string, changed, created bool) {
 	}
 }
 
+// writeFile creates path, or rewrites it when overwrite is set. It writes a
+// temporary file and renames it over path, so a link planted there (to
+// another file, or dangling) is replaced, never written through.
 func writeFile(path string, data []byte, overwrite bool) (changed, created bool, err error) {
-	old, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return true, true, os.WriteFile(path, data, 0o600)
-	case err != nil:
+	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+		return true, true, replaceFile(path, data)
+	} else if err != nil {
 		return false, false, err
-	case !overwrite || bytes.Equal(old, data):
+	}
+	if !overwrite {
 		return false, false, nil
 	}
-	return true, false, os.WriteFile(path, data, 0o600)
+	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
+		if st, err := os.Lstat(path); err == nil && st.Mode().IsRegular() {
+			return false, false, nil
+		}
+	}
+	return true, false, replaceFile(path, data)
+}
+
+// replaceFile writes data to path atomically, readable only by the user.
+func replaceFile(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".write-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
