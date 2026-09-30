@@ -140,7 +140,8 @@ func (w frameWriter) Write(p []byte) (int, error) {
 }
 
 // Handler serves one authenticated request. ctx is cancelled when the client
-// disconnects or the server closes.
+// disconnects or the server closes; in the second case context.Cause(ctx) is
+// ErrClosed.
 type Handler func(ctx context.Context, req Request, c *Conn) Exit
 
 // Server accepts requests on the daemon socket.
@@ -149,7 +150,7 @@ type Server struct {
 	secret  string
 	handler Handler
 	ctx     context.Context
-	cancel  context.CancelFunc
+	cancel  context.CancelCauseFunc
 	wg      sync.WaitGroup
 	mu      sync.Mutex
 	closed  bool
@@ -188,7 +189,7 @@ func Listen(dataDir, secret string, h Handler) (*Server, error) {
 			return nil, err
 		}
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 	return &Server{ln: ln, secret: secret, handler: h, ctx: ctx, cancel: cancel}, nil
 }
 
@@ -222,7 +223,7 @@ func (s *Server) Close() error {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	s.cancel()
+	s.cancel(ErrClosed)
 	err := s.ln.Close()
 	s.wg.Wait()
 	return err

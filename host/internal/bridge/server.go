@@ -19,6 +19,10 @@ import (
 // test can shorten it; New copies it into the Server.
 var helloTimeout = 5 * time.Second
 
+// beforeDispatch runs in the reader for each message about to reach
+// OnMessage. A var so a test can hold a message there; New copies it.
+var beforeDispatch = func(Message) {}
+
 const (
 	helloLimit = 4 << 10 // read limit until the token is checked
 	maxMessage = 1 << 20 // text messages; attachments (binary frames) arrive in M3
@@ -52,8 +56,9 @@ type Options struct {
 // Server is the WebSocket server of the app channel. It serves one app at a
 // time: a new authenticated connection replaces the previous one.
 type Server struct {
-	o            Options
-	helloTimeout time.Duration
+	o              Options
+	helloTimeout   time.Duration
+	beforeDispatch func(Message)
 
 	// connMu orders attach and detach together with their OnConnect calls,
 	// which run outside mu.
@@ -91,13 +96,14 @@ func New(o Options) *Server {
 	if o.Snapshot == nil {
 		o.Snapshot = func() Snapshot { return Snapshot{Pending: []ConfirmRequest{}, Journal: []json.RawMessage{}} }
 	}
-	return &Server{o: o, helloTimeout: helloTimeout, token: o.Token}
+	return &Server{o: o, helloTimeout: helloTimeout, beforeDispatch: beforeDispatch, token: o.Token}
 }
 
 // SetToken makes tok the only token accepted from now on, and closes the
 // app connected with another one: a token handed over before is worth
 // nothing once a new one is (spec §5.2: a new token on each start or
-// connection).
+// connection). From then on the closed app's messages reach OnMessage no more,
+// even while its close is under way.
 func (s *Server) SetToken(tok string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -145,6 +151,13 @@ func (s *Server) Serve(ctx context.Context, l net.Listener) error {
 		return nil
 	}
 	return err
+}
+
+// current reports whether cl is still the connected app.
+func (s *Server) current(cl *client) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.client == cl
 }
 
 // Connected reports whether an authenticated app is connected.
@@ -264,6 +277,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			if m.V != ProtocolVersion || m.Type == "" || m.Type == TypeHello {
 				continue
+			}
+			s.beforeDispatch(m)
+			if !s.current(cl) {
+				// Revoked by SetToken, replaced or dropped: its close may
+				// take a while, but nothing it sends counts any more.
+				return
 			}
 			s.o.OnMessage(m)
 		}

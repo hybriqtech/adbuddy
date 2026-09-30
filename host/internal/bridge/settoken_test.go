@@ -56,3 +56,58 @@ func TestReplyToAnUnknownQuestionIsTold(t *testing.T) {
 		t.Fatalf("published %+v", app.published)
 	}
 }
+
+// T5 re-review, M1: a connection revoked by SetToken dispatches nothing more
+// (confirm.reply, pause, resume), even while its close is still under way.
+func TestARevokedConnectionDispatchesNothing(t *testing.T) {
+	h := start(t, Options{})
+	old := h.dial(token, 0)
+	if m := recv(t, old); m.Type != TypeWelcome {
+		t.Fatalf("got %+v", m)
+	}
+	waitConnected(t, h.srv, true)
+	h.srv.SetToken(strings.Repeat("cd", 32))
+	// The old app does not read, so it never answers the close: its socket
+	// stays open for a while, and it still writes.
+	send(t, old, TypeConfirmReply, ConfirmReply{ID: "j_1", Decision: "allow"})
+	send(t, old, TypePause, struct{}{})
+	send(t, old, TypeResume, struct{}{})
+	select {
+	case m := <-h.msgs:
+		t.Fatalf("the revoked connection dispatched %+v", m)
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// The same for a message the reader had already taken when SetToken came:
+// it is not dispatched after the revocation.
+func TestAMessageReadBeforeTheRevocationIsNotDispatched(t *testing.T) {
+	held, release := make(chan struct{}), make(chan struct{})
+	old := beforeDispatch
+	beforeDispatch = func(m Message) {
+		if m.Type == TypeConfirmReply {
+			close(held)
+			<-release
+		}
+	}
+	t.Cleanup(func() { beforeDispatch = old })
+	h := start(t, Options{})
+	c := h.dial(token, 0)
+	if m := recv(t, c); m.Type != TypeWelcome {
+		t.Fatalf("got %+v", m)
+	}
+	waitConnected(t, h.srv, true)
+	send(t, c, TypeConfirmReply, ConfirmReply{ID: "j_1", Decision: "allow"})
+	select {
+	case <-held:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the reply never reached the reader")
+	}
+	h.srv.SetToken(strings.Repeat("cd", 32))
+	close(release)
+	select {
+	case m := <-h.msgs:
+		t.Fatalf("the revoked connection dispatched %+v", m)
+	case <-time.After(500 * time.Millisecond):
+	}
+}

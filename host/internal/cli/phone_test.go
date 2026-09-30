@@ -283,7 +283,8 @@ func TestChannelFailuresDoNotStopServe(t *testing.T) {
 	}{
 		"installed version unreadable": {
 			prepare: func(t *testing.T, e *env, f *appPhone) { f.fail = map[string]int{"dumpsys package": -1} },
-			want:    []string{"Could not check whether the ADBuddy app is on the phone"},
+			want: []string{"Could not check whether the ADBuddy app is on the phone",
+				"off for the rest of this session", "restart `adbuddy serve` to use it"},
 		},
 		"chat port not saved": {
 			prepare: func(t *testing.T, e *env, f *appPhone) {
@@ -378,8 +379,7 @@ func TestServeInterruptedDuringTheHandshake(t *testing.T) {
 		{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n    versionName=0.2.0\n"},
 		{Match: `^shell content write `, SleepMs: 20000},
 	}, remoteRules("AAAA1111")...)
-	data := isolate(t)
-	_ = data
+	isolate(t)
 	if err := config.Save(filepath.Join(os.Getenv("ADBUDDY_CONFIG_DIR"), "config.toml"), cfg); err != nil {
 		t.Fatal(err)
 	}

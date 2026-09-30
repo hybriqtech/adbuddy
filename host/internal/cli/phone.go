@@ -87,7 +87,10 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 		return nil, Interrupted()
 	}
 	if err != nil {
-		return without("Could not check whether the ADBuddy app is on the phone (" + classify.Printable(err.Error()) + ")")
+		// Only checked here: the app stays off until serve starts again.
+		fmt.Fprintf(app.Stderr, "⚠ Could not check whether the ADBuddy app is on the phone (%s). The phone app is off for the rest of this session: "+
+			"🔴 confirmations happen here; restart `adbuddy serve` to use it.\n", classify.Printable(err.Error()))
+		return l, nil
 	}
 	if version == "" {
 		fmt.Fprintln(app.Stderr, "The ADBuddy app is not on the phone: 🔴 confirmations happen here. Run `adbuddy setup` to install it.")

@@ -285,3 +285,51 @@ func TestHandlerPanicIsReported(t *testing.T) {
 		t.Fatalf("second request: exit %+v err %v", exit, err)
 	}
 }
+
+// T5 re-review, M2: a handler can tell the host stopping (serve's Ctrl+C)
+// from the client going away.
+func TestCloseCancelsHandlersWithErrClosed(t *testing.T) {
+	dir := shortDir(t)
+	causes := make(chan error, 1)
+	started := make(chan struct{})
+	s := startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit {
+		close(started)
+		<-ctx.Done()
+		causes <- context.Cause(ctx)
+		return Exit{}
+	})
+	go Call(context.Background(), dir, Request{Kind: KindExec}, nil, io.Discard, io.Discard, nil)
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the handler never ran")
+	}
+	s.Close()
+	if err := <-causes; !errors.Is(err, ErrClosed) {
+		t.Fatalf("cause %v, want ErrClosed", err)
+	}
+}
+
+func TestClientDisconnectIsNotErrClosed(t *testing.T) {
+	dir := shortDir(t)
+	causes := make(chan error, 1)
+	startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit {
+		<-ctx.Done()
+		causes <- context.Cause(ctx)
+		return Exit{}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	Call(ctx, dir, Request{Kind: KindExec}, nil, io.Discard, io.Discard, nil)
+	select {
+	case err := <-causes:
+		if errors.Is(err, ErrClosed) {
+			t.Fatal("a client that went away looks like the host stopping")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler context was not cancelled")
+	}
+}

@@ -91,6 +91,10 @@ var ErrNotRunning = errors.New("ADBuddy host not running")
 // ErrAlreadyRunning means another daemon already owns the socket.
 var ErrAlreadyRunning = errors.New("another ADBuddy host is already running")
 
+// ErrClosed is the cause (context.Cause) of a request cancelled because the
+// server closed (serve stopping), as opposed to the client going away.
+var ErrClosed = errors.New("the ADBuddy host is stopping")
+
 // SocketPath is the daemon socket inside the data directory.
 func SocketPath(dataDir string) string { return filepath.Join(dataDir, "adbuddy.sock") }
 

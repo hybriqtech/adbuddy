@@ -359,7 +359,22 @@ func TestAllowedButAbandonedDoesNotRun(t *testing.T) {
 	if exit.Code != ExitDenied || len(e.adb.ran()) != 0 {
 		t.Fatalf("%+v ran %q", exit, e.adb.ran())
 	}
-	if j := e.last(t); j.Status != journal.StatusDenied || !strings.Contains(j.Reason, "abandoned") {
+	if j := e.last(t); j.Status != journal.StatusDenied || j.Reason != "abandoned by the agent before it ran" {
+		t.Fatalf("%+v", j)
+	}
+}
+
+// T5 re-review, M2: when serve stops (Ctrl+C), the journal does not blame
+// the agent.
+func TestAllowedButServeStoppedDoesNotRun(t *testing.T) {
+	e := newEnv(t)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ipc.ErrClosed)
+	exit := e.d.Handle(ctx, ipc.Request{Kind: ipc.KindExec, Argv: []string{"shell", "rm", "/sdcard/x"}}, &stream{})
+	if exit.Code != ExitDenied || len(e.adb.ran()) != 0 {
+		t.Fatalf("%+v ran %q", exit, e.adb.ran())
+	}
+	if j := e.last(t); j.Status != journal.StatusDenied || j.Reason != "abandoned: ADBuddy stopped before it ran" {
 		t.Fatalf("%+v", j)
 	}
 }

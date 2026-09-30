@@ -59,6 +59,12 @@ func (n *notices) add(s string) {
 	n.v = append(n.v, s)
 }
 
+func (n *notices) get() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return append([]string(nil), n.v...)
+}
+
 func (n *notices) count(sub string) int {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -121,12 +127,19 @@ func TestQuestionWaitsForAChangeInFlight(t *testing.T) {
 	g.waitStarted(t)
 	red := e.execAsync("shell", "reboot")
 	if !n.waitFor(`Waiting for "Interface action: tap 1 1" to finish before asking "Restart the phone"`) {
-		t.Fatalf("not said: %q", n.v)
+		t.Fatalf("not said: %q", n.get())
+	}
+	// T5 re-review, M2: the notice says how to stop waiting.
+	for _, how := range []string{"pause from the phone app", "stop the agent's command", "Ctrl+C"} {
+		if n.count(how) != 1 {
+			t.Fatalf("the notice does not say %q: %q", how, n.get())
+		}
 	}
 	notAsked(t, held, "a change was running")
+	// Not asked yet: nobody is expected to answer anything.
 	r := waitResult(t, e.execAsync("shell", "getprop", "ro.product.model"))
-	if r.exit.Code != ExitDenied || !strings.Contains(r.s.errOut.String(), `waiting for your answer to "Restart the phone"`) {
-		t.Fatalf("new command while the 🔴 waits: %+v %q", r.exit, r.s.errOut.String())
+	if want := `Blocked by ADBuddy: waiting to ask about "Restart the phone"`; r.exit.Code != ExitDenied || strings.TrimSpace(r.s.errOut.String()) != want {
+		t.Fatalf("new command while the 🔴 waits: %+v %q, want %q", r.exit, r.s.errOut.String(), want)
 	}
 	close(g.open)
 	if r := waitResult(t, yellow); r.exit.Code != 0 {
@@ -187,10 +200,11 @@ func TestQuestionWaitsForAnUndoInFlight(t *testing.T) {
 	waitResult(t, red)
 }
 
-// While it waits for the changes in flight, a pause or the agent leaving
-// ends the 🔴 without asking, and leaves no question behind.
+// While it waits for the changes in flight, a pause, the agent leaving or
+// serve stopping (Ctrl+C) ends the 🔴 without asking, and leaves no
+// question behind. The journal blames the agent only when it left.
 func TestWaitingForChangesInFlightEnds(t *testing.T) {
-	for _, how := range []string{"pause", "agent gone"} {
+	for _, how := range []string{"pause", "agent gone", "serve stopped"} {
 		t.Run(how, func(t *testing.T) {
 			e := newEnv(t)
 			e.d.o.OnEntry = func(journal.Entry) {}
@@ -204,8 +218,8 @@ func TestWaitingForChangesInFlightEnds(t *testing.T) {
 			e.d.o.OnNotice = n.add
 			yellow := e.execAsync("shell", "input", "tap", "1", "1")
 			g.waitStarted(t)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
 			red := make(chan result, 1)
 			go func() {
 				s := &stream{}
@@ -215,11 +229,15 @@ func TestWaitingForChangesInFlightEnds(t *testing.T) {
 				t.Fatal("not said")
 			}
 			want := "Blocked by ADBuddy: " + PausedMessage
-			if how == "pause" {
+			switch how {
+			case "pause":
 				paused.Store(true)
 				e.d.CancelConfirmations()
-			} else {
-				cancel()
+			case "agent gone":
+				cancel(nil)
+				want = ""
+			case "serve stopped":
+				cancel(ipc.ErrClosed) // what the IPC server's Close does
 				want = ""
 			}
 			r := waitResult(t, red)
@@ -230,9 +248,17 @@ func TestWaitingForChangesInFlightEnds(t *testing.T) {
 				t.Fatal("asked")
 			}
 			j := e.last(t)
-			if how == "pause" && (j.Status != journal.StatusBlocked || j.Reason != PausedMessage) ||
-				how != "pause" && (j.Status != journal.StatusDenied || !strings.Contains(j.Reason, "abandoned")) {
-				t.Fatalf("journal %+v", j)
+			wantReason := map[string]string{
+				"pause":         PausedMessage,
+				"agent gone":    "abandoned by the agent before it was asked",
+				"serve stopped": "abandoned: ADBuddy stopped before asking",
+			}[how]
+			wantStatus := journal.StatusDenied
+			if how == "pause" {
+				wantStatus = journal.StatusBlocked
+			}
+			if j.Status != wantStatus || j.Reason != wantReason {
+				t.Fatalf("journal %+v, want %s %q", j, wantStatus, wantReason)
 			}
 			close(g.open)
 			waitResult(t, yellow)
@@ -269,7 +295,7 @@ func TestAnAllowedRedRunsWhenAnotherComesInBetween(t *testing.T) {
 		t.Fatalf("allowed 🔴: %+v %q", r.exit, r.s.errOut.String())
 	}
 	if n.count("Waiting for") != 1 {
-		t.Fatalf("the second 🔴 did not wait: %q", n.v)
+		t.Fatalf("the second 🔴 did not wait: %q", n.get())
 	}
 	asked(t, held)
 	held.answer <- confirm.Deny

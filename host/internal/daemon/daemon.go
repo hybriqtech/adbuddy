@@ -101,6 +101,16 @@ type Daemon struct {
 type question struct {
 	title    string
 	withdraw context.CancelCauseFunc
+	shown    bool // asked on the phone or in the terminal; guarded by askMu
+}
+
+// blocks is why other commands are refused while q waits, in the shim's
+// format (Blocked by ADBuddy: <reason>). askMu must be held.
+func (q *question) blocks() string {
+	if !q.shown {
+		return `waiting to ask about "` + q.title + `"`
+	}
+	return `waiting for your answer to "` + q.title + `"`
 }
 
 // errWithdrawn is why a question is withdrawn when the agent is paused.
@@ -110,15 +120,22 @@ var errWithdrawn = errors.New("paused from the phone")
 type flight struct{ title string }
 
 // ask makes q the question waiting for an answer. If another one is
-// waiting, q is not registered and ask returns the other's title.
-func (d *Daemon) ask(q *question) (other string) {
+// waiting, q is not registered and ask returns why (see blocks).
+func (d *Daemon) ask(q *question) (busy string) {
 	d.askMu.Lock()
 	defer d.askMu.Unlock()
 	if d.asking != nil {
-		return d.asking.title
+		return d.asking.blocks()
 	}
 	d.asking = q
 	return ""
+}
+
+// show marks q as asked, right before it shows up.
+func (d *Daemon) show(q *question) {
+	d.askMu.Lock()
+	defer d.askMu.Unlock()
+	q.shown = true
 }
 
 // answered removes q once its answer is in. An allowed question's command
@@ -138,13 +155,13 @@ func (d *Daemon) answered(q *question, allowed bool) (release func()) {
 }
 
 // admit lets a command reach adb unless a question is waiting (then it
-// returns that question's title). A change (change true) counts as in
-// flight until release is called.
+// returns why, see blocks). A change (change true) counts as in flight
+// until release is called.
 func (d *Daemon) admit(title string, change bool) (release func(), other string) {
 	d.askMu.Lock()
 	defer d.askMu.Unlock()
 	if d.asking != nil {
-		return nil, d.asking.title
+		return nil, d.asking.blocks()
 	}
 	if !change {
 		return func() {}, ""
@@ -194,7 +211,7 @@ func (d *Daemon) waitChanges(ctx context.Context, q *question) error {
 		d.askMu.Unlock()
 		if !told {
 			told = true
-			d.o.OnNotice(`Waiting for "` + classify.Printable(running) + `" to finish before asking "` + classify.Printable(q.title) + `"`)
+			d.o.OnNotice(`Waiting for "` + classify.Printable(running) + `" to finish before asking "` + classify.Printable(q.title) + `". To stop waiting, pause from the phone app, stop the agent's command or press Ctrl+C to stop ADBuddy.`)
 		}
 		select {
 		case <-idle:
@@ -204,14 +221,15 @@ func (d *Daemon) waitChanges(ctx context.Context, q *question) error {
 	}
 }
 
-// waitingFor returns the title of the question waiting for an answer, or "".
+// waitingFor returns why commands are refused while a question waits (see
+// blocks), or "" when none does.
 func (d *Daemon) waitingFor() string {
 	d.askMu.Lock()
 	defer d.askMu.Unlock()
 	if d.asking == nil {
 		return ""
 	}
-	return d.asking.title
+	return d.asking.blocks()
 }
 
 // CancelConfirmations withdraws the question waiting for an answer, if any.
@@ -226,10 +244,14 @@ func (d *Daemon) CancelConfirmations() {
 	}
 }
 
-// waitingMessage is why a command is refused while a question waits, in the
-// shim's format (Blocked by ADBuddy: <reason>).
-func waitingMessage(title string) string {
-	return `waiting for your answer to "` + title + `"`
+// abandoned picks the journal's reason for a 🔴 that ends because its
+// request did: byAgent when the agent left, byServe when serve stopped
+// (Ctrl+C), which is not the agent's doing.
+func abandoned(ctx context.Context, byAgent, byServe string) string {
+	if errors.Is(context.Cause(ctx), ipc.ErrClosed) {
+		return byServe
+	}
+	return byAgent
 }
 
 // New returns a Daemon; missing optional fields get defaults.
@@ -301,7 +323,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if t := d.waitingFor(); t != "" {
 		p := e
 		p.Level, p.Rule, p.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
-		return d.block(p, s, waitingMessage(t))
+		return d.block(p, s, t)
 	}
 	if len(g.Forbidden) > 0 {
 		return d.block(e, s, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed: ADBuddy only talks to the active phone through its own adb server")
@@ -365,8 +387,8 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		qctx, withdraw := context.WithCancelCause(ctx)
 		defer withdraw(nil)
 		q := &question{title: e.Description, withdraw: withdraw}
-		if other := d.ask(q); other != "" {
-			return d.block(e, s, waitingMessage(other))
+		if busy := d.ask(q); busy != "" {
+			return d.block(e, s, busy)
 		}
 		// A pause that came before the question was registered did not
 		// withdraw it: look again now that it is.
@@ -382,11 +404,13 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 				return d.block(e, s, PausedMessage)
 			}
 			code := ExitDenied
-			e.Status, e.Reason, e.ExitCode = journal.StatusDenied, "abandoned by the agent before it was asked", &code
+			e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it was asked", "abandoned: ADBuddy stopped before asking"), &code
 			d.record(e)
 			return ipc.Exit{Code: ExitDenied}
 		}
-		// The expiry counts from when the question is shown.
+		// The expiry counts from when the question is shown; from now on the
+		// refused commands say it waits for an answer.
+		d.show(q)
 		asked := d.o.Now().UTC()
 		cctx, cancel := context.WithTimeout(qctx, d.o.ConfirmTimeout)
 		decision := d.o.Confirmer.Confirm(cctx, confirm.Request{
@@ -419,7 +443,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 		if ctx.Err() != nil { // allowed, but the agent is gone: nobody waits for the result
 			code := ExitDenied
-			e.Status, e.Reason, e.ExitCode = journal.StatusDenied, "abandoned by the agent before it ran", &code
+			e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
 			d.record(e)
 			return ipc.Exit{Code: ExitDenied}
 		}
@@ -438,7 +462,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if level != classify.Red {
 		r, other := d.admit(e.Description, level >= classify.Yellow)
 		if other != "" {
-			return d.block(e, s, waitingMessage(other))
+			return d.block(e, s, other)
 		}
 		release = r
 	}

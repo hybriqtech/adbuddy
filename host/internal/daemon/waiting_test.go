@@ -165,7 +165,7 @@ func TestACommandInFlightIsStoppedBeforeAdb(t *testing.T) {
 	var red chan result
 	// Right before the tap is admitted to run, the 🔴 starts asking.
 	e.d.beforeRun = func(argv []string) {
-		if argv[1] == "input" {
+		if len(argv) > 1 && argv[1] == "input" {
 			red = e.execAsync("shell", "reboot")
 			<-held.asked
 		}
