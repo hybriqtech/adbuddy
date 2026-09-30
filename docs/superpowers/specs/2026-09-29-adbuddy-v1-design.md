@@ -260,7 +260,7 @@ Tailscale es opcional y se recomienda en la documentación y en la app.
 - **Servidor.** El host escucha solo en `127.0.0.1:<port>`. El puerto es alto, se elige en la primera ejecución y queda fijo, de modo que la redirección de `adb reverse` no cambia.
 - **Túnel.** `adb reverse tcp:<port> tcp:<port>` en cada conexión.
 - **Token.**
-  - En cada arranque o conexión, el host genera un token aleatorio de 256 bits y lo entrega con `adb shell content call --uri content://tech.hybriq.adbuddy.bridge --method handshake --extra token:s:<t> --extra port:i:<p> --extra host:s:<nombre>`.
+  - En cada arranque o conexión, el host genera un token aleatorio de 256 bits y lo entrega por stdin, nunca en una línea de comandos: `adb shell content write --uri content://tech.hybriq.adbuddy.bridge/handshake` con el JSON `{token, port, host, nonce}`. El `nonce` es nuevo en cada entrega y no es secreto: `ping` lo devuelve y así el host sabe que la app se quedó con este token y no con el anterior.
   - El `TokenProvider` solo acepta llamadas si `Binder.getCallingUid() == Process.SHELL_UID` (2000), es decir, si llegan por adb.
 - **La app** abre `ws://127.0.0.1:<port>/v1` y envía `hello {token, lastSeq, appVersion, deviceSerial}`. Otras apps pueden ver el puerto, pero no tienen el token.
 - **Reanudación.** El servidor responde `welcome {session, fromSeq}` y vuelve a enviar los eventos perdidos desde un búfer circular de 2000 eventos. Si se ha perdido demasiado, envía `snapshot`, con el estado y los últimos mensajes.
@@ -354,7 +354,7 @@ Todos los mensajes llevan el sobre `{"v":1,"seq":<n>,"type":"…","ts":"…","pa
 |---|---|
 | `MainActivity` (Compose) | Pantallas: Onboarding, Chat, Actividad, Ajustes y Acerca de |
 | `BridgeService` (foreground, `specialUse`) | Cliente WebSocket, notificaciones, reconexión y reactivación de la depuración inalámbrica en Android 11-16 (nunca con "Cortar acceso" activo) |
-| `TokenProvider` (ContentProvider exportado) | `handshake`, `requestSetup`, `getSetupConsent` y `ping`; solo acepta el UID de shell |
+| `TokenProvider` (ContentProvider exportado) | escritura de `/handshake` por stdin, `requestSetup`, `getSetupConsent` y `ping`; solo acepta el UID de shell |
 | `AgentAccessibilityService` | Árbol de interfaz compacto, clic y texto (`ACTION_CLICK`, `ACTION_SET_TEXT`), paquete en primer plano y superposición |
 | `AgentNotificationListener` (opcional) | Notificaciones actuales para `adbuddy notifications` |
 

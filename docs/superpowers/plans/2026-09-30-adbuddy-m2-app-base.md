@@ -3996,25 +3996,29 @@ import org.junit.Test
 
 class HandshakeTest {
     private val token = "0123456789abcdef".repeat(4)
+    private val nonce = "fedcba9876543210".repeat(2)
 
     @Test fun acceptsWhatTheHostWrites() {
-        val h = HandshakeParser.parse("""{"host":"DESKTOP-1","port":47123,"token":"$token"}""".toByteArray())!!
+        val h = HandshakeParser.parse("""{"host":"DESKTOP-1","nonce":"$nonce","port":47123,"token":"$token"}""".toByteArray())!!
         assertEquals(47123, h.port)
+        assertEquals(nonce, h.nonce)
         assertEquals("DESKTOP-1", h.host)
     }
 
     @Test fun refusesAnythingOff() {
         for (bad in listOf(
-            """{"host":"x","port":47123,"token":"short"}""",
-            """{"host":"x","port":80,"token":"$token"}""",
-            """{"host":"x","port":47123}""",
+            """{"host":"x","nonce":"$nonce","port":47123,"token":"short"}""",
+            """{"host":"x","nonce":"$nonce","port":80,"token":"$token"}""",
+            """{"host":"x","nonce":"$nonce","port":47123}""",
+            """{"host":"x","port":47123,"token":"$token"}""",
+            """{"host":"x","nonce":"XYZ","port":47123,"token":"$token"}""",
             "not json",
             "{" + " ".repeat(5000) + "}",
         )) assertNull(bad, HandshakeParser.parse(bad.toByteArray()))
     }
 
     @Test fun oddHostNamesBecomePC() {
-        val h = HandshakeParser.parse("""{"host":"<b>evil</b>","port":47123,"token":"$token"}""".toByteArray())!!
+        val h = HandshakeParser.parse("""{"host":"<b>evil</b>","nonce":"$nonce","port":47123,"token":"$token"}""".toByteArray())!!
         assertEquals("PC", h.host)
     }
 
@@ -4632,12 +4636,13 @@ import kotlinx.serialization.Serializable
 
 /** The handshake the host writes on stdin (`content write …/handshake`, spec §5.2). */
 @Serializable
-data class Handshake(val token: String, val port: Int, val host: String = "")
+data class Handshake(val token: String, val port: Int, val host: String = "", val nonce: String = "")
 
 object HandshakeParser {
     private const val MAX_BYTES = 4096
     private val TOKEN = Regex("^[0-9a-f]{64}$")
     private val HOST = Regex("^[A-Za-z0-9 ._-]{1,40}$")
+    private val NONCE = Regex("^[0-9a-f]{32}$")
 
     /** Reads at most MAX_BYTES + 1 bytes (InputStream.readNBytes needs API 33). */
     fun readLimited(input: java.io.InputStream): ByteArray {
@@ -4659,7 +4664,7 @@ object HandshakeParser {
         } catch (e: IllegalArgumentException) {
             return null
         }
-        if (!TOKEN.matches(h.token) || h.port !in 1024..65535) return null
+        if (!TOKEN.matches(h.token) || h.port !in 1024..65535 || !NONCE.matches(h.nonce)) return null
         val host = if (HOST.matches(h.host)) h.host else "PC"
         return h.copy(host = host)
     }
@@ -4844,20 +4849,22 @@ import androidx.core.content.edit
 class BridgePrefs(context: Context) {
     private val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
 
-    data class Link(val token: String, val port: Int, val host: String)
+    /** nonce: what the host sent with this token; ping returns it so the host knows the app took it. */
+    data class Link(val token: String, val port: Int, val host: String, val nonce: String = "")
 
     var link: Link?
         get() {
             val token = prefs.getString("token", null) ?: return null
             val port = prefs.getInt("port", 0)
             if (port !in 1024..65535) return null
-            return Link(token, port, prefs.getString("host", "") ?: "")
+            return Link(token, port, prefs.getString("host", "") ?: "", prefs.getString("nonce", "") ?: "")
         }
         set(value) = prefs.edit(commit = true) {
             if (value == null) {
-                remove("token"); remove("port"); remove("host")
+                remove("token"); remove("port"); remove("host"); remove("nonce")
             } else {
                 putString("token", value.token); putInt("port", value.port); putString("host", value.host)
+                putString("nonce", value.nonce)
             }
         }
 
@@ -5164,7 +5171,8 @@ import tech.hybriq.adbuddy.BuildConfigInfo
  *   the token, port and PC name as JSON on stdin (never in a command line).
  * - `content call … --method requestSetup --extra host:s:<name>` opens a
  *   consent request; `getSetupConsent` answers pending, granted or denied.
- * - `content call … --method ping` answers the port the app will use.
+ * - `content call … --method ping` answers the port the app will use and the
+ *   nonce of the last handshake it took (not a secret: it proves which one).
  */
 class TokenProvider : ContentProvider() {
     private lateinit var prefs: BridgePrefs
@@ -5181,6 +5189,7 @@ class TokenProvider : ContentProvider() {
                 putBoolean("ok", true)
                 putString("appVersion", BuildConfigInfo.versionName(context!!))
                 putInt("port", prefs.link?.port ?: 0)
+                putString("nonce", prefs.link?.nonce ?: "")
             }
             "requestSetup" -> {
                 val host = extras?.getString("host")?.takeIf { Regex("^[A-Za-z0-9 ._-]{1,40}$").matches(it) } ?: "PC"
@@ -5202,7 +5211,7 @@ class TokenProvider : ContentProvider() {
             val bytes = ParcelFileDescriptor.AutoCloseInputStream(read).use { HandshakeParser.readLimited(it) }
             val h = HandshakeParser.parse(bytes)
             if (h != null) {
-                prefs.link = BridgePrefs.Link(h.token, h.port, h.host)
+                prefs.link = BridgePrefs.Link(h.token, h.port, h.host, h.nonce)
                 try {
                     BridgeService.start(ctx)
                 } catch (e: IllegalStateException) {
