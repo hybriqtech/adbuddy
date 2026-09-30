@@ -401,6 +401,8 @@ func TestSetupInterruptedWhileWaitingForThePhone(t *testing.T) {
 			{Match: tcpPortRule, Stdout: "5555\n"},
 			serialnoRule,
 		}, known: true, cancelOn: "Closed adb's network port"},
+		// Nobody answers in the app.
+		"consent": {rules: appRules("pending"), input: "192.0.2.10:37000\n123456\n", args: []string{"--code"}, cancelOn: "Open the phone"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -429,6 +431,9 @@ func TestSetupInterruptedWhileWaitingForThePhone(t *testing.T) {
 			case code := <-done:
 				if code != ExitInterrupt || !strings.Contains(errb.String(), "INTERRUPTED") {
 					t.Fatalf("exit %d, stderr %q", code, errb.String())
+				}
+				if strings.Contains(errb.String(), "Could not ask in the app") {
+					t.Fatalf("Ctrl+C reported as a failure of the app: %q", errb.String())
 				}
 				if c.known && strings.Contains(errb.String(), "Prepare your phone") {
 					t.Fatalf("went on to pairing after Ctrl+C: %q", errb.String())

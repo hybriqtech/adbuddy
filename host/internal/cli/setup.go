@@ -98,6 +98,9 @@ connection address with --connect (or type it when asked).`,
 				if app.Getenv("ADBUDDY_SOURCE") == "agent" {
 					return NewError("AGENT_SESSION", "`adbuddy setup` cannot be run from the agent's session", "Run it yourself in a terminal.")
 				}
+				if apkFlag != "" && noApp {
+					return UsageError("--apk and --no-app contradict each other: use only one")
+				}
 				if connectFlag != "" && !validPairAddr(connectFlag) {
 					return UsageError(fmt.Sprintf("--connect: %q is not an IP address and port: type them as the phone shows them on its Wireless debugging screen (e.g. 100.64.0.5:41234)", classify.Printable(connectFlag)))
 				}
@@ -265,26 +268,29 @@ connection address with --connect (or type it when asked).`,
 					return err // Ctrl+C becomes INTERRUPTED below
 				}
 
-				// 5. Profile.
+				// Profile of the phone.
 				prof, err := device.Collect(ctx, runner)
 				if err != nil {
 					return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
 				}
 				say("Phone: %s, Android %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android))
 
-				// The phone app (spec §3.1 steps 5-6).
-				appRes := appResult{Consent: "skipped", Note: "--no-app"}
+				// 5-6. The phone app.
+				appRes := appResult{Consent: "skipped", Note: noAppNote}
 				if !noApp {
 					appRes = setupApp(ctx, app, &e, runner, apkFlag, say)
+					if err := ctx.Err(); err != nil {
+						return err // Ctrl+C while waiting for the phone: INTERRUPTED below
+					}
 				}
 
-				// 6. Agent.
+				// Agent.
 				chosen, err := chooseAgent(app, agentFlag, e.cfg.Agent, yes, ask, say)
 				if err != nil {
 					return err
 				}
 
-				// 7. Environment and configuration. The saved serial is the
+				// Environment and configuration. The saved serial is the
 				// phone's stable name, not the address it used this time.
 				saved := stableSerial(guid, serial)
 				if saved == "" {
