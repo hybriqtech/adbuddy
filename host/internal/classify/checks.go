@@ -178,13 +178,19 @@ var protectedTargets = map[string]bool{
 
 // protectedExts: at the top of the environment, files with these extensions
 // are context or configuration for some agent (AGENTS.md, CLAUDE.local.md,
-// opencode.json, device.json…).
-var protectedExts = []string{".md", ".json", ".jsonc", ".toml", ".yaml", ".yml"}
+// opencode.json, device.json…) or programs a shell there could run instead
+// of the shim (cmd.exe looks in the current folder first: adb.bat, run.cmd…).
+var protectedExts = []string{".md", ".json", ".jsonc", ".toml", ".yaml", ".yml", ".exe", ".bat", ".cmd", ".com", ".ps1", ".sh"}
 
-// safeLocalTarget accepts a relative path inside the working directory that
-// does not touch hidden files or folders (.claude, .adbuddy…) or the
-// environment's own files.
-func safeLocalTarget(p string) bool {
+// protectedBases: at the top of the environment, these names with any
+// extension (adb, adb.exe, adbuddy.bat…) could shadow the shim.
+var protectedBases = map[string]bool{"adb": true, "adbuddy": true}
+
+// SafeLocalTarget accepts a relative path that does not leave its folder and
+// does not touch hidden files or folders (.claude, .adbuddy…) or, in its
+// first part, the environment's own files and programs. The daemon applies
+// it to the path relative to the environment's root.
+func SafeLocalTarget(p string) bool {
 	p = strings.ReplaceAll(p, `\`, "/")
 	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, ":") {
 		return false
@@ -196,7 +202,8 @@ func safeLocalTarget(p string) bool {
 		// Windows ignores trailing dots and spaces: "CLAUDE.md. " is CLAUDE.md.
 		if i == 0 {
 			name := strings.ToLower(strings.TrimRight(part, ". "))
-			if protectedTargets[name] {
+			base, _, _ := strings.Cut(name, ".")
+			if protectedTargets[name] || protectedBases[base] {
 				return false
 			}
 			for _, ext := range protectedExts {
@@ -223,26 +230,39 @@ func remoteBase(remote string) (string, bool) {
 
 // adb pull REMOTE [LOCAL] and adb bugreport [PATH] only read the phone, but
 // they write on the PC without the agent's own permission prompt: 🟢 only
-// inside the environment and away from its control files.
+// inside the environment and away from its control files. The daemon checks
+// the same targets against the agent's working directory (Result.PCWrites).
 func checkPullTarget(ws []Word) checkResult {
+	if _, reason := pcTargets(ws); reason != "" {
+		return red(reason)
+	}
+	return ok()
+}
+
+// pcTargets lists where pull or bugreport writes, relative to the working
+// directory, and why that is unsafe (empty if it looks safe).
+func pcTargets(ws []Word) (targets []string, reason string) {
 	var pos []string
 	for _, w := range ws[1:] {
 		switch v := w.Value; {
 		case v == "-a":
 		case strings.HasPrefix(v, "-"):
-			return red("unknown option " + v)
+			return nil, "unknown option " + v
 		default:
 			pos = append(pos, v)
 		}
 	}
-	var targets []string
 	switch {
-	case ws[0].Value == "bugreport" && len(pos) <= 1:
-		targets = pos
+	case ws[0].Value == "bugreport" && len(pos) == 1:
+		// adb adds .zip to a path without it; an existing folder gets the
+		// report inside.
+		targets = []string{pos[0], pos[0] + ".zip"}
+	case ws[0].Value == "bugreport" && len(pos) == 0:
+		// bugreport-<device>-<date>.zip in the working directory.
 	case ws[0].Value == "pull" && (len(pos) == 1 || len(pos) == 2):
 		base, named := remoteBase(pos[0])
 		if !named {
-			return red("pulls a folder's contents without a folder name")
+			return nil, "pulls a folder's contents without a folder name"
 		}
 		targets = []string{base}
 		if len(pos) == 2 {
@@ -250,12 +270,12 @@ func checkPullTarget(ws []Word) checkResult {
 			targets = []string{pos[1], path.Join(strings.ReplaceAll(pos[1], `\`, "/"), base)}
 		}
 	default:
-		return red("several sources or targets")
+		return nil, "several sources or targets"
 	}
 	for _, t := range targets {
-		if !safeLocalTarget(t) {
-			return red("writes outside the environment or over its own files: " + t)
+		if !SafeLocalTarget(t) {
+			return targets, "writes outside the environment or over its own files: " + t
 		}
 	}
-	return ok()
+	return targets, ""
 }

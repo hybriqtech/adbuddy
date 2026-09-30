@@ -125,7 +125,14 @@ func start(t *testing.T) *harness {
 // adb runs the workspace shim.
 func (h *harness) adb(stdin string, args ...string) (stdout, stderr string, code int) {
 	h.t.Helper()
+	return h.adbIn("", stdin, args...)
+}
+
+// adbIn runs the workspace shim from the working directory dir ("": the test's).
+func (h *harness) adbIn(dir, stdin string, args ...string) (stdout, stderr string, code int) {
+	h.t.Helper()
 	cmd := exec.Command(filepath.Join(workspace.BinDir(h.ws), testutil.Exe("adb")), args...)
+	cmd.Dir = dir
 	cmd.Env = append(h.env, "ADBUDDY_SOURCE=agent")
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb bytes.Buffer
@@ -252,6 +259,36 @@ func TestEndToEnd(t *testing.T) {
 	// The live view in serve's stdout shows the entries.
 	if !strings.Contains(h.serveOut.String(), "Delete files: -rf /sdcard/DCIM") {
 		t.Fatalf("live view: %q", h.serveOut.String())
+	}
+}
+
+// Final review, I1: serve tells the daemon where the environment is, and
+// pull only writes there without asking.
+func TestPullOnlyInsideTheEnvironment(t *testing.T) {
+	h := start(t)
+	h.adbIn(h.ws, "", "pull", "/sdcard/a.jpg")
+	if calls := h.adbCalls(); calls[len(calls)-1] != "pull /sdcard/a.jpg" {
+		t.Fatalf("pull inside the environment did not run: %q\n%s", calls, h.serveErr.String())
+	}
+	done := make(chan struct{})
+	var out string
+	var code int
+	go func() {
+		_, out, code = h.adbIn(t.TempDir(), "", "pull", "/sdcard/b.jpg")
+		close(done)
+	}()
+	waitFor(t, func() bool { return strings.Contains(h.serveErr.String(), "Code: ") }, h.serveErr)
+	if !strings.Contains(h.serveErr.String(), "pull writes outside the agent environment") {
+		t.Fatalf("confirmation without the reason:\n%s", h.serveErr.String())
+	}
+	time.Sleep(1200 * time.Millisecond) // answers in the first second are ignored as typed ahead
+	io.WriteString(h.serveIn, "n\n")
+	<-done
+	if code != 126 || !strings.Contains(out, "Denied by user") {
+		t.Fatalf("pull outside: %d %q", code, out)
+	}
+	if calls := h.adbCalls(); calls[len(calls)-1] != "pull /sdcard/a.jpg" {
+		t.Fatalf("pull outside ran: %q", calls)
 	}
 }
 

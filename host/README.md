@@ -46,7 +46,7 @@ go build -o adbuddy ./cmd/adbuddy      # adbuddy.exe on Windows
 
 | Level | Examples | What happens |
 |---|---|---|
-| 🟢 read-only | `getprop`, `dumpsys`, `pm list`, `settings get`, `ls`, `cat`, `pull` | Runs and is journaled |
+| 🟢 read-only | `getprop`, `dumpsys`, `pm list`, `settings get`, `ls`, `cat`, `pull` into the agent environment | Runs and is journaled |
 | 🟡 reversible or harmless | `settings put`, `pm disable-user`, `pm uninstall --user 0` (system apps), `appops set`, `mv`, `install`, `push`, `input`, `am start` | Runs and is journaled with its inverse (if it has one) |
 | 🔴 irreversible, dangerous or unknown | `rm`, `pm clear`, `uninstall`, `reboot`, `settings delete`, anything ADBuddy does not understand | Waits for your confirmation |
 

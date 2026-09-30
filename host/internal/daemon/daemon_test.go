@@ -90,6 +90,7 @@ func (s *stream) Data(v any) error {
 }
 
 type env struct {
+	ws      string // the agent's environment
 	d       *Daemon
 	adb     *fakeADB
 	conf    *fakeConfirmer
@@ -103,20 +104,28 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ws := t.TempDir()
 	e := &env{
+		ws:    ws,
 		adb:   &fakeADB{shell: map[string]string{}, exits: map[string]int{}, out: map[string]string{}},
 		conf:  &fakeConfirmer{decision: confirm.Allow},
-		store: journal.OpenSigned(filepath.Join(t.TempDir(), "journal"), []byte("test key")),
+		store: journal.OpenSigned(filepath.Join(ws, "journal"), []byte("test key")),
 	}
 	e.d = New(Options{Classifier: c, ADB: e.adb, Journal: e.store, Confirmer: e.conf, Serial: "dev1", Session: "s_1", Lang: "en",
-		OnEntry: func(j journal.Entry) { e.entries = append(e.entries, j) }})
+		Workspace: ws, OnEntry: func(j journal.Entry) { e.entries = append(e.entries, j) }})
 	return e
 }
 
 func (e *env) exec(t *testing.T, argv ...string) (*stream, ipc.Exit) {
 	t.Helper()
+	return e.execIn(t, t.TempDir(), argv...)
+}
+
+// execIn runs argv as the agent would from the working directory cwd.
+func (e *env) execIn(t *testing.T, cwd string, argv ...string) (*stream, ipc.Exit) {
+	t.Helper()
 	s := &stream{}
-	exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindExec, Argv: argv, Cwd: t.TempDir(), Env: map[string]string{"ADBUDDY_SOURCE": "agent"}}, s)
+	exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindExec, Argv: argv, Cwd: cwd, Env: map[string]string{"ADBUDDY_SOURCE": "agent"}}, s)
 	return s, exit
 }
 

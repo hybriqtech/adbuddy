@@ -49,6 +49,9 @@ type Options struct {
 	Version        string
 	OnEntry        func(journal.Entry) // final records, for the live view; fields are untrusted, escape before printing; called concurrently
 	OnWarning      func(string)        // problems the person running serve should see; called concurrently
+	// Workspace is the root of the agent's environment: adb pull and adb
+	// bugreport may only write inside it. Empty: they always need confirmation.
+	Workspace string
 	// UndoneLog lists the undos started, finished or failed (see
 	// readUndoneLog), outside the agent's folder, so deleting journal lines
 	// cannot make undo run an inverse twice. Empty in tests that do not need it.
@@ -116,8 +119,16 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	res := d.o.Classifier.Classify(args)
 	e.Level, e.Rule, e.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
 	level, reason := res.Level, ""
+	if len(res.PCWrites) > 0 {
+		// pull and bugreport write on the PC from the agent's working
+		// directory, which the classifier does not know.
+		if why := d.checkPCWrites(req.Cwd, res.PCWrites); why != "" {
+			level, reason = classify.Red, why
+			e.Level = level.String()
+		}
+	}
 
-	if res.Level >= classify.Yellow {
+	if level >= classify.Yellow {
 		if err := d.o.Journal.Writable(); err != nil {
 			return d.block(e, s, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
@@ -127,7 +138,10 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		d.changes.Lock()
 		defer d.changes.Unlock()
 		prep = precheck.Prepare(ctx, d.o.ADB, res.Op, level, precheck.Env{Cwd: req.Cwd, BackupDir: d.o.Journal.BackupDir(e.ID)})
-		level, reason = prep.Level, prep.Reason
+		level = prep.Level
+		if prep.Reason != "" {
+			reason = strings.TrimPrefix(reason+"; "+prep.Reason, "; ")
+		}
 		e.Level = level.String()
 		if prep.Inverse != nil {
 			e.Inverse = &journal.Inverse{Argv: prep.Inverse}

@@ -234,14 +234,21 @@ func checkDate(ws []Word) checkResult {
 	return ok()
 }
 
-// dumpsys is 🟢 unless it passes a command that changes state.
+// dumpsys is 🟢 unless it passes a command that changes state. Options that
+// start with --reset or --clear (procstats --clear, batterystats --reset-all,
+// usagestats --clear…) wipe the service's data.
 func checkDumpsys(ws []Word) checkResult {
 	for _, w := range ws[2:] {
-		switch w.Value {
-		case "set", "reset", "unplug", "enable", "disable", "clear", "put", "delete", "remove", "add",
-			"force-idle", "force-inactive", "unforce", "step", "whitelist", "tempwhitelist",
-			"sys-whitelist", "except-idle-whitelist", "--reset", "suspend", "kill", "stop", "start":
-			return red("dumpsys command that changes state")
+		switch v := w.Value; {
+		case strings.HasPrefix(v, "--reset"), strings.HasPrefix(v, "--clear"):
+			return red("dumpsys option that clears data")
+		default:
+			switch v {
+			case "set", "reset", "unplug", "enable", "disable", "clear", "put", "delete", "remove", "add",
+				"force", "force-idle", "force-inactive", "unforce", "step", "whitelist", "tempwhitelist",
+				"sys-whitelist", "except-idle-whitelist", "suspend", "kill", "stop", "start":
+				return red("dumpsys command that changes state")
+			}
 		}
 	}
 	return ok()

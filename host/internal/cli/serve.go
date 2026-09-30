@@ -73,7 +73,10 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				return NewError("DAEMON_UNREACHABLE", "the ADBuddy socket does not answer: "+perr.Error(),
 					"Stop the other `adbuddy serve` or delete "+ipc.SocketPath(e.dirs.Data)+" if none is running.")
 			}
-			ws := e.workspace(wsDir)
+			ws, err := filepath.Abs(e.workspace(wsDir))
+			if err != nil {
+				return NewError("WORKSPACE_FAILED", err.Error(), "Pass --workspace with an absolute path.")
+			}
 			exe, err := os.Executable()
 			if err != nil {
 				return NewError("EXECUTABLE_UNKNOWN", err.Error(), "")
@@ -130,7 +133,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			session := journal.NewID("s_", time.Now())
 			d := daemon.New(daemon.Options{
 				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: confirmer,
-				Serial: active, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
+				Serial: active, Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
 				UndoneLog: undoneLogPath(e.dirs.Data, workspace.JournalDir(ws)),
 				OnEntry: func(j journal.Entry) {
 					outMu.Lock()
