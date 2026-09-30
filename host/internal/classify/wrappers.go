@@ -36,13 +36,15 @@ func (c *Classifier) evalWords(ws []Word, e *evaluator) []Finding {
 		return fs
 	}
 
+	if scriptBuiltins[name] {
+		return []Finding{unanalysable("shell.script", "runs code from a file or a string", vals, textScript)}
+	}
+
 	switch name {
 	case "sh", "mksh", "bash", "ash", "dash", "zsh", "ksh":
 		return c.evalShell(ws, e)
 	case "su":
 		return c.evalSu(ws, e)
-	case ".", "source", "eval":
-		return []Finding{unanalysable("shell.script", "runs code from a file or a string", vals, textScript)}
 	case "find":
 		return c.evalFind(ws, e)
 	case "watch":
@@ -560,6 +562,7 @@ func (c *Classifier) evalShell(ws []Word, e *evaluator) []Finding {
 	rest := ws[1:]
 	script := false
 	for len(rest) > 0 && (strings.HasPrefix(rest[0].Value, "-") || strings.HasPrefix(rest[0].Value, "+")) && !rest[0].Dynamic {
+		off := rest[0].Value[0] == '+'
 		opts := rest[0].Value[1:]
 		rest = rest[1:]
 		if strings.ContainsAny(opts, "is") || opts == "" || opts == "-" {
@@ -567,6 +570,10 @@ func (c *Classifier) evalShell(ws []Word, e *evaluator) []Finding {
 		}
 		if strings.Trim(opts, "ceufxvnaC") != "" {
 			return []Finding{unanalysable("shell.script", "unknown shell option", vals, textScript)}
+		}
+		if off && strings.Contains(opts, "c") {
+			// +c turns the option off: mksh would open the next word as a file.
+			return []Finding{unanalysable("shell.script", "sh +c: the shell would not read the script from the command line", vals, textScript)}
 		}
 		script = script || strings.Contains(opts, "c")
 	}

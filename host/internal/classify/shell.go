@@ -32,7 +32,7 @@ type evaluator struct {
 	c        *Classifier
 	sc       scope
 	numeric  map[string]bool // variables proven to hold a number (see numericVars)
-	unproven map[string]bool // variables the script sets that are not
+	unproven map[string]bool // variables the script sets that are not proven numeric
 	out      []Finding
 }
 

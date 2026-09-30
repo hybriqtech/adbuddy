@@ -99,3 +99,6 @@
 {"sh": "x=y; echo $(( $x = 1 )); y='a[$(@S@)]'; echo $((y))", "why": "an arithmetic assignment to a name only known on the phone"}
 {"sh": "echo x >$(@S@)", "why": "a substitution as the target of a redirection"}
 {"sh": "echo x 2>&1 >/dev/null | @S@", "why": "a pipeline after redirections"}
+{"sh": "sh +c @S@", "why": "sh +c turns the option off"}
+{"sh": "sh -c +c @S@", "why": "+c after -c"}
+{"sh": "sh +c -c @S@", "why": "-c after +c"}

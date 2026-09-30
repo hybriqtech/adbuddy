@@ -443,20 +443,32 @@ func TestRecordOracle(t *testing.T) {
 	for i, k := range cases {
 		write(strconv.Itoa(i), withSentinel(k.Sh))
 	}
-	write("sentinel", "#!/system/bin/sh\n: >"+sentinelRan+"\n")
+	// The sentinel adds a line to the mark, which exists before each case
+	// and anyone may write: su u0_a1 @S@ runs it as a user that cannot
+	// create files in /data/local/tmp.
+	write("sentinel", "#!/system/bin/sh\necho ran >>"+sentinelRan+"\n")
 	// Each case runs the way adb runs a command: sh -c with the text, in
-	// its own process, with no input and a time limit. The sentinel is put
-	// back before each one: a case may overwrite it (echo x >"$v"). A case
-	// that leaves something in the background gets a second to fire, and
-	// one that hits the time limit counts as having run the sentinel: what
-	// it would have done next is not known. Each case runs in a session of
-	// its own, and whatever it leaves alive is killed before the next one
-	// (watch would go on running the sentinel): the session first, then
-	// the processes of the shell user that lost their parent.
+	// its own process, with no input and a time limit. The sentinel and the
+	// mark are put back before each one: a case may overwrite them
+	// (echo x >"$v"). A case that leaves processes alive gets a second to
+	// fire before the mark is read: processes in its session (cmd &), or
+	// new processes of any user whose parent is gone (setsid @S@ forks into
+	// a session of its own and runs the sentinel after the case ends; su
+	// changes the user). One that hits the time limit counts as having run
+	// the sentinel: what it would have done next is not known. Each case
+	// runs in a session of its own, and whatever it leaves alive is killed
+	// before the next one (watch would go on running the sentinel): the
+	// session first, then the processes of the shell user that lost their
+	// parent.
 	write("run.sh", `n=$1
 i=0
 orphans() {
 	ps -u shell -o PID,PPID | while read -r pid ppid; do
+		[ "$ppid" = 1 ] && echo "$pid"
+	done
+}
+allOrphans() {
+	ps -A -o PID,PPID | while read -r pid ppid; do
 		[ "$ppid" = 1 ] && echo "$pid"
 	done
 }
@@ -465,13 +477,26 @@ while [ $i -lt $n ]; do
 	rm -rf `+sentinelRan+` `+diffCwd+` `+sentinelPath+`
 	cp `+diffDir+`/sentinel `+sentinelPath+`
 	chmod 755 `+sentinelPath+`
+	: >`+sentinelRan+`
+	chmod 666 `+sentinelRan+`
 	mkdir `+diffCwd+`
 	cd `+diffCwd+`
 	text=$(cat `+diffDir+`/$i)
+	before=" $(allOrphans | tr '\n' ' ') "
 	setsid -w /system/bin/sh -c 'echo $$ >`+diffDir+`/sid; exec timeout 5 /system/bin/sh -c "$0"' "$text" </dev/null >/dev/null 2>&1
 	code=$?
-	case $text in *' & '*|*' &') sleep 1;; esac
-	if [ -e `+sentinelRan+` ]; then
+	sid=$(cat `+diffDir+`/sid)
+	late=
+	if [ -n "$sid" ] && [ -n "$(pgrep -s "$sid")" ]; then
+		late=1
+	fi
+	for pid in $(allOrphans); do
+		case $before in *" $pid "*) ;; *) late=1 ;; esac
+	done
+	if [ -n "$late" ]; then
+		sleep 1
+	fi
+	if [ -s `+sentinelRan+` ]; then
 		echo "ran $i"
 	elif [ $code -eq 124 ] || [ $code -eq 137 ] || [ $code -eq 143 ]; then
 		echo "ran $i"

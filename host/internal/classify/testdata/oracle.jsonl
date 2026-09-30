@@ -4835,14 +4835,17 @@
 {"sh":"set -A 'a[$(@S@)]' 1","ran":false}
 {"sh":"set -A PS4 '$(@S@)'; set -x; true","ran":true}
 {"sh":"setsid -w @S@","ran":true}
-{"sh":"setsid @S@","ran":false}
+{"sh":"setsid @S@","ran":true}
+{"sh":"sh +c -c @S@","ran":true}
+{"sh":"sh +c @S@","ran":true}
 {"sh":"sh +e -c @S@","ran":true}
 {"sh":"sh -Cc @S@","ran":true}
-{"sh":"sh -T - -c @S@","ran":false}
+{"sh":"sh -T - -c @S@","ran":true}
 {"sh":"sh -ac @S@","ran":true}
 {"sh":"sh -c \"sh -c '@S@'\"","ran":true}
 {"sh":"sh -c '@S@'","ran":true}
 {"sh":"sh -c '[ \"$@\" ]' _ 'a[$(@S@)]' -eq 1","ran":true}
+{"sh":"sh -c +c @S@","ran":true}
 {"sh":"sh -c -- @S@","ran":true}
 {"sh":"sh -c -e @S@","ran":true}
 {"sh":"sh -c -o xtrace @S@","ran":true}
@@ -4865,7 +4868,7 @@
 {"sh":"su 0 sh -co nohup @S@","ran":true}
 {"sh":"su root @S@","ran":true}
 {"sh":"su shell @S@","ran":true}
-{"sh":"su u0_a1 @S@","ran":false}
+{"sh":"su u0_a1 @S@","ran":true}
 {"sh":"taskset -- 1 @S@","ran":true}
 {"sh":"taskset -a 1 @S@","ran":true}
 {"sh":"taskset 1 @S@","ran":true}

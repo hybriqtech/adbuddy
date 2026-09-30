@@ -118,6 +118,8 @@ func TestWhatIsNotAdmittedIsSpecial(t *testing.T) {
 		"sh -o xtrace -c ls",
 		"sh -c -- ls",
 		"sh -Tc ls",
+		"sh +c ls",
+		"sh -c +c ls",
 		"command -- ls",
 		"builtin command -- ls",
 		"nice -n 1 -- ls",
