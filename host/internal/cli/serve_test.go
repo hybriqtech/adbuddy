@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -322,5 +323,40 @@ func TestServeWaitsForRequestsInFlight(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the request got no answer")
+	}
+}
+
+// Final review of M1b, N3: Ctrl+C before serve waits for the phone (here,
+// while it asks a socket that never answers whether another serve runs)
+// exits with 130 too, and prepares nothing.
+func TestServeInterruptedWhileStarting(t *testing.T) {
+	data := isolate(t)
+	if _, err := ipc.EnsureSecret(data); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", ipc.SocketPath(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close() // never answers
+		}
+	}()
+	ws := filepath.Join(t.TempDir(), "ws")
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(300*time.Millisecond, cancel)
+	start := time.Now()
+	_, errOut, code := runCtx(t, ctx, "serve", "--adb", filepath.Join(t.TempDir(), "no-adb"), "--workspace", ws, "--confirm", "deny")
+	if code != ExitInterrupt || !strings.Contains(errOut, "INTERRUPTED") || strings.Contains(errOut, "DAEMON_UNREACHABLE") || exists(ws) {
+		t.Fatalf("exit %d, workspace created %v, stderr %q", code, exists(ws), errOut)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("took %v", d)
 	}
 }

@@ -44,6 +44,9 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 		Example: "  adbuddy serve\n  adbuddy serve --adb ~/platform-tools/adb --serial adb-XXXX-yyyy._adb-tls-connect._tcp\n  adbuddy serve --json > journal.ndjson",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Ctrl+C at any step, from the first check on, exits with 130.
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
 			// The agent must not be able to start its own host and answer
 			// its own confirmations.
 			if app.Getenv("ADBUDDY_SOURCE") == "agent" {
@@ -67,7 +70,9 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			}
 			// Another serve would get its workspace rewritten under its agent:
 			// find it before touching anything or waiting for the phone.
-			if running, err := serveRunning(cmd.Context(), e.dirs.Data); err != nil {
+			if running, err := serveRunning(ctx, e.dirs.Data); ctx.Err() != nil {
+				return Interrupted()
+			} else if err != nil {
 				return err
 			} else if running {
 				return alreadyRunning
@@ -90,9 +95,10 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			if n := cls.UserRuleCount(); n > 0 {
 				fmt.Fprintf(app.Stderr, "Using %d rules of yours on top of the built-in ones (%s).\n", n, rulesPath(e))
 			}
+			if ctx.Err() != nil {
+				return Interrupted()
+			}
 
-			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
 			runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
 			fmt.Fprintf(app.Stderr, "Waiting for the phone on ADBuddy's adb server (port %d)…\n", e.cfg.ADBServerPort)
 			active, err := findPhone(ctx, runner, serial, deviceWait)

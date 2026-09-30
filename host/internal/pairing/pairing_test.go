@@ -439,7 +439,7 @@ func TestGuidOf(t *testing.T) {
 		"adb-AAA-bbb (2)._adb-tls-connect._tcp":     "adb-AAA-bbb",
 		"adb-A.B_c-d._adb-tls-connect._tcp":         "adb-A.B_c-d",
 		"192.0.2.10:41000":                          "",
-		"R58M123ABC":                                "",
+		"SERIAL0001":                                "",
 		"adb-AAA-bbb._adb-tls-pairing._tcp":         "",
 		"adb-AAA-bbb._adb-tls-connect._tcp.evil":    "",
 		"xadb-AAA-bbb._adb-tls-connect._tcp":        "",
