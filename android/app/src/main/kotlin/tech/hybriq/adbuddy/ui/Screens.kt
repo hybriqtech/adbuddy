@@ -1,5 +1,9 @@
 package tech.hybriq.adbuddy.ui
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -16,6 +22,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -24,8 +31,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Bridge
@@ -33,7 +42,9 @@ import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.ConfirmRequest
 import tech.hybriq.adbuddy.bridge.Decision
 import tech.hybriq.adbuddy.bridge.JournalEntry
+import tech.hybriq.adbuddy.confirm.ConfirmNotifier
 import tech.hybriq.adbuddy.confirm.ConfirmUi
+import tech.hybriq.adbuddy.confirm.HostClock
 import tech.hybriq.adbuddy.control.CutAccess
 
 /** Consent for the PC to finish the setup (spec §3.1 step 6.1). */
@@ -55,37 +66,39 @@ fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
 
 /** Connection, Pause, Cut access and the activity panel (spec §6). */
 @Composable
-fun HomeScreen(state: BridgeState, bridge: Bridge, focusConfirm: String?) {
+fun HomeScreen(
+    state: BridgeState,
+    bridge: Bridge,
+    clock: HostClock,
+    focusConfirm: String?,
+    closed: Set<String>,
+    onClose: (String) -> Unit,
+) {
     val context = LocalContext.current
     var message by remember { mutableStateOf<String?>(null) }
+    var failed by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf<String?>(null) }
+    // Follows both settings, whoever changes them (this screen, the Settings app, adb).
+    val cut by remember(context) { CutAccess.observe(context.contentResolver) }
+        .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context.contentResolver))
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.home_title), style = MaterialTheme.typography.headlineSmall)
-        Text(
-            when {
-                state.connection == BridgeState.Connection.INCOMPATIBLE && state.outdated == BridgeState.Outdated.APP -> stringResource(R.string.status_update_app)
-                state.connection == BridgeState.Connection.INCOMPATIBLE -> stringResource(R.string.status_update_host)
-                state.sessionState.paused -> stringResource(R.string.status_paused)
-                state.connection == BridgeState.Connection.CONNECTED -> stringResource(R.string.status_connected, state.hostName)
-                state.connection == BridgeState.Connection.CONNECTING -> stringResource(R.string.status_connecting)
-                else -> stringResource(R.string.status_waiting)
-            },
-        )
+        val status = LinkStatus.of(state, cut)
+        Text(if (status == LinkStatus.CONNECTED) stringResource(status.text, state.hostName) else stringResource(status.text))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (state.connection == BridgeState.Connection.CONNECTED) {
-                // What the host says (session.state), not whether the request was queued.
-                val paused = state.sessionState.paused
-                Button(onClick = { bridge.pause(!paused) }) {
-                    Text(stringResource(if (paused) R.string.action_resume else R.string.action_pause))
-                }
+            // What the host says (session.state), not whether the request was queued.
+            PauseButton.of(state)?.let { button ->
+                Button(onClick = { bridge.pause(button == PauseButton.PAUSE) }) { Text(stringResource(button.text)) }
             }
-            val cut = CutAccess.isCut(context.contentResolver)
             val cutFailed = stringResource(R.string.cut_failed)
+            val restoreFailed = stringResource(R.string.restore_failed)
             val cutRestored = stringResource(R.string.cut_restored)
             val cutDone = stringResource(R.string.cut_done)
             OutlinedButton(onClick = {
-                val ok = if (cut) CutAccess.restore(context.contentResolver) else CutAccess.cut(context.contentResolver)
+                val ok = if (cut) CutAccess.restore(context) else CutAccess.cut(context)
+                failed = !ok
                 message = when {
+                    !ok && cut -> restoreFailed
                     !ok -> cutFailed
                     cut -> cutRestored
                     else -> cutDone
@@ -93,6 +106,10 @@ fun HomeScreen(state: BridgeState, bridge: Bridge, focusConfirm: String?) {
             }) { Text(stringResource(if (cut) R.string.action_restore else R.string.action_cut)) }
         }
         message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        // Without the permission (or if the change did not stick), the person does it by hand.
+        if (failed) {
+            TextButton(onClick = { openDeveloperOptions(context) }) { Text(stringResource(R.string.action_developer_options)) }
+        }
 
         Text(stringResource(R.string.home_activity), style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -101,34 +118,29 @@ fun HomeScreen(state: BridgeState, bridge: Bridge, focusConfirm: String?) {
                 FilterChip(selected = filter == level, onClick = { filter = level }, label = { Text(levelIcon(level)) })
             }
         }
-        val entries = state.journal.asReversed().filter { filter == null || it.level == filter }
+        // distinctBy: LazyColumn keys must be unique, whatever the host sends.
+        val entries = state.journal.asReversed().distinctBy { it.id }.filter { filter == null || it.level == filter }
         if (entries.isEmpty()) Text(stringResource(R.string.home_empty))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(entries, key = { it.id }) { EntryRow(it) }
         }
     }
-    // The clock the questions are judged by: it moves on at each expiry, so a
-    // question left open on screen loses its buttons when it expires.
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    // The clock the questions are judged by (the host's): it moves on at each
+    // expiry, so a question left open on screen loses its buttons when it expires.
+    var now by remember { mutableLongStateOf(clock.now()) }
     LaunchedEffect(state.pending) {
         while (true) {
-            now = System.currentTimeMillis()
+            now = clock.now()
             delay(ConfirmUi.nextExpiry(state.pending, now) ?: break)
         }
     }
-    // Expired questions the person closed: their final entry may be slow to come.
-    var closed by remember { mutableStateOf(emptySet<String>()) }
-    val open = state.copy(pending = state.pending.filter { it.id !in closed })
-    val question = ConfirmUi.question(open, focusConfirm, now)
+    val question = ConfirmUi.question(state, focusConfirm, now, closed)
     if (question != null) {
-        val status = ConfirmUi.status(question, question.id in state.answering, now)
-        ConfirmDialog(
-            question, status,
-            onClose = { closed = closed + question.id },
-        ) { decision ->
-            // The clock may be late (the delay stops while the phone sleeps): check again.
-            val t = System.currentTimeMillis()
-            if (ConfirmUi.status(question, question.id in state.answering, t) == ConfirmUi.Status.OPEN) {
+        ConfirmDialog(question, ConfirmUi.status(question, state, now), clock, onClose = { onClose(question.id) }) { decision ->
+            // The current state and time, not those of this composition: a second quick
+            // tap sees the first answer (answering), and the delay stops while the phone sleeps.
+            val t = clock.now()
+            if (ConfirmUi.status(question, bridge.state.value, t) == ConfirmUi.Status.OPEN) {
                 bridge.reply(question.id, decision)
             } else {
                 now = t
@@ -137,27 +149,43 @@ fun HomeScreen(state: BridgeState, bridge: Bridge, focusConfirm: String?) {
     }
 }
 
+private fun openDeveloperOptions(context: Context) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (e: ActivityNotFoundException) {
+        context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
+
 /**
- * The same question as the notification, when the app is open (spec §4.5).
- * While its answer is being sent it shows "Sending…", and once expired
- * "Expired", both without buttons; an expired one can be closed (back or a
- * tap outside), so it never hides the screen while its final entry is late.
+ * The same question as the notification, when the app is open (spec §4.5):
+ * the host's rule first, then the agent's command, and it scrolls if long.
+ * It offers its buttons only while the question is open, and says why
+ * otherwise. It can always be closed (back or a tap outside; Close when it
+ * has no buttons): Pause and Cut access are never hidden with no way out,
+ * and the notification is still there. Touches are refused while another
+ * app's window covers it (filterTouchesWhenObscured).
  */
 @Composable
-fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, onClose: () -> Unit, onAnswer: (String) -> Unit) {
+fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock, onClose: () -> Unit, onAnswer: (String) -> Unit) {
+    val context = LocalContext.current
     val decisions = ConfirmUi.decisions(r, status)
+    val footer = ConfirmNotifier.footer(context, status, ConfirmUi.expiry(r)?.let { clock.toLocal(it) })
+    val lines = ConfirmUi.lines(r, stringResource(R.string.confirm_special), footer, maxCommand = DIALOG_MAX_COMMAND)
     AlertDialog(
-        onDismissRequest = { if (status == ConfirmUi.Status.EXPIRED) onClose() },
+        onDismissRequest = onClose,
         title = { Text(stringResource(R.string.confirm_title, r.title)) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(r.rawCommand, style = MaterialTheme.typography.bodySmall)
-                if (r.detail.isNotEmpty()) Text(r.detail)
-                if (r.special) Text("⚠ " + stringResource(R.string.confirm_special))
-                when (status) {
-                    ConfirmUi.Status.SENDING -> Text(stringResource(R.string.confirm_sending), style = MaterialTheme.typography.bodySmall)
-                    ConfirmUi.Status.EXPIRED -> Text(stringResource(R.string.confirm_expired), style = MaterialTheme.typography.bodySmall)
-                    ConfirmUi.Status.OPEN -> Unit
+            val view = LocalView.current
+            DisposableEffect(view) {
+                view.rootView.filterTouchesWhenObscured = true
+                onDispose {}
+            }
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((i, line) in lines.withIndex()) {
+                    val small = i >= lines.size - 2 // the command and the footer
+                    Text(line, style = if (small) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium)
                 }
             }
         },
@@ -169,6 +197,9 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, onClose: () -> Un
                 if (Decision.ALLOW_SESSION in decisions) {
                     TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }) { Text(stringResource(R.string.action_allow_session)) }
                 }
+                if (decisions.isEmpty()) {
+                    TextButton(onClick = onClose) { Text(stringResource(R.string.action_close)) }
+                }
             }
         },
         dismissButton = {
@@ -178,6 +209,9 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, onClose: () -> Un
         },
     )
 }
+
+/** The dialog scrolls, so it shows much more of the command than the notification. */
+private const val DIALOG_MAX_COMMAND = 4_000
 
 @Composable
 private fun EntryRow(e: JournalEntry) {

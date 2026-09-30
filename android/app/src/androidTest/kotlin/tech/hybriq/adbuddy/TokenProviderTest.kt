@@ -4,8 +4,11 @@ import android.content.ContentValues
 import android.net.Uri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import android.os.ParcelFileDescriptor
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,7 +19,8 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class TokenProviderTest {
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val instrumentation = InstrumentationRegistry.getInstrumentation()
+    private val context = instrumentation.targetContext
     private val uri = Uri.parse("content://tech.hybriq.adbuddy.bridge")
 
     @Test fun callsFromAnAppAreRefused() {
@@ -62,5 +66,40 @@ class TokenProviderTest {
                 // expected
             }
         }
+    }
+
+    @Test fun getTypeAndReadingFromAnAppAreRefused() {
+        val u = Uri.parse("content://tech.hybriq.adbuddy.bridge/handshake")
+        try {
+            context.contentResolver.getType(u)
+            fail("getType from an app was not refused")
+        } catch (e: SecurityException) {
+            // expected
+        }
+        try {
+            context.contentResolver.openInputStream(u)?.close()
+            fail("an app could open the handshake for reading")
+        } catch (e: SecurityException) {
+            // expected
+        }
+    }
+
+    // The shell user (uid 2000), as the host reaches it over adb.
+
+    private fun shell(command: String): String {
+        val pfd = instrumentation.uiAutomation.executeShellCommand(command)
+        return ParcelFileDescriptor.AutoCloseInputStream(pfd).use { it.readBytes().decodeToString() }
+    }
+
+    @Test fun theShellUserGetsAPing() {
+        val out = shell("content call --uri content://tech.hybriq.adbuddy.bridge --method ping")
+        assertTrue(out, out.contains("ok=true"))
+        assertTrue(out, out.contains("port="))
+        assertFalse(out, out.contains("not the shell user"))
+    }
+
+    @Test fun theShellUserCannotReadTheHandshake() {
+        val out = shell("content read --uri content://tech.hybriq.adbuddy.bridge/handshake")
+        assertFalse("the handshake was readable: $out", out.contains("token"))
     }
 }

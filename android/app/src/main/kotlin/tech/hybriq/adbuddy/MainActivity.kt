@@ -22,17 +22,26 @@ class MainActivity : ComponentActivity() {
     private var showConsent by mutableStateOf(false)
     private var focusConfirm by mutableStateOf<String?>(null)
 
+    /** Questions whose dialog the person closed; the notification opens them again. */
+    private var closed by mutableStateOf(emptySet<String>())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handle(intent)
-        // Asked once per launch, not again on every rotation.
-        if (savedInstanceState == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        val prefs = BridgePrefs(this)
+        if (savedInstanceState == null) {
+            handle(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            }
+        } else {
+            // A rotation keeps what was on screen; the consent only while the host still waits.
+            showConsent = savedInstanceState.getBoolean(STATE_CONSENT) && prefs.consent == "pending"
+            focusConfirm = savedInstanceState.getString(STATE_FOCUS)
+            closed = savedInstanceState.getStringArrayList(STATE_CLOSED)?.toSet() ?: emptySet()
         }
         val app = application as AdbuddyApp
-        val prefs = BridgePrefs(this)
         // Opening the app (re)starts the channel when the host already handed over a link.
         // A rotation runs onCreate again: the service is already running and
         // Bridge.start ignores the same link, so the connection is kept.
@@ -50,14 +59,25 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 } else {
-                    HomeScreen(state = state, bridge = app.bridge, focusConfirm = focusConfirm)
+                    HomeScreen(
+                        state = state, bridge = app.bridge, clock = app.clock, focusConfirm = focusConfirm,
+                        closed = closed, onClose = { closed = closed + it },
+                    )
                 }
             }
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_CONSENT, showConsent)
+        outState.putString(STATE_FOCUS, focusConfirm)
+        outState.putStringArrayList(STATE_CLOSED, ArrayList(closed))
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handle(intent)
     }
 
@@ -65,10 +85,15 @@ class MainActivity : ComponentActivity() {
         // The consent screen only shows while the host is waiting for it.
         if (intent?.action == ACTION_SETUP && BridgePrefs(this).consent == "pending") showConsent = true
         focusConfirm = intent?.getStringExtra(EXTRA_CONFIRM)
+        // Tapping the notification of a closed question opens its dialog again.
+        focusConfirm?.let { closed = closed - it }
     }
 
     companion object {
         const val ACTION_SETUP = "tech.hybriq.adbuddy.action.SETUP"
         const val EXTRA_CONFIRM = "confirm"
+        private const val STATE_CONSENT = "consent"
+        private const val STATE_FOCUS = "focus"
+        private const val STATE_CLOSED = "closed"
     }
 }

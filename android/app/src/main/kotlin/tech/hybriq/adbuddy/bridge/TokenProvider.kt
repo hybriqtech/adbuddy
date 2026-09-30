@@ -27,6 +27,9 @@ import tech.hybriq.adbuddy.BuildConfigInfo
  *   consent request; `getSetupConsent` answers pending, granted or denied.
  * - `content call … --method ping` answers the port the app will use and the
  *   nonce of the last handshake it took (not a secret: it proves which one).
+ *   Both come from the saved link: they say the app took the handshake, not
+ *   that the channel is up. If Android refused to start the service, the
+ *   host sees it as a channel that does not connect (`adbuddy doctor`).
  *
  * It does not override dump(), and must not: `dumpsys activity provider` is
  * 🟢 for the agent, so anything dumped here would reach it.

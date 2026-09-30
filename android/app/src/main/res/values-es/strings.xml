@@ -11,6 +11,7 @@
     <string name="status_paused">En pausa: el agente no puede usar el móvil</string>
     <string name="status_update_app">Esta app es demasiado antigua para el ADBuddy de tu PC: ejecuta adbuddy setup en el PC para actualizarla</string>
     <string name="status_update_host">El ADBuddy de tu PC es demasiado antiguo para esta app: actualízalo en el PC</string>
+    <string name="status_cut">Acceso adb cortado</string>
 
     <string name="action_allow">Permitir</string>
     <string name="action_deny">Rechazar</string>
@@ -19,11 +20,14 @@
     <string name="action_resume">Reanudar</string>
     <string name="action_cut">Cortar acceso</string>
     <string name="action_restore">Reactivar acceso</string>
+    <string name="action_developer_options">Abrir Opciones de desarrollador</string>
+    <string name="action_close">Cerrar</string>
 
     <string name="confirm_title">El agente quiere: %1$s</string>
     <string name="confirm_special">Puede cortar la conexión con el PC o afectar a ADBuddy.</string>
     <string name="confirm_expires">Caduca: %1$s</string>
-    <string name="confirm_sending">Enviando…</string>
+    <string name="confirm_sending">Respondida: esperando al PC</string>
+    <string name="confirm_offline">Sin conexión con el PC</string>
     <string name="confirm_expired">Caducada: ya no se puede responder.</string>
 
     <string name="consent_title">Configurar ADBuddy con %1$s</string>
@@ -40,6 +44,7 @@
     <string name="home_empty">Nada todavía. Aquí aparecerá cada comando adb del agente.</string>
     <string name="cut_done">La depuración está apagada: el PC no puede llegar al móvil.</string>
     <string name="cut_restored">La depuración vuelve a estar activa. Si el modo remoto estaba activo, su puerto de red sigue abierto hasta que el PC se conecte o reinicies el móvil.</string>
-    <string name="cut_failed">ADBuddy no tiene el permiso: ejecuta adbuddy setup en el PC.</string>
+    <string name="cut_failed">No se ha podido apagar la depuración. Apaga la depuración USB y la depuración inalámbrica en Opciones de desarrollador.</string>
+    <string name="restore_failed">No se ha podido volver a activar la depuración. Actívala en Opciones de desarrollador.</string>
     <string name="filter_all">Todo</string>
 </resources>

@@ -2,6 +2,7 @@ package tech.hybriq.adbuddy.confirm
 
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,28 +15,53 @@ class ConfirmUiTest {
     private fun q(id: String, allowSession: Boolean = false, expiresAt: String = "2026-09-30T10:01:00Z") =
         ConfirmRequest(id = id, title = "Restart", rawCommand = "adb shell reboot", expiresAt = expiresAt, allowSession = allowSession)
 
-    private fun state(vararg pending: ConfirmRequest, answering: Set<String> = emptySet()) =
-        BridgeState(connection = BridgeState.Connection.CONNECTED, pending = pending.toList(), answering = answering)
+    private fun state(
+        vararg pending: ConfirmRequest,
+        answering: Set<String> = emptySet(),
+        connection: BridgeState.Connection = BridgeState.Connection.CONNECTED,
+    ) = BridgeState(connection = connection, pending = pending.toList(), answering = answering)
+
+    private fun status(r: ConfirmRequest, s: BridgeState, at: Long = now) = ConfirmUi.status(r, s, at)
 
     // --- whether a question can be answered ---
 
     @Test fun aQuestionBeforeItsExpiryIsOpen() {
-        assertEquals(ConfirmUi.Status.OPEN, ConfirmUi.status(q("j_1"), answering = false, now = now))
+        assertEquals(ConfirmUi.Status.OPEN, status(q("j_1"), state(q("j_1"))))
     }
 
     @Test fun aQuestionPastItsExpiryIsExpired() {
         val r = q("j_1", expiresAt = "2026-09-30T10:00:00Z")
-        assertEquals("at the second it expires", ConfirmUi.Status.EXPIRED, ConfirmUi.status(r, answering = false, now = now))
-        assertEquals(ConfirmUi.Status.EXPIRED, ConfirmUi.status(q("j_1"), answering = false, now = now + 61_000))
+        assertEquals("at the second it expires", ConfirmUi.Status.EXPIRED, status(r, state(r)))
+        assertEquals(ConfirmUi.Status.EXPIRED, status(q("j_1"), state(q("j_1")), now + 61_000))
     }
 
     @Test fun anUnreadableExpiryCannotBeAnswered() {
-        assertEquals(ConfirmUi.Status.EXPIRED, ConfirmUi.status(q("j_1", expiresAt = "soon"), answering = false, now = now))
+        val r = q("j_1", expiresAt = "soon")
+        assertEquals(ConfirmUi.Status.EXPIRED, status(r, state(r)))
     }
 
     @Test fun anAnswerOnItsWayIsSendingEvenPastTheExpiry() {
-        assertEquals(ConfirmUi.Status.SENDING, ConfirmUi.status(q("j_1"), answering = true, now = now))
-        assertEquals(ConfirmUi.Status.SENDING, ConfirmUi.status(q("j_1"), answering = true, now = now + 61_000))
+        val s = state(q("j_1"), answering = setOf("j_1"))
+        assertEquals(ConfirmUi.Status.SENDING, status(q("j_1"), s))
+        assertEquals(ConfirmUi.Status.SENDING, status(q("j_1"), s, now + 61_000))
+    }
+
+    @Test fun withoutConnectionAQuestionCannotBeAnswered() {
+        for (c in listOf(BridgeState.Connection.WAITING, BridgeState.Connection.CONNECTING, BridgeState.Connection.INCOMPATIBLE)) {
+            assertEquals(c.name, ConfirmUi.Status.OFFLINE, status(q("j_1"), state(q("j_1"), connection = c)))
+        }
+    }
+
+    @Test fun anExpiredQuestionIsExpiredEvenWithoutConnection() {
+        val s = state(q("j_1"), connection = BridgeState.Connection.WAITING)
+        assertEquals(ConfirmUi.Status.EXPIRED, status(q("j_1"), s, now + 61_000))
+    }
+
+    @Test fun reconnectingMakesItAnswerableAgain() {
+        var s = state(q("j_1")).answered("j_1").disconnected()
+        assertEquals(ConfirmUi.Status.OFFLINE, status(q("j_1"), s))
+        s = s.copy(connection = BridgeState.Connection.CONNECTED)
+        assertEquals(ConfirmUi.Status.OPEN, status(q("j_1"), s))
     }
 
     // --- buttons ---
@@ -51,12 +77,39 @@ class ConfirmUiTest {
         )
     }
 
-    @Test fun aQuestionBeingSentOffersNoButtons() {
-        assertTrue(ConfirmUi.decisions(q("j_1", allowSession = true), ConfirmUi.Status.SENDING).isEmpty())
+    @Test fun onlyAnOpenQuestionOffersButtons() {
+        for (st in listOf(ConfirmUi.Status.SENDING, ConfirmUi.Status.OFFLINE, ConfirmUi.Status.EXPIRED)) {
+            assertTrue(st.name, ConfirmUi.decisions(q("j_1", allowSession = true), st).isEmpty())
+        }
     }
 
-    @Test fun anExpiredQuestionOffersNoButtons() {
-        assertTrue(ConfirmUi.decisions(q("j_1", allowSession = true), ConfirmUi.Status.EXPIRED).isEmpty())
+    // --- what the notification button may send ---
+
+    @Test fun theReceiverSendsAnOpenQuestion() {
+        val s = state(q("j_1", allowSession = true))
+        for (d in listOf(Decision.DENY, Decision.ALLOW, Decision.ALLOW_SESSION)) {
+            assertTrue(d, ConfirmUi.canSend(s, "j_1", d, now, locked = false))
+        }
+    }
+
+    @Test fun aLockedPhoneCanDenyButNotAllow() {
+        val s = state(q("j_1", allowSession = true))
+        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = true))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = true))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = true))
+    }
+
+    @Test fun theReceiverSendsNothingThatIsNotOpen() {
+        assertFalse("gone", ConfirmUi.canSend(state(), "j_1", Decision.DENY, now, locked = false))
+        assertFalse("sending", ConfirmUi.canSend(state(q("j_1"), answering = setOf("j_1")), "j_1", Decision.DENY, now, locked = false))
+        assertFalse("expired", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.DENY, now + 61_000, locked = false))
+        val offline = state(q("j_1"), connection = BridgeState.Connection.CONNECTING)
+        assertFalse("offline", ConfirmUi.canSend(offline, "j_1", Decision.DENY, now, locked = false))
+    }
+
+    @Test fun theReceiverSendsOnlyKnownDecisions() {
+        assertFalse(ConfirmUi.canSend(state(q("j_1")), "j_1", "allow_forever", now, locked = false))
+        assertFalse("not offered", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.ALLOW_SESSION, now, locked = false))
     }
 
     // --- the dialog's question ---
@@ -79,14 +132,47 @@ class ConfirmUiTest {
         assertEquals("j_2", ConfirmUi.question(s, focus = "j_1", now = now)?.id)
     }
 
-    @Test fun whenNoneIsOpenTheDialogShowsOneSendingOrExpired() {
+    @Test fun whenNoneIsOpenTheDialogShowsOneSendingExpiredOrOffline() {
         assertEquals("j_1", ConfirmUi.question(state(q("j_1"), answering = setOf("j_1")), focus = null, now = now)?.id)
         val expired = state(q("j_1", expiresAt = "2026-09-30T09:59:00Z"))
         assertEquals("j_1", ConfirmUi.question(expired, focus = null, now = now)?.id)
+        val offline = state(q("j_1"), connection = BridgeState.Connection.WAITING)
+        assertEquals("j_1", ConfirmUi.question(offline, focus = null, now = now)?.id)
+    }
+
+    @Test fun aClosedQuestionIsNotShownAgainWhateverItsState() {
+        val sending = state(q("j_1"), answering = setOf("j_1"))
+        assertNull("answering, closed", ConfirmUi.question(sending, focus = null, now = now, closed = setOf("j_1")))
+        val open = state(q("j_1"), q("j_2"))
+        assertEquals("j_2", ConfirmUi.question(open, focus = "j_1", now = now, closed = setOf("j_1"))?.id)
     }
 
     @Test fun noQuestionNoDialog() {
         assertNull(ConfirmUi.question(state(), focus = "j_1", now = now))
+    }
+
+    // --- what the question says, rule first ---
+
+    @Test fun theRuleComesBeforeTheAgentsCommand() {
+        val r = ConfirmRequest(
+            id = "j_1", title = "Restart", detail = "Reboots the phone.", rawCommand = "adb shell reboot",
+            expiresAt = "2026-09-30T10:01:00Z", special = true,
+        )
+        assertEquals(
+            listOf("Reboots the phone.", "⚠ May cut the link.", "adb shell reboot", "Expires at 10:01"),
+            ConfirmUi.lines(r, special = "May cut the link.", footer = "Expires at 10:01"),
+        )
+    }
+
+    @Test fun withoutDetailOrWarningOnlyTheCommandAndTheFooter() {
+        assertEquals(listOf("adb shell reboot", "x"), ConfirmUi.lines(q("j_1"), special = "never shown", footer = "x"))
+    }
+
+    @Test fun aLongCommandIsCut() {
+        val r = q("j_1").copy(rawCommand = "adb shell " + "a".repeat(1_000))
+        val cmd = ConfirmUi.lines(r, special = "", footer = "x", maxCommand = 50)[0]
+        assertEquals(50, cmd.length)
+        assertTrue(cmd.endsWith("…"))
     }
 
     // --- when the screen must look again ---
@@ -111,9 +197,9 @@ class ConfirmUiTest {
     @Test fun aNewQuestionIsPostedWithItsButtons() {
         val p = ConfirmUi.plan(emptyMap(), state(q("j_1")), now)
         assertEquals(listOf("j_1"), p.post.map { it.request.id })
-        assertEquals(false, p.post[0].answering)
+        assertEquals(ConfirmUi.Status.OPEN, p.post[0].status)
         assertEquals(60_000L, p.post[0].left)
-        assertEquals(mapOf("j_1" to false), p.shown)
+        assertEquals(mapOf("j_1" to ConfirmUi.Status.OPEN), p.shown)
         assertTrue(p.cancel.isEmpty())
     }
 
@@ -125,18 +211,20 @@ class ConfirmUiTest {
         assertEquals(first.shown, again.shown)
     }
 
-    @Test fun anAnsweredQuestionIsPostedAgainAsSendingAndThenAnswerableWhenTheLinkDrops() {
+    @Test fun anAnsweredQuestionIsPostedAsSendingThenOfflineThenAnswerableAgain() {
         var s = state(q("j_1"))
         val first = ConfirmUi.plan(emptyMap(), s, now)
         s = s.answered("j_1")
         val sending = ConfirmUi.plan(first.shown, s, now + 1_000)
-        assertEquals(listOf("j_1"), sending.post.map { it.request.id })
-        assertEquals(true, sending.post[0].answering)
+        assertEquals(ConfirmUi.Status.SENDING, sending.post.single().status)
         assertEquals(59_000L, sending.post[0].left)
         s = s.disconnected()
-        val again = ConfirmUi.plan(sending.shown, s, now + 2_000)
-        assertEquals("answerable again", false, again.post.single().answering)
-        assertEquals(mapOf("j_1" to false), again.shown)
+        val offline = ConfirmUi.plan(sending.shown, s, now + 2_000)
+        assertEquals("no buttons without the PC", ConfirmUi.Status.OFFLINE, offline.post.single().status)
+        s = s.copy(connection = BridgeState.Connection.CONNECTED)
+        val again = ConfirmUi.plan(offline.shown, s, now + 3_000)
+        assertEquals("answerable again", ConfirmUi.Status.OPEN, again.post.single().status)
+        assertEquals(mapOf("j_1" to ConfirmUi.Status.OPEN), again.shown)
     }
 
     @Test fun aQuestionAnsweredElsewhereIsCancelled() {
@@ -144,7 +232,7 @@ class ConfirmUiTest {
         val p = ConfirmUi.plan(first.shown, state(q("j_2")), now)
         assertEquals(setOf("j_1"), p.cancel)
         assertTrue(p.post.isEmpty())
-        assertEquals(mapOf("j_2" to false), p.shown)
+        assertEquals(mapOf("j_2" to ConfirmUi.Status.OPEN), p.shown)
     }
 
     @Test fun expiredOrUnreadableQuestionsAreNotPosted() {

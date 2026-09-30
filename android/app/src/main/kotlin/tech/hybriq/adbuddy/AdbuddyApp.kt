@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import tech.hybriq.adbuddy.bridge.Bridge
+import tech.hybriq.adbuddy.confirm.HostClock
 
 class AdbuddyApp : Application() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -15,9 +16,12 @@ class AdbuddyApp : Application() {
     lateinit var bridge: Bridge
         private set
 
+    /** The host's clock, which the questions' expiry is written in. */
+    val clock = HostClock()
+
     override fun onCreate() {
         super.onCreate()
-        bridge = Bridge(scope, BuildConfigInfo.versionName(this)) { _, _ -> }
+        bridge = Bridge(scope, BuildConfigInfo.versionName(this)) { m, _ -> clock.observe(m) }
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL_STATUS, getString(R.string.channel_status), NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CHANNEL_CONFIRM, getString(R.string.channel_confirm), NotificationManager.IMPORTANCE_HIGH))
