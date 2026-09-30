@@ -193,6 +193,9 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 	d.changes.Lock()
 	defer d.changes.Unlock()
+	if d.o.Paused() { // paused while waiting for the lock
+		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
+	}
 	entries, _, err := d.o.Journal.Load()
 	if err != nil {
 		return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNREADABLE", Error: err.Error()}
@@ -230,6 +233,10 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	for _, e := range plan {
 		if ctx.Err() != nil {
 			break // the client left: stop before touching the phone again
+		}
+		if d.o.Paused() {
+			_ = s.Data(res)
+			return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
 		}
 		item := UndoItem{ID: e.ID, Description: e.Description}
 		if err := validInverse(e.Inverse.Argv, d.o.Journal.BackupDir(e.ID)); err != nil {

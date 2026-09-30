@@ -62,7 +62,10 @@ type Options struct {
 	// cannot make undo run an inverse twice. Empty in tests that do not need it.
 	UndoneLog string
 	// Paused reports whether the person paused the agent from the phone:
-	// then every command and undo is refused (spec §4.6). Nil: never paused.
+	// then every command and undo is refused (spec §4.6). It is asked again
+	// after every wait (the lock, a confirmation, each inverse), so a pause
+	// also stops what was already waiting. Nil: never paused. Called
+	// concurrently: it must be safe across goroutines (an atomic.Bool, say).
 	Paused func() bool
 	Now    func() time.Time
 }
@@ -125,10 +128,13 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		e.Source = journal.SourceAgent
 	}
 
-	if d.o.Paused() {
-		return d.block(e, s, PausedMessage)
-	}
 	g, args := classify.SplitGlobal(req.Argv)
+	res := d.o.Classifier.Classify(args) // pure: nothing reaches adb yet
+	if d.o.Paused() {
+		p := e // say what was attempted, at its level
+		p.Level, p.Rule, p.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
+		return d.block(p, s, PausedMessage)
+	}
 	if len(g.Forbidden) > 0 {
 		return d.block(e, s, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed: ADBuddy only talks to the active phone through its own adb server")
 	}
@@ -140,7 +146,6 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 	}
 
-	res := d.o.Classifier.Classify(args)
 	e.Level, e.Rule, e.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
 	level, reason := res.Level, ""
 	if len(res.PCWrites) > 0 {
@@ -161,6 +166,9 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if res.Op != nil {
 		d.changes.Lock()
 		defer d.changes.Unlock()
+		if d.o.Paused() { // paused while waiting for the lock
+			return d.block(e, s, PausedMessage)
+		}
 		prep = precheck.Prepare(ctx, d.o.ADB, res.Op, level, precheck.Env{Cwd: req.Cwd, BackupDir: d.o.Journal.BackupDir(e.ID)})
 		level = prep.Level
 		if prep.Reason != "" {
@@ -178,11 +186,18 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if reason != "" {
 			detail = strings.TrimSpace(detail + "\n" + classify.Printable(reason))
 		}
+		// Key lets the phone allow the same rule with the same arguments from
+		// the same folder for the rest of the session. A 🔴 that comes from
+		// the state of the phone or the PC (a precheck, a write on the PC)
+		// may be fine now and not next time: no key, so it is always asked.
+		key := ""
+		if reason == "" {
+			key = e.Rule + "\x00" + req.Cwd + "\x00" + strings.Join(req.Argv, "\x00")
+		}
 		cctx, cancel := context.WithTimeout(ctx, d.o.ConfirmTimeout)
 		decision := d.o.Confirmer.Confirm(cctx, confirm.Request{
 			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: classify.DisplayCommand(req.Argv),
-			ExpiresAt: now.Add(d.o.ConfirmTimeout), Special: res.Special,
-			Key: e.Rule + "\x00" + strings.Join(req.Argv, "\x00"),
+			ExpiresAt: now.Add(d.o.ConfirmTimeout), Special: res.Special, Key: key,
 		})
 		cancel()
 		if decision != confirm.Allow {
@@ -210,6 +225,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 	}
 
+	// Paused during the confirmation (an Allow may come after the pause) or
+	// the prechecks: refuse before any running record and before adb.
+	if d.o.Paused() {
+		return d.block(e, s, PausedMessage)
+	}
 	if level >= classify.Yellow {
 		running := e
 		running.Status = journal.StatusRunning
