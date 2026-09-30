@@ -1,6 +1,15 @@
-# Pendientes para planes futuros (M3, M5, M6 y v1.1+)
+# Pendientes para planes futuros (M2.5, M3, M5, M6 y v1.1+)
 
 Notas que hay que incorporar cuando se escriban esos planes (desde el 2026-09-29).
+
+## M2.5 · Clasificador con lista blanca y mksh real
+
+Motivo (M2, Tarea 3): seis rondas de arreglos cerrando, uno a uno, engaños de mksh que ejecutan texto sin analizar (`PS4`/`ENV`/`FPATH`, `trap`/`alias`/`builtin`, `find -exec`, trabajos en segundo plano, aritmética que reevalúa variables, operadores dinámicos de `test`, `typeset -L/-R/-Z` y su herencia a shells hijas). Además, varias conclusiones se tomaron "de memoria del código de mksh", sin comprobarlas.
+
+- **Lista blanca para 🟢/🟡:** una orden solo baja de 🔴 si el parser la entiende entera: órdenes conocidas con palabras literales, o variables probadas (literales, números, bucles `for` sobre literales). Cualquier construcción no reconocida (builtins de shell no listados, expansiones no probadas en contextos que evalúan, asignaciones a variables especiales) es 🔴 especial. Empezar por inventariar lo que hoy es 🟢 en el corpus y asegurar que sigue igual.
+- **Tests diferenciales contra mksh real:** compilar el mksh de AOSP para el PC (o usar un emulador) y ejecutar un corpus de engaños con una orden centinela (`touch /tmp/pwned`) en lugar de `reboot`: si la centinela aparece, el clasificador debe haber dado 🔴 especial. Mismo corpus para las órdenes habituales (no deben subir).
+- **Emulador Android** (imagen de sistema sin permisos de administrador si WHPX/Hyper-V ya está activo) para `connectedDebugAndroidTest` (`TokenProviderTest` con el uid del shell) y para automatizar validaciones manuales de M2: `content write` por stdin, servicio en primer plano desde el proveedor, Cortar/Reactivar.
+- Menores aparcados de M2 que caen aquí: `a=([X]=1)` con índice en el literal (M-3); `$(( $X = 1 ))` con nombre desconocido.
 
 ## M3 · Chat: daemon con PTY
 
