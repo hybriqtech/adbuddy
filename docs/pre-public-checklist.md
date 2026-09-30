@@ -9,3 +9,5 @@ Lista de comprobación. Revisar cada punto antes de cambiar la visibilidad de `h
 - [ ] **Fichero `LICENSE`** (Apache-2.0, §12 de la spec), que aún no existe.
 - [ ] **README** en inglés con traducción al español (§12 de la spec).
 - [ ] **Decidir si `spikes/` se publica o se elimina.**
+- [ ] **GitHub Pages:** publicar `docs/` (Settings → Pages → rama `main`, carpeta `/docs`) y comprobar que `https://hybriqtech.github.io/adbuddy/setup/` carga: `adbuddy setup` enseña un QR a esa página. En un repo privado Pages necesita un plan de pago.
+- [ ] **Capturas reales** en `docs/setup/` en lugar de `img/pending.svg`, y revisar que los textos de los menús coinciden con Android en inglés y en español.

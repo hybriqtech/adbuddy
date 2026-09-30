@@ -2,7 +2,7 @@
 
 The `adbuddy` binary: the host that sits between a coding agent and your Android phone. Every `adb` command the agent runs goes through it, is classified by risk, is written to a journal with its inverse and, when it cannot be undone, waits for your confirmation.
 
-This is milestone M1a: the safety core. It works with a phone that is already paired over wireless debugging and an adb you point it to. Setup, pairing and ADBuddy's own adb arrive in M1b; the phone app and the chat in M2-M4.
+This is milestone M1: ADBuddy downloads its own adb, pairs your phone over Wi-Fi and guards every command. The phone app and the chat arrive in M2-M4.
 
 ## Build
 
@@ -13,13 +13,23 @@ go build -o adbuddy ./cmd/adbuddy      # adbuddy.exe on Windows
 
 ## Use
 
+0. Set it up once: it downloads Android platform-tools, pairs the phone over Wi-Fi with a QR code, reads its profile and prepares the agent environment.
+
+   ```sh
+   adbuddy setup            # or: adbuddy setup --code (IP:port and 6-digit code)
+   ```
+
+   Step-by-step guide with pictures: https://hybriqtech.github.io/adbuddy/setup/
+
+   Running plain `adbuddy` before setup starts the setup when it runs in a terminal; otherwise it fails with `NOT_CONFIGURED`.
+
 1. In one terminal, start the host and keep it open:
 
    ```sh
-   adbuddy serve --adb /path/to/platform-tools/adb
+   adbuddy serve
    ```
 
-   It waits for the phone (up to 45 s), prepares the agent environment in `~/ADBuddy/default/` and shows every command live. When the agent runs something irreversible it asks here and shows a two-digit code: type that code to allow it; anything else denies it. Unanswered questions expire after 2 minutes and count as a no.
+   It waits for the phone (up to 45 s), refreshes the agent environment in `~/ADBuddy/<phone model>/` and shows every command live. When the agent runs something irreversible it asks here and shows a two-digit code: type that code to allow it; anything else denies it. Unanswered questions expire after 2 minutes and count as a no.
 
 2. In another terminal, start the agent:
 
@@ -59,10 +69,10 @@ Anything that could cut the connection or disable ADBuddy (Wi-Fi, debugging sett
 `config.toml` lives in `%APPDATA%\ADBuddy\` (Windows), `~/Library/Application Support/ADBuddy/` (macOS) or `~/.config/adbuddy/` (Linux):
 
 ```toml
-adb_path = "C:\\Android\\platform-tools\\adb.exe"
+adb_path = ""                # empty: ADBuddy's own platform-tools (installed by setup)
 adb_server_port = 5038       # ADBuddy's own adb server
 serial = ""                  # only needed with several phones
-workspace = ""               # default: ~/ADBuddy/default; `run` and `journal` follow the running `serve`
+workspace = ""               # set by setup: ~/ADBuddy/<phone model>; `run` and `journal` follow the running `serve`
 confirm_timeout = "2m"
 language = "es"              # descriptions in the journal: en or es
 agent = "claude"             # default for `adbuddy run`
@@ -77,7 +87,7 @@ rules:
 
 ## Exit codes
 
-`adbuddy` commands: 0 success, 1 failure, 2 invalid usage, 75 temporary failure, 78 configuration error, 130 interrupted (`INTERRUPTED`: Ctrl+C while `serve` waits for the phone). With `--json` they print `{"ok":true,"data":…}` or `{"ok":false,"error":{…}}`.
+`adbuddy` commands: 0 success, 1 failure, 2 invalid usage, 75 temporary failure, 78 configuration error, 130 interrupted (`INTERRUPTED`: Ctrl+C while `setup` or `serve` waits for the phone). With `--json` they print `{"ok":true,"data":…}` or `{"ok":false,"error":{…}}`.
 
 The `adb` shim returns adb's own exit code, 126 when a command is denied, expires or is blocked (`Denied by user: …`, `Blocked by ADBuddy: …`), and 1 with `ADBuddy host not running (run: adbuddy serve)` when the host is not running.
 
@@ -93,10 +103,10 @@ The `adb` shim returns adb's own exit code, 126 when a command is denied, expire
 With the phone paired and wireless debugging on:
 
 ```sh
-adbuddy serve --adb <path to adb> --confirm deny     # deny: every 🔴 is refused without asking
+adbuddy serve --confirm deny     # deny: every 🔴 is refused without asking
 # in another terminal, using the environment's shim:
-~/ADBuddy/default/.adbuddy/bin/adb shell getprop ro.product.model
-~/ADBuddy/default/.adbuddy/bin/adb shell settings get global window_animation_scale
+~/ADBuddy/<phone model>/.adbuddy/bin/adb shell getprop ro.product.model
+~/ADBuddy/<phone model>/.adbuddy/bin/adb shell settings get global window_animation_scale
 adbuddy journal
 ```
 

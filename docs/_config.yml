@@ -1,0 +1,8 @@
+# GitHub Pages (Settings → Pages → Deploy from branch main, folder /docs).
+# Only the user guide is published; design documents stay in the repository.
+title: ADBuddy
+description: Let any coding agent manage your Android phone over Wi-Fi adb, safely.
+exclude:
+  - superpowers
+  - spikes
+  - pre-public-checklist.md
