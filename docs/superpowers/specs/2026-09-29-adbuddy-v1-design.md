@@ -14,7 +14,7 @@ ADBuddy deja que **cualquier agente de código de terminal** (Claude Code, Codex
 
 El agente recomendado es Claude Code, porque además puede programar e instalarte APKs de utilidades.
 
-**Lo que nos diferencia es la experiencia de usuario y el mínimo setup.** Existen muchos servidores MCP de control de Android (mobile-mcp, DroidRun, claude-in-mobile…), pero van dirigidos a QA y desarrolladores y casi siempre funcionan por USB. Ninguno ofrece a la vez:
+**Lo que nos diferencia es la experiencia de usuario y el mínimo setup.** Existen muchos servidores MCP de control de Android (mobile-mcp, DroidRun, claude-in-mobile…), pero van dirigidos a QA y desarrolladores y casi siempre funcionan por USB. El más completo es **ARTEMIS** de Google (Apache-2.0, septiembre de 2026): pruebas de interfaz en lenguaje natural con su propio agente y LLM, lectura de pantalla por accesibilidad, OCR y visión, y servidor MCP para Claude Code, Codex, Cursor… También está pensado para QA: da al modelo una shell de adb sin clasificar, sin confirmaciones ni diario, y habla con el servidor adb directamente (`adbutils`), sin pasar por el binario `adb`. Ninguno ofrece a la vez:
 
 - que un usuario normal gestione su propio móvil;
 - seguridad por defecto;
