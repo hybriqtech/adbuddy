@@ -95,7 +95,12 @@ func specialReason(scope string, ws []Word, level Level) string {
 			}
 		}
 	case "content":
+		// ADBuddy's own channel (token, consent): even reading it is off
+		// limits for the agent (its private files: see run-as in shell.go).
 		// Uri.getAuthority() decodes %xx, so compare the decoded words.
+		if strings.Contains(strings.ToLower(percentDecode(strings.Join(v, " "))), ADBuddyPackage) {
+			return "talks to the ADBuddy app's own channel or files"
+		}
 		if level != Green && strings.Contains(strings.ToLower(percentDecode(strings.Join(v, " "))), "settings") {
 			return "changes system settings directly, including the connection ones"
 		}

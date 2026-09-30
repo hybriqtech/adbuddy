@@ -226,6 +226,11 @@ func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 		}
 		ws = append([]Word{ws[0]}, rest...)
 	}
+	if ws[0].Value == "run-as" && len(ws) > 1 && strings.Contains(strings.ToLower(ws[1].Value), ADBuddyPackage) {
+		f := redFinding("run-as.adbuddy", "reads or changes the ADBuddy app's private files", vals, textUnknown)
+		f.Special = true
+		return []Finding{f}
+	}
 	if inner, handled, reason := unwrap(ws); handled {
 		if reason != "" {
 			return []Finding{redFinding("wrapper", reason, vals, textUnknown)}
