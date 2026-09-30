@@ -69,11 +69,12 @@ type setupResult struct {
 	Agent     string         `json:"agent"`
 	Address   string         `json:"address"` // saved in config.toml: the last IP:port that worked, "" if none
 	ADB       string         `json:"adb"`
+	App       appResult      `json:"app"`
 }
 
 func newSetupCmd(app *App) *cobra.Command {
-	var adbFlag, agentFlag, wsFlag, connectFlag string
-	var useCode, yes bool
+	var adbFlag, agentFlag, wsFlag, connectFlag, apkFlag string
+	var useCode, yes, noApp bool
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Set up ADBuddy: get adb, pair the phone over Wi-Fi and prepare the agent environment",
@@ -271,6 +272,12 @@ connection address with --connect (or type it when asked).`,
 				}
 				say("Phone: %s, Android %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android))
 
+				// The phone app (spec §3.1 steps 5-6).
+				appRes := appResult{Consent: "skipped", Note: "--no-app"}
+				if !noApp {
+					appRes = setupApp(ctx, app, &e, runner, apkFlag, say)
+				}
+
 				// 6. Agent.
 				chosen, err := chooseAgent(app, agentFlag, e.cfg.Agent, yes, ask, say)
 				if err != nil {
@@ -321,11 +328,11 @@ connection address with --connect (or type it when asked).`,
 					return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")
 				}
 
-				res := setupResult{Device: prof, Serial: saved, Active: serial, Address: cfg.Address, Workspace: ws, Agent: chosen, ADB: adbPath}
+				res := setupResult{Device: prof, Serial: saved, Active: serial, Address: cfg.Address, Workspace: ws, Agent: chosen, ADB: adbPath, App: appRes}
 				if app.JSON {
 					return WriteData(app.Stdout, res)
 				}
-				fmt.Fprintf(app.Stdout, "Ready: %s (Android %s), environment %s, agent %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android), ws, chosen)
+				fmt.Fprintf(app.Stdout, "Ready: %s (Android %s), environment %s, agent %s, %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android), ws, chosen, fmtApp(appRes))
 				say("Next: run `adbuddy serve` and keep it open, then `adbuddy run` in another terminal.\n")
 				return nil
 			}()
@@ -341,6 +348,8 @@ connection address with --connect (or type it when asked).`,
 	cmd.Flags().BoolVar(&useCode, "code", false, "pair with IP:port and the 6-digit code instead of a QR code")
 	cmd.Flags().StringVar(&connectFlag, "connect", "", "connect by this IP:port when mDNS does not find the phone (Tailscale or another network), as its Wireless debugging screen shows it")
 	cmd.Flags().BoolVar(&yes, "yes", false, "accept the recommended choices without asking")
+	cmd.Flags().StringVar(&apkFlag, "apk", "", "install this ADBuddy app APK instead of the latest release")
+	cmd.Flags().BoolVar(&noApp, "no-app", false, "do not install or set up the phone app")
 	return cmd
 }
 

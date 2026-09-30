@@ -58,6 +58,7 @@ func newSetupEnv(t *testing.T, rules []testutil.FakeRule) setupEnv {
 	t.Setenv("ADBUDDY_CONFIG_DIR", e.cfgDir)
 	t.Setenv("ADBUDDY_DATA_DIR", filepath.Join(dir, "data"))
 	t.Setenv("ADBUDDY_SOURCE", "")
+	t.Setenv("ADBUDDY_RELEASE_URL", "http://127.0.0.1:1/") // no app release reachable: setup skips the app
 	// No test reaches Google: a download fails at once unless a test serves one.
 	t.Setenv("ADBUDDY_REPOSITORY_URL", "http://127.0.0.1:1/")
 	// A fake "claude" in PATH, and nothing else.
