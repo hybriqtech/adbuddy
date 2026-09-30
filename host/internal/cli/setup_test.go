@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
@@ -205,5 +208,53 @@ func TestSetupCodeMustBeSixDigits(t *testing.T) {
 				t.Fatalf("%q: adb pair called", bad)
 			}
 		}
+	}
+}
+
+// Ctrl+C while setup waits for the phone exits with 130, whatever step it
+// was in.
+func TestSetupInterruptedWhileWaitingForThePhone(t *testing.T) {
+	cases := map[string]struct {
+		rules []testutil.FakeRule
+		input string
+		args  []string
+		block bool // stdin never answers
+	}{
+		// The QR code is shown and nobody scans it.
+		"qr": {rules: []testutil.FakeRule{{Match: "^start-server$"}, {Match: "^mdns services$", Stdout: "List of discovered mdns services\n"}}},
+		// Paired with the code, and the phone never connects.
+		"connect": {rules: []testutil.FakeRule{
+			{Match: "^start-server$"},
+			{Match: "^devices$", Stdout: "List of devices attached\n"},
+			{Match: "^mdns services$", Stdout: "List of discovered mdns services\n"},
+			{Match: `^pair 192\.0\.2\.10:37000$`, Stdout: "Successfully paired to 192.0.2.10:37000 [guid=adb-AAA-bbb]\n", EchoStdin: true},
+		}, input: "192.0.2.10:37000\n123456\n", args: []string{"--code"}},
+		// Nobody types the IP address and port.
+		"prompt": {rules: []testutil.FakeRule{{Match: "^start-server$"}}, args: []string{"--code"}, block: true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := newSetupEnv(t, c.rules)
+			ctx, cancel := context.WithCancel(context.Background())
+			time.AfterFunc(700*time.Millisecond, cancel)
+			var stdin io.Reader = strings.NewReader(c.input)
+			if c.block {
+				r, w := io.Pipe()
+				t.Cleanup(func() { w.Close() })
+				stdin = r
+			}
+			var out, errb strings.Builder
+			args := append([]string{"setup", "--adb", fakeADB(t), "--workspace", e.ws}, c.args...)
+			done := make(chan int, 1)
+			go func() { done <- mainContext(ctx, args, stdin, &out, &errb) }()
+			select {
+			case code := <-done:
+				if code != ExitInterrupt || !strings.Contains(errb.String(), "INTERRUPTED") {
+					t.Fatalf("exit %d, stderr %q", code, errb.String())
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("setup did not stop")
+			}
+		})
 	}
 }

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
@@ -64,123 +66,147 @@ environment. Run it again at any time; it skips what is already done.`,
 		Example: "  adbuddy setup\n  adbuddy setup --code\n  adbuddy setup --agent codex --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if app.Getenv("ADBUDDY_SOURCE") == "agent" {
-				return NewError("AGENT_SESSION", "`adbuddy setup` cannot be run from the agent's session", "Run it yourself in a terminal.")
-			}
-			e, err := loadEnv(app)
-			if err != nil {
-				return err
-			}
-			ctx := cmd.Context()
-			say := func(format string, a ...any) { fmt.Fprintf(app.Stderr, format, a...) }
-			in := bufio.NewReader(app.Stdin)
-			ask := func(prompt string) (string, error) {
-				say("%s", prompt)
-				line, err := in.ReadString('\n')
-				if err != nil && line == "" {
-					return "", UsageError("no answer on stdin")
+			// Ctrl+C at any step (a download, a wait for the phone, a
+			// question) exits with 130. After the first one, the signals go
+			// back to their default, so a second Ctrl+C stops setup at once.
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			go func() { <-ctx.Done(); stop() }()
+			err := func() error {
+				if app.Getenv("ADBUDDY_SOURCE") == "agent" {
+					return NewError("AGENT_SESSION", "`adbuddy setup` cannot be run from the agent's session", "Run it yourself in a terminal.")
 				}
-				return strings.TrimSpace(line), nil
-			}
-
-			// 1. Tools.
-			adbPath := adbFlag
-			if adbPath == "" {
-				adbPath = e.cfg.ADBPath
-			}
-			if adbPath == "" {
-				say("Getting Android platform-tools…\n")
-				res, err := platformtools.Installer{DataDir: e.dirs.Data, BaseURL: repositoryURL(app), GOOS: runtime.GOOS, Log: app.Stderr}.Ensure(ctx)
-				if err != nil {
-					return TransientError("TOOLS_DOWNLOAD_FAILED", err.Error(), "Check the internet connection and run `adbuddy setup` again, or pass --adb <path to adb 37 or newer>.")
-				}
-				adbPath = res.ADB
-			}
-			runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
-			if _, errOut, code, err := runner.Output(ctx, "start-server"); err != nil || code != 0 {
-				return NewError("ADB_FAILED", fmt.Sprintf("cannot start ADBuddy's adb server: %v %s", err, strings.TrimSpace(errOut)), "Check "+adbPath+".")
-			}
-
-			// 2. A phone paired before comes back on its own.
-			serial := ""
-			if e.cfg.Serial != "" {
-				say("Looking for your phone…\n")
-				if s, err := runner.WaitSerial(ctx, e.cfg.Serial, knownPhoneWait); err == nil {
-					serial = s
-					say("Found it: already paired.\n")
-				}
-			}
-
-			// 3-4. Guide and pairing.
-			if serial == "" {
-				guid, err := pair(ctx, app, runner, useCode, ask, say)
+				e, err := loadEnv(app)
 				if err != nil {
 					return err
 				}
-				say("Paired. Connecting…\n")
-				serial, err = pairing.Connect(ctx, runner, guid, connectWait, autoConnectWait, time.Second)
+				say := func(format string, a ...any) { fmt.Fprintf(app.Stderr, format, a...) }
+				in := bufio.NewReader(app.Stdin)
+				type answer struct {
+					line string
+					err  error
+				}
+				ask := func(prompt string) (string, error) {
+					say("%s", prompt)
+					ch := make(chan answer, 1)
+					go func() {
+						line, err := in.ReadString('\n')
+						ch <- answer{line, err}
+					}()
+					select {
+					case <-ctx.Done():
+						return "", ctx.Err()
+					case a := <-ch:
+						if a.err != nil && a.line == "" {
+							return "", UsageError("no answer on stdin")
+						}
+						return strings.TrimSpace(a.line), nil
+					}
+				}
+
+				// 1. Tools.
+				adbPath := adbFlag
+				if adbPath == "" {
+					adbPath = e.cfg.ADBPath
+				}
+				if adbPath == "" {
+					say("Getting Android platform-tools…\n")
+					res, err := platformtools.Installer{DataDir: e.dirs.Data, BaseURL: repositoryURL(app), GOOS: runtime.GOOS, Log: app.Stderr}.Ensure(ctx)
+					if err != nil {
+						return TransientError("TOOLS_DOWNLOAD_FAILED", err.Error(), "Check the internet connection and run `adbuddy setup` again, or pass --adb <path to adb 37 or newer>.")
+					}
+					adbPath = res.ADB
+				}
+				runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
+				if _, errOut, code, err := runner.Output(ctx, "start-server"); err != nil || code != 0 {
+					return NewError("ADB_FAILED", fmt.Sprintf("cannot start ADBuddy's adb server: %v %s", err, strings.TrimSpace(errOut)), "Check "+adbPath+".")
+				}
+
+				// 2. A phone paired before comes back on its own.
+				serial := ""
+				if e.cfg.Serial != "" {
+					say("Looking for your phone…\n")
+					if s, err := runner.WaitSerial(ctx, e.cfg.Serial, knownPhoneWait); err == nil {
+						serial = s
+						say("Found it: already paired.\n")
+					}
+				}
+
+				// 3-4. Guide and pairing.
+				if serial == "" {
+					guid, err := pair(ctx, app, runner, useCode, ask, say)
+					if err != nil {
+						return err
+					}
+					say("Paired. Connecting…\n")
+					serial, err = pairing.Connect(ctx, runner, guid, connectWait, autoConnectWait, time.Second)
+					if err != nil {
+						return TransientError("DEVICE_NOT_FOUND", "the paired phone did not connect: "+err.Error(), "Check that wireless debugging is still on, then run `adbuddy setup` again.")
+					}
+				}
+				runner.Serial = serial
+
+				// Host invariant: no open adb network port unless remote mode is on.
+				restarted, err := device.EnsureNoTCPPort(ctx, runner)
 				if err != nil {
-					return TransientError("DEVICE_NOT_FOUND", "the paired phone did not connect: "+err.Error(), "Check that wireless debugging is still on, then run `adbuddy setup` again.")
+					return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
 				}
-			}
-			runner.Serial = serial
-
-			// Host invariant: no open adb network port unless remote mode is on.
-			restarted, err := device.EnsureNoTCPPort(ctx, runner)
-			if err != nil {
-				return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
-			}
-			if restarted {
-				say("Closed adb's network port on the phone (adb usb); waiting for it to reconnect…\n")
-				if _, err := runner.WaitSerial(ctx, serial, deviceWait); err != nil {
-					return TransientError("DEVICE_NOT_FOUND", "the phone did not come back after `adb usb`", "Run `adbuddy setup` again.")
+				if restarted {
+					say("Closed adb's network port on the phone (adb usb); waiting for it to reconnect…\n")
+					if _, err := runner.WaitSerial(ctx, serial, deviceWait); err != nil {
+						return TransientError("DEVICE_NOT_FOUND", "the phone did not come back after `adb usb`", "Run `adbuddy setup` again.")
+					}
 				}
-			}
 
-			// 5. Profile.
-			prof, err := device.Collect(ctx, runner)
-			if err != nil {
-				return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
-			}
-			say("Phone: %s, Android %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android))
+				// 5. Profile.
+				prof, err := device.Collect(ctx, runner)
+				if err != nil {
+					return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
+				}
+				say("Phone: %s, Android %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android))
 
-			// 6. Agent.
-			chosen, err := chooseAgent(app, agentFlag, e.cfg.Agent, yes, ask, say)
-			if err != nil {
-				return err
-			}
+				// 6. Agent.
+				chosen, err := chooseAgent(app, agentFlag, e.cfg.Agent, yes, ask, say)
+				if err != nil {
+					return err
+				}
 
-			// 7. Environment and configuration.
-			ws := wsFlag
-			if ws == "" {
-				ws = filepath.Join(e.home, "ADBuddy", prof.Name)
-			}
-			exe, err := os.Executable()
-			if err != nil {
-				return NewError("EXECUTABLE_UNKNOWN", err.Error(), "")
-			}
-			if _, err := workspace.Init(workspace.Options{Dir: ws, Exe: exe, Profile: prof.Markdown(), Force: true}); err != nil {
-				return NewError("WORKSPACE_FAILED", err.Error(), "Check that "+ws+" is writable.")
-			}
-			if err := device.WriteJSON(ws, prof); err != nil {
-				return NewError("WORKSPACE_FAILED", err.Error(), "")
-			}
-			cfg := e.cfg
-			cfg.Serial, cfg.Workspace, cfg.Agent = serial, ws, chosen
-			if adbFlag != "" {
-				cfg.ADBPath = adbFlag
-			}
-			if err := config.Save(e.dirs.ConfigFile(), cfg); err != nil {
-				return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")
-			}
+				// 7. Environment and configuration.
+				ws := wsFlag
+				if ws == "" {
+					ws = filepath.Join(e.home, "ADBuddy", prof.Name)
+				}
+				exe, err := os.Executable()
+				if err != nil {
+					return NewError("EXECUTABLE_UNKNOWN", err.Error(), "")
+				}
+				if _, err := workspace.Init(workspace.Options{Dir: ws, Exe: exe, Profile: prof.Markdown(), Force: true}); err != nil {
+					return NewError("WORKSPACE_FAILED", err.Error(), "Check that "+ws+" is writable.")
+				}
+				if err := device.WriteJSON(ws, prof); err != nil {
+					return NewError("WORKSPACE_FAILED", err.Error(), "")
+				}
+				cfg := e.cfg
+				cfg.Serial, cfg.Workspace, cfg.Agent = serial, ws, chosen
+				if adbFlag != "" {
+					cfg.ADBPath = adbFlag
+				}
+				if err := config.Save(e.dirs.ConfigFile(), cfg); err != nil {
+					return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")
+				}
 
-			res := setupResult{Device: prof, Serial: serial, Workspace: ws, Agent: chosen, ADB: adbPath}
-			if app.JSON {
-				return WriteData(app.Stdout, res)
+				res := setupResult{Device: prof, Serial: serial, Workspace: ws, Agent: chosen, ADB: adbPath}
+				if app.JSON {
+					return WriteData(app.Stdout, res)
+				}
+				fmt.Fprintf(app.Stdout, "Ready: %s (Android %s), environment %s, agent %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android), ws, chosen)
+				say("Next: run `adbuddy serve` and keep it open, then `adbuddy run` in another terminal.\n")
+				return nil
+			}()
+			if err != nil && ctx.Err() != nil {
+				return Interrupted()
 			}
-			fmt.Fprintf(app.Stdout, "Ready: %s (Android %s), environment %s, agent %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android), ws, chosen)
-			say("Next: run `adbuddy serve` and keep it open, then `adbuddy run` in another terminal.\n")
-			return nil
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&adbFlag, "adb", "", "use this adb (37 or newer) instead of downloading platform-tools")
