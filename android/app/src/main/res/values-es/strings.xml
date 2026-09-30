@@ -23,6 +23,8 @@
     <string name="confirm_title">El agente quiere: %1$s</string>
     <string name="confirm_special">Puede cortar la conexión con el PC o afectar a ADBuddy.</string>
     <string name="confirm_expires">Caduca: %1$s</string>
+    <string name="confirm_sending">Enviando…</string>
+    <string name="confirm_expired">Caducada: ya no se puede responder.</string>
 
     <string name="consent_title">Configurar ADBuddy con %1$s</string>
     <string name="consent_intro">El PC "%1$s" pide terminar de configurar ADBuddy. Si aceptas, va a:</string>
