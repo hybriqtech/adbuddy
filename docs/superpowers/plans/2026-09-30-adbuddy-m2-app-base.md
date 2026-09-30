@@ -5986,3 +5986,5 @@ Fuera de M2 (con su hito):
 5. **Confirmar desde la notificación con el móvil bloqueado:** debe pedir el desbloqueo antes de Permitir, y Rechazar no debe pedirlo.
 6. **Cortar acceso y Reactivar desde la app**, con y sin el modo `tcpip` (S1 lo probó solo con los interruptores de Ajustes).
 7. **Prueba de extremo a extremo real:** `adbuddy setup --apk …` → `adbuddy serve` → un 🔴 desde el agente → Permitir en el móvil.
+8. **Permitir desde la notificación tras desbloquear desde el bouncer:** `ConfirmReceiver` exige `KeyguardManager.isDeviceLocked == false` (revisión de la Tarea 10). Comprobar que, al desbloquear desde la propia notificación, el móvil ya cuenta como desbloqueado cuando llega Permitir. Si no, Permitir desde la notificación no enviaría nada (desde el diálogo sí).
+9. **La notificación de confirmación no llega a relojes ni espejos** (`setLocalOnly`): comprobar con un reloj Wear o con Phone Link que no aparece.

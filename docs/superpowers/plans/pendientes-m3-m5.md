@@ -18,10 +18,18 @@ Notas que hay que incorporar cuando se escriban esos planes (desde el 2026-09-29
   - Versión mínima del protocolo entre host y app (`MIN_PROTOCOL_VERSION`), para detectar una app desfasada.
   - Receptor del token protegido con `android:permission="android.permission.WRITE_SECURE_SETTINGS"`: solo el usuario shell o el sistema pueden enviarlo. Útil como alternativa al proveedor, pero **sin** pasar el token en la línea de comandos como hace ARTEMIS (`am broadcast --es token …`): lo mantenemos por stdin (plan de M2).
 
+- **ADBuddy es app protegida frente a sus propias ayudas** (revisión de M2): las acciones de accesibilidad (tocar, leer la pantalla) nunca actúan sobre `tech.hybriq.adbuddy`, para que el agente no pueda pulsar Permitir en su diálogo.
+- **Si aparece otra vía de inyección de toques fuera del shim**, pedir autenticación (BiometricPrompt o credencial) al pulsar Permitir en la app. En M2 bastan el bloqueo de órdenes mientras hay una pregunta 🔴 pendiente y que los trabajos en segundo plano sean 🔴 especiales.
+- **`TokenProvider` y `BridgeService` no sobrescriben `dump()`**: `dumpsys activity provider|service` es 🟢 para el agente.
+
 ## M6 · Publicación
 
 - **README, ventaja de coste frente a ARTEMIS:** ADBuddy usa el agente de código que el usuario ya tiene y funciona con su suscripción (por ejemplo, un plan de Claude Code), sin claves de API. ARTEMIS necesita su propio LLM y sus claves de API, porque el agente le delega tareas enteras. Decirlo en una línea al comparar, y en la portada entre las ventajas.
 
+- **Fijar en el host el SHA-256 del certificado de firma del APK** (revisión de la Tarea 4 de M2): el `.sha256` de la release solo protege la integridad, no una release comprometida en la primera instalación.
+
 ## Más adelante (v1.1+)
 
 - **Proxy del protocolo del servidor adb.** Herramientas como ARTEMIS (`adbutils`, `uiautomator2`) hablan con el servidor adb por su protocolo, sin el binario `adb`, así que se saltan el shim. Un proxy que atienda ese protocolo y clasifique las peticiones `host:transport` / `shell:` las pondría bajo el clasificador, el diario y las confirmaciones. Es un trabajo grande: evaluarlo cuando haya demanda.
+
+- **Protocolo v2: el host se autentica ante la app** (revisión de la Tarea 9 de M2): hoy una app que ocupe el puerto mientras no hay túnel puede mostrar preguntas falsas (sus respuestas no llegan al host). Un HMAC del token sobre un nonce de la app dentro del `welcome` lo cerraría.
