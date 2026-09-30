@@ -51,7 +51,8 @@ Step-by-step guide with pictures (scan it with the phone's camera):
 
 type setupResult struct {
 	Device    device.Profile `json:"device"`
-	Serial    string         `json:"serial"`
+	Serial    string         `json:"serial"` // saved in config.toml; "" when not saved (an address)
+	Active    string         `json:"active"` // the serial adb lists the phone with this session
 	Workspace string         `json:"workspace"`
 	Agent     string         `json:"agent"`
 	ADB       string         `json:"adb"`
@@ -235,10 +236,7 @@ environment. Run it again at any time; it skips what is already done.`,
 					return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")
 				}
 
-				res := setupResult{Device: prof, Serial: saved, Workspace: ws, Agent: chosen, ADB: adbPath}
-				if res.Serial == "" {
-					res.Serial = serial
-				}
+				res := setupResult{Device: prof, Serial: saved, Active: serial, Workspace: ws, Agent: chosen, ADB: adbPath}
 				if app.JSON {
 					return WriteData(app.Stdout, res)
 				}
@@ -390,6 +388,21 @@ func stableSerial(guid, active string) string {
 	}
 	if isAddress(active) {
 		return ""
+	}
+	return active
+}
+
+// phoneIdentity is the name the journal and undo know the phone by (see
+// daemon.Options.Identity): its mDNS name when adb lists it by its guid, or
+// when findPhone found it by the guid of the saved serial (then active is
+// that phone, even as ip:port); else the active serial itself.
+func phoneIdentity(saved, active string) string {
+	guid, ok := pairing.GuidOf(active)
+	if !ok {
+		guid, ok = pairing.GuidOf(saved)
+	}
+	if ok {
+		return guid + "." + pairing.ConnectType
 	}
 	return active
 }

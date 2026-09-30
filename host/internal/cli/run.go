@@ -77,9 +77,9 @@ be running in another terminal. The exit code is the agent's.`,
 			if _, err := workspace.Init(workspace.Options{Dir: ws, Exe: exe}); err != nil {
 				return NewError("WORKSPACE_FAILED", err.Error(), "Close other agents running in "+ws+" and try again.")
 			}
-			fmt.Fprintf(app.Stderr, "Starting %s in %s (phone %s)…\n", name, ws, ping.Serial)
+			fmt.Fprintf(app.Stderr, "Starting %s in %s (phone %s)…\n", name, ws, ping.Phone())
 			code, err := agent.Run(cmd.Context(), agent.Options{
-				Agent: name, Args: rest, Dir: ws, BinDir: workspace.BinDir(ws), Serial: ping.Serial,
+				Agent: name, Args: rest, Dir: ws, BinDir: workspace.BinDir(ws), Serial: ping.Phone(), // the name the journal knows it by
 				Environ: os.Environ(), Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 			})
 			if errors.Is(err, agent.ErrNotFound) {

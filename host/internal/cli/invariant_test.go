@@ -11,6 +11,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
 
@@ -255,13 +256,14 @@ func phoneCallsUse(t *testing.T, log, serial string) bool {
 }
 
 // serve finds the phone saved by its mDNS name under the serial adb lists
-// it with, and uses that serial for the session.
+// it with, and uses that serial for the session. The journal and the agent
+// keep knowing it by its mDNS name (final review of M1b, I1).
 func TestServeFindsThePhoneByItsGuid(t *testing.T) {
 	setVar(t, &deviceWait, 3*time.Second)
 	setVar(t, &autoConnectWait, 0)
 	for name, c := range guidCases {
 		t.Run(name, func(t *testing.T) {
-			isolate(t)
+			data := isolate(t)
 			cfg := config.Default()
 			cfg.Serial = phoneSerial
 			if err := config.Save(filepath.Join(os.Getenv("ADBUDDY_CONFIG_DIR"), "config.toml"), cfg); err != nil {
@@ -271,7 +273,20 @@ func TestServeFindsThePhoneByItsGuid(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var out, errb syncBuffer
-			cancelWhen(t, &errb, "ADBuddy is serving", cancel)
+			var ping ipc.Ping
+			var pingErr error
+			pinged := make(chan struct{})
+			serving := make(chan struct{})
+			cancelWhen(t, &errb, "ADBuddy is serving", func() { close(serving) })
+			go func() {
+				defer close(pinged)
+				defer cancel()
+				select {
+				case <-serving:
+					ping, pingErr = ipc.PingDaemon(context.Background(), data)
+				case <-ctx.Done():
+				}
+			}()
 			done := make(chan int, 1)
 			go func() {
 				done <- mainContext(ctx, []string{"serve", "--adb", fakeADB(t), "--workspace", filepath.Join(t.TempDir(), "ws"), "--confirm", "deny"}, strings.NewReader(""), &out, &errb)
@@ -283,6 +298,10 @@ func TestServeFindsThePhoneByItsGuid(t *testing.T) {
 				}
 			case <-time.After(15 * time.Second):
 				t.Fatal("serve did not stop")
+			}
+			<-pinged
+			if pingErr != nil || ping.Serial != c.active || ping.Identity != phoneSerial {
+				t.Fatalf("ping %+v (%v): want serial %s and identity %s", ping, pingErr, c.active, phoneSerial)
 			}
 			if !phoneCallsUse(t, log, c.active) {
 				t.Fatalf("calls to the phone not sent to %s: %q", c.active, loggedCalls(t, log))

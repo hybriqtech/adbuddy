@@ -139,7 +139,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			session := journal.NewID("s_", time.Now())
 			d := daemon.New(daemon.Options{
 				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: confirmer,
-				Serial: active, Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
+				Serial: active, Identity: phoneIdentity(serial, active), Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
 				UndoneLog: undoneLogPath(e.dirs.Data, workspace.JournalDir(ws)),
 				OnEntry: func(j journal.Entry) {
 					outMu.Lock()

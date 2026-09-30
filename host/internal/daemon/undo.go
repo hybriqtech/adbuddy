@@ -14,6 +14,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
+	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/precheck"
 )
 
@@ -49,13 +50,28 @@ const (
 )
 
 // otherDevice is why a change made on another phone is not undone: its
-// inverse would be applied to the active phone. Records older than the
-// serial field have none and are accepted.
-func otherDevice(e journal.Entry, serial string) string {
-	if e.Serial == "" || e.Serial == serial {
+// inverse would be applied to the active phone. identity is the active
+// phone's (see Options.Identity). Records older than the serial field have
+// none and are accepted.
+func otherDevice(e journal.Entry, identity string) string {
+	if e.Serial == "" || samePhone(e.Serial, identity) {
 		return ""
 	}
 	return "recorded on another phone (" + e.Serial + "): undo it by hand on that phone"
+}
+
+// samePhone reports whether a record's serial names the phone known as
+// identity: the same name, or the same mDNS guid (records written before
+// identities kept the session's serial, maybe renamed "<guid> (2)…"). An
+// ip:port says nothing about which phone answered there: only an exact
+// match counts.
+func samePhone(recorded, identity string) bool {
+	if recorded == identity {
+		return true
+	}
+	g, ok := pairing.GuidOf(recorded)
+	h, ok2 := pairing.GuidOf(identity)
+	return ok && ok2 && g == h
 }
 
 // isChange: a 🟡/🔴 command that ran or may have run, and is not undone yet.
@@ -90,12 +106,12 @@ func undoState(entries []journal.Entry) map[string]string {
 // skipReason is "" when e can be undone automatically: a change signed by
 // this ADBuddy, made on the active phone, finished with exit code 0, with an
 // inverse, not undone yet.
-func skipReason(e journal.Entry, state map[string]string, serial string) string {
+func skipReason(e journal.Entry, state map[string]string, identity string) string {
 	switch {
 	case e.Tampered:
 		return skipUntrusted
-	case otherDevice(e, serial) != "":
-		return otherDevice(e, serial)
+	case otherDevice(e, identity) != "":
+		return otherDevice(e, identity)
 	case e.Status != journal.StatusOK || state[e.ID] == journal.StatusRunning:
 		return skipUncertain
 	case e.Inverse == nil:
@@ -105,9 +121,9 @@ func skipReason(e journal.Entry, state map[string]string, serial string) string 
 }
 
 // SelectUndo picks the entries to undo, newest first. target is "last",
-// "session" or an entry id; session is the session for "session"; serial is
-// the active phone.
-func SelectUndo(entries []journal.Entry, target, session, serial string) (plan []journal.Entry, skipped []UndoItem, err error) {
+// "session" or an entry id; session is the session for "session"; identity
+// is the active phone's (see Options.Identity).
+func SelectUndo(entries []journal.Entry, target, session, identity string) (plan []journal.Entry, skipped []UndoItem, err error) {
 	state := undoState(entries)
 	pending := func(e journal.Entry) bool { return isChange(e) && state[e.ID] != journal.StatusOK }
 	skip := func(e journal.Entry, why string) {
@@ -120,7 +136,7 @@ func SelectUndo(entries []journal.Entry, target, session, serial string) (plan [
 			if !pending(e) {
 				continue
 			}
-			if why := skipReason(e, state, serial); why != "" {
+			if why := skipReason(e, state, identity); why != "" {
 				skip(e, why)
 				continue
 			}
@@ -133,7 +149,7 @@ func SelectUndo(entries []journal.Entry, target, session, serial string) (plan [
 			if e.Session != session || !pending(e) {
 				continue
 			}
-			if why := skipReason(e, state, serial); why != "" {
+			if why := skipReason(e, state, identity); why != "" {
 				skip(e, why)
 				continue
 			}
@@ -155,8 +171,8 @@ func SelectUndo(entries []journal.Entry, target, session, serial string) (plan [
 			return nil, nil, &UndoError{"NO_INVERSE", e.ID + " is itself an undo; undo the original change again only by hand"}
 		case e.UndoneBy != nil || state[e.ID] == journal.StatusOK:
 			return nil, nil, &UndoError{"ALREADY_UNDONE", e.ID + " was already undone"}
-		case otherDevice(e, serial) != "":
-			return nil, nil, &UndoError{"OTHER_DEVICE", e.ID + " was " + otherDevice(e, serial)}
+		case otherDevice(e, identity) != "":
+			return nil, nil, &UndoError{"OTHER_DEVICE", e.ID + " was " + otherDevice(e, identity)}
 		case e.Status == journal.StatusError || e.Status == journal.StatusRunning || state[e.ID] == journal.StatusRunning:
 			return nil, nil, &UndoError{"UNCERTAIN_STATE", e.ID + " " + skipUncertain}
 		case e.Status != journal.StatusOK:
@@ -199,7 +215,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			entries = append(entries, journal.Entry{Source: journal.SourceUndo, Undoes: id, Status: journal.StatusRunning})
 		}
 	}
-	plan, skipped, err := SelectUndo(entries, req.Target, session, d.o.Serial)
+	plan, skipped, err := SelectUndo(entries, req.Target, session, d.identity())
 	res := newUndoResult()
 	var reappeared []string // moves not undone because their source exists again
 	res.Skipped = append(res.Skipped, skipped...)
@@ -238,7 +254,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 		now := d.o.Now().UTC()
 		u := journal.Entry{
-			ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.o.Serial, Source: journal.SourceUndo,
+			ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUndo,
 			Argv: e.Inverse.Argv, Level: "yellow", Rule: "undo", Description: undoPrefix(d.o.Lang) + e.Description, Undoes: e.ID,
 		}
 		item.UndoID = u.ID

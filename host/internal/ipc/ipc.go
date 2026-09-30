@@ -69,8 +69,20 @@ type Exit struct {
 type Ping struct {
 	Version string `json:"version"`
 	Session string `json:"session"`
-	Serial  string `json:"serial"`
-	Journal string `json:"journal"`
+	Serial  string `json:"serial"` // the serial adb lists the phone with this session
+	// Identity is the phone's stable name (see daemon.Options.Identity);
+	// empty from a host that predates it.
+	Identity string `json:"identity,omitempty"`
+	Journal  string `json:"journal"`
+}
+
+// Phone is the phone the host serves, as the agent names it in
+// ANDROID_SERIAL: its identity, or its serial when there is none.
+func (p Ping) Phone() string {
+	if p.Identity != "" {
+		return p.Identity
+	}
+	return p.Serial
 }
 
 // ErrNotRunning means no daemon answers on the socket.

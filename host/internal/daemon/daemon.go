@@ -38,11 +38,16 @@ type Stream interface {
 
 // Options configure a Daemon.
 type Options struct {
-	Classifier     *classify.Classifier
-	ADB            Executor
-	Journal        *journal.Store
-	Confirmer      confirm.Confirmer
-	Serial         string // active device
+	Classifier *classify.Classifier
+	ADB        Executor
+	Journal    *journal.Store
+	Confirmer  confirm.Confirmer
+	Serial     string // active device, as adb lists it this session: every command runs with -s Serial
+	// Identity is the phone's stable name: its mDNS name
+	// (<guid>._adb-tls-connect._tcp) even when adb lists it this session as
+	// "<guid> (2)…" or as ip:port. The journal records it, undo compares it,
+	// and the agent may name the phone with it. Empty: Serial.
+	Identity       string
 	Session        string
 	Lang           string
 	ConfirmTimeout time.Duration
@@ -85,6 +90,14 @@ func New(o Options) *Daemon {
 	return &Daemon{o: o}
 }
 
+// identity is the name the journal and undo know the phone by.
+func (d *Daemon) identity() string {
+	if d.o.Identity != "" {
+		return d.o.Identity
+	}
+	return d.o.Serial
+}
+
 // Handle serves one request.
 func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	switch req.Kind {
@@ -93,7 +106,7 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 	case ipc.KindUndo:
 		return d.undo(ctx, req, s)
 	case ipc.KindPing:
-		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.o.Serial, Journal: d.o.Journal.Dir()})
+		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.o.Serial, Identity: d.identity(), Journal: d.o.Journal.Dir()})
 		return ipc.Exit{}
 	}
 	return ipc.Exit{Code: 1, ErrorCode: "UNKNOWN_REQUEST", Error: "unknown request " + req.Kind}
@@ -101,7 +114,7 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 
 func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	now := d.o.Now().UTC()
-	e := journal.Entry{ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.o.Serial, Source: journal.SourceUser, Argv: req.Argv}
+	e := journal.Entry{ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUser, Argv: req.Argv}
 	if req.Env["ADBUDDY_SOURCE"] == journal.SourceAgent {
 		e.Source = journal.SourceAgent
 	}
@@ -110,9 +123,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if len(g.Forbidden) > 0 {
 		return d.block(e, s, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed: ADBuddy only talks to the active phone through its own adb server")
 	}
+	// The phone may be named by this session's serial or by its identity;
+	// either way adb runs with -s Serial (the -s given is not passed on).
 	for _, serial := range []string{g.Serial, req.Env["ANDROID_SERIAL"]} {
-		if serial != "" && serial != d.o.Serial {
-			return d.block(e, s, "only the active phone can be used ("+d.o.Serial+")")
+		if serial != "" && serial != d.o.Serial && serial != d.identity() {
+			return d.block(e, s, "only the active phone can be used ("+d.identity()+")")
 		}
 	}
 

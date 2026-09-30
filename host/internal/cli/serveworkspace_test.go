@@ -9,6 +9,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
+	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 )
 
@@ -79,5 +80,27 @@ func TestRunRefusesAnotherEnvironment(t *testing.T) {
 	same := ws + string(filepath.Separator)
 	if _, errOut, _ := run(t, "run", "adbuddy-test-no-such-agent", "--workspace", same); strings.Contains(errOut, "WORKSPACE_MISMATCH") {
 		t.Fatalf("same environment refused: %q", errOut)
+	}
+}
+
+// Final review of M1b, I1: the agent names the phone by its identity, the
+// name the journal records, not by the serial adb lists it with this session.
+func TestRunExportsTheIdentity(t *testing.T) {
+	ws := t.TempDir()
+	data := isolate(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	fakeDaemon(t, data, ipc.Ping{Version: Version, Session: "s_1", Serial: "192.0.2.10:41000", Identity: "adb-AAA-bbb._adb-tls-connect._tcp", Journal: workspace.JournalDir(ws)}, ipc.Exit{})
+	log := filepath.Join(t.TempDir(), "agent.log")
+	t.Setenv("FAKEADB_SCRIPT", "")
+	t.Setenv("FAKEADB_LOG", log)
+	// The fake adb stands in for the agent: it logs its ANDROID_SERIAL.
+	if _, errOut, code := run(t, "run", fakeADB(t)); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	calls, err := testutil.ReadLog(log)
+	if err != nil || len(calls) != 1 || calls[0].Serial != "adb-AAA-bbb._adb-tls-connect._tcp" {
+		t.Fatalf("agent calls %+v (%v)", calls, err)
 	}
 }

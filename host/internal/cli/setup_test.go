@@ -502,8 +502,11 @@ func TestSetupSavesTheStableSerial(t *testing.T) {
 	if cfg := loadSetupConfig(t, e); cfg.Serial != "adb-AAA-bbb._adb-tls-connect._tcp" {
 		t.Fatalf("serial %q", cfg.Serial)
 	}
-	if strings.Contains(out, "192.0.2.10") {
-		t.Fatalf("stdout reports the address: %s", out)
+	// Final review of M1b, R2-4: the JSON tells the saved serial from the
+	// one of this session.
+	var env struct{ Data setupResult }
+	if err := json.Unmarshal([]byte(out), &env); err != nil || env.Data.Serial != "adb-AAA-bbb._adb-tls-connect._tcp" || env.Data.Active != "192.0.2.10:41000" {
+		t.Fatalf("stdout %s (%v)", out, err)
 	}
 }
 
@@ -519,7 +522,7 @@ func TestSetupDoesNotSaveAnAddressAsSerial(t *testing.T) {
 	if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
 		t.Fatal(err)
 	}
-	_, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+	out, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws, "--json")
 	if code != 0 {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
@@ -528,6 +531,11 @@ func TestSetupDoesNotSaveAnAddressAsSerial(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "not saving") {
 		t.Fatalf("no warning: %q", errOut)
+	}
+	// Final review of M1b, R2-4: "serial" is only the saved one.
+	var env struct{ Data setupResult }
+	if err := json.Unmarshal([]byte(out), &env); err != nil || env.Data.Serial != "" || env.Data.Active != "192.0.2.10:41000" {
+		t.Fatalf("stdout %s (%v)", out, err)
 	}
 }
 
