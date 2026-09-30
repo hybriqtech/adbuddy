@@ -54,9 +54,21 @@ be running in another terminal. The exit code is the agent's.`,
 			if err != nil {
 				return NewError("DAEMON_UNREACHABLE", err.Error(), "Restart `adbuddy serve`.")
 			}
-			ws, err := filepath.Abs(e.workspace(wsDir))
-			if err != nil {
-				return NewError("WORKSPACE_FAILED", err.Error(), "")
+			// The agent must work where serve looks: its journal, and the only
+			// place where adb pull may write without asking.
+			serveWS := serveWorkspace(ping)
+			ws := serveWS
+			if wsDir != "" || serveWS == "" {
+				if ws, err = filepath.Abs(e.workspace(wsDir)); err != nil {
+					return NewError("WORKSPACE_FAILED", err.Error(), "")
+				}
+			}
+			if serveWS != "" && ws != serveWS {
+				if !sameDir(ws, serveWS) {
+					return NewError("WORKSPACE_MISMATCH", "`adbuddy serve` is watching "+serveWS+", not "+ws,
+						"Run `adbuddy run` without --workspace to use "+serveWS+", or stop serve and start it with `adbuddy serve --workspace "+ws+"`.")
+				}
+				ws = serveWS
 			}
 			exe, err := os.Executable()
 			if err != nil {
@@ -79,6 +91,6 @@ be running in another terminal. The exit code is the agent's.`,
 			return ExitWith(code)
 		},
 	}
-	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: ~/ADBuddy/default)")
+	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment; must be the one `adbuddy serve` is watching (default: that one)")
 	return cmd
 }

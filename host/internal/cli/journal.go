@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
@@ -33,17 +35,26 @@ func newJournalCmd(app *App) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if session == "current" {
-				p, err := ipc.PingDaemon(cmd.Context(), e.dirs.Data)
-				if errors.Is(err, ipc.ErrNotRunning) {
-					return NewError("DAEMON_NOT_RUNNING", "the current session is only known while `adbuddy serve` runs", "Pass --session <id> (ids start with s_).")
+			ws := e.workspace(wsDir)
+			if session == "current" || wsDir == "" {
+				pctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+				p, err := ipc.PingDaemon(pctx, e.dirs.Data)
+				cancel()
+				if session == "current" {
+					if errors.Is(err, ipc.ErrNotRunning) {
+						return NewError("DAEMON_NOT_RUNNING", "the current session is only known while `adbuddy serve` runs", "Pass --session <id> (ids start with s_).")
+					}
+					if err != nil {
+						return NewError("DAEMON_UNREACHABLE", err.Error(), "")
+					}
+					session = p.Session
 				}
-				if err != nil {
-					return NewError("DAEMON_UNREACHABLE", err.Error(), "")
+				// Without --workspace, the journal of the serve that runs.
+				if err == nil && wsDir == "" && serveWorkspace(p) != "" {
+					ws = serveWorkspace(p)
 				}
-				session = p.Session
 			}
-			dir := workspace.JournalDir(e.workspace(wsDir))
+			dir := workspace.JournalDir(ws)
 			store := journal.Open(dir)
 			secret, err := ipc.ReadSecret(e.dirs.Data)
 			signed := err == nil
@@ -87,6 +98,6 @@ func newJournalCmd(app *App) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&session, "session", "", "only this session: its id (s_…), or current for the one serve is running now")
 	cmd.Flags().IntVar(&limit, "limit", 50, "show only the last N entries (0 = all)")
-	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: ~/ADBuddy/default)")
+	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: the one `adbuddy serve` is watching, else ~/ADBuddy/default)")
 	return cmd
 }

@@ -62,7 +62,7 @@ Anything that could cut the connection or disable ADBuddy (Wi-Fi, debugging sett
 adb_path = "C:\\Android\\platform-tools\\adb.exe"
 adb_server_port = 5038       # ADBuddy's own adb server
 serial = ""                  # only needed with several phones
-workspace = ""               # default: ~/ADBuddy/default
+workspace = ""               # default: ~/ADBuddy/default; `run` and `journal` follow the running `serve`
 confirm_timeout = "2m"
 language = "es"              # descriptions in the journal: en or es
 agent = "claude"             # default for `adbuddy run`
@@ -77,7 +77,7 @@ rules:
 
 ## Exit codes
 
-`adbuddy` commands: 0 success, 1 failure, 2 invalid usage, 75 temporary failure, 78 configuration error. With `--json` they print `{"ok":true,"data":…}` or `{"ok":false,"error":{…}}`.
+`adbuddy` commands: 0 success, 1 failure, 2 invalid usage, 75 temporary failure, 78 configuration error, 130 interrupted (`INTERRUPTED`: Ctrl+C while `serve` waits for the phone). With `--json` they print `{"ok":true,"data":…}` or `{"ok":false,"error":{…}}`.
 
 The `adb` shim returns adb's own exit code, 126 when a command is denied, expires or is blocked (`Denied by user: …`, `Blocked by ADBuddy: …`), and 1 with `ADBuddy host not running (run: adbuddy serve)` when the host is not running.
 

@@ -3,10 +3,13 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/paths"
 	"github.com/mattn/go-isatty"
@@ -37,6 +40,34 @@ func (e env) workspace(flag string) string {
 		return flag
 	}
 	return e.cfg.WorkspaceDir(e.home)
+}
+
+// serveWorkspace is the environment of the serve that answered p: the folder
+// that holds its journal. "" if it does not say.
+func serveWorkspace(p ipc.Ping) string {
+	if p.Journal == "" {
+		return ""
+	}
+	return filepath.Dir(p.Journal)
+}
+
+// sameDir reports whether a and b name the same folder: absolute, with links
+// resolved where they exist, and without case on Windows.
+func sameDir(a, b string) bool {
+	norm := func(p string) string {
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			p = real
+		}
+		return filepath.Clean(p)
+	}
+	a, b = norm(a), norm(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 // isTerminal reports whether f is an interactive terminal (including mintty).
