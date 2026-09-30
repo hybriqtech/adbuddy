@@ -215,7 +215,7 @@ func TestEverythingShownIsEscaped(t *testing.T) {
 
 func TestDenyAll(t *testing.T) {
 	var out bytes.Buffer
-	if got := (DenyAll{Out: &out}).Confirm(context.Background(), req()); got != Deny || !strings.Contains(out.String(), "Restart the phone") {
+	if got := (DenyAll{Out: &out}).Confirm(context.Background(), req()); got != Nobody || !strings.Contains(out.String(), "Restart the phone") {
 		t.Fatalf("%v %q", got, out.String())
 	}
 }

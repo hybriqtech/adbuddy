@@ -178,7 +178,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if decision != confirm.Allow {
 			e.Status, e.Reason = journal.StatusDenied, "denied by user"
 			msg := "Denied by user: " + e.Description
-			if decision == confirm.Timeout {
+			switch decision {
+			case confirm.Nobody:
+				e.Reason = "denied: nobody to confirm (serve --confirm deny or no terminal)"
+				msg = "Denied: nobody could confirm: " + e.Description
+			case confirm.Timeout:
 				e.Status, e.Reason = journal.StatusTimeout, "confirmation expired"
 				msg += " (confirmation expired)"
 			}

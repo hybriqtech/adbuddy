@@ -170,5 +170,6 @@ func render(t Text, vars map[string]string) Text {
 		pairs = append(pairs, "{"+k+"}", v)
 	}
 	r := strings.NewReplacer(pairs...)
-	return Text{EN: r.Replace(t.EN), ES: r.Replace(t.ES)}
+	// An empty value at the end ("Restart the phone {args}") leaves no space.
+	return Text{EN: strings.TrimSpace(r.Replace(t.EN)), ES: strings.TrimSpace(r.Replace(t.ES))}
 }

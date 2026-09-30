@@ -428,3 +428,20 @@ func TestAdbFailures(t *testing.T) {
 		t.Fatalf("signal: %+v", exit)
 	}
 }
+
+// Nobody could be asked (serve --confirm deny, or no terminal): the journal
+// and the shim say so instead of "denied by user".
+func TestRedDeniedWhenNobodyCanConfirm(t *testing.T) {
+	e := newEnv(t)
+	e.conf.decision = confirm.Nobody
+	s, exit := e.exec(t, "reboot")
+	if exit.Code != ExitDenied || !strings.Contains(s.errOut.String(), "Denied: nobody could confirm: Restart the phone") || strings.Contains(s.errOut.String(), "by user") {
+		t.Fatalf("exit %+v stderr %q", exit, s.errOut.String())
+	}
+	if len(e.adb.ran()) != 0 {
+		t.Fatalf("ran %q", e.adb.ran())
+	}
+	if j := e.last(t); j.Status != journal.StatusDenied || j.Reason != "denied: nobody to confirm (serve --confirm deny or no terminal)" || *j.ExitCode != ExitDenied {
+		t.Fatalf("entry %+v", j)
+	}
+}

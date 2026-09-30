@@ -35,6 +35,7 @@ const (
 	Deny Decision = iota
 	Allow
 	Timeout
+	Nobody // nobody could be asked (DenyAll): denied
 )
 
 func (d Decision) String() string {
@@ -43,6 +44,8 @@ func (d Decision) String() string {
 		return "allow"
 	case Timeout:
 		return "timeout"
+	case Nobody:
+		return "nobody"
 	default:
 		return "deny"
 	}
@@ -55,7 +58,7 @@ type Confirmer interface {
 	Confirm(ctx context.Context, r Request) Decision
 }
 
-// DenyAll answers Deny: used when nobody can be asked (spec §4.5: "si no hay
+// DenyAll answers Nobody: used when nobody can be asked (spec §4.5: "si no hay
 // ninguna de las dos opciones, se rechaza").
 type DenyAll struct{ Out io.Writer }
 
@@ -63,7 +66,7 @@ func (d DenyAll) Confirm(_ context.Context, r Request) Decision {
 	if d.Out != nil {
 		fmt.Fprintf(d.Out, "🔴 Denied (no terminal to confirm in): %s\n", classify.Printable(r.Title))
 	}
-	return Deny
+	return Nobody
 }
 
 // settleTime: lines that arrive earlier than this after a question is shown

@@ -143,3 +143,20 @@ func TestBadRules(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A template whose {args} is empty leaves no trailing space ("Restart the
+// phone ", seen in the real test).
+func TestTitlesHaveNoTrailingSpace(t *testing.T) {
+	c := mustNew(t, "")
+	for _, argv := range [][]string{{"reboot"}, {"shell", "reboot"}, {"uninstall"}} {
+		r := c.Classify(argv)
+		for _, lang := range []string{"en", "es"} {
+			if d := r.Description(lang); d != strings.TrimSpace(d) || d == "" {
+				t.Errorf("%v (%s): %q", argv, lang, d)
+			}
+		}
+	}
+	if d := c.Classify([]string{"reboot"}).Description("en"); d != "Restart the phone" {
+		t.Fatalf("%q", d)
+	}
+}
