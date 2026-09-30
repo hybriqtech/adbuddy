@@ -1,7 +1,10 @@
 # GitHub Pages (Settings → Pages → Deploy from branch main, folder /docs).
 # Only the user guide is published; design documents stay in the repository.
+# Careful: `exclude` is a list of what stays out, not of what goes in. Any new
+# .md file under docs/ is published unless it is added below.
 title: ADBuddy
 description: Let any coding agent manage your Android phone over Wi-Fi adb, safely.
+theme: jekyll-theme-minimal  # responsive, with a viewport for phones
 exclude:
   - superpowers
   - spikes

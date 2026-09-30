@@ -23,6 +23,8 @@ go build -o adbuddy ./cmd/adbuddy      # adbuddy.exe on Windows
 
    Running plain `adbuddy` before setup starts the setup when it runs in a terminal; otherwise it fails with `NOT_CONFIGURED`.
 
+   `adbuddy setup --adb <path>` uses an adb you already have (37 or newer) instead of downloading one. Stop `adbuddy serve` before running setup again: while it runs, setup refuses with `ALREADY_RUNNING`.
+
 1. In one terminal, start the host and keep it open:
 
    ```sh
@@ -87,7 +89,7 @@ rules:
 
 ## Exit codes
 
-`adbuddy` commands: 0 success, 1 failure, 2 invalid usage, 75 temporary failure, 78 configuration error, 130 interrupted (`INTERRUPTED`: Ctrl+C while `setup` or `serve` waits for the phone). With `--json` they print `{"ok":true,"data":…}` or `{"ok":false,"error":{…}}`.
+`adbuddy` commands: 0 success, 1 failure, 2 invalid usage, 75 temporary failure, 78 configuration error, 130 interrupted (`INTERRUPTED`: Ctrl+C during `setup`, or while `serve` waits for the phone). With `--json` they print `{"ok":true,"data":…}` or `{"ok":false,"error":{…}}`.
 
 The `adb` shim returns adb's own exit code, 126 when a command is denied, expires or is blocked (`Denied by user: …`, `Blocked by ADBuddy: …`), and 1 with `ADBuddy host not running (run: adbuddy serve)` when the host is not running.
 
