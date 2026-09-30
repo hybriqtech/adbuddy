@@ -50,6 +50,7 @@ type Entry struct {
 	ID          string    `json:"id"`
 	TS          time.Time `json:"ts"`
 	Session     string    `json:"session"`
+	Serial      string    `json:"serial,omitempty"` // the phone it ran on; empty in records older than this field
 	Source      string    `json:"source"`
 	Argv        []string  `json:"argv"`
 	Level       string    `json:"level"`

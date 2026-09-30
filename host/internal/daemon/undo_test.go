@@ -53,23 +53,23 @@ func TestSelectUndo(t *testing.T) {
 		entry("j_6", "s_2", "yellow", "running", "shell", "d"), // the host stopped mid-command
 		entry("j_7", "s_2", "yellow", "error", "shell", "e"),
 	}
-	plan, skipped, err := SelectUndo(entries, "last", "")
+	plan, skipped, err := SelectUndo(entries, "last", "", "dev1")
 	if err != nil || ids(plan) != "j_4" || itemIDs(skipped) != "j_7,j_6,j_5" {
 		t.Fatalf("last: %s | %s | %v", ids(plan), itemIDs(skipped), err)
 	}
 	if skipped[0].Error != skipUncertain || skipped[2].Error != skipNoInverse {
 		t.Fatalf("skip reasons: %+v", skipped)
 	}
-	plan, _, err = SelectUndo(entries, "session", "s_1")
+	plan, _, err = SelectUndo(entries, "session", "s_1", "dev1")
 	if err != nil || ids(plan) != "j_1" {
 		t.Fatalf("session: %s %v", ids(plan), err)
 	}
 	for target, code := range map[string]string{"j_0": "ALREADY_UNDONE", "j_3": "NOT_APPLIED", "j_5": "NO_INVERSE", "j_6": "UNCERTAIN_STATE", "j_7": "UNCERTAIN_STATE", "j_9": "NOT_FOUND"} {
-		if _, _, err := SelectUndo(entries, target, ""); err == nil || err.(*UndoError).Code != code {
+		if _, _, err := SelectUndo(entries, target, "", "dev1"); err == nil || err.(*UndoError).Code != code {
 			t.Errorf("%s: %v", target, err)
 		}
 	}
-	if _, _, err := SelectUndo(entries[:1], "last", ""); err == nil || err.(*UndoError).Code != "NOTHING_TO_UNDO" {
+	if _, _, err := SelectUndo(entries[:1], "last", "", "dev1"); err == nil || err.(*UndoError).Code != "NOTHING_TO_UNDO" {
 		t.Fatalf("nothing: %v", err)
 	}
 }
@@ -145,12 +145,12 @@ func TestSelectUndoTrustsOnlySignedRecordsAndFinishedUndos(t *testing.T) {
 		entry("j_3", "s_1", "yellow", "ok", "shell", "pm", "enable", "com.c"),
 		crashedUndo, finishedUndo, forged,
 	}
-	plan, skipped, err := SelectUndo(entries, "session", "s_1")
+	plan, skipped, err := SelectUndo(entries, "session", "s_1", "dev1")
 	if err != nil || ids(plan) != "j_1" || itemIDs(skipped) != "j_f,j_2" {
 		t.Fatalf("plan %s skipped %s err %v", ids(plan), itemIDs(skipped), err)
 	}
 	for target, code := range map[string]string{"j_f": "UNTRUSTED_ENTRY", "j_2": "UNCERTAIN_STATE", "j_3": "ALREADY_UNDONE", "j_u2": "NO_INVERSE"} {
-		if _, _, err := SelectUndo(entries, target, ""); err == nil || err.(*UndoError).Code != code {
+		if _, _, err := SelectUndo(entries, target, "", "dev1"); err == nil || err.(*UndoError).Code != code {
 			t.Errorf("%s: %v", target, err)
 		}
 	}

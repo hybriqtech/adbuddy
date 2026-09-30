@@ -101,7 +101,7 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 
 func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	now := d.o.Now().UTC()
-	e := journal.Entry{ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Source: journal.SourceUser, Argv: req.Argv}
+	e := journal.Entry{ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.o.Serial, Source: journal.SourceUser, Argv: req.Argv}
 	if req.Env["ADBUDDY_SOURCE"] == journal.SourceAgent {
 		e.Source = journal.SourceAgent
 	}

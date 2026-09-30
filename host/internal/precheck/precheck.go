@@ -216,9 +216,10 @@ func deviceidle(ctx context.Context, dev Device, a map[string]string, p *Prepare
 	return nil
 }
 
-// kind reports whether path is a directory, a file (anything else that exists,
-// including dangling links) or missing.
-func kind(ctx context.Context, dev Device, target string) (string, error) {
+// Kind reports whether path is a directory, a file (anything else that exists,
+// including dangling links) or missing: "dir", "file" or "none". It only
+// reads; undo uses it too before moving a file back.
+func Kind(ctx context.Context, dev Device, target string) (string, error) {
 	q := shq.Quote(target)
 	out, code, err := dev.Shell(ctx, "if [ -d "+q+" ]; then echo dir; elif [ -e "+q+" ] || [ -L "+q+" ]; then echo file; else echo none; fi")
 	if err != nil {
@@ -232,7 +233,7 @@ func kind(ctx context.Context, dev Device, target string) (string, error) {
 }
 
 func mv(ctx context.Context, dev Device, a map[string]string, p *Prepared) error {
-	k, err := kind(ctx, dev, a["dst"])
+	k, err := Kind(ctx, dev, a["dst"])
 	if err != nil {
 		return err
 	}
@@ -245,7 +246,7 @@ func mv(ctx context.Context, dev Device, a map[string]string, p *Prepared) error
 }
 
 func mkdir(ctx context.Context, dev Device, a map[string]string, p *Prepared) error {
-	k, err := kind(ctx, dev, a["path"])
+	k, err := Kind(ctx, dev, a["path"])
 	if err != nil {
 		return err
 	}
@@ -256,7 +257,7 @@ func mkdir(ctx context.Context, dev Device, a map[string]string, p *Prepared) er
 }
 
 func newFile(ctx context.Context, dev Device, a map[string]string, p *Prepared) error {
-	k, err := kind(ctx, dev, a["path"])
+	k, err := Kind(ctx, dev, a["path"])
 	if err != nil {
 		return err
 	}
@@ -321,13 +322,13 @@ func push(ctx context.Context, dev Device, a map[string]string, env Env, p *Prep
 		return nil
 	}
 	target := a["remote"]
-	k, err := kind(ctx, dev, target)
+	k, err := Kind(ctx, dev, target)
 	if err != nil {
 		return err
 	}
 	if k == "dir" {
 		target = path.Join(target, filepath.Base(local))
-		if k, err = kind(ctx, dev, target); err != nil {
+		if k, err = Kind(ctx, dev, target); err != nil {
 			return err
 		}
 	} else if strings.HasSuffix(target, "/") {

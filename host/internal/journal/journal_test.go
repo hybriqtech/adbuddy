@@ -244,3 +244,33 @@ func mustReadFile(t *testing.T, p string) []byte {
 	}
 	return b
 }
+
+// Final review, Round3: the journal remembers which phone each change was
+// made on, inside the signature, so undo never applies it to another one.
+func TestSerialIsSignedAndOptional(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "journal")
+	s := OpenSigned(dir, []byte("k"))
+	s.now = func() time.Time { return time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC) }
+	if err := s.Append(Entry{ID: "j_a", Status: StatusOK, Serial: "devA"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Append(Entry{ID: "j_old", Status: StatusOK}); err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Join(dir, "2026-09.jsonl")
+	data := string(mustReadFile(t, name))
+	lines := strings.Split(strings.TrimSpace(data), "\n")
+	if !strings.Contains(lines[0], `"serial":"devA"`) || strings.Contains(lines[1], `"serial"`) {
+		t.Fatalf("lines %q", lines)
+	}
+	if e, _, _ := s.Get("j_a"); e.Tampered || e.Serial != "devA" {
+		t.Fatalf("own record: %+v", e)
+	}
+	if e, _, _ := s.Get("j_old"); e.Tampered {
+		t.Fatal("a record without serial must still verify")
+	}
+	os.WriteFile(name, []byte(strings.Replace(data, `"serial":"devA"`, `"serial":"devB"`, 1)), 0o600)
+	if e, _, _ := s.Get("j_a"); !e.Tampered {
+		t.Fatal("changing the serial did not break the signature")
+	}
+}

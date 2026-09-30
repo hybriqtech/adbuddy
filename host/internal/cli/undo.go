@@ -20,7 +20,8 @@ var undoFixes = map[string]string{
 	"NOT_APPLIED":        "Nothing to do: the command never ran.",
 	"UNTRUSTED_ENTRY":    "The entry was not written by ADBuddy: check the phone and undo it by hand if needed.",
 	"JOURNAL_UNWRITABLE": "Check that the journal folder is writable; the changes listed as undone did happen.",
-	"UNCERTAIN_STATE":    "Check the phone: the command failed or the host stopped while it ran, so its inverse is not run automatically.",
+	"UNCERTAIN_STATE":    "Check the phone: the command failed, the host stopped while it ran, or its place on the phone is taken again, so its inverse is not run automatically.",
+	"OTHER_DEVICE":       "Connect the phone the change was made on (see `adbuddy journal`) and undo it there, or revert it by hand.",
 	"UNDO_FAILED":        "Check the phone and the journal; failed inverses can be retried with `adbuddy undo <id>`.",
 }
 

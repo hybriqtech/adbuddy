@@ -71,3 +71,12 @@ func TestUndoNothingToUndoShowsSkipped(t *testing.T) {
 		t.Fatalf("exit %d, stdout %q, stderr %q: %v", code, out, errOut, err)
 	}
 }
+
+// A change recorded on another phone gets a fix that says where to undo it.
+func TestUndoOtherDeviceHasAFix(t *testing.T) {
+	data := isolate(t)
+	fakeDaemon(t, data, nil, ipc.Exit{Code: 1, ErrorCode: "OTHER_DEVICE", Error: "j_1 was recorded on another phone (devB): undo it by hand on that phone"})
+	if _, errOut, code := run(t, "undo", "j_1"); code != ExitFailure || !strings.Contains(errOut, "OTHER_DEVICE") || !strings.Contains(errOut, "Connect the phone") {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+}
