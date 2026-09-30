@@ -142,14 +142,14 @@ func TestSetupKnownPhoneAtItsAddress(t *testing.T) {
 }
 
 // serveOnce runs serve until it is serving (then stops it) or fails, and
-// returns its exit code, stderr and what it answered to a ping.
-func serveOnce(t *testing.T, rules []testutil.FakeRule, cfg config.Config) (int, string, ipc.Ping) {
+// returns its exit code, stderr, what it answered to a ping and the fake adb's log.
+func serveOnce(t *testing.T, rules []testutil.FakeRule, cfg config.Config) (int, string, ipc.Ping, string) {
 	t.Helper()
 	data := isolate(t)
 	if err := config.Save(filepath.Join(os.Getenv("ADBUDDY_CONFIG_DIR"), "config.toml"), cfg); err != nil {
 		t.Fatal(err)
 	}
-	invariantRunner(t, rules...)
+	_, log := invariantRunner(t, rules...)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var out, errb syncBuffer
@@ -178,7 +178,7 @@ func serveOnce(t *testing.T, rules []testutil.FakeRule, cfg config.Config) (int,
 	}
 	cancel()
 	<-pinged
-	return code, errb.String(), ping
+	return code, errb.String(), ping, log
 }
 
 // serve reaches the phone at its saved address when mDNS does not find it;
@@ -187,12 +187,19 @@ func TestServeUsesTheSavedAddress(t *testing.T) {
 	shortWaits(t)
 	cfg := config.Default()
 	cfg.Serial, cfg.Address = phoneSerial, tsAddr
-	code, errOut, ping := serveOnce(t, remoteRules("AAA"), cfg)
+	code, errOut, ping, log := serveOnce(t, remoteRules("AAA"), cfg)
 	if code != 0 || !strings.Contains(errOut, "ADBuddy is serving "+tsAddr+" ") {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
 	if ping.Serial != tsAddr || ping.Identity != phoneSerial {
 		t.Fatalf("ping %+v: want serial %s and identity %s", ping, tsAddr, phoneSerial)
+	}
+	// Already connected on ADBuddy's adb server: used at once, without
+	// waiting for mDNS nor connecting again.
+	for _, c := range loggedCalls(t, log) {
+		if c == "mdns services" || strings.HasPrefix(c, "connect ") {
+			t.Fatalf("unexpected %q: %q", c, loggedCalls(t, log))
+		}
 	}
 }
 
@@ -207,13 +214,13 @@ func TestServeSavedAddressGone(t *testing.T) {
 		{Match: "^devices$", Stdout: phoneGone},
 		{Match: "^mdns services$", Stdout: "List of discovered mdns services\n"},
 	}
-	code, errOut, _ := serveOnce(t, rules, cfg)
+	code, errOut, _, _ := serveOnce(t, rules, cfg)
 	if code != ExitTransient || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, "adbuddy connect <new ip:port>") {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
 	// The address of another phone is not used either.
-	code, errOut, _ = serveOnce(t, remoteRules("ZZZ"), cfg)
-	if code != ExitFailure || !strings.Contains(errOut, "WRONG_PHONE") || !strings.Contains(errOut, "adbuddy connect <new ip:port>") {
+	code, errOut, _, _ = serveOnce(t, remoteRules("ZZZ"), cfg)
+	if code != ExitTransient || !strings.Contains(errOut, wrongPhoneWarning) || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, "adbuddy connect <new ip:port>") {
 		t.Fatalf("other phone: exit %d stderr %q", code, errOut)
 	}
 }
@@ -256,9 +263,10 @@ func TestInterruptedWhileConnectingByAddress(t *testing.T) {
 		known    bool
 		cancelOn string
 	}{
-		"prompt":  {rules: remoteRules("AAA"), args: []string{"setup", "--code"}, terminal: true, cancelOn: "Connection address"},
-		"connect": {rules: append(hang, remoteRules("AAA")...), args: []string{"setup", "--code", "--connect", tsAddr}, cancelOn: "Connecting to " + tsAddr},
-		"serve":   {rules: append(hang, remoteRules("AAA")...), args: []string{"serve", "--confirm", "deny"}, known: true, cancelOn: "Connecting to " + tsAddr},
+		"prompt":      {rules: remoteRules("AAA"), args: []string{"setup", "--code"}, terminal: true, cancelOn: "Connection address"},
+		"connect":     {rules: append(hang, remoteRules("AAA")...), args: []string{"setup", "--code", "--connect", tsAddr}, cancelOn: "Connecting to " + tsAddr},
+		"serve":       {rules: append(append(hang, testutil.FakeRule{Match: "^devices$", Stdout: phoneGone}), remoteRules("AAA")...), args: []string{"serve", "--confirm", "deny"}, known: true, cancelOn: "Connecting to " + tsAddr},
+		"serve-check": {rules: append([]testutil.FakeRule{{Match: `^shell getprop ro.serialno$`, SleepMs: 20000}}, remoteRules("AAA")...), args: []string{"serve", "--confirm", "deny"}, known: true, cancelOn: "Checking the phone at " + tsAddr},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -312,5 +320,58 @@ func TestSetupDropsASavedAddressThatFailed(t *testing.T) {
 	}
 	if cfg := loadSetupConfig(t, e); cfg.Serial != phoneSerial || cfg.Address != "" {
 		t.Fatalf("config %+v", cfg)
+	}
+}
+
+// wrongPhoneWarning is said when the saved address reaches another phone.
+const wrongPhoneWarning = "is not the one you set up; not using that address"
+
+// A saved address that went stale (the phone came back by mDNS with a new
+// port): it costs at most knownAddrWait, then the usual wait for mDNS goes on.
+func TestServeStaleAddressFallsBackToMDNS(t *testing.T) {
+	shortWaits(t)
+	setVar(t, &deviceWait, 10*time.Second)
+	setVar(t, &knownAddrWait, 300*time.Millisecond)
+	cfg := config.Default()
+	cfg.Serial, cfg.Address = phoneSerial, tsAddr
+	rules := append([]testutil.FakeRule{
+		{Match: "^connect ", SleepMs: 20000}, // an address nobody answers on
+		{Match: "^devices$", Stdout: phoneGone, Times: 1},
+		{Match: "^devices$", Stdout: phoneOnline},
+		{Match: tcpPortRule, Stdout: "\n"},
+	}, remoteRules("AAA")...)
+	start := time.Now()
+	code, errOut, ping, _ := serveOnce(t, rules, cfg)
+	if code != 0 || !strings.Contains(errOut, "Connecting to "+tsAddr) || ping.Serial != phoneSerial {
+		t.Fatalf("exit %d ping %+v stderr %q", code, ping, errOut)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("took %s", d)
+	}
+}
+
+// Another phone already connected at the saved address: not used, said so,
+// disconnected, and the phone is found by mDNS.
+func TestServeIgnoresAnotherPhoneAtTheSavedAddress(t *testing.T) {
+	shortWaits(t)
+	setVar(t, &deviceWait, 10*time.Second)
+	cfg := config.Default()
+	cfg.Serial, cfg.Address = phoneSerial, tsAddr
+	rules := append([]testutil.FakeRule{
+		{Match: "^devices$", Stdout: "List of devices attached\n" + tsAddr + "\tdevice\n", Times: 1},
+		{Match: "^devices$", Stdout: phoneOnline},
+	}, remoteRules("ZZZ")...)
+	code, errOut, ping, log := serveOnce(t, rules, cfg)
+	if code != 0 || !strings.Contains(errOut, tsAddr+" "+wrongPhoneWarning) || ping.Serial != phoneSerial {
+		t.Fatalf("exit %d ping %+v stderr %q", code, ping, errOut)
+	}
+	calls := loggedCalls(t, log)
+	if !strings.Contains(strings.Join(calls, "|"), "disconnect "+tsAddr) {
+		t.Fatalf("not disconnected: %q", calls)
+	}
+	for _, c := range calls {
+		if c == "connect "+tsAddr {
+			t.Fatalf("connected again to the other phone: %q", calls)
+		}
 	}
 }

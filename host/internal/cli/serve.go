@@ -101,17 +101,13 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				addr = e.cfg.Address
 			}
 			const reconnect = "run `adbuddy connect <new ip:port>` with the IP address and port on the phone's Wireless debugging screen, then `adbuddy serve` again."
-			active, used, verified, err := findKnownPhone(ctx, runner, serial, addr, deviceWait, app.Stderr)
+			k, err := findKnownPhone(ctx, runner, serial, addr, deviceWait, app.Stderr)
 			switch {
 			case err != nil && ctx.Err() != nil:
 				return Interrupted()
-			case hasCode(err, "WRONG_PHONE"):
-				return NewError("WRONG_PHONE", AsError(err).Message, "That address is another phone now: "+reconnect)
-			case hasCode(err, "DEVICE_NOT_FOUND") || hasCode(err, "CONNECT_FAILED"):
-				return TransientError("DEVICE_NOT_FOUND", "the phone did not show up by itself, and its saved address does not answer: "+AsError(err).Message,
+			case errors.Is(err, adb.ErrNoDevice) && k.AddrErr != nil:
+				return TransientError("DEVICE_NOT_FOUND", "the phone did not show up, and its saved address "+addr+" did not work: "+AsError(k.AddrErr).Message,
 					"The port changes each time wireless debugging is turned on: "+reconnect)
-			case hasCode(err, "DEVICE_UNREADABLE"):
-				return err
 			case errors.Is(err, adb.ErrNoDevice):
 				return TransientError("DEVICE_NOT_FOUND", "no phone in state `device` on adb server port "+strconv.Itoa(e.cfg.ADBServerPort),
 					"Turn on wireless debugging on the phone and keep it on the same Wi-Fi as this PC; if it was never paired, run `adbuddy setup`; on another network (e.g. Tailscale), run `adbuddy connect <ip:port>`.")
@@ -120,9 +116,10 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			case err != nil:
 				return NewError("ADB_FAILED", err.Error(), "Check the adb path ("+adbPath+").")
 			}
-			if used != "" && !verified {
-				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s).\n", used, unverifiedWhy(serial))
+			if k.Used != "" && !k.Verified {
+				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s).\n", k.Used, unverifiedWhy(serial))
 			}
+			active := k.Active
 			runner.Serial = active
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
 			if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy serve"); err != nil {

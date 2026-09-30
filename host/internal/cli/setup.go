@@ -177,21 +177,18 @@ connection address with --connect (or type it when asked).`,
 						known = e.cfg.Address
 					}
 					say("Looking for your phone…\n")
-					s, used, verified, err := findKnownPhone(ctx, runner, e.cfg.Serial, known, knownPhoneWait, app.Stderr)
+					k, err := findKnownPhone(ctx, runner, e.cfg.Serial, known, knownPhoneWait, app.Stderr)
 					if ctx.Err() != nil {
 						return ctx.Err() // Ctrl+C: no guide nor QR code
 					}
-					savedFailed = err != nil && known != ""
-					switch {
-					case err == nil:
-						serial, usedAddr = s, used
+					savedFailed = k.AddrErr != nil
+					if err == nil {
+						serial, usedAddr = k.Active, k.Used
 						guid, _ = pairing.GuidOf(e.cfg.Serial) // keeps the saved name
-						if used != "" && !verified {
-							say("Note: could not check that the phone at %s is the one you set up (%s).\n", used, unverifiedWhy(e.cfg.Serial))
+						if k.Used != "" && !k.Verified {
+							say("Note: could not check that the phone at %s is the one you set up (%s).\n", k.Used, unverifiedWhy(e.cfg.Serial))
 						}
 						say("Found it: already paired.\n")
-					case hasCode(err, "WRONG_PHONE"):
-						say("Note: %s is another phone now; pairing again.\n", known)
 					}
 				}
 
@@ -229,7 +226,7 @@ connection address with --connect (or type it when asked).`,
 								"Check that wireless debugging is still on, then run `adbuddy setup` again; if the phone is on another network (e.g. Tailscale), add --connect <ip:port> with the IP address and port on its Wireless debugging screen.")
 						}
 						say("Connecting to %s…\n", addr)
-						s, verified, err := connectAddr(ctx, runner, addr, guid)
+						s, verified, err := connectAddr(ctx, runner, addr, guid, connectAddrWait)
 						if err != nil {
 							return err
 						}

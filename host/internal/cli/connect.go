@@ -23,6 +23,7 @@ import (
 var (
 	connectAddrWait = 20 * time.Second // `adb connect` plus the wait for the phone to be online
 	disconnectWait  = 5 * time.Second  // bounds `adb disconnect` of another phone
+	knownAddrWait   = 5 * time.Second  // the try of the saved address before the wait for mDNS
 )
 
 // wrongPhoneFix is the fix of WRONG_PHONE.
@@ -80,7 +81,7 @@ turned on: run this command again with the new one.`,
 				}
 				fmt.Fprintf(app.Stderr, "Connecting to %s…\n", addr)
 				guid, _ := pairing.GuidOf(e.cfg.Serial)
-				active, verified, err := connectAddr(ctx, runner, addr, guid)
+				active, verified, err := connectAddr(ctx, runner, addr, guid, connectAddrWait)
 				if err != nil {
 					return err
 				}
@@ -133,14 +134,14 @@ func unverifiedWhy(saved string) string {
 	return "its saved name does not carry its serial number"
 }
 
-// connectAddr connects runner's adb server to the phone at addr and, when
-// guid names the paired phone, checks that it is that phone (verified).
-// Another phone there is disconnected again and is WRONG_PHONE. When ctx
-// ends, the error is ctx's: callers turn it into Interrupted.
-func connectAddr(ctx context.Context, runner adb.Runner, addr, guid string) (active string, verified bool, err error) {
+// connectAddr connects runner's adb server to the phone at addr (waiting at
+// most timeout) and, when guid names the paired phone, checks that it is
+// that phone (see verifyAt). When ctx ends, the error is ctx's: callers turn
+// it into Interrupted.
+func connectAddr(ctx context.Context, runner adb.Runner, addr, guid string, timeout time.Duration) (active string, verified bool, err error) {
 	host := runner
 	host.Serial = "" // connect and devices are host commands
-	active, err = pairing.ConnectAddr(ctx, host, addr, connectAddrWait)
+	active, err = pairing.ConnectAddr(ctx, host, addr, timeout)
 	switch {
 	case ctx.Err() != nil:
 		return "", false, ctx.Err()
@@ -149,44 +150,118 @@ func connectAddr(ctx context.Context, runner adb.Runner, addr, guid string) (act
 	case err != nil:
 		return "", false, TransientError("CONNECT_FAILED", err.Error(), "Check the IP address and port on the phone's Wireless debugging screen (the port changes each time wireless debugging is turned on) and that the phone and this PC can reach each other.")
 	}
+	verified, err = verifyAt(ctx, runner, active, guid)
+	if err != nil {
+		return "", false, err
+	}
+	return active, verified, nil
+}
+
+// verifyAt checks that the phone online as active (an address) is the one
+// with guid. verified is false when guid does not carry a serial number.
+// Another phone is disconnected from ADBuddy's adb server and is WRONG_PHONE.
+func verifyAt(ctx context.Context, runner adb.Runner, active, guid string) (verified bool, err error) {
 	if _, ok := pairing.GuidSerialNo(guid); !ok {
-		return active, false, nil
+		return false, nil
 	}
 	phone := runner
 	phone.Serial = active
 	err = pairing.VerifyIdentity(ctx, phone, guid)
 	switch {
 	case ctx.Err() != nil:
-		return "", false, ctx.Err()
+		return false, ctx.Err()
 	case errors.Is(err, pairing.ErrWrongPhone):
+		host := runner
+		host.Serial = ""
 		dctx, cancel := context.WithTimeout(ctx, disconnectWait)
-		_, _, _, _ = host.Output(dctx, "disconnect", addr)
+		_, _, _, _ = host.Output(dctx, "disconnect", active)
 		cancel()
-		return "", false, NewError("WRONG_PHONE", "the phone at "+addr+" is not the phone you set up", wrongPhoneFix)
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		return false, NewError("WRONG_PHONE", "the phone at "+active+" is not the phone you set up", wrongPhoneFix)
 	case err != nil:
-		return "", false, NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
+		return false, NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
 	}
-	return active, true, nil
+	return true, nil
 }
 
-// findKnownPhone finds the phone saved as serial (see findPhone) and, when
-// it does not show up and addr is set (the address that worked last time,
-// or --connect), connects to it there and checks it is that phone. used is
-// the address it was reached at ("" if it came back by itself); verified
-// tells whether its identity could be checked there.
-func findKnownPhone(ctx context.Context, runner adb.Runner, serial, addr string, wait time.Duration, log io.Writer) (active, used string, verified bool, err error) {
-	active, err = findPhone(ctx, runner, serial, wait)
-	if err == nil || addr == "" || ctx.Err() != nil || !errors.Is(err, adb.ErrNoDevice) {
-		return active, "", false, err
-	}
-	fmt.Fprintf(log, "Connecting to %s (the address saved last time)…\n", addr)
-	guid, _ := pairing.GuidOf(serial)
-	active, verified, err = connectAddr(ctx, runner, addr, guid)
-	if err != nil {
-		return "", "", false, err
-	}
-	return active, addr, verified, nil
+// knownPhone is where findKnownPhone found the phone.
+type knownPhone struct {
+	Active   string // the serial adb lists it with
+	Used     string // the saved address it was reached at; "" when not by address
+	Verified bool   // its identity was checked at Used
+	AddrErr  error  // why the saved address was not used; nil if it was not tried
 }
+
+// findKnownPhone finds the phone saved as serial, trying the quickest ways
+// first when there is an address to try (without one, only step 4):
+//  1. adb already lists it by its guid (renamed by mDNS or not);
+//  2. addr (the address that worked last time, or --connect) is already
+//     online on ADBuddy's adb server, and it is that phone;
+//  3. `adb connect addr` works within knownAddrWait, and it is that phone;
+//  4. the usual wait for it by mDNS (findPhone), at most wait.
+//
+// Another phone at addr is disconnected, said on log and skipped. A phone
+// that does not show up is adb.ErrNoDevice; AddrErr then tells why addr
+// did not help. When ctx ends, the error is ctx's.
+func findKnownPhone(ctx context.Context, runner adb.Runner, serial, addr string, wait time.Duration, log io.Writer) (knownPhone, error) {
+	if addr == "" { // nothing to try first: the usual wait, as before
+		active, err := findPhone(ctx, runner, serial, wait)
+		return knownPhone{Active: active}, err
+	}
+	var k knownPhone
+	guid, byGuid := pairing.GuidOf(serial)
+	online, err := runner.Online(ctx) // host command: Online drops the serial
+	if ctx.Err() != nil {
+		return knownPhone{}, ctx.Err()
+	}
+	if err == nil {
+		for _, d := range online {
+			if byGuid && pairing.IsGuidSerial(guid, d.Serial) || !byGuid && serial != "" && d.Serial == serial {
+				return knownPhone{Active: d.Serial}, nil
+			}
+		}
+		if hasSerial(online, addr) {
+			fmt.Fprintf(log, "Checking the phone at %s (the address saved last time)…\n", addr)
+			verified, err := verifyAt(ctx, runner, addr, guid)
+			if ctx.Err() != nil {
+				return knownPhone{}, ctx.Err()
+			}
+			if err == nil {
+				return knownPhone{Active: addr, Used: addr, Verified: verified}, nil
+			}
+			k.AddrErr = err
+			skipAddr(log, addr, err)
+		}
+	}
+	if k.AddrErr == nil {
+		fmt.Fprintf(log, "Connecting to %s (the address saved last time)…\n", addr)
+		active, verified, err := connectAddr(ctx, runner, addr, guid, knownAddrWait)
+		if ctx.Err() != nil {
+			return knownPhone{}, ctx.Err()
+		}
+		if err == nil {
+			return knownPhone{Active: active, Used: addr, Verified: verified}, nil
+		}
+		k.AddrErr = err
+		skipAddr(log, addr, err)
+	}
+	k.Active, err = findPhone(ctx, runner, serial, wait)
+	return k, err
+}
+
+// skipAddr says why the saved address addr is not used.
+func skipAddr(log io.Writer, addr string, err error) {
+	if hasCode(err, "WRONG_PHONE") {
+		fmt.Fprintf(log, "Warning: the phone at %s %s.\n", addr, wrongPhoneWarningText)
+		return
+	}
+	fmt.Fprintf(log, "The address %s did not work (%s); waiting for the phone on this network…\n", addr, AsError(err).Message)
+}
+
+// wrongPhoneWarningText follows "the phone at <addr>" when it is another phone.
+const wrongPhoneWarningText = "is not the one you set up; not using that address"
 
 // hasCode reports whether err is an *Error with that code.
 func hasCode(err error, code string) bool {
