@@ -47,6 +47,18 @@ class AccessSwitch(private val settings: Settings, private val saved: Saved) {
         return true
     }
 
+    /**
+     * Forgets the values from before the cut once adb debugging is on again
+     * without restore() (the person turned it on in Settings): a later cut
+     * must not bring back what there was before the first one. Called on
+     * every change of the settings (CutAccess.observe).
+     */
+    fun forgetIfRestored() {
+        if (isCut()) return
+        saved.put(ADB_ENABLED, null)
+        saved.put(ADB_WIFI_ENABLED, null)
+    }
+
     private fun write(vararg changes: Pair<String, Int>): Boolean {
         try {
             for ((name, value) in changes) settings.put(name, value)

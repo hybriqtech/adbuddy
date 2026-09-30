@@ -93,6 +93,21 @@ class AccessSwitchTest {
         assertEquals(1, saved.values[wifi])
     }
 
+    @Test fun reactivatingByHandForgetsTheSavedValues() {
+        val s = FakeSettings(adb to 1, wifi to 1)
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved)
+        sw.cut()
+        sw.forgetIfRestored()
+        assertEquals("still cut: kept", 1, saved.values[wifi])
+        s.values[adb] = 1 // the person turns USB debugging on in Settings
+        sw.forgetIfRestored()
+        assertTrue(saved.values.isEmpty())
+        s.values[adb] = 0 // and cuts again later, by hand: nothing old comes back
+        assertTrue(sw.restore())
+        assertEquals(0, s.values[wifi])
+    }
+
     @Test fun aFailedRestoreKeepsTheSavedValues() {
         val s = FakeSettings(adb to 1, wifi to 1)
         val saved = FakeSaved()

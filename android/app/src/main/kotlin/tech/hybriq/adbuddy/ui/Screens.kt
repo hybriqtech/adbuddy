@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.ui
 
+import android.app.KeyguardManager
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -33,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
@@ -79,7 +81,7 @@ fun HomeScreen(
     var failed by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf<String?>(null) }
     // Follows both settings, whoever changes them (this screen, the Settings app, adb).
-    val cut by remember(context) { CutAccess.observe(context.contentResolver) }
+    val cut by remember(context) { CutAccess.observe(context) }
         .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context.contentResolver))
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(stringResource(R.string.home_title), style = MaterialTheme.typography.headlineSmall)
@@ -137,10 +139,13 @@ fun HomeScreen(
     val question = ConfirmUi.question(state, focusConfirm, now, closed)
     if (question != null) {
         ConfirmDialog(question, ConfirmUi.status(question, state, now), clock, onClose = { onClose(question.id) }) { decision ->
-            // The current state and time, not those of this composition: a second quick
-            // tap sees the first answer (answering), and the delay stops while the phone sleeps.
+            // The same rule as the notification buttons (ConfirmReceiver), with the
+            // current state and time, not those of this composition: a second quick
+            // tap sees the first answer (answering), and the delay stops while the
+            // phone sleeps. Allowing needs the phone unlocked here too.
             val t = clock.now()
-            if (ConfirmUi.status(question, bridge.state.value, t) == ConfirmUi.Status.OPEN) {
+            val locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
+            if (ConfirmUi.canSend(bridge.state.value, question.id, decision, t, locked)) {
                 bridge.reply(question.id, decision)
             } else {
                 now = t
@@ -175,7 +180,8 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
     val lines = ConfirmUi.lines(r, stringResource(R.string.confirm_special), footer, maxCommand = DIALOG_MAX_COMMAND)
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text(stringResource(R.string.confirm_title, r.title)) },
+        // The title comes from the host's rules, but it never takes the whole dialog.
+        title = { Text(stringResource(R.string.confirm_title, r.title), maxLines = 3, overflow = TextOverflow.Ellipsis) },
         text = {
             val view = LocalView.current
             DisposableEffect(view) {

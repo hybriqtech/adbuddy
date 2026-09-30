@@ -50,7 +50,7 @@ class BridgeService : LifecycleService() {
             app.bridge.state.collect { s -> ConfirmNotifier.sync(this@BridgeService, s) }
         }
         lifecycleScope.launch {
-            combine(app.bridge.state, CutAccess.observe(contentResolver)) { s, cut -> StatusView.of(s, cut) }.collect { v ->
+            combine(app.bridge.state, CutAccess.observe(this@BridgeService)) { s, cut -> StatusView.of(s, cut) }.collect { v ->
                 // Posted again only when what it shows changes, not on every journal entry.
                 if (v != shownStatus) {
                     shownStatus = v

@@ -52,17 +52,29 @@ object CutAccess {
     fun isCut(resolver: ContentResolver): Boolean =
         Settings.Global.getInt(resolver, Settings.Global.ADB_ENABLED, 1) == 0
 
-    /** isCut, now and on every change of either setting (by ADBuddy, the Settings app or adb). */
-    fun observe(resolver: ContentResolver): Flow<Boolean> = callbackFlow {
+    /**
+     * isCut, now and on every change of either setting (by ADBuddy, the
+     * Settings app or adb). Each time it also forgets the values from before a
+     * cut that the person already undid by hand (AccessSwitch.forgetIfRestored).
+     * The observer runs on the main thread, like cut() and restore() (the
+     * screen's buttons), so it never sees a cut half done.
+     */
+    fun observe(context: Context): Flow<Boolean> = callbackFlow {
+        val resolver = context.contentResolver
+        val switch = switch(context)
+        fun current(): Boolean {
+            switch.forgetIfRestored()
+            return isCut(resolver)
+        }
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
-                trySend(isCut(resolver))
+                trySend(current())
             }
         }
         for (name in listOf(AccessSwitch.ADB_ENABLED, AccessSwitch.ADB_WIFI_ENABLED)) {
             resolver.registerContentObserver(Settings.Global.getUriFor(name), false, observer)
         }
-        trySend(isCut(resolver))
+        trySend(current())
         awaitClose { resolver.unregisterContentObserver(observer) }
     }.distinctUntilChanged()
 }
