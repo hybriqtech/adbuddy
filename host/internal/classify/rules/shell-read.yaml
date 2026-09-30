@@ -48,8 +48,12 @@ rules:
   - {id: sh.sleep, cmd: sleep, level: green, anyArgs: true, title: {en: "Wait {args}", es: "Esperar {args}"}}
   - {id: sh.set, cmd: set, level: green, anyArgs: true, check: set, title: {en: "Set shell options", es: "Ajustar opciones de la shell"}}
   - {id: sh.exit, cmd: exit, level: green, anyArgs: true, title: {en: "End the shell", es: "Terminar la shell"}}
+  - {id: sh.read, cmd: read, level: green, title: {en: "Read a line into a variable", es: "Leer una línea en una variable"}}
+  - {id: sh.break, cmd: break, level: green, anyArgs: true, title: {en: "Leave a loop", es: "Salir de un bucle"}}
+  - {id: sh.continue, cmd: continue, level: green, anyArgs: true, title: {en: "Go on with the next turn of a loop", es: "Seguir con la siguiente vuelta de un bucle"}}
   - {id: sh.which, cmd: which, level: green, anyArgs: true, title: {en: "Locate a program: {args}", es: "Localizar un programa: {args}"}}
   - {id: sh.type, cmd: type, level: green, anyArgs: true, title: {en: "Describe a command: {args}", es: "Describir un comando: {args}"}}
+  - {id: sh.whence, cmd: whence, level: green, anyArgs: true, title: {en: "Describe a command: {args}", es: "Describir un comando: {args}"}}
   - {id: sh.basename, cmd: basename, level: green, anyArgs: true, title: {en: "Take a file name", es: "Obtener un nombre de fichero"}}
   - {id: sh.dirname, cmd: dirname, level: green, anyArgs: true, title: {en: "Take a folder name", es: "Obtener un nombre de carpeta"}}
   - {id: sys.id, cmd: id, level: green, anyArgs: true, title: {en: "Show the user", es: "Mostrar el usuario"}}

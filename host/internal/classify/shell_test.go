@@ -65,7 +65,7 @@ func TestShellReads(t *testing.T) {
 		"cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME",
 		"cat <<EOF\nhello\nEOF",
 		"echo 'rm -rf /sdcard' | cat",
-		"X=1 ls",
+		"LANG=C ls",
 		"# only a comment",
 	} {
 		cases = append(cases, tc{argv: sh(line), level: Green})

@@ -13,7 +13,7 @@ var trustedDirs = map[string]bool{
 
 // evalWords classifies one simple command, unwrapping wrappers such as
 // nohup, env, toybox or `sh -c`.
-func (c *Classifier) evalWords(ws []Word, sc scope) []Finding {
+func (c *Classifier) evalWords(ws []Word, e *evaluator) []Finding {
 	vals := values(ws)
 	if ws[0].Dynamic {
 		return []Finding{unanalysable("dynamic", "command name only known on the phone", vals, textDynamic)}
@@ -27,47 +27,35 @@ func (c *Classifier) evalWords(ws []Word, sc scope) []Finding {
 		name = base
 	}
 	ws = append([]Word{{Value: name}}, ws[1:]...)
+	if strings.HasPrefix(name, "-") || strings.HasPrefix(name, "+") {
+		// A wrapper read fewer options than the phone does (command -- x,
+		// nice -n 1 -n 2 x): what runs is not this word.
+		return []Finding{unanalysable("wrapper", "an option where ADBuddy expected the command", vals, textUnknown)}
+	}
+	if fs := e.builtin(ws); len(fs) > 0 {
+		return fs
+	}
 
 	switch name {
 	case "sh", "mksh", "bash", "ash", "dash", "zsh", "ksh":
-		return c.evalShell(ws, sc)
+		return c.evalShell(ws, e)
 	case "su":
-		return c.evalSu(ws, sc)
+		return c.evalSu(ws, e)
 	case ".", "source", "eval":
 		return []Finding{unanalysable("shell.script", "runs code from a file or a string", vals, textScript)}
-	case "trap":
-		if trapRunsCode(ws[1:]) {
-			return []Finding{unanalysable("shell.script", "trap runs a string as shell code", vals, textScript)}
-		}
-	case "alias":
-		// An alias makes a name run other shell code from the next line on.
-		if len(ws) > 1 {
-			return []Finding{unanalysable("shell.script", "alias makes a name run other shell code", vals, textScript)}
-		}
 	case "find":
-		return c.evalFind(ws, sc)
+		return c.evalFind(ws, e)
 	case "watch":
-		return c.evalWatch(ws, sc)
+		return c.evalWatch(ws, e)
 	case "flock":
-		return c.evalFlock(ws, sc)
+		return c.evalFlock(ws, e)
 	case "script":
-		return c.evalScriptCmd(ws, sc)
-	case "fc", "r":
-		// fc -e and fc -s run commands from the shell history, after an
-		// editor that is itself a command; mksh's r is fc -e -. Only a
-		// listing (fc -l) runs nothing.
-		if name == "r" || !fcLists(ws[1:]) {
-			return []Finding{unanalysable("shell.script", "fc runs commands from the shell history", vals, textScript)}
-		}
-	case "env", "read", "getopts", "set", "printf", "unset":
-		if why := setsHiddenVar(ws); why != "" {
-			return []Finding{unanalysable("shell.script", why, vals, textScript)}
-		}
+		return c.evalScriptCmd(ws, e)
 	case "toybox", "busybox":
 		if len(ws) == 1 {
 			return []Finding{{Rule: "toybox.list", Level: Green, Title: Text{EN: "List toybox commands", ES: "Listar los comandos de toybox"}, Words: vals}}
 		}
-		return c.evalWords(ws[1:], sc)
+		return c.evalWords(ws[1:], e)
 	case "cmd":
 		rest := ws[1:]
 		for len(rest) > 0 && !rest[0].Dynamic && rest[0].Value == "-w" { // -w: wait for the service
@@ -80,7 +68,7 @@ func (c *Classifier) evalWords(ws []Word, sc scope) []Finding {
 		}
 		if len(rest) > 0 {
 			if alias, ok := cmdAliases[rest[0].Value]; ok {
-				return c.evalWords(append(lits(alias), rest[1:]...), sc)
+				return c.evalWords(append(lits(alias), rest[1:]...), e)
 			}
 		}
 		ws = append([]Word{ws[0]}, rest...)
@@ -105,26 +93,14 @@ func (c *Classifier) evalWords(ws []Word, sc scope) []Finding {
 		if len(inner) == 0 {
 			return []Finding{{Rule: "wrapper.noop", Level: Green, Title: render(Text{EN: "Run {cmd}", ES: "Ejecutar {cmd}"}, baseVars(ws)), Words: vals}}
 		}
-		return c.evalWords(inner, sc)
+		return c.evalWords(inner, e)
 	}
-	out := []Finding{c.evalRule("shell", ws)}
-	switch ws[0].Value {
-	case "test", "[":
-		out = append(out, sc.vars.testFindings(ws)...)
-	case "shift", "ulimit":
-		out = append(out, sc.vars.argsFindings(ws)...)
-	case "integer", "typeset", "export", "readonly", "local", "declare":
-		// Here only when run through a wrapper (builtin typeset …) or, for
-		// integer, always: the parser reads the others as declarations
-		// (checkDeclClause).
-		out = append(out, declArgs(ws)...)
-	}
-	return out
+	return []Finding{c.evalRule("shell", ws)}
 }
 
 // evalWatch handles watch [-tebx] [-n SEC] PROG ARGS. Without -x, watch
 // joins its arguments with spaces and runs them with sh -c, like adb shell.
-func (c *Classifier) evalWatch(ws []Word, sc scope) []Finding {
+func (c *Classifier) evalWatch(ws []Word, e *evaluator) []Finding {
 	vals := values(ws)
 	bad := func(why string) []Finding { return []Finding{unanalysable("wrapper", why, vals, textUnknown)} }
 	rest, direct := ws[1:], false
@@ -151,19 +127,19 @@ func (c *Classifier) evalWatch(ws []Word, sc scope) []Finding {
 		return []Finding{{Rule: "wrapper.noop", Level: Green, Title: render(Text{EN: "Run {cmd}", ES: "Ejecutar {cmd}"}, baseVars(ws)), Words: vals}}
 	}
 	if direct {
-		return c.evalWords(rest, sc)
+		return c.evalWords(rest, e)
 	}
 	for _, w := range rest {
 		if w.Dynamic {
 			return []Finding{unanalysable("shell.script", "watch runs a command line only known on the phone", vals, textScript)}
 		}
 	}
-	return c.classifyScript(strings.Join(values(rest), " "), sc.child())
+	return c.classifyScript(strings.Join(values(rest), " "), e.sc.child())
 }
 
 // evalFlock handles flock [-sxunoeF] [-w SEC] [-E N] FILE|FD [COMMAND… |
 // -c CMD]. A lock file that is not a descriptor is created if missing.
-func (c *Classifier) evalFlock(ws []Word, sc scope) []Finding {
+func (c *Classifier) evalFlock(ws []Word, e *evaluator) []Finding {
 	vals := values(ws)
 	bad := func(why string) []Finding { return []Finding{unanalysable("wrapper", why, vals, textUnknown)} }
 	rest := ws[1:]
@@ -201,17 +177,17 @@ func (c *Classifier) evalFlock(ws []Word, sc scope) []Finding {
 		if len(rest) != 2 {
 			return bad("flock -c takes one command line")
 		}
-		return append(out, c.evalShell([]Word{{Value: "sh"}, {Value: "-c"}, rest[1]}, sc)...)
+		return append(out, c.evalShell([]Word{{Value: "sh"}, {Value: "-c"}, rest[1]}, e)...)
 	case !rest[0].Dynamic && strings.HasPrefix(rest[0].Value, "-"):
 		return bad("unknown flock option " + rest[0].Value)
 	}
-	return append(out, c.evalWords(rest, sc)...)
+	return append(out, c.evalWords(rest, e)...)
 }
 
 // evalScriptCmd handles util-linux script [-aefq] -c CMD [FILE]: it runs
 // CMD with $SHELL -c and writes the session to FILE (./typescript by
 // default). Without -c it opens a shell.
-func (c *Classifier) evalScriptCmd(ws []Word, sc scope) []Finding {
+func (c *Classifier) evalScriptCmd(ws []Word, e *evaluator) []Finding {
 	vals := values(ws)
 	bad := func(why string) []Finding { return []Finding{unanalysable("wrapper", why, vals, textUnknown)} }
 	var cmd *Word
@@ -248,7 +224,7 @@ func (c *Classifier) evalScriptCmd(ws []Word, sc scope) []Finding {
 	if file != "/dev/null" {
 		out = append(out, redFinding("shell.redirect", "script writes the session to "+file, []string{"script", file}, textRedirect))
 	}
-	return append(out, c.evalShell([]Word{{Value: "sh"}, {Value: "-c"}, *cmd}, sc)...)
+	return append(out, c.evalShell([]Word{{Value: "sh"}, {Value: "-c"}, *cmd}, e)...)
 }
 
 // backgroundFinding is for anything that keeps running on the phone after
@@ -279,7 +255,7 @@ var findRuns = map[string]bool{"-exec": true, "-execdir": true, "-ok": true, "-o
 // ones it runs with -exec, -execdir, -ok or -okdir, where {} is a file name
 // only known on the phone. A word of find's own only known on the phone may
 // split into one of those actions: that cannot be analysed.
-func (c *Classifier) evalFind(ws []Word, sc scope) []Finding {
+func (c *Classifier) evalFind(ws []Word, e *evaluator) []Finding {
 	vals := values(ws)
 	var runs [][]Word
 	ownDynamic := false
@@ -316,7 +292,7 @@ func (c *Classifier) evalFind(ws []Word, sc scope) []Finding {
 			out = append(out, unanalysable("wrapper", "find runs a command it does not name", vals, textUnknown))
 			continue
 		}
-		out = append(out, c.evalWords(cmd, sc)...)
+		out = append(out, c.evalWords(cmd, e)...)
 	}
 	return out
 }
@@ -401,8 +377,8 @@ func unwrapWords(ws []Word) (inner []Word, start int, handled bool, reason strin
 				return nil, 0, true, "unknown env option " + v
 			case strings.Contains(v, "="):
 				name := v[:strings.Index(v, "=")]
-				if dangerousVar(name) {
-					return nil, 0, true, "sets " + name
+				if !commandEnv[name] {
+					return nil, 0, true, "sets " + name + " in the environment of a command"
 				}
 				rest = rest[1:]
 			default:
@@ -576,25 +552,29 @@ func flagsIn(v, letters string) bool {
 }
 
 // evalShell handles `sh [-opts] -c 'script' [args…]`; any other use runs a
-// file or reads the script from stdin, which cannot be analysed.
-func (c *Classifier) evalShell(ws []Word, sc scope) []Finding {
+// file or reads the script from stdin, which cannot be analysed. The shell
+// reads every option word before the script, and only the options listed
+// here take no argument: -o takes the next word (sh -co nohup x runs x).
+func (c *Classifier) evalShell(ws []Word, e *evaluator) []Finding {
 	vals := values(ws)
 	rest := ws[1:]
+	script := false
 	for len(rest) > 0 && (strings.HasPrefix(rest[0].Value, "-") || strings.HasPrefix(rest[0].Value, "+")) && !rest[0].Dynamic {
 		opts := rest[0].Value[1:]
 		rest = rest[1:]
 		if strings.ContainsAny(opts, "is") || opts == "" || opts == "-" {
 			return []Finding{unanalysable("shell.script", "shell reading commands from stdin", vals, textScript)}
 		}
-		if strings.Contains(opts, "c") {
-			if len(rest) == 0 || rest[0].Dynamic {
-				return []Finding{unanalysable("shell.script", "sh -c with a script only known on the phone", vals, textScript)}
-			}
-			return c.classifyScript(rest[0].Value, sc.child())
-		}
-		if strings.Trim(opts, "eufxvnaC") != "" {
+		if strings.Trim(opts, "ceufxvnaC") != "" {
 			return []Finding{unanalysable("shell.script", "unknown shell option", vals, textScript)}
 		}
+		script = script || strings.Contains(opts, "c")
+	}
+	if script {
+		if len(rest) == 0 || rest[0].Dynamic {
+			return []Finding{unanalysable("shell.script", "sh -c with a script only known on the phone", vals, textScript)}
+		}
+		return c.classifyScript(rest[0].Value, e.sc.child())
 	}
 	if len(rest) == 0 {
 		return []Finding{unanalysable("shell.script", "shell reading commands from stdin", vals, textScript)}
@@ -602,11 +582,12 @@ func (c *Classifier) evalShell(ws []Word, sc scope) []Finding {
 	return []Finding{unanalysable("shell.script", "runs a script file", vals, textScript)}
 }
 
-// evalSu handles `su [user] -c 'script'` and `su [user] command…`.
-func (c *Classifier) evalSu(ws []Word, sc scope) []Finding {
+// evalSu handles `su [user] -c 'script'` and `su [user] command…`. The
+// first word that is not an option is always the user.
+func (c *Classifier) evalSu(ws []Word, e *evaluator) []Finding {
 	vals := values(ws)
 	rest := ws[1:]
-	if len(rest) > 0 && !rest[0].Dynamic && isSuUser(rest[0].Value) {
+	if len(rest) > 0 && !rest[0].Dynamic && !strings.HasPrefix(rest[0].Value, "-") {
 		rest = rest[1:]
 	}
 	switch {
@@ -616,21 +597,9 @@ func (c *Classifier) evalSu(ws []Word, sc scope) []Finding {
 		if len(rest) < 2 || rest[1].Dynamic {
 			return []Finding{unanalysable("shell.script", "su -c with a script only known on the phone", vals, textScript)}
 		}
-		return c.classifyScript(rest[1].Value, sc.child())
+		return c.classifyScript(rest[1].Value, e.sc.child())
 	case strings.HasPrefix(rest[0].Value, "-"):
 		return []Finding{unanalysable("shell.script", "unknown su option", vals, textScript)}
 	}
-	return c.evalWords(rest, sc)
-}
-
-func isSuUser(s string) bool {
-	if s == "root" || s == "shell" || s == "system" {
-		return true
-	}
-	for _, r := range s {
-		if (r < '0' || r > '9') && r != ',' {
-			return false
-		}
-	}
-	return s != ""
+	return c.evalWords(rest, e)
 }

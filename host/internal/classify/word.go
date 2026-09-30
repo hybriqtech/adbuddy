@@ -1,10 +1,95 @@
 package classify
 
 import (
+	"regexp"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
 )
+
+// word checks the parts of a word against the forms the evaluator admits
+// and returns its value (see wordOf). Inside it, $(…) is classified as a
+// script of its own and $((…)) must only see numbers.
+func (e *evaluator) word(w *syntax.Word) Word {
+	e.parts(w.Parts, false)
+	return wordOf(w)
+}
+
+func (e *evaluator) parts(parts []syntax.WordPart, quoted bool) {
+	for _, part := range parts {
+		switch p := part.(type) {
+		case *syntax.Lit:
+		case *syntax.SglQuoted:
+			// Text; $'…' is text with escapes, only known on the phone. Inside
+			// double quotes or a here-document the parser only reads quotes
+			// in the word of ${x:-…}, and there mksh takes them as text and
+			// expands what they hold: echo "${x:-'$(reboot)'}" runs reboot.
+			if quoted {
+				e.unsupported("quotes inside an expansion in double quotes", p)
+			}
+		case *syntax.DblQuoted:
+			if quoted {
+				e.unsupported("quotes inside an expansion in double quotes", p)
+				continue
+			}
+			e.parts(p.Parts, true)
+		case *syntax.ParamExp:
+			e.param(p, quoted)
+		case *syntax.CmdSubst:
+			if p.TempFile || p.ReplyVar {
+				e.unsupported("mksh ${ …;} substitution", p)
+				continue
+			}
+			e.stmts(p.Stmts)
+		case *syntax.ArithmExp:
+			if !arithOK(p, e.numeric) {
+				e.out = append(e.out, arithFinding(nodeText(p)))
+			}
+		default:
+			// <(…), extended globs and whatever the parser learns next.
+			e.unsupported("shell expansion", part)
+		}
+	}
+}
+
+// paramOps are the ${x…} operators that only cut or replace the value of x
+// as text.
+var paramOps = map[syntax.ParExpOperator]bool{
+	syntax.RemSmallPrefix: true, syntax.RemLargePrefix: true,
+	syntax.RemSmallSuffix: true, syntax.RemLargeSuffix: true,
+	syntax.DefaultUnset: true, syntax.DefaultUnsetOrNull: true,
+}
+
+// param admits $x, ${x}, $?, $#, ${#x} and ${x#p}, ${x##p}, ${x%p}, ${x%%p},
+// ${x-p}, ${x:-p}. Reading a variable as a word does not evaluate its value
+// again; the forms that assign (${x:=p}), evaluate arithmetic (${x:a:b},
+// ${a[i]}) or name another variable (${!x}) are not admitted. quoted says
+// the expansion is in double quotes or in a here-document (see parts).
+func (e *evaluator) param(p *syntax.ParamExp, quoted bool) {
+	if p.Param == nil || p.Excl || p.Width || p.Flags != nil || p.NestedParam != nil || p.Index != nil ||
+		len(p.Modifiers) > 0 || p.Slice != nil || p.Repl != nil || p.Names != 0 {
+		e.unsupported("parameter expansion", p)
+		return
+	}
+	name := p.Param.Value
+	if !nameRE.MatchString(name) && !(name == "?" || name == "#") {
+		// $1, $@, $*, $$, $!, $-…
+		e.unsupported("parameter $"+name, p)
+		return
+	}
+	if p.Exp == nil {
+		return
+	}
+	if !paramOps[p.Exp.Op] {
+		e.unsupported("parameter expansion ${"+name+p.Exp.Op.String()+"…}", p)
+		return
+	}
+	if p.Exp.Word != nil {
+		e.parts(p.Exp.Word.Parts, quoted)
+	}
+}
+
+var nameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // wordOf computes the literal value of a word. Anything whose value is only
 // known when the phone's shell runs it — expansions, substitutions, globs,

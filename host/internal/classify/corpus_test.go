@@ -174,3 +174,57 @@ func safeClassify(t *testing.T, c *Classifier, argv []string) (r Result, ok bool
 	}()
 	return c.Classify(argv), true
 }
+
+// mkshNames reads testdata/mksh-builtins.tsv: name, tab, kind.
+func mkshNames(t *testing.T) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "mksh-builtins.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if strings.HasPrefix(line, "#") || line == "" {
+			continue
+		}
+		name, kind, ok := strings.Cut(strings.TrimRight(line, "\r"), "\t")
+		if !ok {
+			t.Fatalf("mksh-builtins.tsv: bad line %q", line)
+		}
+		out[name] = kind
+	}
+	return out
+}
+
+// Spec M2.5 §4.7: every builtin and predefined alias of the real mksh is
+// admitted with a grammar or never analysed; nothing in between. Reserved
+// words are the parser's: a construct the evaluator admits or not.
+func TestEveryMkshBuiltinIsAdmittedOrSpecial(t *testing.T) {
+	c := mustNew(t, "")
+	names := mkshNames(t)
+	if len(names) < 40 {
+		t.Fatalf("mksh-builtins.tsv has %d names, want at least 40", len(names))
+	}
+	for name, kind := range names {
+		if kind == "reserved" {
+			continue
+		}
+		_, admitted := admittedBuiltins[name]
+		switch {
+		case admitted, scriptBuiltins[name]:
+		case otherBuiltins[name]:
+			for _, line := range []string{name, name + " x", "command " + name + " x", "builtin " + name + " x"} {
+				if r := c.Classify(sh(line)); r.Level != Red || !r.Special {
+					t.Errorf("%q: %v special=%v, want red special (%s is a %s of mksh)", line, r.Level, r.Special, name, kind)
+				}
+			}
+		default:
+			t.Errorf("%s is a %s of mksh: admit it in admittedBuiltins with a grammar or list it in otherBuiltins", name, kind)
+		}
+	}
+	for name := range otherBuiltins {
+		if _, ok := names[name]; !ok {
+			t.Errorf("otherBuiltins lists %s, which the recorded mksh does not have", name)
+		}
+	}
+}

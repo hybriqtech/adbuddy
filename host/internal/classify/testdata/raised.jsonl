@@ -1,0 +1,26 @@
+{"sh": "((i=1+2))", "why": "(( )) is not admitted"}
+{"sh": "((i=i+1))", "why": "(( )) is not admitted"}
+{"sh": "X=1 ls", "why": "the environment of a command only takes LANG, LC_* and TZ"}
+{"sh": "X=1; echo $X", "why": "only lower-case names are the script's own: every variable mksh or a program treats specially is upper-case"}
+{"sh": "echo $((RANDOM % 10))", "why": "an arithmetic operand must be a variable the script proves numeric; the shell's own numeric variables are not listed"}
+{"sh": "echo $((i++))", "why": "arithmetic that assigns is not admitted"}
+{"sh": "echo ${PATH/x/y}", "why": "${x/a/b} is not admitted"}
+{"sh": "echo ${s:1:2}", "why": "${x:a:b} evaluates arithmetic"}
+{"sh": "export FOO=1", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "export FOO=1; getprop", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "export LANG=C; ls", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "export PATH; ls", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "i=0; [[ $i -lt 3 ]] && echo ok", "why": "[[ ]] is not admitted: use [ ]"}
+{"sh": "n=2; echo ${s:n:1}", "why": "${x:a:b} evaluates arithmetic"}
+{"sh": "readonly PATH; ls", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "set +o braceexpand", "why": "set only takes the options it lists: no positional parameters, nothing that changes how words expand"}
+{"sh": "set -- -B", "why": "set only takes the options it lists: no positional parameters, nothing that changes how words expand"}
+{"sh": "set -- PS4", "why": "set only takes the options it lists: no positional parameters, nothing that changes how words expand"}
+{"sh": "typeset -R2 s=ab; echo $s", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "typeset -R4 FOO; echo $FOO", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "typeset -i n=0; n=n+1", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "typeset -i x=16#ab; echo $((x))", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "typeset -r PATH; ls", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "typeset -x PATH; ls", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "typeset -x x=16#ab; echo $((x))", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}
+{"sh": "typeset i=1; ls", "why": "typeset, export, readonly and local are not admitted: their attributes change how a value is read (M2 task 3)"}

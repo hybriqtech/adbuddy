@@ -335,85 +335,13 @@ func loadOracle(t *testing.T) (oracleHeader, map[string]bool) {
 	return head, ran
 }
 
-// knownM2Gaps are the cases in which mksh runs the sentinel and the M2
-// classifier is not 🔴 special: the oracle found them. The allowlist
-// evaluator of task 4 closes them and deletes this list.
-var knownM2Gaps = map[string]bool{}
-
-func init() {
-	for _, sh := range []string{
-		"[ \"${u:-'$(@S@)'}\" = x ]",
-		"[ \"${u:-'`@S@`'}\" = x ]",
-		"[ \"${u:-'a[$(@S@)]'}\" = x ]",
-		"builtin command -- @S@",
-		"cat <<-EOF\n\t${u:-'$(@S@)'}\nEOF",
-		"cat <<-EOF\n\t${u:-'`@S@`'}\nEOF",
-		"cat <<-EOF\n\t${u:-'a[$(@S@)]'}\nEOF",
-		"cat <<<\"${u:-'$(@S@)'}\"",
-		"cat <<<\"${u:-'`@S@`'}\"",
-		"cat <<<\"${u:-'a[$(@S@)]'}\"",
-		"cat <<EOF\n${u:-'$(@S@)'}\nEOF",
-		"cat <<EOF\n${u:-'`@S@`'}\nEOF",
-		"cat <<EOF\n${u:-'a[$(@S@)]'}\nEOF",
-		"command -- @S@",
-		"command -p -- @S@",
-		"echo \"${u-'$(@S@)'}\"",
-		"echo \"${u-'`@S@`'}\"",
-		"echo \"${u-'a[$(@S@)]'}\"",
-		"echo \"${u:-${t:-'$(@S@)'}}\"",
-		"echo \"${u:-${t:-'`@S@`'}}\"",
-		"echo \"${u:-${t:-'a[$(@S@)]'}}\"",
-		"echo \"${u:-'$(@S@)'}\"",
-		"echo \"${u:-'`@S@`'}\"",
-		"echo \"${u:-'a[$(@S@)]'}\"",
-		"echo \"${u:-x'$(@S@)'y}\"",
-		"echo \"${u:-x'`@S@`'y}\"",
-		"echo \"${u:-x'a[$(@S@)]'y}\"",
-		"echo \"x${u:-'$(@S@)'}y\"",
-		"echo \"x${u:-'`@S@`'}y\"",
-		"echo \"x${u:-'a[$(@S@)]'}y\"",
-		"echo $(echo \"${u:-'$(@S@)'}\")",
-		"echo $(echo \"${u:-'`@S@`'}\")",
-		"echo $(echo \"${u:-'a[$(@S@)]'}\")",
-		"echo 'a[$(@S@)]' | while read -r v; do [ -v \"$v\" ]\ndone",
-		"echo 'a[$(@S@)]' | while read -r v; do [[ -v $v ]]\ndone",
-		"echo `echo \"${u:-'$(@S@)'}\"`",
-		"echo `echo \"${u:-'a[$(@S@)]'}\"`",
-		"for v in 'a[$(@S@)]'; do [ -v \"$v\" ]\ndone",
-		"for v in 'a[$(@S@)]'; do [[ -v $v ]]\ndone",
-		"for w in \"${u:-'$(@S@)'}\"; do echo \"$w\"; done",
-		"for w in \"${u:-'`@S@`'}\"; do echo \"$w\"; done",
-		"for w in \"${u:-'a[$(@S@)]'}\"; do echo \"$w\"; done",
-		"nice -n 1 -- @S@",
-		"nice -n 1 -n 2 @S@",
-		"sh -c -- @S@",
-		"sh -c -e @S@",
-		"sh -c -o xtrace @S@",
-		"sh -co nohup @S@",
-		"sh -co xtrace @S@",
-		"su 0 sh -co nohup @S@",
-		"time -- @S@",
-		"v=$(echo 'a[$(@S@)]'); [ -v \"$v\" ]",
-		"v=$(echo 'a[$(@S@)]'); [[ -v $v ]]",
-		"v='a[$(@S@)]'; [ -v \"$v\" ]",
-		"v='a[$(@S@)]'; [[ -v $v ]]",
-		"w=\"${u:-'$(@S@)'}\"; echo \"$w\"",
-		"w=\"${u:-'`@S@`'}\"; echo \"$w\"",
-		"w=\"${u:-'a[$(@S@)]'}\"; echo \"$w\"",
-		"w='a[$(@S@)]'; v=$w; [ -v \"$v\" ]",
-		"w='a[$(@S@)]'; v=$w; [[ -v $v ]]",
-	} {
-		knownM2Gaps[sh] = true
-	}
-}
-
 // Spec M2.5 §2.1, criteria 3 and 4: every case is recorded against a real
 // mksh, and whatever ran the sentinel there is 🔴 special here.
 func TestWhatMkshRunsIsSpecial(t *testing.T) {
 	c := mustNew(t, "")
 	_, ran := loadOracle(t)
 	cases := differentialCases(t)
-	missing, gaps := 0, 0
+	missing := 0
 	for _, k := range cases {
 		did, recorded := ran[k.Sh]
 		if !recorded {
@@ -426,15 +354,8 @@ func TestWhatMkshRunsIsSpecial(t *testing.T) {
 			continue
 		}
 		if r := c.Classify(sh(withSentinel(k.Sh))); r.Level != Red || !r.Special {
-			if knownM2Gaps[k.Sh] {
-				gaps++
-				continue
-			}
 			t.Errorf("mksh runs the sentinel in %q and the classifier says %v special=%v (%s)", k.Sh, r.Level, r.Special, r.Primary.Rule)
 		}
-	}
-	if gaps != len(knownM2Gaps) {
-		t.Errorf("%d of the %d known gaps of M2 are open: delete the closed ones from knownM2Gaps", gaps, len(knownM2Gaps))
 	}
 	if missing > 10 {
 		t.Errorf("…and %d more cases are not in oracle.jsonl", missing-10)
@@ -461,6 +382,25 @@ func TestEveryPayloadFiresSomewhere(t *testing.T) {
 			prefix := fmt.Sprintf(carrier[:strings.LastIndex(carrier, "%s")], p)
 			if !fires(func(sh string) bool { return strings.HasPrefix(sh, prefix) }) {
 				t.Errorf("payload %s never runs the sentinel through %q", name, carrier)
+			}
+		}
+	}
+}
+
+// The numbers that make the differential corpus worth trusting: most
+// admitted uses are 🟢 here, and none of them runs the sentinel there.
+func TestAdmittedSinksStayBelowRed(t *testing.T) {
+	c := mustNew(t, "")
+	_, ran := loadOracle(t)
+	for _, sink := range admittedSinks {
+		for _, carrier := range carriers {
+			sh := fmt.Sprintf(carrier, payloads["index"], sink)
+			r := c.Classify([]string{"shell", withSentinel(sh)})
+			if r.Special {
+				t.Errorf("%q: %v special (%s: %s), want an admitted form", sh, r.Level, r.Primary.Rule, r.Primary.Reason)
+			}
+			if ran[sh] {
+				t.Errorf("mksh runs the sentinel in %q, which the evaluator admits", sh)
 			}
 		}
 	}

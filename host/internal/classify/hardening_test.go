@@ -364,6 +364,9 @@ func TestBracesWithQuotedParts(t *testing.T) {
 		"set +o posix",
 		"set +o sh",
 		"set -e -o braceexpand",
+		// M2.5: set only takes the options it lists.
+		"set +o braceexpand",
+		"set -- -B",
 	} {
 		if r := c.Classify(sh(line)); r.Level != Red {
 			t.Errorf("%q: %v, want red (%s)", line, r.Level, r.Primary.Rule)
@@ -383,8 +386,6 @@ func TestBracesWithQuotedParts(t *testing.T) {
 		{sh("timeout '{'5,reboot} echo"), Green, "", "-", false},
 		{sh("set -e"), Green, "sh.set", "-", false},
 		{sh("set -o pipefail"), Green, "sh.set", "-", false},
-		{sh("set +o braceexpand"), Green, "sh.set", "-", false},
-		{sh("set -- -B"), Green, "sh.set", "-", false},
 	})
 }
 
@@ -435,6 +436,15 @@ func TestEveryWayToAssignAVariable(t *testing.T) {
 		"set -A PATH /tmp; ls",
 		"set +A PATH /tmp; ls",
 		"printf -v PATH /tmp; ls",
+		// M2.5: declarations, arithmetic that assigns and ${x/a/b} are not
+		// admitted with any name.
+		"typeset i=1; ls",
+		"export LANG=C; ls",
+		"typeset -x PATH; ls",
+		"readonly PATH; ls",
+		"echo $((i++))",
+		"((i=i+1))",
+		"echo ${PATH/x/y}",
 	}
 	for _, line := range red {
 		if r := c.Classify(sh(line)); r.Level != Red {
@@ -443,16 +453,10 @@ func TestEveryWayToAssignAVariable(t *testing.T) {
 	}
 	green := []string{
 		"for i in 1 2; do ls; done",
-		"typeset i=1; ls",
-		"export LANG=C; ls",
-		"typeset -x PATH; ls", // does not change PATH's value
-		"readonly PATH; ls",
+		"LANG=C ls",
 		"echo $((1+2))",
-		"echo $((i++))",
-		"((i=i+1))",
 		"echo ${#PATH}",
 		"echo ${x:-y}",
-		"echo ${PATH/x/y}",
 		"[ -e /sdcard/x ]",
 		"x=$(ls)",
 	}

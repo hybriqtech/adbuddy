@@ -53,8 +53,25 @@ func TestArithmeticOnAValueNotProvenNumericIsSpecial(t *testing.T) {
 		`env x='a[$(reboot)]' sh -c 'echo $((x++))'`,
 	} {
 		r := c.Classify(sh(line))
-		if r.Level != Red || !r.Special || !hasRule(r, "shell.script") {
-			t.Errorf("%q: %v special=%v (%s: %s), want red special shell.script", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		if r.Level != Red || !r.Special || !notAnalysed(r) {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special, not analysed", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+	// M2.5: arithmetic that assigns, (( )), [[ ]], typeset, ${x:a:b} and the
+	// shell's own numeric variables are not admitted, even with numbers.
+	for _, line := range []string{
+		"((i=1+2))",
+		"typeset -i n=0; n=n+1",
+		"echo $((i++))",
+		"((i=i+1))",
+		"echo $((RANDOM % 10))",
+		"echo ${s:1:2}",
+		"n=2; echo ${s:n:1}",
+		"i=0; [[ $i -lt 3 ]] && echo ok",
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special || !notAnalysed(r) {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special, not analysed", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
 		}
 	}
 	// Numbers the classifier can prove keep their level.
@@ -63,21 +80,13 @@ func TestArithmeticOnAValueNotProvenNumericIsSpecial(t *testing.T) {
 		level Level
 	}{
 		// The cases of the brief.
-		{"((i=1+2))", Green},
 		{"echo $((1+2))", Green},
-		{"typeset -i n=0; n=n+1", Green},
 		{"for i in 1 2 3; do echo $((i*2)); done", Green},
 		{"i=0; while [ $i -lt 3 ]; do i=$((i+1)); done", Green},
 		{"[ $# -eq 0 ]", Green},
 		// Other everyday arithmetic.
-		{"echo $((i++))", Green},
-		{"((i=i+1))", Green},
 		{"n=5; echo $((n*2))", Green},
-		{"echo $((RANDOM % 10))", Green},
 		{"echo $((16#ff + 0x1f))", Green},
-		{"echo ${s:1:2}", Green},
-		{"n=2; echo ${s:n:1}", Green},
-		{`i=0; [[ $i -lt 3 ]] && echo ok`, Green},
 		{`[ "$?" -ne 0 ] && echo failed`, Green},
 		{`n=$(( $# + 1 )); echo $n`, Green},
 		{"[ -e /sdcard/x ]", Green},
@@ -139,10 +148,10 @@ func TestAssigningAVariableThatPicksTheFileIsSpecial(t *testing.T) {
 		level   Level
 		special bool
 	}{
-		{"export FOO=1; getprop", Green, false},
-		{"typeset -x PATH; ls", Green, false},
+		{"export FOO=1; getprop", Red, true}, // M2.5: export is not admitted
+		{"typeset -x PATH; ls", Red, true},
 		{"echo $PATH", Green, false},
-		{"IFS=x; ls", Red, false}, // splits words, runs no file
+		{"IFS=x; ls", Red, true}, // M2.5: not a name of the script's own
 	} {
 		r := c.Classify(sh(k.line))
 		if r.Level != k.level || r.Special != k.special {
@@ -314,18 +323,19 @@ func TestJustifiedVariableIsNotNumeric(t *testing.T) {
 		"x=16#ab; echo $((x)); typeset -R2 x",
 	} {
 		r := c.Classify(sh(line))
-		if r.Level != Red || !r.Special || !hasRule(r, "shell.script") {
-			t.Errorf("%q: %v special=%v (%s: %s), want red special shell.script", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		if r.Level != Red || !r.Special || !notAnalysed(r) {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special, not analysed", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
 		}
 	}
+	// M2.5: typeset is not admitted with any option.
 	for _, line := range []string{
 		"typeset -i x=16#ab; echo $((x))",
 		"typeset -x x=16#ab; echo $((x))",
 		"typeset -R2 s=ab; echo $s",
 	} {
 		r := c.Classify(sh(line))
-		if r.Level != Green || r.Special {
-			t.Errorf("%q: %v special=%v (%s: %s), want green", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		if r.Level != Red || !r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
 		}
 	}
 }
@@ -359,19 +369,21 @@ func TestArrayNamesAndImplicitVariablesAreSpecial(t *testing.T) {
 			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
 		}
 	}
+	// M2.5: of these, only read into a name of the script's own is admitted.
 	for _, k := range []struct {
-		line  string
-		level Level
+		line    string
+		level   Level
+		special bool
 	}{
-		{"unset x", Red},
-		{"read -r line", Red},
-		{"getopts ab o", Red},
-		{"set -A a 1 2", Red},
-		{"integer i=1", Red},
+		{"unset x", Red, true},
+		{"read -r line", Green, false},
+		{"getopts ab o", Red, true},
+		{"set -A a 1 2", Red, true},
+		{"integer i=1", Red, true},
 	} {
 		r := c.Classify(sh(k.line))
-		if r.Level != k.level || r.Special {
-			t.Errorf("%q: %v special=%v (%s: %s), want %v not special", k.line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.level)
+		if r.Level != k.level || r.Special != k.special {
+			t.Errorf("%q: %v special=%v (%s: %s), want %v special=%v", k.line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.level, k.special)
 		}
 	}
 }
@@ -431,20 +443,14 @@ func TestWrappedDeclarationNamesAreChecked(t *testing.T) {
 		"builtin local 'a[$(reboot)]'",
 		"builtin export PATH=/data/local/tmp; ls",
 		"builtin typeset -n r=PATH",
-	} {
-		r := c.Classify(sh(line))
-		if r.Level != Red || !r.Special {
-			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
-		}
-	}
-	for _, line := range []string{
+		// M2.5: a declaration is not admitted with any name.
 		"builtin typeset x=1",
 		`command export x="$(getprop y)"`,
 		"builtin typeset -x FOO",
 	} {
 		r := c.Classify(sh(line))
-		if r.Special {
-			t.Errorf("%q: %v special=%v (%s: %s), want not special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		if r.Level != Red || !r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
 		}
 	}
 }
@@ -481,19 +487,16 @@ func TestDeclaringAHiddenVariableWithAValueAttributeIsSpecial(t *testing.T) {
 			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
 		}
 	}
-	// Attributes that keep the value do not change.
-	for _, k := range []struct {
-		line  string
-		level Level
-	}{
-		{"typeset -x PATH; ls", Green},
-		{"export PATH; ls", Green},
-		{"typeset -r PATH; ls", Green},
-		{"typeset -R4 FOO; echo $FOO", Green},
+	// M2.5: nor are the attributes that keep the value.
+	for _, line := range []string{
+		"typeset -x PATH; ls",
+		"export PATH; ls",
+		"typeset -r PATH; ls",
+		"typeset -R4 FOO; echo $FOO",
 	} {
-		r := c.Classify(sh(k.line))
-		if r.Level != k.level || r.Special {
-			t.Errorf("%q: %v special=%v (%s: %s), want %v not special", k.line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.level)
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
 		}
 	}
 }

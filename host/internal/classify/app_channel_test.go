@@ -248,10 +248,15 @@ func TestWhatCannotBeAnalysedIsSpecial(t *testing.T) {
 		{"builtin eval 'sleep 5 & input tap 1 1'", "shell.script"},
 		{"builtin -- eval reboot", "shell.script"},
 		// trap and alias run a string as shell code, like eval.
-		{"trap 'reboot' EXIT", "shell.script"},
-		{"trap -- 'input tap 1 1' EXIT", "shell.script"},
-		{"trap \"$X\" EXIT", "shell.script"},
-		{"alias ls='content query --uri content://tech.hybriq.adbuddy.bridge'", "shell.script"},
+		{"trap 'reboot' EXIT", "shell.builtin"},
+		{"trap -- 'input tap 1 1' EXIT", "shell.builtin"},
+		{"trap \"$X\" EXIT", "shell.builtin"},
+		{"alias ls='content query --uri content://tech.hybriq.adbuddy.bridge'", "shell.builtin"},
+		// M2.5: a builtin that is not admitted is never analysed, whatever
+		// its arguments.
+		{"trap - EXIT", "shell.builtin"},
+		{"trap", "shell.builtin"},
+		{"alias", "shell.builtin"},
 		{"trap 'run-as tech.hybriq.adbudd$Y ls' EXIT", ""},
 	} {
 		r := c.Classify(sh(k.line))
@@ -285,9 +290,6 @@ func TestWhatCannotBeAnalysedIsSpecial(t *testing.T) {
 		{"find /sdcard -name '*.jpg'", Green},
 		{`find /sdcard -name '*.jpg' -exec ls {} \;`, Red},
 		{"find /sdcard -type f -name '*.tmp'", Green},
-		{"trap - EXIT", Red},
-		{"trap", Red},
-		{"alias", Red},
 		{"builtin", Green},
 	} {
 		r := c.Classify(sh(k.line))
@@ -352,6 +354,17 @@ func hasRule(r Result, rule string) bool {
 	return false
 }
 
+// notAnalysed reports a finding for shell the evaluator does not admit or
+// cannot read.
+func notAnalysed(r Result) bool {
+	for _, rule := range []string{"shell.script", "shell.unsupported", "shell.builtin", "shell.assign", "shell.parse", "wrapper"} {
+		if hasRule(r, rule) {
+			return true
+		}
+	}
+	return false
+}
+
 // T3 round 4: variables the shell itself runs or expands as code (PS4 before
 // each `set -x` line, prompts, ENV, BASH_ENV, FPATH, EXECSHELL) hide code
 // from the classifier: assigning one, in any form, is special.
@@ -386,23 +399,25 @@ func TestAssigningACodeVariableIsSpecial(t *testing.T) {
 		"(( PS4 = 1 ))",
 	} {
 		r := c.Classify(sh(line))
-		if r.Level != Red || !r.Special || !hasRule(r, "shell.script") {
-			t.Errorf("%q: %v special=%v (%s: %s), want red special shell.script", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		if r.Level != Red || !r.Special || !notAnalysed(r) {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special, not analysed", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
 		}
 	}
-	// Without a code variable, nothing changes.
+	// A variable of the script's own (lower-case) is fine; any other name,
+	// export and set -- are not analysed (M2.5).
 	for _, k := range []struct {
 		line    string
 		level   Level
 		special bool
 	}{
 		{"set -x; ls", Green, false},
-		{"X=1; echo $X", Green, false},
-		{"export FOO=1", Green, false},
+		{"x=1; echo $x", Green, false},
+		{"X=1; echo $X", Red, true},
+		{"export FOO=1", Red, true},
 		{"for p in a b; do echo $p; done", Green, false},
-		{"IFS=x; ls", Red, false}, // PATH is special since round 5
-		{"read line", Red, false},
-		{"set -- PS4", Green, false},
+		{"IFS=x; ls", Red, true},
+		{"read line", Green, false},
+		{"set -- PS4", Red, true},
 	} {
 		r := c.Classify(sh(k.line))
 		if r.Level != k.level || r.Special != k.special {
