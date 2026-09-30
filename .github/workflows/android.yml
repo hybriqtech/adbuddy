@@ -27,8 +27,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.8.0"
-      # compileSdk = 37 (android/app/build.gradle.kts): make sure the platform is there.
+      # compileSdk = 37 (android/app/build.gradle.kts); its SDK package is "platforms;android-37.0".
       - name: Install Android SDK platform 37
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37"
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0"
       - name: Unit tests, debug build and lint
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
