@@ -93,3 +93,31 @@ func TestLangAndWorkspace(t *testing.T) {
 		t.Fatal(Default().WorkspaceDir("home"))
 	}
 }
+
+// address is the last IP:port the phone answered on; empty or IP:port.
+func TestAddress(t *testing.T) {
+	for _, ok := range []string{"", "100.64.0.5:41234", "192.0.2.10:5555", "[fd7a:115c:a1e0::1]:41234"} {
+		c := Default()
+		c.Address = ok
+		if err := c.Validate(); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"100.64.0.5", "phone.local:41234", "100.64.0.5:0", "100.64.0.5:65536", "100.64.0.5:x", " 100.64.0.5:41234"} {
+		c := Default()
+		c.Address = bad
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "address") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	p := filepath.Join(t.TempDir(), "config.toml")
+	c := Default()
+	c.Address = "100.64.0.5:41234"
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(p)
+	if got, err := Load(p); err != nil || got.Address != c.Address || !strings.Contains(string(data), `address = "100.64.0.5:41234"`) {
+		t.Fatalf("%+v %v\n%s", got, err, data)
+	}
+}

@@ -457,3 +457,115 @@ func TestGuidOf(t *testing.T) {
 		}
 	}
 }
+
+// VerifyIdentity compares the phone's ro.serialno with the middle of the
+// guid adb built from it (adb-<serialno>-<suffix>), without case.
+func TestVerifyIdentity(t *testing.T) {
+	phone := func(serialno string) *fakeADB {
+		return &fakeADB{answers: map[string][]string{"shell getprop ro.serialno": {serialno + "\n"}}}
+	}
+	if err := VerifyIdentity(context.Background(), phone("AAA111"), "adb-AAA111-bbbCCC"); err != nil {
+		t.Fatalf("same phone: %v", err)
+	}
+	if err := VerifyIdentity(context.Background(), phone("aaa111"), "adb-AAA111-bbbCCC"); err != nil {
+		t.Fatalf("same phone, other case: %v", err)
+	}
+	for _, other := range []string{"ZZZ999", "AAA1110", ""} {
+		if err := VerifyIdentity(context.Background(), phone(other), "adb-AAA111-bbbCCC"); !errors.Is(err, ErrWrongPhone) {
+			t.Fatalf("serialno %q: %v", other, err)
+		}
+	}
+	// A guid that does not look like adb-<serialno>-<suffix> cannot be
+	// checked: nil, and adb is not even asked.
+	for _, guid := range []string{"", "AAA111", "adb-AAA111", "adb--bbb", "adb-AAA111-", "mdns-AAA111-bbb"} {
+		f := phone("ZZZ999")
+		if err := VerifyIdentity(context.Background(), f, guid); err != nil {
+			t.Fatalf("guid %q: %v", guid, err)
+		}
+		if _, ok := GuidSerialNo(guid); ok {
+			t.Fatalf("guid %q has a serial number", guid)
+		}
+		if len(f.calls) != 0 {
+			t.Fatalf("guid %q: adb called %q", guid, f.calls)
+		}
+	}
+	if s, ok := GuidSerialNo("adb-AAA111-bbbCCC"); !ok || s != "AAA111" {
+		t.Fatalf("GuidSerialNo: %q %v", s, ok)
+	}
+	// getprop failing is an error, never a match nor ErrWrongPhone.
+	f := &fakeADB{fail: map[string]string{"shell getprop ro.serialno": "error: device offline"}}
+	if err := VerifyIdentity(context.Background(), f, "adb-AAA111-bbbCCC"); err == nil || errors.Is(err, ErrWrongPhone) || !strings.Contains(err.Error(), "device offline") {
+		t.Fatalf("getprop failing: %v", err)
+	}
+}
+
+// ConnectAddr runs `adb connect` and waits for the address to be online.
+func TestConnectAddr(t *testing.T) {
+	old := connectAddrPoll
+	connectAddrPoll = time.Millisecond
+	t.Cleanup(func() { connectAddrPoll = old })
+	const addr = "100.64.0.5:41234"
+
+	t.Run("connected", func(t *testing.T) {
+		f := &fakeADB{answers: map[string][]string{
+			"connect " + addr: {"connected to " + addr + "\n"},
+			"devices":         {"List of devices attached\n", "List of devices attached\n" + addr + "\toffline\n", "List of devices attached\n" + addr + "\tdevice\n"},
+		}}
+		serial, err := ConnectAddr(context.Background(), f, addr, 5*time.Second)
+		if err != nil || serial != addr {
+			t.Fatalf("%q %v", serial, err)
+		}
+		if f.calls[0] != "connect "+addr {
+			t.Fatalf("calls %q", f.calls)
+		}
+	})
+	t.Run("already connected", func(t *testing.T) {
+		f := &fakeADB{answers: map[string][]string{
+			"connect " + addr: {"already connected to " + addr + "\n"},
+			"devices":         {"List of devices attached\n" + addr + "\tdevice\n"},
+		}}
+		if serial, err := ConnectAddr(context.Background(), f, addr, 5*time.Second); err != nil || serial != addr {
+			t.Fatalf("%q %v", serial, err)
+		}
+	})
+	t.Run("connect fails", func(t *testing.T) {
+		for _, out := range []string{
+			"failed to connect to '" + addr + "': Connection refused\n",
+			"cannot connect to " + addr + ": No route to host\n",
+			"",
+		} {
+			f := &fakeADB{answers: map[string][]string{
+				"connect " + addr: {out},
+				"devices":         {"List of devices attached\n" + addr + "\tdevice\n"},
+			}}
+			if _, err := ConnectAddr(context.Background(), f, addr, 5*time.Second); err == nil || errors.Is(err, ErrTimeout) {
+				t.Fatalf("%q: %v", out, err)
+			}
+		}
+		f := &fakeADB{fail: map[string]string{"connect " + addr: "error: protocol fault"}}
+		if _, err := ConnectAddr(context.Background(), f, addr, 5*time.Second); err == nil || !strings.Contains(err.Error(), "protocol fault") {
+			t.Fatalf("exit 1: %v", err)
+		}
+	})
+	t.Run("never online", func(t *testing.T) {
+		f := &fakeADB{answers: map[string][]string{
+			"connect " + addr: {"connected to " + addr + "\n"},
+			"devices":         {"List of devices attached\n" + addr + "\tunauthorized\n"},
+		}}
+		_, err := ConnectAddr(context.Background(), f, addr, 50*time.Millisecond)
+		if !errors.Is(err, ErrTimeout) || !strings.Contains(err.Error(), "unauthorized") {
+			t.Fatalf("%v", err)
+		}
+	})
+	t.Run("invalid address", func(t *testing.T) {
+		for _, bad := range []string{"", "100.64.0.5", "phone.local:41234", "100.64.0.5:0", "100.64.0.5:65536", "100.64.0.5:x", "100.64.0.5:41234\n"} {
+			f := &fakeADB{}
+			if _, err := ConnectAddr(context.Background(), f, bad, time.Second); !errors.Is(err, ErrInvalidAddr) {
+				t.Fatalf("%q: %v", bad, err)
+			}
+			if len(f.calls) != 0 {
+				t.Fatalf("%q: adb called %q", bad, f.calls)
+			}
+		}
+	})
+}

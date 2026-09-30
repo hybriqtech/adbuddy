@@ -451,3 +451,109 @@ func connectService(ctx context.Context, a ADB, guid string) string {
 	}
 	return ""
 }
+
+// ErrWrongPhone means the phone at an address is not the paired one.
+var ErrWrongPhone = errors.New("this is not the paired phone")
+
+// guidSerialRe is the guid adb gives a phone: adb-<serialno>-<suffix>.
+var guidSerialRe = regexp.MustCompile(`^adb-([A-Za-z0-9][A-Za-z0-9._-]{0,127})-([A-Za-z0-9]{1,32})$`)
+
+// GuidSerialNo returns the serial number (ro.serialno) in the middle of the
+// phone's guid, adb-<serialno>-<suffix>; false if guid has another form.
+func GuidSerialNo(guid string) (string, bool) {
+	m := guidSerialRe.FindStringSubmatch(guid)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// VerifyIdentity checks that the phone a talks to (an ADB already aimed at
+// the active serial) is the one with this guid: its ro.serialno must be the
+// guid's serial number (without case). An address may reach another phone
+// (another IP, a port reused), and a guid is the only name of the paired
+// one. A guid without the form adb-<serialno>-<suffix> cannot be checked:
+// the answer is nil (see GuidSerialNo) and the caller warns.
+func VerifyIdentity(ctx context.Context, a ADB, guid string) error {
+	want, ok := GuidSerialNo(guid)
+	if !ok {
+		return nil
+	}
+	out, err := run(ctx, a, nil, "shell", "getprop", "ro.serialno")
+	if err != nil {
+		return fmt.Errorf("cannot read the phone's serial number: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(out), want) {
+		return ErrWrongPhone
+	}
+	return nil
+}
+
+// ErrInvalidAddr means an address is not IP:port with a port in 1-65535.
+var ErrInvalidAddr = errors.New("not an IP address and port")
+
+// connectAddrPoll is how often ConnectAddr asks `adb devices` (tests shorten it).
+var connectAddrPoll = 500 * time.Millisecond
+
+// ConnectAddr runs `adb connect addr` (a is a host ADB, with no serial) and
+// waits until addr is online in state "device", at most timeout even if adb
+// hangs. It returns the serial adb lists the phone with: addr itself. It is
+// the way in when mDNS does not reach the phone (Tailscale, another network).
+func ConnectAddr(ctx context.Context, a ADB, addr string, timeout time.Duration) (string, error) {
+	if !validAddr(addr) {
+		return "", fmt.Errorf("%q: %w", classify.Printable(addr), ErrInvalidAddr)
+	}
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := run(ctx, a, nil, "connect", addr)
+	if err != nil {
+		if timeoutErr(parent, err) == ErrTimeout {
+			return "", fmt.Errorf("adb connect %s did not answer in %s: %w", addr, timeout, ErrTimeout)
+		}
+		return "", err
+	}
+	if !connectedTo(out, addr) {
+		msg := classify.Printable(strings.TrimSpace(out))
+		if msg == "" {
+			msg = "no answer"
+		}
+		return "", fmt.Errorf("adb connect %s: %s", addr, msg)
+	}
+	state := ""
+	err = poll(ctx, connectAddrPoll, func() (bool, error) {
+		ds, err := devices(ctx, a)
+		if err != nil {
+			return false, err
+		}
+		for _, d := range ds {
+			if d.Serial == addr {
+				state = d.State
+				return d.State == "device", nil
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		err = timeoutErr(parent, err)
+		if err == ErrTimeout && state != "" {
+			return "", fmt.Errorf("the phone at %s stayed %s: %w", addr, classify.Printable(state), ErrTimeout)
+		}
+		return "", err
+	}
+	return addr, nil
+}
+
+// connectedTo reports whether `adb connect addr` said it is connected
+// ("connected to addr" or "already connected to addr"): adb reports a
+// failure ("failed to connect to …") with exit code 0 too.
+func connectedTo(out, addr string) bool {
+	for _, line := range strings.Split(strings.ReplaceAll(out, "\r", ""), "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "already ")
+		if line == "connected to "+addr {
+			return true
+		}
+	}
+	return false
+}

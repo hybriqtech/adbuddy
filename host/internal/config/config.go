@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +23,7 @@ type Config struct {
 	ADBPath        string   `toml:"adb_path"`        // real adb; empty = ADBuddy's own platform-tools (installed by `adbuddy setup`)
 	ADBServerPort  int      `toml:"adb_server_port"` // private adb server port (spec §3.2)
 	Serial         string   `toml:"serial"`          // active device; empty = the only connected one
+	Address        string   `toml:"address"`         // last IP:port the phone answered on (maybe over Tailscale); empty = none
 	Workspace      string   `toml:"workspace"`       // agent environment; empty = ~/ADBuddy/default
 	ConfirmTimeout Duration `toml:"confirm_timeout"` // how long a 🔴 confirmation waits
 	Rules          string   `toml:"rules"`           // user rules.yaml; empty = <config dir>/rules.yaml
@@ -87,6 +91,9 @@ func (c Config) Validate() error {
 	if c.ConfirmTimeout.Duration <= 0 || c.ConfirmTimeout.Duration > time.Hour {
 		return fmt.Errorf("confirm_timeout must be between 1s and 1h, got %s", c.ConfirmTimeout)
 	}
+	if c.Address != "" && !validAddress(c.Address) {
+		return fmt.Errorf("address must be an IP address and port (e.g. 100.64.0.5:41234), got %q", c.Address)
+	}
 	switch c.Language {
 	case "", "en", "es":
 	default:
@@ -149,4 +156,17 @@ func (c Config) Lang(getenv func(string) string) string {
 		}
 	}
 	return "en"
+}
+
+// validAddress accepts only IP:port with a port in 1-65535.
+func validAddress(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if _, err := netip.ParseAddr(host); err != nil {
+		return false
+	}
+	p, err := strconv.ParseUint(port, 10, 16)
+	return err == nil && p >= 1
 }

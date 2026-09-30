@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"sync"
 	"syscall"
@@ -23,7 +22,6 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
-	"github.com/hybriqtech/adbuddy/host/internal/platformtools"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -56,12 +54,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			if err != nil {
 				return err
 			}
-			if adbPath == "" {
-				adbPath = e.cfg.ADBPath
-			}
-			if adbPath == "" && fileExists(platformtools.ADBPath(e.dirs.Data, runtime.GOOS)) {
-				adbPath = platformtools.ADBPath(e.dirs.Data, runtime.GOOS)
-			}
+			adbPath = configuredADB(e, adbPath)
 			if adbPath == "" {
 				return ConfigError("ADB_NOT_CONFIGURED", "ADBuddy's adb is not installed", "Run `adbuddy setup` (or pass --adb <path to adb 37 or newer>).")
 			}
