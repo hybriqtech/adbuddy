@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,10 +14,14 @@ import (
 )
 
 func TestIsShim(t *testing.T) {
-	for name, want := range map[string]bool{
-		"adb": true, "/x/.adbuddy/bin/adb": true, `C:\x\.adbuddy\bin\adb.exe`: true, "ADB.EXE": true,
+	cases := map[string]bool{
+		"adb": true, "/x/.adbuddy/bin/adb": true, "ADB.EXE": true,
 		"adbuddy": false, "adbuddy.exe": false, "adbd": false,
-	} {
+	}
+	if runtime.GOOS == "windows" { // only Windows splits paths on `\`
+		cases[`C:\x\.adbuddy\bin\adb.exe`] = true
+	}
+	for name, want := range cases {
 		if got := IsShim(name); got != want {
 			t.Errorf("IsShim(%q) = %v", name, got)
 		}
