@@ -48,7 +48,7 @@ func NewRoot(app *App) *cobra.Command {
 	root.PersistentFlags().BoolVar(&app.JSON, "json", false, "print machine-readable JSON on stdout")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return UsageError(err.Error()) })
 	setup := newSetupCmd(app)
-	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app), newConnectCmd(app), setup)
+	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app), newConnectCmd(app), newDoctorCmd(app), setup)
 	// `adbuddy` alone starts the setup the first time (spec §3.1), but only
 	// for a person at a terminal: a script, a CI job or an agent would get a
 	// download, a background adb server and a long wait for a QR code.

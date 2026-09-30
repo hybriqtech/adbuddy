@@ -265,3 +265,16 @@ func TestInitForceDoesNotWriteThroughHardLinks(t *testing.T) {
 		t.Fatal("AGENTS.md not rewritten")
 	}
 }
+
+func TestAgentsCoversDoctorAndBoundedCommands(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "x")}); err != nil {
+		t.Fatal(err)
+	}
+	a := read(t, filepath.Join(dir, "AGENTS.md"))
+	for _, want := range []string{"`adbuddy doctor [--json]`", "13. Always bound commands", "`logcat -d`", "14. Never ask the user to type a password"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("AGENTS.md lacks %q", want)
+		}
+	}
+}
