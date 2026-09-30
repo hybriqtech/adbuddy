@@ -214,13 +214,14 @@ class BridgeTest {
     }
 
     @Test fun stopWhileWaitingEndsTheRetries() {
-        val bridge = Bridge(scope, "0.2.0", Timing(first = 300, reconnect = 300, max = 300)) { _, _ -> }
+        // A one-second wait leaves room to stop well before it ends, even on a slow machine.
+        val bridge = Bridge(scope, "0.2.0", Timing(first = 1_000, reconnect = 1_000, max = 1_000)) { _, _ -> }
         bridge.start(link())
         connect(bridge, hosts[0])
         hosts[0].ws!!.close(1000, "restart")
         waitFor("waiting") { bridge.state.value.connection == BridgeState.Connection.WAITING }
         bridge.stop()
-        Thread.sleep(1500)
+        Thread.sleep(2_000) // twice the wait: a retry would have come by now
         assertEquals(1, server.requestCount)
     }
 
@@ -247,6 +248,38 @@ class BridgeTest {
         assertTrue(bridge.pause(false))
         assertEquals(Protocol.RESUME, hosts[0].next().type)
         bridge.stop()
+    }
+
+    @Test fun nothingGoesBeforeTheHelloOrBeforeTheWelcome() {
+        // The host reads the hello first and closes with 1008 on anything else,
+        // so reply and pause must refuse until the host has welcomed the app.
+        // The upgrade answers late, so the socket exists before it opens.
+        val slow = MockWebServer()
+        val h = Host()
+        slow.enqueue(MockResponse.Builder().headersDelay(500, TimeUnit.MILLISECONDS).webSocketUpgrade(h).build())
+        slow.start()
+        val bridge = Bridge(scope, "0.2.0", fast) { _, _ -> }
+        try {
+            bridge.start(BridgePrefs.Link(token, slow.port, "PC"))
+            waitFor("connecting") { bridge.state.value.connection == BridgeState.Connection.CONNECTING }
+            assertFalse("no reply before the socket opens", bridge.reply("j_1", Decision.ALLOW))
+            assertFalse("no pause before the socket opens", bridge.pause(true))
+
+            assertEquals("the hello goes first", Protocol.HELLO, h.next().type)
+            // Hello sent, no welcome yet: still connecting.
+            assertEquals(BridgeState.Connection.CONNECTING, bridge.state.value.connection)
+            assertFalse("no reply before the welcome", bridge.reply("j_1", Decision.ALLOW))
+            assertFalse("no pause before the welcome", bridge.pause(false))
+            assertTrue(bridge.state.value.answering.isEmpty())
+
+            h.welcome()
+            waitFor("connected") { bridge.state.value.connection == BridgeState.Connection.CONNECTED }
+            assertTrue(bridge.pause(true))
+            assertEquals("nothing refused was sent", Protocol.PAUSE, h.next().type)
+        } finally {
+            bridge.stop()
+            slow.close()
+        }
     }
 
     @Test fun withoutAConnectionNothingIsSent() {

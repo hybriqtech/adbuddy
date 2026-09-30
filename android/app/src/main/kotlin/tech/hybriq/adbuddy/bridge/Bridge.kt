@@ -176,22 +176,35 @@ class Bridge internal constructor(
     }
 
     /**
-     * Sends the answer to a 🔴 question. Returns false when the host is not reachable.
+     * The socket to send on, or null until the host has welcomed the app. The
+     * socket exists from CONNECTING on, but the host reads the hello first and
+     * closes with 1008 on anything else, and OkHttp would write a frame queued
+     * before onOpen ahead of the hello. CONNECTED only comes from a welcome of
+     * the current socket, set under this same lock, so the hello is already out.
+     * Call it holding the lock.
+     */
+    private fun welcomedSocket(): WebSocket? =
+        if (_state.value.connection == BridgeState.Connection.CONNECTED) socket else null
+
+    /**
+     * Sends the answer to a 🔴 question. Returns false when the host is not
+     * reachable or has not welcomed the app yet.
      * The question stays in pending, marked as answering, until its final journal entry.
      */
     fun reply(id: String, decision: String): Boolean = synchronized(lock) {
-        val ok = socket?.send(Protocol.encode(Protocol.CONFIRM_REPLY, ConfirmReply(id, decision), now())) ?: false
+        val ok = welcomedSocket()?.send(Protocol.encode(Protocol.CONFIRM_REPLY, ConfirmReply(id, decision), now())) ?: false
         if (ok) _state.update { it.answered(id) }
         ok
     }
 
     /**
-     * Asks the host to pause (true) or resume (false) the agent. true only means
+     * Asks the host to pause (true) or resume (false) the agent. false when the
+     * host is not reachable or has not welcomed the app yet. true only means
      * the request was queued on the socket, not that the host took it: the UI
      * shows what the host says in session.state (paused), never this result.
      */
     fun pause(paused: Boolean): Boolean = synchronized(lock) {
-        socket?.send(Protocol.encodeElement(if (paused) Protocol.PAUSE else Protocol.RESUME, JsonObject(emptyMap()), now())) ?: false
+        welcomedSocket()?.send(Protocol.encodeElement(if (paused) Protocol.PAUSE else Protocol.RESUME, JsonObject(emptyMap()), now())) ?: false
     }
 
     private fun now() = Instant.now().toString()
