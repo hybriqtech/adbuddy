@@ -21,7 +21,6 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
-	"github.com/hybriqtech/adbuddy/host/internal/device"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/platformtools"
@@ -30,8 +29,9 @@ import (
 )
 
 // deviceWait is how long serve waits for the phone: ADBuddy's private adb
-// server needs some seconds to reconnect a paired phone found by mDNS.
-const deviceWait = 45 * time.Second
+// server needs some seconds to reconnect a paired phone found by mDNS (a
+// variable so tests can shorten it).
+var deviceWait = 45 * time.Second
 
 func newServeCmd(app *App) *cobra.Command {
 	var adbPath, serial, wsDir, confirmMode string
@@ -116,15 +116,11 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			}
 			runner.Serial = active
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
-			restarted, err := device.EnsureNoTCPPort(ctx, runner)
-			if err != nil {
-				return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
-			}
-			if restarted {
-				fmt.Fprintln(app.Stderr, "Closed adb's network port on the phone (adb usb); waiting for it to reconnect…")
-				if _, err := runner.WaitSerial(ctx, active, deviceWait); err != nil {
-					return TransientError("DEVICE_NOT_FOUND", "the phone did not come back after `adb usb`", "Run `adbuddy serve` again.")
+			if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy serve"); err != nil {
+				if ctx.Err() != nil {
+					return Interrupted()
 				}
+				return err
 			}
 
 			secret, err := ipc.EnsureSecret(e.dirs.Data)

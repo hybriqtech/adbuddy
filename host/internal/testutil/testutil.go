@@ -38,6 +38,7 @@ type FakeRule struct {
 	Stderr    string `json:"stderr,omitempty"`
 	Exit      int    `json:"exit,omitempty"`
 	EchoStdin bool   `json:"echoStdin,omitempty"`
+	Times     int    `json:"times,omitempty"` // answers only this many calls (0 = all), then the next matching rule answers
 }
 
 // WriteScript writes the fake adb script and returns its path.
@@ -47,6 +48,11 @@ func WriteScript(dir string, rules ...FakeRule) (string, error) {
 		return "", err
 	}
 	p := filepath.Join(dir, "fakeadb.json")
+	// A new script starts its "times" counts again.
+	old, _ := filepath.Glob(p + ".count*")
+	for _, c := range old {
+		os.Remove(c)
+	}
 	return p, os.WriteFile(p, b, 0o600)
 }
 

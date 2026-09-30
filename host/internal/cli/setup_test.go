@@ -133,9 +133,11 @@ func TestSetupSkipsPairingForAKnownPhone(t *testing.T) {
 	}
 }
 
+// After `adb usb`, setup checks the port again before reading the profile.
 func TestSetupClosesAnOpenTCPPort(t *testing.T) {
+	setVar(t, &usbDropWait, 100*time.Millisecond)
 	rules := append([]testutil.FakeRule{
-		{Match: "^shell getprop service\\.adb\\.tcp\\.port$", Stdout: "5555\n"},
+		{Match: tcpPortRule, Stdout: "5555\n", Times: 1},
 		{Match: "^usb$", Stdout: "restarting in USB mode\n"},
 	}, phoneRules()...)
 	e := newSetupEnv(t, rules)
@@ -143,13 +145,28 @@ func TestSetupClosesAnOpenTCPPort(t *testing.T) {
 	if code != 0 || !strings.Contains(errOut, "adb usb") {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
-	calls, _ := testutil.ReadLog(e.log)
-	usb := false
-	for _, c := range calls {
-		usb = usb || c.Joined() == "usb"
+	var steps []string
+	for _, c := range loggedCalls(t, e.log) {
+		if c == "usb" || c == "shell getprop service.adb.tcp.port" || c == "shell getprop ro.product.model" {
+			steps = append(steps, c)
+		}
 	}
-	if !usb {
-		t.Fatal("adb usb not run")
+	if want := "shell getprop service.adb.tcp.port|usb|shell getprop service.adb.tcp.port|shell getprop ro.product.model"; strings.Join(steps, "|") != want {
+		t.Fatalf("steps %q", steps)
+	}
+}
+
+// A port that `adb usb` does not close stops setup: nothing is saved.
+func TestSetupStopsWhenThePortStaysOpen(t *testing.T) {
+	setVar(t, &usbDropWait, 100*time.Millisecond)
+	rules := append([]testutil.FakeRule{{Match: tcpPortRule, Stdout: "5555\n"}}, phoneRules()...)
+	e := newSetupEnv(t, rules)
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitFailure || !strings.Contains(errOut, "DEVICE_PORT_OPEN") || !strings.Contains(errOut, "adbuddy setup") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if exists(filepath.Join(e.cfgDir, "config.toml")) {
+		t.Fatal("config saved with the port open")
 	}
 }
 
@@ -212,38 +229,62 @@ func TestSetupCodeMustBeSixDigits(t *testing.T) {
 }
 
 // Ctrl+C while setup waits for the phone exits with 130, whatever step it
-// was in.
+// was in. Each case cancels once stderr shows that step, so it never depends
+// on how fast the machine is.
 func TestSetupInterruptedWhileWaitingForThePhone(t *testing.T) {
+	setVar(t, &usbDropWait, 100*time.Millisecond)
 	cases := map[string]struct {
-		rules []testutil.FakeRule
-		input string
-		args  []string
-		block bool // stdin never answers
+		rules    []testutil.FakeRule
+		input    string
+		args     []string
+		block    bool   // stdin never answers
+		known    bool   // config.toml has the phone's serial
+		cancelOn string // stderr text of the step to interrupt
 	}{
 		// The QR code is shown and nobody scans it.
-		"qr": {rules: []testutil.FakeRule{{Match: "^start-server$"}, {Match: "^mdns services$", Stdout: "List of discovered mdns services\n"}}},
+		"qr": {rules: []testutil.FakeRule{{Match: "^start-server$"}, {Match: "^mdns services$", Stdout: "List of discovered mdns services\n"}},
+			cancelOn: "Waiting for the phone"},
 		// Paired with the code, and the phone never connects.
 		"connect": {rules: []testutil.FakeRule{
 			{Match: "^start-server$"},
 			{Match: "^devices$", Stdout: "List of devices attached\n"},
 			{Match: "^mdns services$", Stdout: "List of discovered mdns services\n"},
 			{Match: `^pair 192\.0\.2\.10:37000$`, Stdout: "Successfully paired to 192.0.2.10:37000 [guid=adb-AAA-bbb]\n", EchoStdin: true},
-		}, input: "192.0.2.10:37000\n123456\n", args: []string{"--code"}},
+		}, input: "192.0.2.10:37000\n123456\n", args: []string{"--code"}, cancelOn: "Paired. Connecting"},
 		// Nobody types the IP address and port.
-		"prompt": {rules: []testutil.FakeRule{{Match: "^start-server$"}}, args: []string{"--code"}, block: true},
+		"prompt": {rules: []testutil.FakeRule{{Match: "^start-server$"}}, args: []string{"--code"}, block: true,
+			cancelOn: "type the IP address and port"},
+		// The phone paired before does not show up.
+		"known": {rules: []testutil.FakeRule{{Match: "^start-server$"}, {Match: "^devices$", Stdout: phoneGone}},
+			known: true, cancelOn: "Looking for your phone"},
+		// The phone does not come back after `adb usb`.
+		"invariant": {rules: []testutil.FakeRule{
+			{Match: "^start-server$"},
+			{Match: "^devices$", Stdout: phoneOnline, Times: 1},
+			{Match: "^devices$", Stdout: phoneGone},
+			{Match: tcpPortRule, Stdout: "5555\n"},
+		}, known: true, cancelOn: "Closed adb's network port"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			e := newSetupEnv(t, c.rules)
+			if c.known {
+				cfg := config.Default()
+				cfg.Serial = phoneSerial
+				if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
+					t.Fatal(err)
+				}
+			}
 			ctx, cancel := context.WithCancel(context.Background())
-			time.AfterFunc(700*time.Millisecond, cancel)
+			defer cancel()
 			var stdin io.Reader = strings.NewReader(c.input)
 			if c.block {
 				r, w := io.Pipe()
 				t.Cleanup(func() { w.Close() })
 				stdin = r
 			}
-			var out, errb strings.Builder
+			var out, errb syncBuffer
+			cancelWhen(t, &errb, c.cancelOn, cancel)
 			args := append([]string{"setup", "--adb", fakeADB(t), "--workspace", e.ws}, c.args...)
 			done := make(chan int, 1)
 			go func() { done <- mainContext(ctx, args, stdin, &out, &errb) }()
@@ -251,6 +292,9 @@ func TestSetupInterruptedWhileWaitingForThePhone(t *testing.T) {
 			case code := <-done:
 				if code != ExitInterrupt || !strings.Contains(errb.String(), "INTERRUPTED") {
 					t.Fatalf("exit %d, stderr %q", code, errb.String())
+				}
+				if c.known && strings.Contains(errb.String(), "Prepare your phone") {
+					t.Fatalf("went on to pairing after Ctrl+C: %q", errb.String())
 				}
 			case <-time.After(15 * time.Second):
 				t.Fatal("setup did not stop")

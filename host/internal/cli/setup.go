@@ -142,7 +142,11 @@ environment. Run it again at any time; it skips what is already done.`,
 				serial := ""
 				if e.cfg.Serial != "" {
 					say("Looking for your phone…\n")
-					if s, err := runner.WaitSerial(ctx, e.cfg.Serial, knownPhoneWait); err == nil {
+					s, err := runner.WaitSerial(ctx, e.cfg.Serial, knownPhoneWait)
+					if ctx.Err() != nil {
+						return ctx.Err() // Ctrl+C: no guide nor QR code
+					}
+					if err == nil {
 						serial = s
 						say("Found it: already paired.\n")
 					}
@@ -164,15 +168,8 @@ environment. Run it again at any time; it skips what is already done.`,
 				runner.Serial = serial
 
 				// Host invariant: no open adb network port unless remote mode is on.
-				restarted, err := device.EnsureNoTCPPort(ctx, runner)
-				if err != nil {
-					return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
-				}
-				if restarted {
-					say("Closed adb's network port on the phone (adb usb); waiting for it to reconnect…\n")
-					if _, err := runner.WaitSerial(ctx, serial, deviceWait); err != nil {
-						return TransientError("DEVICE_NOT_FOUND", "the phone did not come back after `adb usb`", "Run `adbuddy setup` again.")
-					}
+				if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy setup"); err != nil {
+					return err // Ctrl+C becomes INTERRUPTED below
 				}
 
 				// 5. Profile.

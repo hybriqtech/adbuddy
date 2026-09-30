@@ -2,9 +2,12 @@
 //
 // Every call appends one JSON line {"args","port","cwd","stdin"} to
 // $FAKEADB_LOG. The answer comes from the first rule in $FAKEADB_SCRIPT (a
-// JSON file {"rules":[{"match","stdout","stderr","exit","echoStdin"}]}) whose
-// regular expression matches the arguments joined by spaces, without the
-// leading "-s SERIAL". Without a matching rule it prints nothing and exits 0.
+// JSON file {"rules":[{"match","stdout","stderr","exit","echoStdin","times"}]})
+// whose regular expression matches the arguments joined by spaces, without
+// the leading "-s SERIAL". A rule with "times" > 0 answers only that many
+// calls, then it is skipped (successive answers: list the rules in order).
+// Its count lives in a file next to the script. Without a matching rule it
+// prints nothing and exits 0.
 package main
 
 import (
@@ -13,6 +16,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +26,7 @@ type rule struct {
 	Stderr    string `json:"stderr"`
 	Exit      int    `json:"exit"`
 	EchoStdin bool   `json:"echoStdin"`
+	Times     int    `json:"times"`
 }
 
 func main() {
@@ -44,11 +49,15 @@ func main() {
 			fmt.Fprintln(os.Stderr, "fakeadb:", err)
 			os.Exit(99)
 		}
-		for _, candidate := range script.Rules {
-			if regexp.MustCompile(candidate.Match).MatchString(joined) {
-				r = candidate
-				break
+		for i, candidate := range script.Rules {
+			if !regexp.MustCompile(candidate.Match).MatchString(joined) {
+				continue
 			}
+			if candidate.Times > 0 && !use(path, i, candidate.Times) {
+				continue
+			}
+			r = candidate
+			break
 		}
 	}
 
@@ -71,4 +80,20 @@ func main() {
 	}
 	os.Stderr.WriteString(r.Stderr)
 	os.Exit(r.Exit)
+}
+
+// use counts one more answer of rule i and reports whether it still had
+// answers left (fewer than times used).
+func use(script string, i, times int) bool {
+	counter := script + ".count" + strconv.Itoa(i)
+	b, _ := os.ReadFile(counter)
+	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	if n >= times {
+		return false
+	}
+	if err := os.WriteFile(counter, []byte(strconv.Itoa(n+1)), 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, "fakeadb:", err)
+		os.Exit(99)
+	}
+	return true
 }
