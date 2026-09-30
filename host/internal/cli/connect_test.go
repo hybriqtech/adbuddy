@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
@@ -158,5 +160,28 @@ func TestConnectHelpHasAnExample(t *testing.T) {
 	out, _, _ := run(t, "connect", "--help")
 	if !strings.Contains(out, "adbuddy connect 100.64.0.5:41234") {
 		t.Fatalf("help: %s", out)
+	}
+}
+
+// Final review of M1c, M8: Ctrl+C while `adbuddy connect` waits exits with 130.
+func TestConnectInterrupted(t *testing.T) {
+	e := newSetupEnv(t, []testutil.FakeRule{{Match: "^start-server$"}, {Match: "^connect ", SleepMs: 20000}})
+	saveConfig(t, e, phoneSerial)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var out, errb syncBuffer
+	cancelWhen(t, &errb, "Connecting to "+tsAddr, cancel)
+	done := make(chan int, 1)
+	go func() { done <- mainContext(ctx, []string{"connect", tsAddr}, strings.NewReader(""), &out, &errb) }()
+	select {
+	case code := <-done:
+		if code != ExitInterrupt || !strings.Contains(errb.String(), "INTERRUPTED") {
+			t.Fatalf("exit %d, stderr %q", code, errb.String())
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("connect did not stop")
+	}
+	if cfg := loadSetupConfig(t, e); cfg.Address != "" {
+		t.Fatalf("address saved: %+v", cfg)
 	}
 }

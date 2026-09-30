@@ -64,7 +64,7 @@ type DenyAll struct{ Out io.Writer }
 
 func (d DenyAll) Confirm(_ context.Context, r Request) Decision {
 	if d.Out != nil {
-		fmt.Fprintf(d.Out, "🔴 Denied (no terminal to confirm in): %s\n", classify.Printable(r.Title))
+		fmt.Fprintf(d.Out, "🔴 Denied (nobody to confirm): %s\n", classify.Printable(r.Title))
 	}
 	return Nobody
 }
@@ -178,8 +178,9 @@ func (t *Terminal) Confirm(ctx context.Context, r Request) Decision {
 			fmt.Fprintln(t.out, "→ denied")
 			return Deny
 		case <-t.eof:
-			fmt.Fprintln(t.out, "\n→ denied (no more input)")
-			return Deny
+			// Nobody can answer any more (a pipe that ended): not the user's no.
+			fmt.Fprintln(t.out, "\n→ denied (no more input: nobody to confirm)")
+			return Nobody
 		case <-ctx.Done():
 			return t.expired(ctx)
 		}

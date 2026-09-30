@@ -172,7 +172,7 @@ func TestTimeoutCancelAndEOF(t *testing.T) {
 	if got := term.Confirm(ctx2, req()); got != Deny {
 		t.Fatalf("cancel: %v", got)
 	}
-	if got := testTerminal(strings.NewReader(""), io.Discard, "42").Confirm(context.Background(), req()); got != Deny {
+	if got := testTerminal(strings.NewReader(""), io.Discard, "42").Confirm(context.Background(), req()); got != Nobody {
 		t.Fatalf("eof: %v", got)
 	}
 }
@@ -215,7 +215,7 @@ func TestEverythingShownIsEscaped(t *testing.T) {
 
 func TestDenyAll(t *testing.T) {
 	var out bytes.Buffer
-	if got := (DenyAll{Out: &out}).Confirm(context.Background(), req()); got != Nobody || !strings.Contains(out.String(), "Restart the phone") {
+	if got := (DenyAll{Out: &out}).Confirm(context.Background(), req()); got != Nobody || !strings.Contains(out.String(), "Restart the phone") || !strings.Contains(out.String(), "nobody to confirm") || strings.Contains(out.String(), "no terminal") {
 		t.Fatalf("%v %q", got, out.String())
 	}
 }

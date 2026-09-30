@@ -377,3 +377,42 @@ func TestServeIgnoresAnotherPhoneAtTheSavedAddress(t *testing.T) {
 		}
 	}
 }
+
+// Final review of M1c, M8: with --code, the short mDNS waits are used only
+// when there is an address to go on with (--connect or a terminal to ask);
+// without one, setup waits the full time.
+func TestSetupCodeWaitsLessOnlyWithAnAddress(t *testing.T) {
+	shortWaits(t)
+	setVar(t, &connectWait, 3*time.Second)
+	refused := append([]testutil.FakeRule{
+		{Match: "^connect ", Stdout: "failed to connect to '" + tsAddr + "': Connection refused\n"},
+	}, remoteRules("AAAA1111")...)
+	cases := map[string]struct {
+		args     []string
+		input    string
+		terminal bool
+		full     bool
+	}{
+		"no address": {full: true},
+		"--connect":  {args: []string{"--connect", tsAddr}},
+		"terminal":   {input: tsAddr + "\n", terminal: true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if c.terminal {
+				setVar(t, &isTerminal, func(any) bool { return true })
+			}
+			e := newSetupEnv(t, refused)
+			args := append([]string{"setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws}, c.args...)
+			start := time.Now()
+			_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n"+c.input, args...)
+			d := time.Since(start)
+			if code != ExitTransient {
+				t.Fatalf("exit %d stderr %q", code, errOut)
+			}
+			if c.full && d < 3*time.Second || !c.full && d > 2*time.Second {
+				t.Fatalf("took %s (full wait %v)", d, c.full)
+			}
+		})
+	}
+}
