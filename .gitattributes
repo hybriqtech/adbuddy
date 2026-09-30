@@ -8,3 +8,13 @@ host/go.sum text eol=lf
 host/**/*.yaml text eol=lf
 host/**/*.md text eol=lf
 .github/**/*.yml text eol=lf
+
+# android/: LF (Gradle, Kotlin and Android resources)
+android/**/*.kt text eol=lf
+android/**/*.kts text eol=lf
+android/**/*.xml text eol=lf
+android/**/*.toml text eol=lf
+android/**/*.properties text eol=lf
+android/**/*.pro text eol=lf
+android/**/*.md text eol=lf
+android/.gitignore text eol=lf

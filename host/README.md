@@ -111,7 +111,11 @@ The `adb` shim returns adb's own exit code, 126 when a command is denied, expire
 - The shim talks to the host over a local socket (`adbuddy.sock` in the data folder) plus a per-installation secret (`ipc.secret`, readable only by you). On Windows the socket file inherits the permissions of `%LOCALAPPDATA%\ADBuddy\`, which only your user can open.
 - If the journal cannot be written, nothing 🟡 or 🔴 runs.
 - Every journal record is signed with the installation secret, and `adbuddy undo` only runs inverses that ADBuddy itself wrote, in the shapes it knows; `adbuddy journal` marks records that were not written by ADBuddy.
-- ADBuddy protects against mistakes and prompt injection, not against an agent determined to find another adb. The real kill switch arrives with the app ("Cut access", M2).
+- ADBuddy protects against mistakes and prompt injection, not against an agent determined to find another adb. The real kill switch is in the phone app: "Cut access" turns debugging off from the phone, without the PC.
+
+## Phone app
+
+`adbuddy setup` installs the ADBuddy app (the latest release, or `--apk <file>`) and asks for your consent in it. Only if you accept, it gives the app the permission for "Cut access", exempts it from battery optimisation and turns on its accessibility service, keeping any other one. From then on `adbuddy serve` connects to the app through `adb reverse` on `127.0.0.1:<chat_port>`: 🔴 confirmations go to the phone (unlocking is required to allow), the app shows the journal live, and you can pause the agent from the phone. When the app is not connected, confirmations happen in the terminal as before. The agent cannot use the app's channel: `content` and `run-as` on `tech.hybriq.adbuddy` always ask first.
 
 ## Manual check with a real phone
 
