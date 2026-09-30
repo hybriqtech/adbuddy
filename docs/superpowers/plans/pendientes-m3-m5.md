@@ -16,6 +16,10 @@ Motivo (M2, Tarea 3): seis rondas de arreglos cerrando, uno a uno, engaños de m
 - **Lista de variables de entorno permitidas** para lanzar el agente (§5.1). En M1a, `host/internal/agent.Env` solo quita variables (`CLAUDECODE*`, `CLAUDE_CODE_*`, `CLAUDE_EFFORT`, `CLAUDE_PID`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT`, `ADBUDDY_SOURCE`). M3 debe pasar a una lista de permitidas: las de sistema, autenticación y proxy del usuario (`PATH`, `HOME`/`USERPROFILE`, `APPDATA`, `ANTHROPIC_*`, `HTTP(S)_PROXY`/`NO_PROXY`, `CLAUDE_CONFIG_DIR`…), verificando la lista en Windows, macOS y Linux.
 - **Confianza previa de la carpeta del entorno** en Claude Code (§5.1, S3): averiguar dónde y con qué clave guarda Claude Code la confianza de una carpeta y preconfiar el entorno antes de lanzar el agente en el PTY; si no es posible, detectar el diálogo y elegir "Yes" de forma explícita (un Enter a ciegas elige "No, exit").
 
+- **La app muestra los `notice` del host** (revisión final de M2): hoy los ignora; el de respuesta tardía ("That question was already answered or moved to the PC terminal.") y el de tipo no soportado deberían verse en la pantalla de inicio.
+- **Fixtures JSON compartidas del protocolo** en `testdata/` que lean los tests de Go y de Kotlin: hoy el contrato lo sostienen cadenas escritas a mano (`ProtocolTest.kt`) y la app falsa del e2e. Hacerlo antes de que el protocolo crezca con el chat.
+- **`adbuddy doctor` desde la sesión del agente** usa el adb real fuera del shim (solo lecturas fijas, sin argumentos del agente) aunque haya pausa o una pregunta pendiente, y no lo apunta en el diario. Decidir si se registra o se bloquea en pausa.
+
 ## M5 · Ayudas al agente
 
 - **`adbuddy screen` con el servicio de accesibilidad vinculado y la app desconectada:** devolver un error claro en lugar de usar `uiautomator dump`, que desconectaría el servicio (§6). Mensaje propuesto: `ADBuddy's accessibility service is running but the app is not connected: open the ADBuddy app and try again`.
@@ -35,6 +39,7 @@ Motivo (M2, Tarea 3): seis rondas de arreglos cerrando, uno a uno, engaños de m
 
 - **README, ventaja de coste frente a ARTEMIS:** ADBuddy usa el agente de código que el usuario ya tiene y funciona con su suscripción (por ejemplo, un plan de Claude Code), sin claves de API. ARTEMIS necesita su propio LLM y sus claves de API, porque el agente le delega tareas enteras. Decirlo en una línea al comparar, y en la portada entre las ventajas.
 
+- **`ADBUDDY_RELEASE_URL`** cambia a la vez el origen del APK y el de su checksum: es un gancho de test que vive en producción. Documentarlo o limitarlo junto con el certificado de firma.
 - **Fijar en el host el SHA-256 del certificado de firma del APK** (revisión de la Tarea 4 de M2): el `.sha256` de la release solo protege la integridad, no una release comprometida en la primera instalación.
 
 ## Más adelante (v1.1+)
