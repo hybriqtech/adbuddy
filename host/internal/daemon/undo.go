@@ -302,7 +302,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		fmt.Fprintf(s.Stderr(), "✓ %s\n", classify.Printable(e.Description))
 	}
 	for _, it := range res.Skipped {
-		fmt.Fprintf(s.Stderr(), "– %s: %s\n", classify.Printable(it.Description), it.Error)
+		fmt.Fprintf(s.Stderr(), "– %s: %s\n", classify.Printable(it.Description), classify.Printable(it.Error))
 	}
 	_ = s.Data(res)
 	if len(res.Failed) > 0 {

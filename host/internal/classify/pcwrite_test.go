@@ -41,7 +41,7 @@ func TestUserRuleCannotHidePullTargets(t *testing.T) {
 	}
 }
 
-func TestPullNeverCreatesProgramsAtTheTop(t *testing.T) {
+func TestPullNeverCreatesPrograms(t *testing.T) {
 	c := mustNew(t, "")
 	for _, argv := range [][]string{
 		{"pull", "/sdcard/Download/x", "run.bat"}, {"pull", "/sdcard/adb.exe"}, {"pull", "/sdcard/x", "adb"},
@@ -49,13 +49,20 @@ func TestPullNeverCreatesProgramsAtTheTop(t *testing.T) {
 		{"pull", "/sdcard/x", "x.ps1"}, {"pull", "/sdcard/x", "x.sh"}, {"pull", "/sdcard/x", "x.com"},
 		{"pull", "/sdcard/x", "x.cmd"}, {"pull", "/sdcard/x", "x.exe"}, {"pull", "/sdcard/adb"},
 		{"bugreport", "adb"},
+		// Re-review, m3: cmd.exe looks in whatever folder the agent is in.
+		{"pull", "/sdcard/x", "tools/run.bat"}, {"pull", "/sdcard/x", "tools/adb.bat"}, {"pull", "/sdcard/x", "tools/run.vbs"},
+		{"pull", "/sdcard/x", "a/b/ADBUDDY"}, {"pull", "/sdcard/x", "tools/x.jse"}, {"pull", "/sdcard/x", "tools/x.cpl"},
+		{"pull", "/sdcard/x", "tools/x.msc"}, {"pull", "/sdcard/x", "tools/x.wsf"}, {"pull", "/sdcard/x", "tools/x.wsh"},
+		{"pull", "/sdcard/x", "tools/x.js"}, {"pull", "/sdcard/x", "tools/x.vbe"}, {"pull", "/sdcard/x", "tools/x.exe. "},
+		{"pull", "/sdcard/x", "out/../payload"}, {"pull", "/sdcard/x", `out\..\payload`}, {"pull", "/sdcard/x", "./a/../b"},
 	} {
 		if r := c.Classify(argv); r.Level != Red {
 			t.Errorf("%q: %v, want red", argv, r.Level)
 		}
 	}
 	for _, argv := range [][]string{
-		{"pull", "/sdcard/x", "tools/run.bat"}, {"pull", "/sdcard/adbx.txt"}, {"pull", "/sdcard/notes.txt"},
+		{"pull", "/sdcard/adbx.txt"}, {"pull", "/sdcard/notes.txt"}, {"pull", "/sdcard/x", "tools/notes.md"},
+		{"pull", "/sdcard/x", "tools/data.json"}, {"pull", "/sdcard/x", "sub/file"}, {"pull", "/sdcard/x", "./sub/file"},
 	} {
 		if r := c.Classify(argv); r.Level != Green {
 			t.Errorf("%q: %v, want green (%s)", argv, r.Level, r.Primary.Reason)

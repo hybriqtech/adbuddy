@@ -130,3 +130,22 @@ func TestUndoMoveSkipsWhenTheSourceExistsAgain(t *testing.T) {
 		t.Fatalf("free: %+v runs %q", exit, e.adb.ran())
 	}
 }
+
+// Re-review, m5: the reason a change is skipped carries the recorded serial
+// and paths; it reaches the terminal only in printable form.
+func TestUndoPrintsSkippedReasonsSafely(t *testing.T) {
+	e := newEnv(t)
+	e.adb.shell["settings get global a"] = "1\n"
+	e.adb.shell["settings get global b"] = "1\n"
+	e.d.o.Serial = "dev2"
+	e.exec(t, "shell", "settings", "put", "global", "a", "2")
+	e.d.o.Serial = "dev\x1b[2K\n1"
+	e.exec(t, "shell", "settings", "put", "global", "b", "2")
+	e.d.o.Serial = "dev2"
+	s := &stream{}
+	e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "last"}, s)
+	out := s.errOut.String()
+	if !strings.Contains(out, `dev\u001b[2K\n1`) || strings.Contains(out, "\x1b") {
+		t.Fatalf("stderr %q", out)
+	}
+}

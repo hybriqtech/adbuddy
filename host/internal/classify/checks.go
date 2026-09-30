@@ -176,44 +176,62 @@ var protectedTargets = map[string]bool{
 	"journal": true, "inbox": true, "outbox": true,
 }
 
-// protectedExts: at the top of the environment, files with these extensions
+// configExts: at the top of the environment, files with these extensions
 // are context or configuration for some agent (AGENTS.md, CLAUDE.local.md,
-// opencode.json, device.json…) or programs a shell there could run instead
-// of the shim (cmd.exe looks in the current folder first: adb.bat, run.cmd…).
-var protectedExts = []string{".md", ".json", ".jsonc", ".toml", ".yaml", ".yml", ".exe", ".bat", ".cmd", ".com", ".ps1", ".sh"}
+// opencode.json, device.json…).
+var configExts = []string{".md", ".json", ".jsonc", ".toml", ".yaml", ".yml"}
 
-// protectedBases: at the top of the environment, these names with any
-// extension (adb, adb.exe, adbuddy.bat…) could shadow the shim.
+// programExts: in any folder, programs a shell there could run instead of
+// the shim or at the agent's request (cmd.exe looks in the current folder
+// first, and the agent may go into any of them: adb.bat, tools/run.vbs…).
+var programExts = []string{
+	".exe", ".bat", ".cmd", ".com", ".ps1", ".sh", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".msc", ".cpl",
+}
+
+// protectedBases: in any folder, these names with any extension (adb,
+// adb.exe, adbuddy.bat…) could shadow the shim.
 var protectedBases = map[string]bool{"adb": true, "adbuddy": true}
 
-// SafeLocalTarget accepts a relative path that does not leave its folder and
-// does not touch hidden files or folders (.claude, .adbuddy…) or, in its
-// first part, the environment's own files and programs. The daemon applies
-// it to the path relative to the environment's root.
+// SafeLocalTarget accepts a relative path without ".." that does not touch
+// hidden files or folders (.claude, .adbuddy…), programs or names that could
+// shadow the shim, or, in its first part, the environment's own files. The
+// daemon applies it to the path relative to the environment's root.
 func SafeLocalTarget(p string) bool {
 	p = strings.ReplaceAll(p, `\`, "/")
 	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, ":") {
 		return false
 	}
+	// ".." is checked before cleaning: "out/../x" cleans to "x", but if out
+	// is a link Linux and macOS resolve it in the parent of its target.
+	for _, part := range strings.Split(p, "/") {
+		if part == ".." {
+			return false
+		}
+	}
 	for i, part := range strings.Split(path.Clean(p), "/") {
-		if part == ".." || (strings.HasPrefix(part, ".") && part != ".") || strings.Contains(part, "~") {
-			return false // hidden, parent, or a Windows short name such as CLAUDE~1.MD
+		if (strings.HasPrefix(part, ".") && part != ".") || strings.Contains(part, "~") {
+			return false // hidden, or a Windows short name such as CLAUDE~1.MD
 		}
 		// Windows ignores trailing dots and spaces: "CLAUDE.md. " is CLAUDE.md.
-		if i == 0 {
-			name := strings.ToLower(strings.TrimRight(part, ". "))
-			base, _, _ := strings.Cut(name, ".")
-			if protectedTargets[name] || protectedBases[base] {
-				return false
-			}
-			for _, ext := range protectedExts {
-				if strings.HasSuffix(name, ext) {
-					return false
-				}
-			}
+		name := strings.ToLower(strings.TrimRight(part, ". "))
+		base, _, _ := strings.Cut(name, ".")
+		if protectedBases[base] || hasExt(name, programExts) {
+			return false
+		}
+		if i == 0 && (protectedTargets[name] || hasExt(name, configExts)) {
+			return false
 		}
 	}
 	return true
+}
+
+func hasExt(name string, exts []string) bool {
+	for _, ext := range exts {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 // remoteBase is the name a pulled file or folder gets on the PC. A remote

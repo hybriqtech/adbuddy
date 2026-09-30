@@ -39,7 +39,11 @@ func (d *Daemon) checkPCWrite(cwd string, w classify.PCWrite) string {
 	if cwd == "" || !filepath.IsAbs(cwd) {
 		return outside + "(unknown working directory " + cwd + ")"
 	}
-	cwd = filepath.Clean(cwd)
+	// adb runs in cwd as sent, and Linux and macOS resolve "out/.." on disk
+	// (in the parent of out's target) while filepath.Clean just drops it.
+	if cwd != filepath.Clean(cwd) || hasDotDot(cwd) {
+		return outside + "(working directory not in clean form " + cwd + ")"
+	}
 	for _, t := range append([]string{"."}, w.Targets...) {
 		p := filepath.Join(cwd, filepath.FromSlash(strings.ReplaceAll(t, `\`, "/")))
 		real, err := resolveLinks(p)
@@ -57,6 +61,15 @@ func (d *Daemon) checkPCWrite(cwd string, w classify.PCWrite) string {
 		}
 	}
 	return ""
+}
+
+func hasDotDot(p string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(p), "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveLinks resolves the links in p. The part that does not exist yet (the

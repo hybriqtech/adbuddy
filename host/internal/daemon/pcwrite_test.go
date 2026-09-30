@@ -179,3 +179,29 @@ func TestUserRuleDoesNotLetPullWriteOutside(t *testing.T) {
 		t.Error("program at the top: not asked")
 	}
 }
+
+// Re-review, I-A: filepath.Join and filepath.Clean drop "out/.." before the
+// link out is looked at, but Linux and macOS resolve it on disk, in the
+// parent of the link's target. A ".." in the target or in the working
+// directory is red on every system.
+func TestPullWithDotDotAfterALinkIsRed(t *testing.T) {
+	e := newEnv(t)
+	outside := filepath.Join(t.TempDir(), "deep")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	linkDir(t, outside, filepath.Join(e.ws, "out"))
+	if d := deniedPC(t, e, e.ws, "pull", "/sdcard/x", "out/../payload"); d == "" {
+		t.Error("out/../payload: not asked")
+	}
+	sep := string(filepath.Separator)
+	if d := deniedPC(t, e, e.ws+sep+"out"+sep+"..", "pull", "/sdcard/x"); !strings.Contains(d, "writes outside the agent environment") {
+		t.Errorf("cwd <ws>/out/..: %q", d)
+	}
+	if err := os.MkdirAll(filepath.Join(e.ws, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if d := deniedPC(t, e, e.ws, "pull", "/sdcard/x", "sub/file"); d != "" {
+		t.Errorf("sub/file: asked (%q)", d)
+	}
+}
