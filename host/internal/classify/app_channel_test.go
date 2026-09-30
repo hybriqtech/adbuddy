@@ -70,6 +70,10 @@ func TestTheAppChannelFailsClosedOnWordsOnlyKnownOnThePhone(t *testing.T) {
 		"am --user 0 dumpheap com.example.app /data/local/tmp/heap.hprof",
 		"am start --attach-agent /data/local/tmp/agent.so -n com.example.app/.Main",
 		"am $(echo dumpheap) com.example.app /data/local/tmp/heap.hprof",
+		// Android splits single-dash options (ShellCommand.getNextOption):
+		// -P/file is -P with its value attached.
+		"am start -P/data/local/tmp/p -a android.intent.action.VIEW -d https://example.com",
+		"cmd activity start -P/data/local/tmp/p -n com.example.app/.Main",
 		// Minor 4: pm and appops with the package only known on the phone.
 		"pm disable-user $(echo tech.hybriq.adbuddy)",
 		`pm revoke "$P" android.permission.WRITE_SECURE_SETTINGS`,
@@ -170,13 +174,28 @@ func TestBackgroundJobsAreSpecial(t *testing.T) {
 	for _, line := range []string{
 		"am instrument com.example.test/androidx.test.runner.AndroidJUnitRunner",
 		"cmd activity instrument -e class com.example.T com.example.test/.Runner",
+		// That -w is a value of -e (it takes two), or comes after the
+		// component, where am no longer reads options.
+		"am instrument -e x -w com.example/.Runner",
+		"am instrument -ex -w com.example/.Runner",
+		"am instrument -p -w com.example/.Runner",
+		"am instrument --user -w com.example/.Runner",
+		"am instrument com.example/.Runner -w",
+		"am instrument -- -w com.example/.Runner",
 	} {
 		if r := c.Classify(sh(line)); r.Level != Red || !r.Special {
 			t.Errorf("%q: %v special=%v, want red special", line, r.Level, r.Special)
 		}
 	}
-	if r := c.Classify(sh("am instrument -w com.example.test/.Runner")); r.Level != Red || r.Special {
-		t.Errorf("am instrument -w: %v special=%v, want red, not special", r.Level, r.Special)
+	for _, line := range []string{
+		"am instrument -w com.example.test/.Runner",
+		"am instrument -r -e class com.example.T -w com.example.test/.Runner",
+		"am instrument --user 0 -p /data/local/tmp/p -w com.example.test/.Runner",
+		"am --user 0 instrument -w com.example.test/.Runner",
+	} {
+		if r := c.Classify(sh(line)); r.Level != Red || r.Special {
+			t.Errorf("%q: %v special=%v, want red, not special", line, r.Level, r.Special)
+		}
 	}
 	// nohup without & still runs in the foreground: judged by the wrapped command.
 	check(t, c, []tc{
@@ -184,6 +203,70 @@ func TestBackgroundJobsAreSpecial(t *testing.T) {
 		{sh("nohup input tap 1 1"), Yellow, "ui.input", "", false},
 		{sh("ls && ls"), Green, "", "", false},
 	})
+}
+
+// What the classifier cannot analyse (a command name only known on the phone,
+// eval, a shell reading a file or stdin, running a file, syntax it cannot
+// parse, too many nested shells, a wrapper it cannot read) could hide the app
+// channel or a delayed tap: it fails closed and is special, so the phone
+// offers no "allow during the session" for it.
+func TestWhatCannotBeAnalysedIsSpecial(t *testing.T) {
+	c := mustNew(t, "")
+	deep := "ls"
+	for i := 0; i <= maxDepth+1; i++ {
+		deep = "sh -c " + adbEscapeArg(deep)
+	}
+	for _, k := range []struct{ line, rule string }{
+		{"eval 'sleep 5 & input tap 1 1'", "shell.script"},
+		{"echo 'sleep 5 & input tap 1 1' | sh", "shell.script"},
+		{"$(echo content) query --uri content://tech.hybriq.adbuddy.bridge", "dynamic"},
+		{"eval content query --uri content://tech.hybriq.adbuddy.bridge", "shell.script"},
+		{"echo tech.hybriq.adbuddy | xargs -I {} run-as {} ls", "wrapper"},
+		{"sh /data/local/tmp/x.sh", "shell.script"},
+		{`sh -c "$X"`, "shell.script"},
+		{". /data/local/tmp/x.sh", "shell.script"},
+		{"su", "shell.script"},
+		{"$C query --uri content://settings/global", "dynamic"},
+		{"/data/local/tmp/x.sh", "exec.file"},
+		{"ls ((", "shell.parse"},
+		{deep, "shell.depth"},
+		{"nohup -x ls", "wrapper"},
+		{"timeout -z 5 ls", "wrapper"},
+	} {
+		r := c.Classify(sh(k.line))
+		if r.Level != Red || !r.Special || !hasRule(r, k.rule) {
+			t.Errorf("%s: %v special=%v (%s: %s), want red special %s", display([]string{k.line}), r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.rule)
+		}
+	}
+	// Everyday commands keep their level and are not special.
+	for _, k := range []struct {
+		line  string
+		level Level
+	}{
+		{"for p in $(pm list packages -3); do echo $p; done", Green},
+		{"for p in $(pm list packages -3 | cut -d: -f2); do pm path $p; done", Green},
+		{"for p in $(pm list packages -3); do dumpsys package $p | grep versionName; done", Red},
+		{"pm list packages $X", Green},
+		{"pm path $P", Green},
+		{"appops get $P", Green},
+		{"nohup ls", Green},
+		{"nohup input tap 1 1", Yellow},
+		{"sleep 1 && echo ok", Green},
+		{"ls /sdcard/*.jpg", Green},
+		{"cat /sdcard/$F", Green},
+		{"ls | xargs -n 1 echo", Green},
+		{"logcat -d | grep -i crash", Green},
+		{"sh -c 'ls /sdcard'", Green},
+		{"su -c 'ls /data'", Green},
+		{"/system/bin/ls /sdcard", Green},
+		{"timeout 5 ls", Green},
+		{"find /sdcard -name '*.jpg' -exec ls -l {} +", Red},
+	} {
+		r := c.Classify(sh(k.line))
+		if r.Level != k.level || r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want %v not special", k.line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.level)
+		}
+	}
 }
 
 func hasRule(r Result, rule string) bool {

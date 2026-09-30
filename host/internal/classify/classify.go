@@ -459,22 +459,28 @@ func titleFor(t Text, vars map[string]string, rejected bool) Text {
 // A dynamic word up to the subcommand makes it unknown: on the phone an
 // unquoted $(…) may split into options and a different verb.
 func subOf(ws []Word) string {
+	sub, _ := subAt(ws)
+	return sub
+}
+
+// subAt is subOf plus the subcommand's index in ws (-1 if unknown).
+func subAt(ws []Word) (string, int) {
 	for i := 1; i < len(ws); i++ {
 		if ws[i].Dynamic {
-			return ""
+			return "", -1
 		}
 		v := ws[i].Value
 		if v == "--user" {
 			i++
 			if i < len(ws) && ws[i].Dynamic {
-				return ""
+				return "", -1
 			}
 			continue
 		}
 		if strings.HasPrefix(v, "-") {
 			continue
 		}
-		return v
+		return v, i
 	}
-	return ""
+	return "", -1
 }

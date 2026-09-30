@@ -20,11 +20,11 @@ func newParser() *syntax.Parser {
 // loops and here-documents.
 func (c *Classifier) classifyScript(src string, depth int) []Finding {
 	if depth > maxDepth {
-		return []Finding{redFinding("shell.depth", "too many nested shells", []string{src}, textParse)}
+		return []Finding{unanalysable("shell.depth", "too many nested shells", []string{src}, textParse)}
 	}
 	file, err := newParser().Parse(strings.NewReader(src), "")
 	if err != nil {
-		return []Finding{redFinding("shell.parse", "cannot parse: "+err.Error(), []string{src}, textParse)}
+		return []Finding{unanalysable("shell.parse", "cannot parse: "+err.Error(), []string{src}, textParse)}
 	}
 	var out []Finding
 	syntax.Walk(file, func(n syntax.Node) bool {
@@ -78,9 +78,10 @@ func (c *Classifier) classifyScript(src string, depth int) []Finding {
 			}
 		case *syntax.FuncDecl:
 			out = append(out, redFinding("shell.function", "defines a shell function", []string{n.Name.Value}, textScript))
-		case *syntax.CoprocClause:
-			out = append(out, backgroundFinding("coprocess", []string{"coproc"}))
 		}
+		// No case for *syntax.CoprocClause: `coproc` is bash's keyword and the
+		// mksh parser never produces it (there `coproc` is an unknown command,
+		// red). mksh's coprocess is `cmd |&`, caught above as Stmt.Coprocess.
 		return true
 	})
 	return out
@@ -195,13 +196,13 @@ var trustedDirs = map[string]bool{
 func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 	vals := values(ws)
 	if ws[0].Dynamic {
-		return []Finding{redFinding("dynamic", "command name only known on the phone", vals, textDynamic)}
+		return []Finding{unanalysable("dynamic", "command name only known on the phone", vals, textDynamic)}
 	}
 	name := ws[0].Value
 	if strings.Contains(name, "/") {
 		dir, base := path.Split(path.Clean(name))
 		if !trustedDirs[dir] || base == "" {
-			return []Finding{redFinding("exec.file", "runs a file", vals, textScript)}
+			return []Finding{unanalysable("exec.file", "runs a file", vals, textScript)}
 		}
 		name = base
 	}
@@ -213,7 +214,7 @@ func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 	case "su":
 		return c.evalSu(ws, depth)
 	case ".", "source", "eval":
-		return []Finding{redFinding("shell.script", "runs code from a file or a string", vals, textScript)}
+		return []Finding{unanalysable("shell.script", "runs code from a file or a string", vals, textScript)}
 	case "toybox", "busybox":
 		if len(ws) == 1 {
 			return []Finding{{Rule: "toybox.list", Level: Green, Title: Text{EN: "List toybox commands", ES: "Listar los comandos de toybox"}, Words: vals}}
@@ -251,7 +252,7 @@ func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 	}
 	if inner, handled, reason := unwrap(ws); handled {
 		if reason != "" {
-			return []Finding{redFinding("wrapper", reason, vals, textUnknown)}
+			return []Finding{unanalysable("wrapper", reason, vals, textUnknown)}
 		}
 		if len(inner) == 0 {
 			return []Finding{{Rule: "wrapper.noop", Level: Green, Title: render(Text{EN: "Run {cmd}", ES: "Ejecutar {cmd}"}, baseVars(ws)), Words: vals}}
@@ -266,6 +267,17 @@ func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 // (a delayed input tap), so it is always special.
 func backgroundFinding(reason string, words []string) Finding {
 	f := redFinding("shell.background", reason, words, textBackground)
+	f.Special = true
+	return f
+}
+
+// unanalysable is for what the classifier cannot read: a command name only
+// known on the phone, eval or `.`, a shell reading a file or stdin, running a
+// file, syntax it cannot parse, too many nested shells or a wrapper it cannot
+// read. Any of them could hide ADBuddy's own channel or a delayed tap, so it
+// fails closed: special, with no "allow during the session".
+func unanalysable(rule, reason string, words []string, title Text) Finding {
+	f := redFinding(rule, reason, words, title)
 	f.Special = true
 	return f
 }
@@ -427,22 +439,22 @@ func (c *Classifier) evalShell(ws []Word, depth int) []Finding {
 		opts := rest[0].Value[1:]
 		rest = rest[1:]
 		if strings.ContainsAny(opts, "is") || opts == "" || opts == "-" {
-			return []Finding{redFinding("shell.script", "shell reading commands from stdin", vals, textScript)}
+			return []Finding{unanalysable("shell.script", "shell reading commands from stdin", vals, textScript)}
 		}
 		if strings.Contains(opts, "c") {
 			if len(rest) == 0 || rest[0].Dynamic {
-				return []Finding{redFinding("shell.script", "sh -c with a script only known on the phone", vals, textScript)}
+				return []Finding{unanalysable("shell.script", "sh -c with a script only known on the phone", vals, textScript)}
 			}
 			return c.classifyScript(rest[0].Value, depth+1)
 		}
 		if strings.Trim(opts, "eufxvnaC") != "" {
-			return []Finding{redFinding("shell.script", "unknown shell option", vals, textScript)}
+			return []Finding{unanalysable("shell.script", "unknown shell option", vals, textScript)}
 		}
 	}
 	if len(rest) == 0 {
-		return []Finding{redFinding("shell.script", "shell reading commands from stdin", vals, textScript)}
+		return []Finding{unanalysable("shell.script", "shell reading commands from stdin", vals, textScript)}
 	}
-	return []Finding{redFinding("shell.script", "runs a script file", vals, textScript)}
+	return []Finding{unanalysable("shell.script", "runs a script file", vals, textScript)}
 }
 
 // evalSu handles `su [user] -c 'script'` and `su [user] command…`.
@@ -454,14 +466,14 @@ func (c *Classifier) evalSu(ws []Word, depth int) []Finding {
 	}
 	switch {
 	case len(rest) == 0:
-		return []Finding{redFinding("shell.script", "su without command opens a root shell", vals, textScript)}
+		return []Finding{unanalysable("shell.script", "su without command opens a root shell", vals, textScript)}
 	case rest[0].Value == "-c":
 		if len(rest) < 2 || rest[1].Dynamic {
-			return []Finding{redFinding("shell.script", "su -c with a script only known on the phone", vals, textScript)}
+			return []Finding{unanalysable("shell.script", "su -c with a script only known on the phone", vals, textScript)}
 		}
 		return c.classifyScript(rest[1].Value, depth+1)
 	case strings.HasPrefix(rest[0].Value, "-"):
-		return []Finding{redFinding("shell.script", "unknown su option", vals, textScript)}
+		return []Finding{unanalysable("shell.script", "unknown su option", vals, textScript)}
 	}
 	return c.evalWords(rest, depth)
 }

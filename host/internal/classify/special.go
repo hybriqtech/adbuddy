@@ -147,24 +147,64 @@ var amStartMemory = map[string]bool{
 	"--attach-agent": true, "--attach-agent-bind": true, "--start-profiler": true, "-P": true,
 }
 
+// amStartMemoryOption also catches a short option with its value attached:
+// Android splits single-dash options (ShellCommand.getNextOption), so
+// -P/data/local/tmp/p.trace is -P with that value.
+func amStartMemoryOption(v string) bool {
+	if amStartMemory[v] {
+		return true
+	}
+	for o := range amStartMemory {
+		if !strings.HasPrefix(o, "--") && strings.HasPrefix(v, o) {
+			return true
+		}
+	}
+	return false
+}
+
 func amSpecial(ws []Word) string {
-	sub := subOf(ws)
+	sub, at := subAt(ws)
 	if amMemory[sub] {
 		return "reads or changes an app's memory"
 	}
-	wait := false
 	for _, w := range ws[1:] {
-		if amStartMemory[w.Value] {
+		if amStartMemoryOption(w.Value) {
 			return "reads or changes the memory of the app it opens"
 		}
-		wait = wait || w.Value == "-w"
 	}
-	if sub == "instrument" && !wait {
+	if sub == "instrument" && !instrumentWaits(ws[at+1:]) {
 		// It returns at once and the instrumentation, which can drive the
 		// screen, keeps running.
 		return "am instrument without -w keeps running after it returns"
 	}
 	return ""
+}
+
+// instrumentValues are the am instrument options that take values. A few
+// more than am documents today (-f, --abi) only make -w harder to find.
+var instrumentValues = map[string]int{"-e": 2, "-p": 1, "-f": 1, "--user": 1, "--abi": 1}
+
+// instrumentWaits reports whether am instrument's options (the words after
+// "instrument") include -w as an option, not as the value of another one.
+// am stops reading options at the component, at "--" and at the first word
+// that does not start with "-"; a word only known on the phone is unknown.
+func instrumentWaits(ws []Word) bool {
+	for i := 0; i < len(ws); i++ {
+		v := ws[i].Value
+		if ws[i].Dynamic || v == "--" || !strings.HasPrefix(v, "-") {
+			return false
+		}
+		if v == "-w" {
+			return true
+		}
+		n := instrumentValues[v]
+		if !strings.HasPrefix(v, "--") && len(v) > 2 {
+			// -ekey: the first value is attached.
+			n = max(instrumentValues[v[:2]]-1, 0)
+		}
+		i += n
+	}
+	return false
 }
 
 // mentionsADBuddy compares the words decoded and in lower case: intent: URIs
