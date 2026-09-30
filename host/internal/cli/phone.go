@@ -36,6 +36,7 @@ type phoneLink struct {
 
 	mu      sync.Mutex
 	paused  bool
+	onPause func() // withdraws the question waiting for an answer (daemon.CancelConfirmations)
 	entries []json.RawMessage
 }
 
@@ -102,10 +103,20 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 				fmt.Fprintln(app.Stderr, "📱 The phone app is connected: 🔴 confirmations go to the phone.")
 			} else {
 				fmt.Fprintln(app.Stderr, "📱 The phone app disconnected: 🔴 confirmations happen here.")
+				// A question already on the phone would wait there for
+				// nobody: it moves here too.
+				l.conf.AppGone()
 			}
 		},
 	})
 	l.conf = bridge.NewConfirmer(l.srv, fallback)
+	l.conf.Notify = func(title string, moved bool) {
+		if moved {
+			fmt.Fprintf(app.Stderr, "📱 The phone app disconnected before you answered “%s”: it no longer waits for the phone.\n", classify.Printable(title))
+		} else {
+			fmt.Fprintf(app.Stderr, "📱 The phone app is back: “%s” still waits for your answer on the phone.\n", classify.Printable(title))
+		}
+	}
 	go l.srv.Serve(ctx, listener)
 	host, _ := os.Hostname()
 	host = phoneapp.HostName(host)
@@ -145,6 +156,15 @@ func (noApp) Publish(string, any) error { return nil }
 
 // Confirmer asks on the phone when the app is connected, else fallback.
 func (l *phoneLink) Confirmer() confirm.Confirmer { return l.conf }
+
+// OnPause sets what withdraws the question waiting for an answer when the
+// person pauses from the phone (the daemon's CancelConfirmations): the
+// daemon is created after the link.
+func (l *phoneLink) OnPause(f func()) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.onPause = f
+}
 
 // Paused reports whether the person paused the agent from the phone.
 func (l *phoneLink) Paused() bool {
@@ -191,11 +211,18 @@ func (l *phoneLink) onMessage(m bridge.Message) {
 	case bridge.TypeConfirmReply:
 		l.conf.Reply(m.Payload)
 	case bridge.TypePause, bridge.TypeResume:
+		pause := m.Type == bridge.TypePause
 		l.mu.Lock()
-		l.paused = m.Type == bridge.TypePause
+		l.paused = pause
+		withdraw := l.onPause
 		l.mu.Unlock()
-		if m.Type == bridge.TypePause {
+		if pause {
 			fmt.Fprintln(l.log, "⏸ Paused from the phone: every adb command of the agent is refused until you resume.")
+			// After Paused reports true: the command whose question is
+			// withdrawn then ends blocked as paused.
+			if withdraw != nil {
+				withdraw()
+			}
 		} else {
 			fmt.Fprintln(l.log, "▶ Resumed from the phone.")
 		}

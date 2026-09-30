@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -156,5 +157,84 @@ func TestPhoneAppConfirmsAndPauses(t *testing.T) {
 	p.until(bridge.TypeSessionState)
 	if out, _, code := h.adb("", "shell", "getprop", "ro.product.model"); code != 0 || out != "Pixel 9 Pro XL\n" {
 		t.Fatalf("resumed: %d %q", code, out)
+	}
+}
+
+// redOnThePhone starts `adb shell reboot` from the agent and waits for its
+// question on the phone.
+func redOnThePhone(t *testing.T, h *harness, p *phone) (chan [2]string, bridge.ConfirmRequest) {
+	t.Helper()
+	done := make(chan [2]string, 1)
+	go func() {
+		_, errOut, code := h.adb("", "shell", "reboot")
+		done <- [2]string{strconv.Itoa(code), errOut}
+	}()
+	var req bridge.ConfirmRequest
+	json.Unmarshal(p.until(bridge.TypeConfirmReq).Payload, &req)
+	return done, req
+}
+
+func waitDone(t *testing.T, done chan [2]string, h *harness) (code, errOut string) {
+	t.Helper()
+	select {
+	case r := <-done:
+		return r[0], r[1]
+	case <-time.After(15 * time.Second):
+		t.Fatalf("the 🔴 kept waiting; serve stderr:\n%s", h.serveErr.String())
+	}
+	return "", ""
+}
+
+// T1 review, M7: the app disconnects while its question waits; the question
+// moves to the terminal at once, and is answered there.
+func TestPhoneDisconnectMovesTheQuestionToTheTerminal(t *testing.T) {
+	port := strconv.Itoa(freePort(t))
+	h := startWith(t, "chat_port = "+port+"\n", phoneAppRules(port)...)
+	p := connectPhone(t, h, port)
+	done, _ := redOnThePhone(t, h, p)
+	p.c.CloseNow()
+	waitFor(t, func() bool { return strings.Contains(h.serveErr.String(), "Code: ") }, h.serveErr)
+	if !strings.Contains(h.serveErr.String(), "disconnected before you answered “Restart the phone”") {
+		t.Fatalf("the terminal was not told why:\n%s", h.serveErr.String())
+	}
+	time.Sleep(1200 * time.Millisecond) // answers in the first second are ignored as typed ahead
+	io.WriteString(h.serveIn, "n\n")
+	if code, errOut := waitDone(t, done, h); code != "126" || !strings.Contains(errOut, "Denied by user: Restart the phone") {
+		t.Fatalf("%s %q", code, errOut)
+	}
+}
+
+// T2 review and controller finding: while the question waits on the phone
+// every other command is refused; pausing withdraws the question at once and
+// the command ends blocked as paused.
+func TestPhonePauseWithdrawsTheQuestion(t *testing.T) {
+	port := strconv.Itoa(freePort(t))
+	h := startWith(t, "chat_port = "+port+"\n", phoneAppRules(port)...)
+	p := connectPhone(t, h, port)
+	done, req := redOnThePhone(t, h, p)
+	if _, errOut, code := h.adb("", "shell", "input", "tap", "1", "1"); code != 126 || strings.TrimSpace(errOut) != `Blocked by ADBuddy: waiting for your answer to "Restart the phone"` {
+		t.Fatalf("tap while the question waits: %d %q", code, errOut)
+	}
+	p.send(bridge.TypePause, struct{}{})
+	if code, errOut := waitDone(t, done, h); code != "126" || !strings.Contains(errOut, "Blocked by ADBuddy: paused from the phone") {
+		t.Fatalf("%s %q", code, errOut)
+	}
+	for {
+		var e struct{ ID, Status, Reason string }
+		json.Unmarshal(p.until(bridge.TypeJournalEntry).Payload, &e)
+		if e.ID == req.ID {
+			if e.Status != "blocked" || !strings.Contains(e.Reason, "paused") {
+				t.Fatalf("journal %+v", e)
+			}
+			break
+		}
+	}
+	for _, c := range h.adbCalls() {
+		if strings.Contains(c, "reboot") || strings.Contains(c, "input") {
+			t.Fatalf("%q reached adb", c)
+		}
+	}
+	if strings.Contains(h.serveErr.String(), "Code: ") {
+		t.Fatal("the terminal asked")
 	}
 }

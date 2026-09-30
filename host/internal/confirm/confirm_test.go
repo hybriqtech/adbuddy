@@ -3,6 +3,7 @@ package confirm
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -233,5 +234,26 @@ func TestConsecutiveQuestionsNeverShareACode(t *testing.T) {
 	term.Confirm(context.Background(), req())
 	if got := term.Confirm(context.Background(), req()); got != Deny {
 		t.Fatalf("the previous code approved the next question: %v", got)
+	}
+}
+
+// A question withdrawn with a cause (the agent was paused from the phone)
+// says so, instead of blaming the agent.
+func TestWithdrawnQuestionSaysWhy(t *testing.T) {
+	pr, _ := io.Pipe()
+	out := &syncBuffer{}
+	term := testTerminal(pr, out, "42")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	go func() {
+		for deadline := time.Now().Add(3 * time.Second); !strings.Contains(out.String(), "Code: ") && time.Now().Before(deadline); {
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel(errors.New("paused from the phone"))
+	}()
+	if got := term.Confirm(ctx, req()); got != Deny {
+		t.Fatalf("got %v", got)
+	}
+	if s := out.String(); !strings.Contains(s, "→ withdrawn: paused from the phone") || strings.Contains(s, "abandoned") {
+		t.Fatalf("%q", s)
 	}
 }

@@ -23,6 +23,7 @@ var undoFixes = map[string]string{
 	"UNCERTAIN_STATE":    "Check the phone: the command failed, the host stopped while it ran, or its place on the phone is taken again, so its inverse is not run automatically.",
 	"OTHER_DEVICE":       "Connect the phone the change was made on (see `adbuddy journal`) and undo it there, or revert it by hand.",
 	"UNDO_FAILED":        "Check the phone and the journal; failed inverses can be retried with `adbuddy undo <id>`.",
+	"WAITING_FOR_ANSWER": "Answer the 🔴 question (on the phone or in the terminal running `adbuddy serve`), then try again.",
 }
 
 func newUndoCmd(app *App) *cobra.Command {

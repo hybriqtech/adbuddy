@@ -184,6 +184,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				},
 				OnWarning: func(w string) { fmt.Fprintln(app.Stderr, "⚠ "+w) },
 			})
+			link.OnPause(d.CancelConfirmations)
 			srv, err := ipc.Listen(e.dirs.Data, secret, func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {
 				return d.Handle(ctx, req, c)
 			})

@@ -190,9 +190,13 @@ func (t *Terminal) Confirm(ctx context.Context, r Request) Decision {
 
 func (t *Terminal) expired(ctx context.Context) Decision {
 	d := fromContext(ctx)
-	if d == Timeout {
+	switch cause := context.Cause(ctx); {
+	case d == Timeout:
 		fmt.Fprintln(t.out, "\n→ expired, denied")
-	} else {
+	case cause != nil && !errors.Is(cause, context.Canceled):
+		// Withdrawn by the host, with a reason (a pause from the phone).
+		fmt.Fprintf(t.out, "\n→ withdrawn: %s\n", classify.Printable(cause.Error()))
+	default:
 		fmt.Fprintln(t.out, "\n→ abandoned by the agent")
 	}
 	return d

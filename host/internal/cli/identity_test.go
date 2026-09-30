@@ -117,3 +117,33 @@ func TestServeIdentityOfAPhoneThatCannotBeChecked(t *testing.T) {
 		t.Fatalf("checked: exit %d ping %+v stderr %q", code, ping, errOut)
 	}
 }
+
+// Final review of M1c, m-a: with an address saved, a phone that adb already
+// lists under the saved guid (step 1 of findKnownPhone) is checked too:
+// another phone answering with that guid is not taken for the known one.
+func TestServeRefusesAnotherPhoneByGuidWithASavedAddress(t *testing.T) {
+	shortWaits(t)
+	cfg := config.Default()
+	cfg.Serial, cfg.Address = phoneSerial, tsAddr
+	rules := []testutil.FakeRule{
+		{Match: "^devices$", Stdout: phoneOnline},
+		{Match: `^shell getprop ro\.serialno$`, Stdout: "ZZZZ9999\n"},
+		{Match: "^disconnect "},
+		{Match: tcpPortRule, Stdout: "\n"},
+	}
+	code, errOut, _, log := serveOnce(t, rules, cfg)
+	if code != ExitFailure || !strings.Contains(errOut, "WRONG_PHONE") || strings.Contains(errOut, "ADBuddy is serving") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	calls := loggedCalls(t, log)
+	joined := strings.Join(calls, "|")
+	if !strings.Contains(joined, "shell getprop ro.serialno") || !strings.Contains(joined, "disconnect "+phoneSerial) {
+		t.Fatalf("identity not checked or the other phone kept: %q", calls)
+	}
+	// Nothing else reaches the other phone: no invariant, no app.
+	for _, c := range calls {
+		if strings.HasPrefix(c, "shell ") && c != "shell getprop ro.serialno" {
+			t.Fatalf("%q ran on the other phone: %q", c, calls)
+		}
+	}
+}

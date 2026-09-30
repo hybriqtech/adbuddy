@@ -17,13 +17,20 @@ type Publisher interface {
 }
 
 // Confirmer asks on the phone (spec §4.5). When no app is connected at the
-// moment of asking it uses Fallback (the terminal, or deny).
+// moment of asking it uses Fallback (the terminal, or deny), and so does a
+// question already on the phone when the app disconnects (AppGone).
 type Confirmer struct {
 	App      Publisher
 	Fallback confirm.Confirmer
+	// Notify, if set, tells the person what happened to a question when the
+	// app disconnected while it waited: it moved to Fallback (moved), or it
+	// stays on the phone because the app is already back. Called from the
+	// goroutine that waits for the answer; title comes from the rules and the
+	// agent's arguments: escape it before printing.
+	Notify func(title string, moved bool)
 
 	mu      sync.Mutex
-	pending map[string]pendingReq
+	pending map[string]*pendingReq
 	session map[string]bool // keys allowed for the rest of the session
 }
 
@@ -31,11 +38,12 @@ type pendingReq struct {
 	req   ConfirmRequest
 	reply chan confirm.Decision
 	key   string
+	gone  chan struct{} // closed by AppGone; replaced when the question stays on the phone
 }
 
 // NewConfirmer returns a Confirmer that asks on app, or fallback.
 func NewConfirmer(app Publisher, fallback confirm.Confirmer) *Confirmer {
-	return &Confirmer{App: app, Fallback: fallback, pending: map[string]pendingReq{}, session: map[string]bool{}}
+	return &Confirmer{App: app, Fallback: fallback, pending: map[string]*pendingReq{}, session: map[string]bool{}}
 }
 
 // Confirm implements confirm.Confirmer.
@@ -59,7 +67,7 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 	}
 	req := ConfirmRequest{ID: r.ID, Level: "red", Title: r.Title, Detail: r.Detail, RawCommand: r.RawCommand,
 		ExpiresAt: r.ExpiresAt.UTC(), Special: r.Special, AllowSession: allowSession}
-	p := pendingReq{req: req, reply: make(chan confirm.Decision, 1), key: r.Key}
+	p := &pendingReq{req: req, reply: make(chan confirm.Decision, 1), key: r.Key, gone: make(chan struct{})}
 	c.mu.Lock()
 	if _, dup := c.pending[r.ID]; dup {
 		c.mu.Unlock()
@@ -75,14 +83,73 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 	if err := c.App.Publish(TypeConfirmReq, req); err != nil {
 		return confirm.Deny
 	}
-	select {
-	case d := <-p.reply:
-		return d
-	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return confirm.Timeout
+	// The app may have left between the check above and the question being
+	// pending: then AppGone already ran and did not see it.
+	if !c.App.Connected() {
+		c.AppGone()
+	}
+	for {
+		c.mu.Lock()
+		gone := p.gone
+		c.mu.Unlock()
+		select {
+		case d := <-p.reply:
+			return d
+		case <-gone:
+			// Never under c.mu: the server answers Connected under its
+			// lock, and holds that lock when a snapshot calls Pending.
+			back := c.App.Connected()
+			c.mu.Lock()
+			_, waiting := c.pending[r.ID]
+			if !waiting { // answered just now
+				c.mu.Unlock()
+				return <-p.reply
+			}
+			if back {
+				// Back already: it has the question (resent, or in a
+				// snapshot), so it keeps waiting there.
+				p.gone = make(chan struct{})
+				c.mu.Unlock()
+				c.notify(r.Title, false)
+				// If it left again before the new channel was in place,
+				// AppGone closed the old one only.
+				if !c.App.Connected() {
+					c.AppGone()
+				}
+				continue
+			}
+			delete(c.pending, r.ID)
+			c.mu.Unlock()
+			c.notify(r.Title, true)
+			return c.Fallback.Confirm(ctx, r)
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return confirm.Timeout
+			}
+			return confirm.Deny
 		}
-		return confirm.Deny
+	}
+}
+
+// AppGone moves the questions waiting on the phone to Fallback: the app
+// disconnected and nobody would answer them there. Call it when the app is
+// gone (the server's OnConnect(false)). A question whose app is back by the
+// time it looks keeps waiting on the phone.
+func (c *Confirmer) AppGone() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, p := range c.pending {
+		select {
+		case <-p.gone: // already told
+		default:
+			close(p.gone)
+		}
+	}
+}
+
+func (c *Confirmer) notify(title string, moved bool) {
+	if c.Notify != nil {
+		c.Notify(title, moved)
 	}
 }
 

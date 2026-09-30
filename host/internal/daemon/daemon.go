@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -77,6 +78,70 @@ type Daemon struct {
 	// the phone's state, and another change in between would make the
 	// recorded inverse wrong.
 	changes sync.Mutex
+
+	// asking is the 🔴 question waiting for an answer, on the phone or in
+	// the terminal. While there is one, every other command is refused: an
+	// `input tap` sent meanwhile could press Allow on the phone.
+	askMu  sync.Mutex
+	asking *question
+}
+
+// question is a 🔴 confirmation in progress.
+type question struct {
+	title    string
+	withdraw context.CancelCauseFunc
+}
+
+// errWithdrawn is why a question is withdrawn when the agent is paused.
+var errWithdrawn = errors.New("paused from the phone")
+
+// ask makes q the question waiting for an answer. If another one is
+// waiting, q is not registered and ask returns the other's title.
+func (d *Daemon) ask(q *question) (other string) {
+	d.askMu.Lock()
+	defer d.askMu.Unlock()
+	if d.asking != nil {
+		return d.asking.title
+	}
+	d.asking = q
+	return ""
+}
+
+// answered removes q once its answer is in.
+func (d *Daemon) answered(q *question) {
+	d.askMu.Lock()
+	defer d.askMu.Unlock()
+	if d.asking == q {
+		d.asking = nil
+	}
+}
+
+// waitingFor returns the title of the question waiting for an answer, or "".
+func (d *Daemon) waitingFor() string {
+	d.askMu.Lock()
+	defer d.askMu.Unlock()
+	if d.asking == nil {
+		return ""
+	}
+	return d.asking.title
+}
+
+// CancelConfirmations withdraws the question waiting for an answer, if any.
+// Call it after the person pauses from the phone (once Paused reports true):
+// the command then ends blocked as paused at once, instead of when the
+// question expires.
+func (d *Daemon) CancelConfirmations() {
+	d.askMu.Lock()
+	defer d.askMu.Unlock()
+	if d.asking != nil {
+		d.asking.withdraw(errWithdrawn)
+	}
+}
+
+// waitingMessage is why a command is refused while a question waits, in the
+// shim's format (Blocked by ADBuddy: <reason>).
+func waitingMessage(title string) string {
+	return `waiting for your answer to "` + title + `"`
 }
 
 // New returns a Daemon; missing optional fields get defaults.
@@ -134,6 +199,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		p := e // say what was attempted, at its level
 		p.Level, p.Rule, p.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
 		return d.block(p, s, PausedMessage)
+	}
+	if t := d.waitingFor(); t != "" {
+		p := e
+		p.Level, p.Rule, p.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
+		return d.block(p, s, waitingMessage(t))
 	}
 	if len(g.Forbidden) > 0 {
 		return d.block(e, s, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed: ADBuddy only talks to the active phone through its own adb server")
@@ -194,12 +264,34 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if reason == "" {
 			key = e.Rule + "\x00" + req.Cwd + "\x00" + strings.Join(req.Argv, "\x00")
 		}
-		cctx, cancel := context.WithTimeout(ctx, d.o.ConfirmTimeout)
+		qctx, withdraw := context.WithCancelCause(ctx)
+		cctx, cancel := context.WithTimeout(qctx, d.o.ConfirmTimeout)
+		q := &question{title: e.Description, withdraw: withdraw}
+		done := func() {
+			d.answered(q)
+			cancel()
+			withdraw(nil)
+		}
+		if other := d.ask(q); other != "" {
+			done()
+			return d.block(e, s, waitingMessage(other))
+		}
+		// A pause that came before the question was registered did not
+		// withdraw it: look again now that it is.
+		if d.o.Paused() {
+			done()
+			return d.block(e, s, PausedMessage)
+		}
 		decision := d.o.Confirmer.Confirm(cctx, confirm.Request{
 			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: classify.DisplayCommand(req.Argv),
 			ExpiresAt: now.Add(d.o.ConfirmTimeout), Special: res.Special, Key: key,
 		})
-		cancel()
+		done()
+		// Paused while it was asked: whatever the answer (or none, if the
+		// pause withdrew it), it ends blocked.
+		if d.o.Paused() {
+			return d.block(e, s, PausedMessage)
+		}
 		if decision != confirm.Allow {
 			e.Status, e.Reason = journal.StatusDenied, "denied by user"
 			msg := "Denied by user: " + e.Description
@@ -229,6 +321,10 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// the prechecks: refuse before any running record and before adb.
 	if d.o.Paused() {
 		return d.block(e, s, PausedMessage)
+	}
+	// A question that started after this command got past the door.
+	if t := d.waitingFor(); t != "" {
+		return d.block(e, s, waitingMessage(t))
 	}
 	if level >= classify.Yellow {
 		running := e

@@ -191,10 +191,16 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if d.o.Paused() {
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
 	}
+	if t := d.waitingFor(); t != "" {
+		return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: waitingMessage(t)}
+	}
 	d.changes.Lock()
 	defer d.changes.Unlock()
 	if d.o.Paused() { // paused while waiting for the lock
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
+	}
+	if t := d.waitingFor(); t != "" { // a question started while undo waited for the lock
+		return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: waitingMessage(t)}
 	}
 	entries, _, err := d.o.Journal.Load()
 	if err != nil {
