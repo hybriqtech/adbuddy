@@ -189,9 +189,10 @@ func dangerousVar(name string) bool { return hiddenVar(name) || name == "IFS" }
 // variant, for a `-n` option in any combination (which turns a name into a
 // reference to another variable), for any argument whose variable name is not
 // a static literal (quoted, computed or a $(…) that could expand to an
-// assignment), and for an assignment to a dangerous variable. The names it
-// cannot read, like an assignment to a code variable, are special: they may
-// hide code (see codeVars).
+// assignment), for an assignment to a dangerous variable, and for a code or
+// file variable declared with an attribute that changes its value (see
+// valueAttrs). The names it cannot read, like an assignment to a code
+// variable, are special: they may hide code (see codeVars).
 func checkDeclClause(d *syntax.DeclClause) []Finding {
 	var out []Finding
 	// A name the classifier cannot read may be a code variable (see
@@ -202,6 +203,7 @@ func checkDeclClause(d *syntax.DeclClause) []Finding {
 	if d.Variant.Value == "nameref" {
 		unknownName("nameref makes a variable a reference to another", d.Variant.Value)
 	}
+	changes := changesValue(d.Args)
 	for _, a := range d.Args {
 		switch {
 		case a.Name == nil:
@@ -224,9 +226,35 @@ func checkDeclClause(d *syntax.DeclClause) []Finding {
 			}
 		case (a.Value != nil || a.Array != nil) && dangerousVar(a.Name.Value):
 			out = append(out, assignFinding(a.Name.Value, []string{d.Variant.Value, a.Name.Value}))
+		case changes != "" && hiddenVar(a.Name.Value):
+			// typeset -R4 PATH sets PATH to its last 4 characters (xbin, a
+			// relative path) without assigning it.
+			out = append(out, assignFinding(a.Name.Value, []string{d.Variant.Value, changes, a.Name.Value}))
 		}
 	}
 	return out
+}
+
+// valueAttrs are mksh's typeset attributes that change a variable's value
+// when they are set or removed: justify and pad (L, R, Z), integer and
+// unsigned integer (i, U: the value is evaluated as arithmetic), and lower
+// or upper case (l, u). The others (r, x, t, f, p) keep it; n is a
+// reference, checked apart.
+const valueAttrs = "LRZiUlu"
+
+// changesValue returns the first option of a declaration that changes the
+// value of the variables it names, or "".
+func changesValue(args []*syntax.Assign) string {
+	for _, a := range args {
+		if a.Name != nil || a.Value == nil {
+			continue
+		}
+		if v := wordOf(a.Value); !v.Dynamic && (strings.HasPrefix(v.Value, "-") || strings.HasPrefix(v.Value, "+")) &&
+			strings.ContainsAny(v.Value[1:], valueAttrs) {
+			return v.Value
+		}
+	}
+	return ""
 }
 
 // isArithAssign reports the assignment operators inside arithmetic (=, +=, …).

@@ -448,3 +448,52 @@ func TestWrappedDeclarationNamesAreChecked(t *testing.T) {
 		}
 	}
 }
+
+// T3 fix 6, re-review: an attribute that changes a variable's value
+// (typeset -R4 PATH keeps its last 4 characters, xbin, a relative path)
+// sets a code or file variable without assigning it.
+func TestDeclaringAHiddenVariableWithAValueAttributeIsSpecial(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		// The cases of the review.
+		"typeset -R4 PATH; cd /data/local/tmp; ls",
+		"export -L3 PATH",
+		"builtin typeset -u PATH",
+		// Every attribute that changes the value.
+		"typeset -L PATH; ls",
+		"typeset -Z4 PATH; ls",
+		"typeset -l PATH; ls",
+		"typeset -i PATH; ls",
+		"typeset -U PATH; ls",
+		"typeset -i16 LD_PRELOAD; ls",
+		"typeset -xR4 PATH; ls",
+		"typeset +R PATH; ls",
+		// Every declaration and variable.
+		"readonly -u PS4; ls",
+		"f() { local -R4 PATH; ls; }",
+		"integer PATH; ls",
+		"command export -l ENV",
+		"typeset -R4 CLASSPATH FPATH",
+		"sh -c 'typeset -R4 PATH; ls'",
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+	// Attributes that keep the value do not change.
+	for _, k := range []struct {
+		line  string
+		level Level
+	}{
+		{"typeset -x PATH; ls", Green},
+		{"export PATH; ls", Green},
+		{"typeset -r PATH; ls", Green},
+		{"typeset -R4 FOO; echo $FOO", Green},
+	} {
+		r := c.Classify(sh(k.line))
+		if r.Level != k.level || r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want %v not special", k.line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.level)
+		}
+	}
+}
