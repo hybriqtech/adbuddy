@@ -1,6 +1,6 @@
-# Pendientes para los planes de M3 y M5
+# Pendientes para planes futuros (M3, M5, M6 y v1.1+)
 
-Notas que hay que incorporar cuando se escriban esos planes (pedidas el 2026-09-29).
+Notas que hay que incorporar cuando se escriban esos planes (desde el 2026-09-29).
 
 ## M3 · Chat: daemon con PTY
 

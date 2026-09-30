@@ -4,7 +4,7 @@
 
 **Objetivo:** que el móvil vea y controle lo que hace el agente (spec §13, M2). El host instala la app con `adb install` y pide el consentimiento en ella. Después concede `WRITE_SECURE_SETTINGS`, activa la accesibilidad sin quitar otros servicios y abre un canal WebSocket por `adb reverse` autenticado con un token. Por ese canal llegan al móvil el diario en directo y las confirmaciones 🔴 (notificación con desbloqueo obligatorio). Desde el móvil se puede Pausar el agente o Cortar el acceso. Además, `adbuddy doctor` diagnostica todo el conjunto y dice cómo arreglar cada problema, y la app y el host comprueban que sus versiones son compatibles. Las dos ideas vienen de revisar ARTEMIS de Google, igual que las reglas nuevas de `AGENTS.md`.
 
-**Arquitectura:** sobre M1c (rama `m1c`, conexión manual por IP:puerto; HEAD eea4ec4).
+**Arquitectura:** sobre M1c (rama `m1c`, conexión manual por IP:puerto; HEAD d7acb35 y sus arreglos de documentación).
 - **Host.** Dos paquetes nuevos:
   - `bridge`: el servidor WS en `127.0.0.1:<chat_port>`, el protocolo v1 de §5.3, el búfer de 2000 eventos, la reanudación con `lastSeq` o `snapshot`, y un `Confirmer` que pregunta al móvil y, si la app no está conectada, a la terminal.
   - `phoneapp`: instalar, consentimiento, permisos, túnel y entrega del token.
@@ -53,6 +53,11 @@
 
 - **Todas las de M1a y M1b siguen vigentes:** módulo `host/`, Go 1.27, CLI con sobre JSON y códigos 0/1/2/75/78/130, LF, TDD, commits con `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`, identidad local hybriqtech, sin push y sin subagentes.
 - **Rama `m2`**, creada desde `m1c`.
+- **Mensajes literales del shim**, que el agente reconoce por `AGENTS.md` y M2 no puede cambiar:
+  - `ADBuddy host not running (run: adbuddy serve)`;
+  - `Denied by user: <título>` (con ` (confirmation expired)` si caducó), cuando alguien, en la terminal o ahora en el móvil, dijo que no o no contestó a tiempo;
+  - `Denied: nobody could confirm: <título>`, cuando nadie pudo responder: sin terminal, con `--confirm deny` o sin la app conectada;
+  - `Blocked by ADBuddy: <motivo>`.
 - **Dependencias nuevas con versión exacta:**
   - en el host, solo `github.com/coder/websocket` v1.8.15;
   - en la app, solo las de `android/gradle/libs.versions.toml`.
