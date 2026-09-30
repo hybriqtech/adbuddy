@@ -188,6 +188,9 @@ func SelectUndo(entries []journal.Entry, target, session, identity string) (plan
 // undo runs inverses in reverse order without asking again (spec §4.4). It
 // holds the changes lock, so two undos (or an undo and a change) never race.
 func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
+	if d.o.Paused() {
+		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
+	}
 	d.changes.Lock()
 	defer d.changes.Unlock()
 	entries, _, err := d.o.Journal.Load()

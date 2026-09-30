@@ -61,7 +61,10 @@ type Options struct {
 	// readUndoneLog), outside the agent's folder, so deleting journal lines
 	// cannot make undo run an inverse twice. Empty in tests that do not need it.
 	UndoneLog string
-	Now       func() time.Time
+	// Paused reports whether the person paused the agent from the phone:
+	// then every command and undo is refused (spec §4.6). Nil: never paused.
+	Paused func() bool
+	Now    func() time.Time
 }
 
 // Daemon handles IPC requests.
@@ -83,6 +86,9 @@ func New(o Options) *Daemon {
 	}
 	if o.OnWarning == nil {
 		o.OnWarning = func(string) {}
+	}
+	if o.Paused == nil {
+		o.Paused = func() bool { return false }
 	}
 	if o.ConfirmTimeout <= 0 {
 		o.ConfirmTimeout = 2 * time.Minute
@@ -119,6 +125,9 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		e.Source = journal.SourceAgent
 	}
 
+	if d.o.Paused() {
+		return d.block(e, s, PausedMessage)
+	}
 	g, args := classify.SplitGlobal(req.Argv)
 	if len(g.Forbidden) > 0 {
 		return d.block(e, s, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed: ADBuddy only talks to the active phone through its own adb server")
@@ -173,6 +182,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		decision := d.o.Confirmer.Confirm(cctx, confirm.Request{
 			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: classify.DisplayCommand(req.Argv),
 			ExpiresAt: now.Add(d.o.ConfirmTimeout), Special: res.Special,
+			Key: e.Rule + "\x00" + strings.Join(req.Argv, "\x00"),
 		})
 		cancel()
 		if decision != confirm.Allow {
@@ -234,6 +244,9 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	d.record(e)
 	return ipc.Exit{Code: code}
 }
+
+// PausedMessage explains why nothing runs while paused.
+const PausedMessage = "paused from the phone: nothing runs until you resume it there"
 
 // block refuses a command without running it.
 func (d *Daemon) block(e journal.Entry, s Stream, reason string) ipc.Exit {
