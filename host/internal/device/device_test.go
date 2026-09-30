@@ -259,3 +259,20 @@ func TestEnsureNoTCPPortEdgeCases(t *testing.T) {
 		}
 	}
 }
+
+// TCPPort only reads the property: it never runs `adb usb`.
+func TestTCPPort(t *testing.T) {
+	for raw, want := range map[string]string{"": "", "0": "", "5555": "5555", " 5555\r": "5555"} {
+		f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": raw + "\n", "usb": ""}}
+		port, err := TCPPort(context.Background(), f)
+		if err != nil || port != want {
+			t.Errorf("%q: port %q err %v", raw, port, err)
+		}
+		if strings.Join(f.calls, "|") != "shell getprop service.adb.tcp.port" {
+			t.Errorf("%q: calls %q", raw, f.calls)
+		}
+	}
+	if _, err := TCPPort(context.Background(), &fakeADB{}); err == nil {
+		t.Fatal("an unreadable property must be an error")
+	}
+}

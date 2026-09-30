@@ -3,12 +3,14 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
+	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
 
@@ -143,8 +145,33 @@ func TestApplyInvariant(t *testing.T) {
 		if errorCode(err) != "DEVICE_PORT_OPEN" || !strings.Contains(AsError(err).Fix, "adbuddy serve") {
 			t.Fatalf("%v", err)
 		}
-		if got := loggedCalls(t, log); got[len(got)-2] != getprop {
-			t.Fatalf("port not checked again: %q", got)
+		// The second check only reads the port: adbd is not restarted again.
+		got := loggedCalls(t, log)
+		usb := 0
+		for _, c := range got {
+			if c == "usb" {
+				usb++
+			}
+		}
+		if got[len(got)-1] != getprop || usb != 1 {
+			t.Fatalf("calls %q: want one `adb usb` and the port checked again", got)
+		}
+	})
+
+	// An `adb devices` that hangs while adbd drops is cut at usbDropWait.
+	t.Run("adb hangs", func(t *testing.T) {
+		r, _ := invariantRunner(t,
+			testutil.FakeRule{Match: tcpPortRule, Stdout: "5555\n", Times: 1},
+			testutil.FakeRule{Match: tcpPortRule, Stdout: "\n"},
+			testutil.FakeRule{Match: "^devices$", Stdout: phoneGone, SleepMs: 20000, Times: 1},
+			testutil.FakeRule{Match: "^devices$", Stdout: phoneOnline},
+		)
+		start := time.Now()
+		if err := applyInvariant(context.Background(), r, time.Second, &strings.Builder{}, "adbuddy serve"); err != nil {
+			t.Fatal(err)
+		}
+		if d := time.Since(start); d > 10*time.Second {
+			t.Fatalf("waited %s for a hanging adb", d)
 		}
 	})
 
@@ -184,5 +211,82 @@ func TestServeInterruptedDuringTheInvariant(t *testing.T) {
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("serve did not stop")
+	}
+}
+
+// guidCases are a phone saved by its mDNS name that adb lists under another
+// serial: its address, after a fallback `adb connect`, or its name renamed
+// by mDNS after a clash.
+var guidCases = map[string]struct {
+	rules  []testutil.FakeRule
+	active string
+}{
+	"address": {rules: []testutil.FakeRule{
+		{Match: "^devices$", Stdout: "List of devices attached\n192.0.2.10:41000\tdevice\n"},
+		{Match: "^mdns services$", Stdout: "List of discovered mdns services\nadb-AAA-bbb\t_adb-tls-connect._tcp\t192.0.2.10:41000\n"},
+		{Match: `^connect 192\.0\.2\.10:41000$`, Stdout: "already connected to 192.0.2.10:41000\n"},
+	}, active: "192.0.2.10:41000"},
+	"renamed": {rules: []testutil.FakeRule{
+		{Match: "^devices$", Stdout: "List of devices attached\nadb-AAA-bbb (2)._adb-tls-connect._tcp\tdevice\n"},
+	}, active: "adb-AAA-bbb (2)._adb-tls-connect._tcp"},
+}
+
+// phoneCallsUse reports whether every call to the phone (shell, usb) went
+// to serial.
+func phoneCallsUse(t *testing.T, log, serial string) bool {
+	t.Helper()
+	calls, err := testutil.ReadLog(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, c := range calls {
+		if len(c.Args) > 0 && (c.Args[0] == "shell" || c.Args[0] == "usb") {
+			return false // no -s
+		}
+		if len(c.Args) >= 3 && c.Args[0] == "-s" {
+			if c.Args[1] != serial {
+				return false
+			}
+			n++
+		}
+	}
+	return n > 0
+}
+
+// serve finds the phone saved by its mDNS name under the serial adb lists
+// it with, and uses that serial for the session.
+func TestServeFindsThePhoneByItsGuid(t *testing.T) {
+	setVar(t, &deviceWait, 3*time.Second)
+	setVar(t, &autoConnectWait, 0)
+	for name, c := range guidCases {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			cfg := config.Default()
+			cfg.Serial = phoneSerial
+			if err := config.Save(filepath.Join(os.Getenv("ADBUDDY_CONFIG_DIR"), "config.toml"), cfg); err != nil {
+				t.Fatal(err)
+			}
+			_, log := invariantRunner(t, append(c.rules, testutil.FakeRule{Match: tcpPortRule, Stdout: "\n"})...)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var out, errb syncBuffer
+			cancelWhen(t, &errb, "ADBuddy is serving", cancel)
+			done := make(chan int, 1)
+			go func() {
+				done <- mainContext(ctx, []string{"serve", "--adb", fakeADB(t), "--workspace", filepath.Join(t.TempDir(), "ws"), "--confirm", "deny"}, strings.NewReader(""), &out, &errb)
+			}()
+			select {
+			case code := <-done:
+				if code != 0 || !strings.Contains(errb.String(), "ADBuddy is serving "+c.active+" ") {
+					t.Fatalf("exit %d, stderr %q", code, errb.String())
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("serve did not stop")
+			}
+			if !phoneCallsUse(t, log, c.active) {
+				t.Fatalf("calls to the phone not sent to %s: %q", c.active, loggedCalls(t, log))
+			}
+		})
 	}
 }

@@ -214,18 +214,25 @@ func WriteJSON(dir string, p Profile) error {
 	return os.Rename(tmp.Name(), filepath.Join(dir, "device.json"))
 }
 
+// TCPPort returns the TCP port adbd listens on, or "" when it listens on
+// none (service.adb.tcp.port empty or 0). It only reads.
+func TCPPort(ctx context.Context, a ADB) (string, error) {
+	port, err := shell(ctx, a, "getprop service.adb.tcp.port")
+	if err != nil || port == "0" {
+		return "", err
+	}
+	return port, nil
+}
+
 // EnsureNoTCPPort applies the host invariant (spec §3.3): if adbd listens on
 // a TCP port (service.adb.tcp.port neither empty nor 0) and remote mode is
 // not on, `adb usb` closes it. adbd restarts, so the caller must wait for
 // the phone again when this returns true. ADBuddy has no remote mode yet,
 // so the port is always closed.
 func EnsureNoTCPPort(ctx context.Context, a ADB) (bool, error) {
-	port, err := shell(ctx, a, "getprop service.adb.tcp.port")
-	if err != nil {
+	port, err := TCPPort(ctx, a)
+	if err != nil || port == "" {
 		return false, err
-	}
-	if port == "" || port == "0" {
-		return false, nil
 	}
 	var out, errb bytes.Buffer
 	code, err := a.Run(ctx, "", []string{"usb"}, nil, &out, &errb)

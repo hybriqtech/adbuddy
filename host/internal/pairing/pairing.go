@@ -108,11 +108,31 @@ func matchName(want, got string) bool {
 	return true
 }
 
-// isGuidSerial reports whether serial is the adb serial of the phone guid
-// connected through mDNS.
-func isGuidSerial(guid, serial string) bool {
+// IsGuidSerial reports whether serial is the adb serial of the phone guid
+// connected through mDNS ("<guid>._adb-tls-connect._tcp", or "<guid> (N)…"
+// when mDNS renamed it after a clash).
+func IsGuidSerial(guid, serial string) bool {
 	inst, ok := strings.CutSuffix(serial, "."+ConnectType)
 	return ok && matchName(guid, inst)
+}
+
+var guidOnlyRe = regexp.MustCompile(`^adb-[A-Za-z0-9._-]{1,128}$`)
+
+// GuidOf returns the phone's guid when serial is its mDNS serial (see
+// IsGuidSerial), so the phone can be found again under whatever serial adb
+// lists it with.
+func GuidOf(serial string) (string, bool) {
+	inst, ok := strings.CutSuffix(serial, "."+ConnectType)
+	if !ok {
+		return "", false
+	}
+	if i := strings.LastIndex(inst, " ("); i >= 0 && matchName(inst[:i], inst) {
+		inst = inst[:i]
+	}
+	if !guidOnlyRe.MatchString(inst) {
+		return "", false
+	}
+	return inst, true
 }
 
 // run runs adb and returns its stdout. If ctx ended meanwhile, it returns
@@ -393,7 +413,7 @@ func Connect(ctx context.Context, a ADB, guid string, timeout, autoConnectWait, 
 			return false, err
 		}
 		for _, d := range ds {
-			if d.State == "device" && (isGuidSerial(guid, d.Serial) || connectedTo != "" && d.Serial == connectedTo) {
+			if d.State == "device" && (IsGuidSerial(guid, d.Serial) || connectedTo != "" && d.Serial == connectedTo) {
 				serial = d.Serial
 				return true, nil
 			}

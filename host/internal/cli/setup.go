@@ -152,22 +152,23 @@ environment. Run it again at any time; it skips what is already done.`,
 					return err
 				}
 
-				// 2. A phone paired before comes back on its own.
-				serial := ""
+				// 2. A phone paired before comes back on its own, maybe under
+				// another serial than the saved one (see findPhone).
+				serial, guid := "", ""
 				if e.cfg.Serial != "" {
 					say("Looking for your phone…\n")
-					s, err := runner.WaitSerial(ctx, e.cfg.Serial, knownPhoneWait)
+					s, err := findPhone(ctx, runner, e.cfg.Serial, knownPhoneWait)
 					if ctx.Err() != nil {
 						return ctx.Err() // Ctrl+C: no guide nor QR code
 					}
 					if err == nil {
 						serial = s
+						guid, _ = pairing.GuidOf(e.cfg.Serial) // keeps the saved name
 						say("Found it: already paired.\n")
 					}
 				}
 
 				// 3-4. Guide and pairing.
-				guid := ""
 				if serial == "" {
 					guid, err = pair(ctx, app, runner, useCode, ask, say)
 					if err != nil {
@@ -205,10 +206,12 @@ environment. Run it again at any time; it skips what is already done.`,
 				if saved == "" {
 					say("Note: not saving the serial %s in the configuration: it is an address that changes when wireless debugging restarts. Pair again with `adbuddy setup` to save the phone's name.\n", classify.Printable(serial))
 				}
-				samePhone := e.cfg.Serial != "" && (e.cfg.Serial == saved || e.cfg.Serial == serial)
+				// The environment chosen before is kept for the same phone, and
+				// when config.toml does not say which phone it was for.
+				samePhone := e.cfg.Serial == "" || e.cfg.Serial == saved || e.cfg.Serial == serial
 				ws := wsDir
 				if ws == "" && samePhone {
-					ws = e.cfg.Workspace // the environment chosen before
+					ws = e.cfg.Workspace
 				}
 				if ws == "" {
 					ws = filepath.Join(e.home, "ADBuddy", prof.Name)
@@ -436,15 +439,38 @@ func startServer(ctx context.Context, runner adb.Runner) error {
 	return nil
 }
 
-// absExecutable makes an --adb path absolute; a bare name ("adb") is looked
-// up in PATH first.
+// absExecutable makes an --adb path absolute; a bare name ("adb") must be
+// in PATH.
 func absExecutable(p string) (string, error) {
 	if !strings.ContainsAny(p, `/\`) {
-		if found, err := exec.LookPath(p); err == nil {
-			p = found
+		found, err := exec.LookPath(p)
+		if err != nil {
+			name := classify.Printable(p)
+			return "", fmt.Errorf("%s not found in PATH (pass its path, e.g. ./%s)", name, name)
 		}
+		p = found
 	}
 	return filepath.Abs(p)
+}
+
+// findPhone waits for the phone saved as serial and returns the serial adb
+// lists it with now. A phone saved by its mDNS name is looked up by its
+// guid: adb may list it renamed by mDNS ("<guid> (2)._adb-tls-connect._tcp")
+// or, after `adb connect`, as its address; pairing.Connect accepts both and
+// runs `adb connect` itself when the phone does not show up. Any other
+// serial (or "" for the only phone) is waited for as is. A phone that does
+// not show up in time is adb.ErrNoDevice.
+func findPhone(ctx context.Context, runner adb.Runner, serial string, wait time.Duration) (string, error) {
+	runner.Serial = "" // host commands: devices, mdns, connect
+	guid, ok := pairing.GuidOf(serial)
+	if !ok {
+		return runner.WaitSerial(ctx, serial, wait)
+	}
+	s, err := pairing.Connect(ctx, runner, guid, wait, autoConnectWait, time.Second)
+	if errors.Is(err, pairing.ErrTimeout) {
+		return "", adb.ErrNoDevice
+	}
+	return s, err
 }
 
 func fileExists(path string) bool {

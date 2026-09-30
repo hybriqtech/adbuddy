@@ -551,3 +551,63 @@ func TestSetupKeepsTheConfiguredAgent(t *testing.T) {
 		t.Fatalf("no note: %q", errOut)
 	}
 }
+
+// Running setup again finds the phone saved by its mDNS name under the
+// serial adb lists it with, without pairing again, and keeps the name.
+func TestSetupFindsTheKnownPhoneByItsGuid(t *testing.T) {
+	setVar(t, &autoConnectWait, 0)
+	for name, c := range guidCases {
+		t.Run(name, func(t *testing.T) {
+			e := newSetupEnv(t, append(append([]testutil.FakeRule{}, c.rules...), phoneRules()...))
+			cfg := config.Default()
+			cfg.Serial = phoneSerial
+			if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
+				t.Fatal(err)
+			}
+			_, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+			if code != 0 || !strings.Contains(errOut, "already paired") || strings.Contains(errOut, "Prepare your phone") {
+				t.Fatalf("exit %d stderr %q", code, errOut)
+			}
+			if got := loadSetupConfig(t, e).Serial; got != phoneSerial {
+				t.Fatalf("saved serial %q", got)
+			}
+			if !phoneCallsUse(t, e.log, c.active) {
+				t.Fatalf("calls to the phone not sent to %s: %q", c.active, loggedCalls(t, e.log))
+			}
+		})
+	}
+}
+
+// An environment in config.toml without a serial (the phone was known only
+// by its address) is kept when setup runs again.
+func TestSetupKeepsTheWorkspaceWithoutASerial(t *testing.T) {
+	e := newSetupEnv(t, phoneRules())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	custom := filepath.Join(t.TempDir(), "custom")
+	cfg := config.Default()
+	cfg.Workspace = custom
+	if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t)); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if got := loadSetupConfig(t, e).Workspace; got != custom {
+		t.Fatalf("workspace moved to %q", got)
+	}
+}
+
+// --adb with a bare name that is not in PATH is a usage error, not a path
+// in the current folder.
+func TestSetupADBNotInPath(t *testing.T) {
+	e := newSetupEnv(t, phoneRules())
+	_, errOut, code := runWithInput(t, "", "setup", "--adb", "no-such-adb", "--workspace", e.ws)
+	if code != ExitUsage || !strings.Contains(errOut, "not found in PATH") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if exists(filepath.Join(e.cfgDir, "config.toml")) {
+		t.Fatal("config saved")
+	}
+}

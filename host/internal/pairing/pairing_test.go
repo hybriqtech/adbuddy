@@ -430,3 +430,30 @@ func TestQRHasAFourModuleQuietZone(t *testing.T) {
 		}
 	}
 }
+
+// GuidOf reads the phone's guid back from its mDNS serial, also when mDNS
+// renamed it after a clash; anything else has no guid.
+func TestGuidOf(t *testing.T) {
+	for serial, want := range map[string]string{
+		"adb-AAA-bbb._adb-tls-connect._tcp":         "adb-AAA-bbb",
+		"adb-AAA-bbb (2)._adb-tls-connect._tcp":     "adb-AAA-bbb",
+		"adb-A.B_c-d._adb-tls-connect._tcp":         "adb-A.B_c-d",
+		"192.0.2.10:41000":                          "",
+		"R58M123ABC":                                "",
+		"adb-AAA-bbb._adb-tls-pairing._tcp":         "",
+		"adb-AAA-bbb._adb-tls-connect._tcp.evil":    "",
+		"xadb-AAA-bbb._adb-tls-connect._tcp":        "",
+		"adb-AAA bbb._adb-tls-connect._tcp":         "",
+		"adb-AAA-bbb (x)._adb-tls-connect._tcp":     "",
+		"adb-AAA-bbb (12345)._adb-tls-connect._tcp": "",
+		"._adb-tls-connect._tcp":                    "",
+	} {
+		got, ok := GuidOf(serial)
+		if got != want || ok != (want != "") {
+			t.Errorf("GuidOf(%q) = %q, %v; want %q", serial, got, ok, want)
+		}
+		if ok && !IsGuidSerial(got, serial) {
+			t.Errorf("IsGuidSerial(%q, %q) = false", got, serial)
+		}
+	}
+}

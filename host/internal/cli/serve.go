@@ -95,7 +95,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			defer stop()
 			runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
 			fmt.Fprintf(app.Stderr, "Waiting for the phone on ADBuddy's adb server (port %d)…\n", e.cfg.ADBServerPort)
-			active, err := runner.WaitSerial(ctx, serial, deviceWait)
+			active, err := findPhone(ctx, runner, serial, deviceWait)
 			switch {
 			case err != nil && ctx.Err() != nil:
 				return Interrupted()

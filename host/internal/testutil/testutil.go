@@ -38,7 +38,8 @@ type FakeRule struct {
 	Stderr    string `json:"stderr,omitempty"`
 	Exit      int    `json:"exit,omitempty"`
 	EchoStdin bool   `json:"echoStdin,omitempty"`
-	Times     int    `json:"times,omitempty"` // answers only this many calls (0 = all), then the next matching rule answers
+	Times     int    `json:"times,omitempty"`   // answers only this many calls (0 = all), then the next matching rule answers
+	SleepMs   int    `json:"sleepMs,omitempty"` // waits this long before answering (an adb that hangs)
 }
 
 // WriteScript writes the fake adb script and returns its path.

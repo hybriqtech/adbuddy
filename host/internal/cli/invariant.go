@@ -43,11 +43,15 @@ func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, 
 		return TransientError("DEVICE_NOT_FOUND", "the phone did not come back after `adb usb`",
 			"Check that wireless debugging is still on, then run `"+command+"` again.")
 	}
-	restarted, err = device.EnsureNoTCPPort(ctx, runner)
+	// Only read the port now: another `adb usb` would restart adbd again.
+	port, err := device.TCPPort(ctx, runner)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
 	}
-	if restarted {
+	if port != "" {
 		return NewError("DEVICE_PORT_OPEN", "adb's network port on the phone is still open after `adb usb`",
 			"Restart the phone (that closes a port opened with `adb tcpip`), turn wireless debugging on again and run `"+command+"` again.")
 	}
@@ -60,7 +64,10 @@ func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, 
 func waitDropped(ctx context.Context, runner adb.Runner, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		online, err := runner.Online(ctx)
+		// A hanging `adb devices` is cut at the deadline too.
+		octx, cancel := context.WithDeadline(ctx, deadline)
+		online, err := runner.Online(octx)
+		cancel()
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
