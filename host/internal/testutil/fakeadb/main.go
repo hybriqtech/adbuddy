@@ -8,6 +8,9 @@
 // calls, then it is skipped (successive answers: list the rules in order).
 // Its count lives in a file next to the script. A rule with "sleepMs" waits
 // that long after logging the call, before answering (an adb that hangs).
+// A rule with "saveStdin" keeps the stdin (a JSON object) under that name,
+// next to the script; {{name.field}} in a later "stdout" is replaced by that
+// field (empty until something was saved).
 // Without a matching rule it prints nothing and exits 0.
 package main
 
@@ -30,6 +33,7 @@ type rule struct {
 	EchoStdin bool   `json:"echoStdin"`
 	Times     int    `json:"times"`
 	SleepMs   int    `json:"sleepMs"`
+	SaveStdin string `json:"saveStdin"`
 }
 
 func main() {
@@ -65,8 +69,15 @@ func main() {
 	}
 
 	var stdin []byte
-	if r.EchoStdin {
+	if r.EchoStdin || r.SaveStdin != "" {
 		stdin, _ = io.ReadAll(os.Stdin)
+	}
+	script := os.Getenv("FAKEADB_SCRIPT")
+	if r.SaveStdin != "" {
+		if err := os.WriteFile(script+".saved."+r.SaveStdin, stdin, 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, "fakeadb:", err)
+			os.Exit(99)
+		}
 	}
 	if path := os.Getenv("FAKEADB_LOG"); path != "" {
 		cwd, _ := os.Getwd()
@@ -78,12 +89,32 @@ func main() {
 		}
 	}
 	time.Sleep(time.Duration(r.SleepMs) * time.Millisecond)
-	os.Stdout.WriteString(r.Stdout)
+	os.Stdout.WriteString(fill(script, r.Stdout))
 	if r.EchoStdin {
 		os.Stdout.Write(stdin)
 	}
 	os.Stderr.WriteString(r.Stderr)
 	os.Exit(r.Exit)
+}
+
+// savedField matches {{name.field}} in an answer.
+var savedField = regexp.MustCompile(`\{\{([A-Za-z0-9_-]+)\.([A-Za-z0-9_]+)\}\}`)
+
+// fill replaces {{name.field}} in out with that field of the stdin saved as
+// name.
+func fill(script, out string) string {
+	return savedField.ReplaceAllStringFunc(out, func(m string) string {
+		g := savedField.FindStringSubmatch(m)
+		data, _ := os.ReadFile(script + ".saved." + g[1])
+		var fields map[string]any
+		if json.Unmarshal(data, &fields) != nil {
+			return ""
+		}
+		if v, ok := fields[g[2]]; ok {
+			return fmt.Sprint(v)
+		}
+		return ""
+	})
 }
 
 // use counts one more answer of rule i and reports whether it still had

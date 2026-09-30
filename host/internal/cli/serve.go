@@ -157,10 +157,19 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				return UsageError("--confirm must be auto, terminal or deny")
 			}
 
+			agentName := e.cfg.Agent
+			if agentName == "" {
+				agentName = agent.Known[0]
+			}
 			var outMu sync.Mutex
 			session := journal.NewID("s_", time.Now())
+			link, err := startPhoneLink(ctx, app, &e, runner, session, agentName, confirmer)
+			if err != nil {
+				return err
+			}
 			d := daemon.New(daemon.Options{
-				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: confirmer,
+				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: link.Confirmer(),
+				Paused: link.Paused,
 				Serial: active, Identity: identity, Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
 				UndoneLog: undoneLogPath(e.dirs.Data, workspace.JournalDir(ws)),
 				OnEntry: func(j journal.Entry) {
@@ -171,6 +180,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 					} else {
 						fmt.Fprintln(app.Stdout, formatEntry(j))
 					}
+					link.Entry(j)
 				},
 				OnWarning: func(w string) { fmt.Fprintln(app.Stderr, "⚠ "+w) },
 			})
@@ -182,10 +192,6 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			}
 			if err != nil {
 				return NewError("SOCKET_FAILED", err.Error(), "")
-			}
-			agentName := e.cfg.Agent
-			if agentName == "" {
-				agentName = agent.Known[0]
 			}
 			fmt.Fprintf(app.Stderr, "ADBuddy is serving %s (session %s).\nJournal: %s\nIn another terminal run: adbuddy run %s\nPress Ctrl+C to stop.\n\n",
 				active, session, workspace.JournalDir(ws), agentName)

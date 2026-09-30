@@ -40,6 +40,10 @@ type FakeRule struct {
 	EchoStdin bool   `json:"echoStdin,omitempty"`
 	Times     int    `json:"times,omitempty"`   // answers only this many calls (0 = all), then the next matching rule answers
 	SleepMs   int    `json:"sleepMs,omitempty"` // waits this long before answering (an adb that hangs)
+	// SaveStdin keeps the call's stdin (a JSON object) under this name: a
+	// later answer's Stdout may then say {{name.field}} to repeat a field,
+	// as the app's ping repeats the nonce of the last handshake.
+	SaveStdin string `json:"saveStdin,omitempty"`
 }
 
 // WriteScript writes the fake adb script and returns its path.
@@ -49,8 +53,10 @@ func WriteScript(dir string, rules ...FakeRule) (string, error) {
 		return "", err
 	}
 	p := filepath.Join(dir, "fakeadb.json")
-	// A new script starts its "times" counts again.
+	// A new script starts its "times" counts and saved stdins again.
 	old, _ := filepath.Glob(p + ".count*")
+	saved, _ := filepath.Glob(p + ".saved.*")
+	old = append(old, saved...)
 	for _, c := range old {
 		os.Remove(c)
 	}

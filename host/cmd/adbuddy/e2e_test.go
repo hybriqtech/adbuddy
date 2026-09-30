@@ -69,6 +69,13 @@ type harness struct {
 
 func start(t *testing.T) *harness {
 	t.Helper()
+	return startWith(t, "")
+}
+
+// startWith starts serve with extra fake adb rules first and, when config is
+// not empty, that config.toml.
+func startWith(t *testing.T, config string, extra ...testutil.FakeRule) *harness {
+	t.Helper()
 	data, err := os.MkdirTemp("", "e2d")
 	if err != nil {
 		t.Fatal(err)
@@ -76,14 +83,21 @@ func start(t *testing.T) *harness {
 	t.Cleanup(func() { os.RemoveAll(data) })
 	tmp := t.TempDir()
 	h := &harness{t: t, data: data, ws: filepath.Join(tmp, "ws"), logPath: filepath.Join(tmp, "adb.log"), serveErr: &syncBuffer{}, serveOut: &syncBuffer{}}
-	script, err := testutil.WriteScript(tmp,
+	rules := append(extra,
 		testutil.FakeRule{Match: "^devices$", Stdout: "List of devices attached\ndev1\tdevice\n"},
 		testutil.FakeRule{Match: "^shell getprop ro.product.model$", Stdout: "Pixel 9 Pro XL\n"},
 		testutil.FakeRule{Match: "^shell settings get global window_animation_scale$", Stdout: "1.0\n"},
 		testutil.FakeRule{Match: "^shell cat$", EchoStdin: true},
 	)
+	script, err := testutil.WriteScript(tmp, rules...)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if config != "" {
+		os.MkdirAll(filepath.Join(tmp, "cfg"), 0o700)
+		if err := os.WriteFile(filepath.Join(tmp, "cfg", "config.toml"), []byte(config), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Run from inside an agent session, the inherited ADBUDDY_SOURCE=agent
 	// would make serve refuse to start and ANDROID_SERIAL would leak in.
@@ -210,7 +224,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	calls := h.adbCalls()
-	want := []string{"devices", "shell getprop service.adb.tcp.port", "shell getprop ro.product.model", "shell cat", "shell settings get global window_animation_scale", "shell settings put global window_animation_scale 0.5"}
+	want := []string{"devices", "shell getprop service.adb.tcp.port", "shell dumpsys package tech.hybriq.adbuddy", "shell getprop ro.product.model", "shell cat", "shell settings get global window_animation_scale", "shell settings put global window_animation_scale 0.5"}
 	if strings.Join(calls, "|") != strings.Join(want, "|") {
 		t.Fatalf("adb calls:\n%q\nwant\n%q", calls, want)
 	}

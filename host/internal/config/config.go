@@ -28,6 +28,7 @@ type Config struct {
 	ConfirmTimeout Duration `toml:"confirm_timeout"` // how long a 🔴 confirmation waits
 	Rules          string   `toml:"rules"`           // user rules.yaml; empty = <config dir>/rules.yaml
 	Language       string   `toml:"language"`        // "en" or "es"; empty = from LANG
+	ChatPort       int      `toml:"chat_port"`       // port of the app channel on 127.0.0.1 (PC and phone); 0 = chosen on first use
 }
 
 // Duration is a time.Duration written as text ("2m") in TOML.
@@ -93,6 +94,9 @@ func (c Config) Validate() error {
 	}
 	if c.Address != "" && !validAddress(c.Address) {
 		return fmt.Errorf("address must be an IP address and port (e.g. 100.64.0.5:41234), got %q", c.Address)
+	}
+	if c.ChatPort != 0 && (c.ChatPort < 1024 || c.ChatPort > 65535) {
+		return fmt.Errorf("chat_port must be between 1024 and 65535, got %d", c.ChatPort)
 	}
 	switch c.Language {
 	case "", "en", "es":

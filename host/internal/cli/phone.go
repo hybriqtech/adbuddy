@@ -1,0 +1,207 @@
+package cli
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math/big"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/bridge"
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/journal"
+	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
+)
+
+// tunnelCheck is how often serve checks that the chat tunnel is still in
+// place: adb drops the reverse when the phone reconnects.
+var tunnelCheck = 15 * time.Second
+
+// keptEntries is how many journal entries a snapshot carries.
+const keptEntries = 50
+
+// phoneLink connects serve with the phone app (spec §5): the bridge server,
+// confirmations on the phone and the pause.
+type phoneLink struct {
+	srv   *bridge.Server // nil when the app is not installed
+	conf  *bridge.Confirmer
+	log   io.Writer
+	agent string
+
+	mu      sync.Mutex
+	paused  bool
+	entries []json.RawMessage
+}
+
+// chatPort returns the configured port of the app channel, choosing and
+// saving one on first use (spec §5.2: fixed, so the reverse never changes).
+func chatPort(e *env) (int, error) {
+	if e.cfg.ChatPort != 0 {
+		return e.cfg.ChatPort, nil
+	}
+	for range 20 {
+		n, err := rand.Int(rand.Reader, big.NewInt(40000))
+		if err != nil {
+			return 0, err
+		}
+		port := 20000 + int(n.Int64())
+		l, err := bridge.Listen(port)
+		if err != nil {
+			continue // in use
+		}
+		l.Close()
+		e.cfg.ChatPort = port
+		if err := config.Save(e.dirs.ConfigFile(), e.cfg); err != nil {
+			return 0, err
+		}
+		return port, nil
+	}
+	return 0, fmt.Errorf("no free port found for the app channel")
+}
+
+// startPhoneLink starts the app channel when the app is installed. Without
+// the app it returns a link that confirms with fallback and never pauses.
+func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
+	l := &phoneLink{log: app.Stderr, agent: agentName}
+	version, err := phoneapp.InstalledVersion(ctx, a)
+	if err != nil {
+		return nil, NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
+	}
+	if version == "" {
+		fmt.Fprintln(app.Stderr, "The ADBuddy app is not on the phone: 🔴 confirmations happen here. Run `adbuddy setup` to install it.")
+		l.conf = bridge.NewConfirmer(noApp{}, fallback)
+		return l, nil
+	}
+	port, err := chatPort(e)
+	if err != nil {
+		return nil, NewError("CHAT_PORT_FAILED", err.Error(), "Set chat_port in "+e.dirs.ConfigFile()+".")
+	}
+	token, err := bridge.NewToken()
+	if err != nil {
+		return nil, NewError("TOKEN_FAILED", err.Error(), "")
+	}
+	listener, err := bridge.Listen(port)
+	if err != nil {
+		return nil, NewError("CHAT_PORT_IN_USE", err.Error(), "Another program uses port "+fmt.Sprint(port)+": change chat_port in "+e.dirs.ConfigFile()+".")
+	}
+	l.srv = bridge.New(bridge.Options{
+		Token: token, Session: session, HostVersion: Version,
+		OnMessage: l.onMessage,
+		Snapshot:  l.snapshot,
+		OnReject: func(h bridge.Hello) {
+			fmt.Fprintf(app.Stderr, "⚠ The ADBuddy app on the phone (%s) is too old for this host: run `adbuddy setup` to update it.\n", classify.Printable(h.AppVersion))
+		},
+		OnConnect: func(on bool) {
+			if on {
+				fmt.Fprintln(app.Stderr, "📱 The phone app is connected: 🔴 confirmations go to the phone.")
+			} else {
+				fmt.Fprintln(app.Stderr, "📱 The phone app disconnected: 🔴 confirmations happen here.")
+			}
+		},
+	})
+	l.conf = bridge.NewConfirmer(l.srv, fallback)
+	go l.srv.Serve(ctx, listener)
+	host, _ := os.Hostname()
+	host = phoneapp.HostName(host)
+	connect := func() error {
+		if err := phoneapp.Tunnel(ctx, a, port); err != nil {
+			return err
+		}
+		return phoneapp.Handshake(ctx, a, token, port, host)
+	}
+	if err := connect(); err != nil {
+		fmt.Fprintf(app.Stderr, "⚠ Could not reach the phone app (%v): 🔴 confirmations happen here until it connects.\n", err)
+	}
+	go func() {
+		t := time.NewTicker(tunnelCheck)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if ok, err := phoneapp.TunnelOpen(ctx, a, port); err == nil && !ok {
+					if err := connect(); err != nil && ctx.Err() == nil {
+						fmt.Fprintf(app.Stderr, "⚠ Could not reopen the phone app's channel: %v\n", err)
+					}
+				}
+			}
+		}
+	}()
+	return l, nil
+}
+
+// noApp is a Publisher with no app behind it.
+type noApp struct{}
+
+func (noApp) Connected() bool           { return false }
+func (noApp) Publish(string, any) error { return nil }
+
+// Confirmer asks on the phone when the app is connected, else fallback.
+func (l *phoneLink) Confirmer() confirm.Confirmer { return l.conf }
+
+// Paused reports whether the person paused the agent from the phone.
+func (l *phoneLink) Paused() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.paused
+}
+
+// Entry sends a journal entry to the app's activity panel.
+func (l *phoneLink) Entry(j journal.Entry) {
+	raw, err := json.Marshal(j)
+	if err != nil {
+		return
+	}
+	l.mu.Lock()
+	l.entries = append(l.entries, raw)
+	if len(l.entries) > keptEntries {
+		l.entries = l.entries[len(l.entries)-keptEntries:]
+	}
+	l.mu.Unlock()
+	if l.srv != nil {
+		_ = l.srv.Publish(bridge.TypeJournalEntry, json.RawMessage(raw))
+	}
+}
+
+func (l *phoneLink) state() bridge.SessionState {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return bridge.SessionState{Agent: l.agent, State: "idle", Paused: l.paused}
+}
+
+func (l *phoneLink) snapshot() bridge.Snapshot {
+	st := l.state()
+	l.mu.Lock()
+	entries := append([]json.RawMessage{}, l.entries...)
+	l.mu.Unlock()
+	return bridge.Snapshot{State: st, Pending: l.conf.Pending(), Journal: entries}
+}
+
+// onMessage handles what the app sends. Everything it carries comes from the
+// phone: only known types with checked payloads do anything.
+func (l *phoneLink) onMessage(m bridge.Message) {
+	switch m.Type {
+	case bridge.TypeConfirmReply:
+		l.conf.Reply(m.Payload)
+	case bridge.TypePause, bridge.TypeResume:
+		l.mu.Lock()
+		l.paused = m.Type == bridge.TypePause
+		l.mu.Unlock()
+		if m.Type == bridge.TypePause {
+			fmt.Fprintln(l.log, "⏸ Paused from the phone: every adb command of the agent is refused until you resume.")
+		} else {
+			fmt.Fprintln(l.log, "▶ Resumed from the phone.")
+		}
+		_ = l.srv.Publish(bridge.TypeSessionState, l.state())
+	default:
+		_ = l.srv.Publish(bridge.TypeNotice, bridge.Notice{Level: "info",
+			Text: "This version of the ADBuddy host does not handle " + classify.Printable(m.Type) + " yet."})
+	}
+}

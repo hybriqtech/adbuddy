@@ -1,0 +1,160 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"net"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/hybriqtech/adbuddy/host/internal/bridge"
+	"github.com/hybriqtech/adbuddy/host/internal/testutil"
+)
+
+// freePort returns a TCP port that was free a moment ago.
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+// phone is a fake phone app speaking the bridge protocol.
+type phone struct {
+	t *testing.T
+	c *websocket.Conn
+}
+
+func (p *phone) send(typ string, payload any) {
+	p.t.Helper()
+	raw, _ := json.Marshal(payload)
+	data, _ := json.Marshal(bridge.Message{V: bridge.ProtocolVersion, Type: typ, TS: time.Now(), Payload: raw})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := p.c.Write(ctx, websocket.MessageText, data); err != nil {
+		p.t.Fatal(err)
+	}
+}
+
+// until reads messages until one of type typ arrives.
+func (p *phone) until(typ string) bridge.Message {
+	p.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for {
+		_, data, err := p.c.Read(ctx)
+		if err != nil {
+			p.t.Fatalf("waiting for %s: %v", typ, err)
+		}
+		var m bridge.Message
+		json.Unmarshal(data, &m)
+		if m.Type == typ {
+			return m
+		}
+	}
+}
+
+// phoneAppRules make the fake adb answer like a phone with the app installed
+// that takes the handshake: ping returns the nonce of the last handshake.
+func phoneAppRules(port string) []testutil.FakeRule {
+	return []testutil.FakeRule{
+		{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n    versionName=0.2.0\n"},
+		{Match: `^reverse tcp:` + port + ` tcp:` + port + `$`},
+		{Match: `^reverse --list$`, Stdout: "dev1 tcp:" + port + " tcp:" + port + "\n"},
+		{Match: `^shell content write --uri content://tech\.hybriq\.adbuddy\.bridge/handshake$`, EchoStdin: true, SaveStdin: "handshake"},
+		{Match: `^shell content call --uri content://tech\.hybriq\.adbuddy\.bridge --method ping$`, Stdout: "Result: Bundle[{ok=true, port=" + port + ", nonce={{handshake.nonce}}}]\n"},
+	}
+}
+
+// connectPhone waits for the handshake, checks that the token never went in
+// a command line and connects a fake app with it.
+func connectPhone(t *testing.T, h *harness, port string) *phone {
+	t.Helper()
+	// The token reached the app on stdin, never in a command line.
+	var token string
+	waitFor(t, func() bool {
+		calls, _ := testutil.ReadLog(h.logPath)
+		for _, c := range calls {
+			if strings.Contains(c.Joined(), "content write") {
+				var hs struct {
+					Token string
+					Port  int
+				}
+				json.Unmarshal([]byte(c.Stdin), &hs)
+				token = hs.Token
+			}
+		}
+		return token != ""
+	}, h.serveErr)
+	for _, c := range h.adbCalls() {
+		if strings.Contains(c, token) {
+			t.Fatalf("the token is in a command line: %q", c)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, "ws://127.0.0.1:"+port+"/v1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+	p := &phone{t: t, c: c}
+	p.send(bridge.TypeHello, bridge.Hello{Protocol: bridge.ProtocolVersion, Token: token, AppVersion: "0.2.0"})
+	p.until(bridge.TypeWelcome)
+	waitFor(t, func() bool { return strings.Contains(h.serveErr.String(), "phone app is connected") }, h.serveErr)
+	return p
+}
+
+func TestPhoneAppConfirmsAndPauses(t *testing.T) {
+	port := strconv.Itoa(freePort(t))
+	h := startWith(t, "chat_port = "+port+"\n",
+		append(phoneAppRules(port), testutil.FakeRule{Match: `^shell reboot$`})...)
+	p := connectPhone(t, h, port)
+
+	// A 🔴 command asks on the phone; allowing it runs it.
+	done := make(chan int)
+	go func() {
+		_, _, code := h.adb("", "shell", "reboot")
+		done <- code
+	}()
+	m := p.until(bridge.TypeConfirmReq)
+	var req bridge.ConfirmRequest
+	json.Unmarshal(m.Payload, &req)
+	if req.RawCommand != "adb shell reboot" || !req.Special || req.AllowSession {
+		t.Fatalf("request %+v", req)
+	}
+	p.send(bridge.TypeConfirmReply, bridge.ConfirmReply{ID: req.ID, Decision: "allow"})
+	if code := <-done; code != 0 {
+		t.Fatalf("allowed command exit %d", code)
+	}
+	for {
+		m = p.until(bridge.TypeJournalEntry)
+		var e struct{ ID, Status string }
+		json.Unmarshal(m.Payload, &e)
+		if e.ID == req.ID && e.Status == "ok" {
+			break
+		}
+	}
+	if strings.Contains(h.serveErr.String(), "Code: ") {
+		t.Fatal("the terminal asked too")
+	}
+
+	// Pause refuses everything until resume.
+	p.send(bridge.TypePause, struct{}{})
+	p.until(bridge.TypeSessionState)
+	if _, errOut, code := h.adb("", "shell", "getprop", "ro.product.model"); code != 126 || !strings.Contains(errOut, "paused") {
+		t.Fatalf("paused: %d %q", code, errOut)
+	}
+	p.send(bridge.TypeResume, struct{}{})
+	p.until(bridge.TypeSessionState)
+	if out, _, code := h.adb("", "shell", "getprop", "ro.product.model"); code != 0 || out != "Pixel 9 Pro XL\n" {
+		t.Fatalf("resumed: %d %q", code, out)
+	}
+}
