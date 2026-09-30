@@ -602,19 +602,28 @@ func (t *varTable) testFindings(ws []Word) []Finding {
 	return []Finding{arithFinding(ws[0].Value + " " + strings.Join(bad, " "))}
 }
 
+// testUnaryOps are the unary file and string operators of test and [.
+var testUnaryOps = map[string]bool{
+	"-b": true, "-c": true, "-d": true, "-e": true, "-f": true, "-g": true, "-G": true, "-h": true, "-k": true,
+	"-L": true, "-n": true, "-O": true, "-p": true, "-r": true, "-s": true, "-S": true, "-t": true, "-u": true,
+	"-w": true, "-x": true, "-z": true,
+}
+
 // testOperatorWord reports a static operator of test or [ that mksh cannot
 // evaluate as an arithmetic operand: =, !=, !, ( and ) are syntax errors
-// there. -a and -o are not: as operands they read the variables a and o,
-// so they only count when the script and its enclosing shells never set
-// those variables (the value then comes from adbd's environment).
+// there. -a, -o and the unary operators (-f, -n…) are not: mksh prefers a
+// binary operator to a unary one ([ -f -eq 1 ] compares -f), and as an
+// operand -f reads the variable f. They only count when the script and its
+// enclosing shells never set that variable (the value then comes from
+// adbd's environment).
 func (t *varTable) testOperatorWord(w Word) bool {
 	if w.Dynamic {
 		return false
 	}
-	switch w.Value {
-	case "=", "!=", "!", "(", ")":
+	switch {
+	case w.Value == "=" || w.Value == "!=" || w.Value == "!" || w.Value == "(" || w.Value == ")":
 		return true
-	case "-a", "-o":
+	case w.Value == "-a" || w.Value == "-o" || testUnaryOps[w.Value]:
 		name := w.Value[1:]
 		if t == nil {
 			return true

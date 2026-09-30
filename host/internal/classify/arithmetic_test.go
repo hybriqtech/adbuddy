@@ -247,6 +247,14 @@ func TestDynamicTestOperatorIsSpecial(t *testing.T) {
 		`o='x[$(reboot)]'; op=-eq; [ 1 "$op" -o ]`,
 		// [[ ]] only takes literal operators: a dynamic one does not parse.
 		`x='a[$(reboot)]'; op=-eq; [[ $x $op 1 ]]`,
+		// mksh prefers a binary operator to a unary one: after -n the next
+		// word can still be -eq, with -n as its operand.
+		`x='a[$(reboot)]'; op=-eq; [ -n "$op" "$x" -eq 1 ]`,
+		`x='a[$(reboot)]'; op=-eq; [ -n "$op" "$x" ]`,
+		`x='a[$(reboot)]'; op=-eq; [ -f "$op" "$x" -a -r /x ]`,
+		// A unary operator whose variable the script sets is an operand.
+		`f='x[$(reboot)]'; op=-eq; [ -f "$op" 1 ]`,
+		`F=-eq; f='x[$(reboot)]'; [ -f "$F" -a -r "$F" ]`,
 	} {
 		r := c.Classify(sh(line))
 		if r.Level != Red || !r.Special || !hasRule(r, "shell.script") && !hasRule(r, "shell.parse") {
@@ -264,6 +272,12 @@ func TestDynamicTestOperatorIsSpecial(t *testing.T) {
 		`[ "$a" != x -o "$b" = y ]`,
 		`[ ! "$a" = x ]`,
 		`[ \( "$a" = x \) ]`,
+		// Unary file and string operators next to a dynamic word.
+		`[ -f "$F" -a -r "$F" ]`,
+		`[ -n "$x" -a -n "$y" ]`,
+		`[ -z "$x" -o "$x" = 0 ]`,
+		`[ -d "$D" -o -L "$D" ]`,
+		`test -e "$F" -a -s "$F"`,
 		// A dynamic word proven to be a number is no operator.
 		`i=1; [ 1 -eq "$i" ]`,
 		`i=1; n=2; [ "$n" -gt "$i" ]`,
