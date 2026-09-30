@@ -440,3 +440,110 @@ func freeTCPPort(t *testing.T) int {
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port
 }
+
+// heldFallback is the terminal: it says when it is asked and answers when
+// released.
+type heldFallback struct {
+	asked   chan struct{}
+	release chan struct{}
+}
+
+func (h *heldFallback) Confirm(ctx context.Context, _ confirm.Request) confirm.Decision {
+	close(h.asked)
+	select {
+	case <-h.release:
+		return confirm.Allow
+	case <-ctx.Done():
+		return confirm.Deny
+	}
+}
+
+// openApp connects to the channel as the app with hl and returns the socket.
+func openApp(t *testing.T, port int, hl bridge.Hello) *websocket.Conn {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, "ws://127.0.0.1:"+strconv.Itoa(port)+"/v1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.CloseNow() })
+	raw, _ := json.Marshal(hl)
+	data, _ := json.Marshal(bridge.Message{V: bridge.ProtocolVersion, Type: bridge.TypeHello, TS: time.Now(), Payload: raw})
+	if err := c.Write(ctx, websocket.MessageText, data); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// readApp reads the next message the app gets, or fails after a while.
+func readApp(t *testing.T, c *websocket.Conn) bridge.Message {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, data, err := c.Read(ctx)
+	if err != nil {
+		t.Fatalf("no message for the app: %v", err)
+	}
+	var m bridge.Message
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// Final review, I1: a question on the phone moves to the terminal when the
+// app disconnects. The app keeps its questions while away and on a welcome of
+// the same session, so when it comes back it gets a snapshot without that
+// one: nothing there answers a question the terminal has.
+func TestAQuestionMovedToTheTerminalLeavesTheApp(t *testing.T) {
+	e := linkEnv(t)
+	f := &appPhone{}
+	fb := &heldFallback{asked: make(chan struct{}), release: make(chan struct{})}
+	l, _, err := startLink(t, e, f, fb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "a handshake", func() bool { return len(f.handedTokens()) >= 1 })
+	tok := f.handedTokens()[0]
+	c := openApp(t, e.cfg.ChatPort, bridge.Hello{Protocol: bridge.ProtocolVersion, Token: tok, AppVersion: "0.2.0"})
+	if m := readApp(t, c); m.Type != bridge.TypeWelcome {
+		t.Fatalf("first message %q", m.Type)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	decided := make(chan confirm.Decision, 1)
+	go func() {
+		decided <- l.Confirmer().Confirm(ctx, confirm.Request{ID: "j_1", Title: "Restart", ExpiresAt: time.Now().Add(time.Minute)})
+	}()
+	req := readApp(t, c)
+	if req.Type != bridge.TypeConfirmReq || !strings.Contains(string(req.Payload), `"j_1"`) {
+		t.Fatalf("the question: %q %s", req.Type, req.Payload)
+	}
+	c.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-fb.asked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the question did not move to the terminal")
+	}
+	// Back with the same session and everything seen so far.
+	c2 := openApp(t, e.cfg.ChatPort, bridge.Hello{Protocol: bridge.ProtocolVersion, Token: tok, AppVersion: "0.2.0", Session: "s_1", LastSeq: req.Seq})
+	if m := readApp(t, c2); m.Type != bridge.TypeWelcome {
+		t.Fatalf("first message %q", m.Type)
+	}
+	snap := readApp(t, c2)
+	if snap.Type != bridge.TypeSnapshot || snap.Seq <= req.Seq {
+		t.Fatalf("got %q seq %d after the question's %d, want a snapshot", snap.Type, snap.Seq, req.Seq)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(snap.Payload, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := raw["pending"]; !ok || string(p) != "[]" || strings.Contains(string(snap.Payload), "j_1") {
+		t.Fatalf("the snapshot still has the question: %s", snap.Payload)
+	}
+	close(fb.release)
+	if d := <-decided; d != confirm.Allow {
+		t.Fatalf("decided %v, want the terminal's allow", d)
+	}
+}

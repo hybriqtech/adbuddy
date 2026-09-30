@@ -300,3 +300,26 @@ func TestAgentsSaysCompareCommandOutputAsText(t *testing.T) {
 		}
 	}
 }
+
+// Final review, M3: rule 8 tells the temporary blocks (a question waiting)
+// from the pause, for adb and for adbuddy undo.
+func TestAgentsSaysWhichBlocksAreTemporary(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "x")}); err != nil {
+		t.Fatal(err)
+	}
+	a := read(t, filepath.Join(dir, "AGENTS.md"))
+	for _, want := range []string{
+		"`Blocked by ADBuddy: waiting for your answer to …` and `… waiting to ask about …` are temporary",
+		"retry it once the user has answered",
+		"`… paused from the phone …` means stop and tell the user",
+		"`PAUSED` and `WAITING_FOR_ANSWER` from `adbuddy undo`",
+	} {
+		if !strings.Contains(a, want) {
+			t.Errorf("AGENTS.md lacks %q", want)
+		}
+	}
+	if strings.Contains(a, "adbuddy setup") {
+		t.Error("must not mention setup")
+	}
+}

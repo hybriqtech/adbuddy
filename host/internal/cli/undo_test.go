@@ -88,8 +88,61 @@ func TestUndoWaitingForAnswerFixFitsBothCases(t *testing.T) {
 	for _, reason := range []string{`waiting to ask about "Restart the phone"`, `waiting for your answer to "Restart the phone"`} {
 		data := isolate(t)
 		fakeDaemon(t, data, nil, ipc.Exit{Code: 1, ErrorCode: "WAITING_FOR_ANSWER", Error: reason})
-		if _, errOut, code := run(t, "undo"); code != ExitFailure || !strings.Contains(errOut, reason) || !strings.Contains(errOut, want) {
+		if _, errOut, code := run(t, "undo"); code != ExitTransient || !strings.Contains(errOut, reason) || !strings.Contains(errOut, want) {
 			t.Fatalf("exit %d, stderr %q", code, errOut)
 		}
+		// Final review, M2: it is transient, like the pause.
+		out, _, code := run(t, "undo", "--json")
+		var env struct{ Error *Error }
+		if err := json.Unmarshal([]byte(out), &env); err != nil || code != ExitTransient || env.Error == nil || !env.Error.Transient {
+			t.Fatalf("--json: exit %d, stdout %q: %v", code, out, err)
+		}
+	}
+}
+
+// Final review, M2: undo stopped by the pause shows what it undid before,
+// like a partial failure, and PAUSED is transient (75) with a fix.
+func TestUndoPausedShowsWhatWasUndone(t *testing.T) {
+	const fix = "Resume from the ADBuddy app, then run adbuddy undo again for the rest."
+	data := isolate(t)
+	res := daemon.UndoResult{
+		Undone:  []daemon.UndoItem{{ID: "j_1", Description: "Animations 1.0 → 0.5", UndoID: "j_u1"}},
+		Skipped: []daemon.UndoItem{},
+		Failed:  []daemon.UndoItem{},
+	}
+	msg := daemon.PausedMessage + "; undid 1 change(s) before stopping"
+	fakeDaemon(t, data, res, ipc.Exit{Code: daemon.ExitDenied, ErrorCode: "PAUSED", Error: msg})
+	out, errOut, code := run(t, "undo", "--json")
+	var env struct {
+		OK    bool
+		Error *Error
+		Data  *daemon.UndoResult
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || code != ExitTransient || strings.Count(out, "\n") != 1 || env.OK ||
+		env.Error == nil || env.Error.Code != "PAUSED" || !env.Error.Transient || env.Error.Fix != fix ||
+		env.Data == nil || len(env.Data.Undone) != 1 || env.Data.Undone[0].ID != "j_1" {
+		t.Fatalf("exit %d, stdout %q, stderr %q: %v", code, out, errOut, err)
+	}
+	out, errOut, code = run(t, "undo")
+	if code != ExitTransient || !strings.Contains(out, "undone   j_1") || !strings.Contains(errOut, "PAUSED") ||
+		!strings.Contains(errOut, msg) || !strings.Contains(errOut, fix) {
+		t.Fatalf("human: exit %d, stdout %q, stderr %q", code, out, errOut)
+	}
+}
+
+// Paused before undoing anything: no result, still transient with the fix.
+func TestUndoPausedBeforeStarting(t *testing.T) {
+	data := isolate(t)
+	fakeDaemon(t, data, nil, ipc.Exit{Code: daemon.ExitDenied, ErrorCode: "PAUSED", Error: daemon.PausedMessage})
+	out, errOut, code := run(t, "undo", "--json")
+	var env struct {
+		OK    bool
+		Error *Error
+		Data  json.RawMessage
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || code != ExitTransient || env.OK || env.Error == nil ||
+		env.Error.Code != "PAUSED" || !env.Error.Transient || !strings.Contains(env.Error.Fix, "Resume from the ADBuddy app") ||
+		(len(env.Data) != 0 && string(env.Data) != "null") {
+		t.Fatalf("exit %d, stdout %q, stderr %q: %v", code, out, errOut, err)
 	}
 }

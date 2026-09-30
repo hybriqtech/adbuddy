@@ -24,7 +24,12 @@ var undoFixes = map[string]string{
 	"OTHER_DEVICE":       "Connect the phone the change was made on (see `adbuddy journal`) and undo it there, or revert it by hand.",
 	"UNDO_FAILED":        "Check the phone and the journal; failed inverses can be retried with `adbuddy undo <id>`.",
 	"WAITING_FOR_ANSWER": "A 🔴 command is waiting for confirmation (in the ADBuddy app or the serve terminal); retry when it is answered.",
+	"PAUSED":             "Resume from the ADBuddy app, then run adbuddy undo again for the rest.",
 }
+
+// undoTransient are the failures that go away by themselves: the pause ends,
+// or the question is answered. They exit with 75.
+var undoTransient = map[string]bool{"PAUSED": true, "WAITING_FOR_ANSWER": true}
 
 func newUndoCmd(app *App) *cobra.Command {
 	var session string
@@ -59,7 +64,12 @@ are reported and skipped. Needs ` + "`adbuddy serve`" + ` running.`,
 				code = "DAEMON_ERROR" // e.g. "unauthorized" after the secret changed
 			}
 			failure := NewError(code, exit.Error, undoFixes[code])
-			partial := code == "UNDO_FAILED" || code == "JOURNAL_UNWRITABLE"
+			if undoTransient[code] {
+				failure = TransientError(code, exit.Error, undoFixes[code])
+			}
+			// A pause in the middle stops undo after some changes: say which.
+			paused := code == "PAUSED" && len(res.Undone)+len(res.Failed)+len(res.Skipped) > 0
+			partial := code == "UNDO_FAILED" || code == "JOURNAL_UNWRITABLE" || paused
 			if exit.Code != 0 && !partial {
 				if code == "NOTHING_TO_UNDO" {
 					// Tell why the last changes were not undone.

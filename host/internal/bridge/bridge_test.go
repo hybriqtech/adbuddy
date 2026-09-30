@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -674,5 +675,35 @@ func TestAnOldAppWithoutTheTokenLearnsNothing(t *testing.T) {
 	_, _, err := c.Read(ctx)
 	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
 		t.Fatalf("%v: a wrong token must be rejected before the version check", err)
+	}
+}
+
+// Final review, I1: PublishSnapshot sends the current state as a numbered
+// event, to the app connected now and, kept like any event, to one that
+// resumes after it.
+func TestPublishSnapshotIsAnEvent(t *testing.T) {
+	var state atomic.Value
+	state.Store("idle")
+	h := start(t, Options{Snapshot: func() Snapshot {
+		return Snapshot{State: SessionState{State: state.Load().(string)}, Pending: []ConfirmRequest{}, Journal: []json.RawMessage{}}
+	}})
+	c := h.dial(token, 0)
+	recv(t, c) // welcome
+	waitConnected(t, h.srv, true)
+	h.srv.Publish(TypeNotice, Notice{Text: "one"})
+	recv(t, c)
+	h.srv.PublishSnapshot()
+	var snap Snapshot
+	if m := recv(t, c); m.Type != TypeSnapshot || m.Seq != 2 || json.Unmarshal(m.Payload, &snap) != nil || snap.State.State != "idle" {
+		t.Fatalf("live: %+v", m)
+	}
+	c.Close(websocket.StatusNormalClosure, "")
+	waitConnected(t, h.srv, false)
+	state.Store("working")
+	h.srv.PublishSnapshot()
+	c = h.dial(token, 2)
+	recv(t, c) // welcome
+	if m := recv(t, c); m.Type != TypeSnapshot || m.Seq != 3 || json.Unmarshal(m.Payload, &snap) != nil || snap.State.State != "working" {
+		t.Fatalf("resumed: %+v", m)
 	}
 }

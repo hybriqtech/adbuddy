@@ -131,6 +131,12 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 	l.conf.Notify = func(title string, moved bool) {
 		if moved {
 			fmt.Fprintf(app.Stderr, "📱 The phone app disconnected before you answered “%s”: it no longer waits for the phone.\n", classify.Printable(title))
+			// The app keeps its questions while away and when it comes
+			// back to the same session: a snapshot without this one takes
+			// it off the phone. It goes to the events kept for the app, so
+			// the app gets it when it resumes, or at once if it is already
+			// back (it may have got the question in its welcome's snapshot).
+			l.srv.PublishSnapshot()
 		} else {
 			fmt.Fprintf(app.Stderr, "📱 The phone app is back: “%s” still waits for your answer on the phone.\n", classify.Printable(title))
 		}

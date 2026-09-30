@@ -39,9 +39,9 @@ type Options struct {
 	// time. Its payload comes from the app: validate before use. Its TS is
 	// what the app sent, or zero when that was not a valid time.
 	OnMessage func(Message)
-	// Snapshot describes the current state when the app missed too much. It
-	// is called with the server's lock held: it must not call Publish or
-	// Connected.
+	// Snapshot describes the current state when the app missed too much, and
+	// for PublishSnapshot. It is called with the server's lock held: it must
+	// not call Publish, PublishSnapshot or Connected.
 	Snapshot func() Snapshot
 	// OnConnect is called with true when an app authenticates and none was
 	// connected, and with false when the app is gone and no other took its
@@ -176,12 +176,34 @@ func (s *Server) Publish(typ string, payload any) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.sendLocked(s.keepLocked(typ, raw))
+	return nil
+}
+
+// PublishSnapshot sends the current state (Options.Snapshot) as an event,
+// like Publish: the app replaces what it shows with it, now or when it
+// resumes. The snapshot is taken under the server's lock, so no event
+// published meanwhile falls between what it shows and its number.
+func (s *Server) PublishSnapshot() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw, _ := json.Marshal(s.o.Snapshot())
+	s.sendLocked(s.keepLocked(TypeSnapshot, raw))
+}
+
+// keepLocked numbers an event and keeps it to resend. Call it with mu held.
+func (s *Server) keepLocked(typ string, raw json.RawMessage) Message {
 	s.seq++
 	m := Message{V: ProtocolVersion, Seq: s.seq, Type: typ, TS: s.o.Now().UTC(), Payload: raw}
 	s.ring = append(s.ring, m)
 	if len(s.ring) > BufferSize {
 		s.ring = s.ring[len(s.ring)-BufferSize:]
 	}
+	return m
+}
+
+// sendLocked queues m for the connected app, if any. Call it with mu held.
+func (s *Server) sendLocked(m Message) {
 	if s.client != nil {
 		select {
 		case s.client.send <- m:
@@ -190,7 +212,6 @@ func (s *Server) Publish(typ string, payload any) error {
 			s.client = nil
 		}
 	}
-	return nil
 }
 
 // localHost reports whether the request's Host is how the app reaches the
@@ -351,12 +372,7 @@ func (s *Server) swap(cl *client, h Hello) (backlog []Message, first uint64, ok 
 		snap, _ := json.Marshal(s.o.Snapshot())
 		// The snapshot takes the next number, so the app's lastSeq moves past
 		// everything it replaces.
-		s.seq++
-		m := Message{V: ProtocolVersion, Seq: s.seq, Type: TypeSnapshot, TS: s.o.Now().UTC(), Payload: snap}
-		s.ring = append(s.ring, m)
-		if len(s.ring) > BufferSize {
-			s.ring = s.ring[len(s.ring)-BufferSize:]
-		}
+		m := s.keepLocked(TypeSnapshot, snap)
 		return []Message{m}, m.Seq, true
 	}
 	for _, m := range s.ring {
