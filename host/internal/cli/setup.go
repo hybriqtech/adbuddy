@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -200,6 +201,9 @@ func colorOK(app *App) bool {
 	return app.Getenv("NO_COLOR") == "" && app.Getenv("TERM") != "dumb"
 }
 
+// pairingCodeRe is the code the phone shows in "Pair device with pairing code".
+var pairingCodeRe = regexp.MustCompile(`^[0-9]{6}$`)
+
 // pair shows the guide and pairs by QR code or by code.
 func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask func(string) (string, error), say func(string, ...any)) (string, error) {
 	say("%s", phoneGuide)
@@ -215,6 +219,9 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 		code, err := ask("Wi-Fi pairing code: ")
 		if err != nil {
 			return "", err
+		}
+		if !pairingCodeRe.MatchString(code) {
+			return "", UsageError("the Wi-Fi pairing code is 6 digits")
 		}
 		guid, err := pairing.Pair(ctx, runner, addr, code)
 		if err != nil {

@@ -1,8 +1,10 @@
 package pairing
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -18,8 +20,10 @@ type fakeADB struct {
 	mu      sync.Mutex
 	answers map[string][]string
 	fail    map[string]string
-	calls   []string
-	stdin   map[string]string
+	// failTimes[key] calls fail before the answers start.
+	failTimes map[string]int
+	calls     []string
+	stdin     map[string]string
 }
 
 func (f *fakeADB) Run(_ context.Context, _ string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
@@ -33,6 +37,11 @@ func (f *fakeADB) Run(_ context.Context, _ string, args []string, stdin io.Reade
 			f.stdin = map[string]string{}
 		}
 		f.stdin[key] = string(b)
+	}
+	if n := f.failTimes[key]; n > 0 {
+		f.failTimes[key] = n - 1
+		io.WriteString(stderr, "error: flaky")
+		return 1, nil
 	}
 	if msg, ok := f.fail[key]; ok {
 		io.WriteString(stderr, msg)
@@ -145,8 +154,9 @@ func TestConnectWaitsForAutoConnect(t *testing.T) {
 
 func TestConnectFallsBackToExplicitConnect(t *testing.T) {
 	f := &fakeADB{answers: map[string][]string{
-		"devices":       {"List of devices attached\n", "List of devices attached\n", "List of devices attached\n192.0.2.10:41234\tdevice\n"},
-		"mdns services": {mdnsHeader + "adb-AAA-bbb\t_adb-tls-connect._tcp\t192.0.2.10:41234\n"},
+		"devices":                  {"List of devices attached\n", "List of devices attached\n", "List of devices attached\n192.0.2.10:41234\tdevice\n"},
+		"mdns services":            {mdnsHeader + "adb-AAA-bbb\t_adb-tls-connect._tcp\t192.0.2.10:41234\n"},
+		"connect 192.0.2.10:41234": {"connected to 192.0.2.10:41234\n"},
 	}}
 	serial, err := Connect(context.Background(), f, "adb-AAA-bbb", 5*time.Second, 0, time.Millisecond)
 	if err != nil || serial != "192.0.2.10:41234" {
@@ -154,5 +164,269 @@ func TestConnectFallsBackToExplicitConnect(t *testing.T) {
 	}
 	if _, err := Connect(context.Background(), &fakeADB{}, "adb-X", 20*time.Millisecond, time.Hour, 5*time.Millisecond); !errors.Is(err, ErrTimeout) {
 		t.Fatalf("%v", err)
+	}
+}
+
+// funcADB runs fn for every call.
+type funcADB func(ctx context.Context, args []string, stdout, stderr io.Writer) (int, error)
+
+func (f funcADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (int, error) {
+	return f(ctx, args, stdout, stderr)
+}
+
+// hangingADB blocks until ctx ends and then fails as a killed adb does.
+var hangingADB = funcADB(func(ctx context.Context, _ []string, _, _ io.Writer) (int, error) {
+	<-ctx.Done()
+	return -1, errors.New("signal: killed")
+})
+
+// within fails the test if fn does not return in d.
+func within(t *testing.T, d time.Duration, fn func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { fn(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(d):
+		t.Fatal("did not return in time")
+	}
+}
+
+func TestCancelDuringAnAdbCallIsReportedAsCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	killed := funcADB(func(context.Context, []string, io.Writer, io.Writer) (int, error) {
+		cancel()
+		return -1, errors.New("signal: killed")
+	})
+	if _, err := WaitService(ctx, killed, "ADBuddy-x", PairingType, time.Minute, time.Millisecond); !errors.Is(err, context.Canceled) {
+		t.Fatalf("WaitService: %v", err)
+	}
+	if _, err := Connect(ctx, killed, "adb-AAA-bbb", time.Minute, 0, time.Millisecond); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Connect: %v", err)
+	}
+	if _, err := Pair(ctx, killed, "192.0.2.10:37000", "123456"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Pair: %v", err)
+	}
+}
+
+func TestTimeoutsBoundHangingAdb(t *testing.T) {
+	within(t, 5*time.Second, func() {
+		if _, err := WaitService(context.Background(), hangingADB, "ADBuddy-x", PairingType, 50*time.Millisecond, time.Millisecond); !errors.Is(err, ErrTimeout) {
+			t.Errorf("WaitService: %v", err)
+		}
+		if _, err := Connect(context.Background(), hangingADB, "adb-AAA-bbb", 50*time.Millisecond, 0, time.Millisecond); !errors.Is(err, ErrTimeout) {
+			t.Errorf("Connect: %v", err)
+		}
+	})
+	old := pairTimeout
+	pairTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { pairTimeout = old })
+	within(t, 5*time.Second, func() {
+		if _, err := Pair(context.Background(), hangingADB, "192.0.2.10:37000", "123456"); !errors.Is(err, ErrTimeout) {
+			t.Errorf("Pair: %v", err)
+		}
+	})
+}
+
+func TestWaitIsCutToTheTimeLeft(t *testing.T) {
+	empty := &fakeADB{answers: map[string][]string{"mdns services": {mdnsHeader}, "devices": {"List of devices attached\n"}}}
+	within(t, 5*time.Second, func() {
+		if _, err := WaitService(context.Background(), empty, "ADBuddy-x", PairingType, 30*time.Millisecond, time.Hour); !errors.Is(err, ErrTimeout) {
+			t.Errorf("WaitService: %v", err)
+		}
+		if _, err := Connect(context.Background(), empty, "adb-AAA-bbb", 30*time.Millisecond, time.Hour, time.Hour); !errors.Is(err, ErrTimeout) {
+			t.Errorf("Connect: %v", err)
+		}
+	})
+}
+
+func TestConnectMatchesTheGuidExactly(t *testing.T) {
+	if _, err := Connect(context.Background(), &fakeADB{}, "", time.Second, 0, time.Millisecond); err == nil || errors.Is(err, ErrTimeout) {
+		t.Fatalf("empty guid: %v", err)
+	}
+	other := &fakeADB{answers: map[string][]string{
+		"devices":       {"List of devices attached\nadb-AAA-bbbXYZ._adb-tls-connect._tcp\tdevice\nadb-AAA-bbb._adb-tls-connect._tcp.evil\tdevice\nxadb-AAA-bbb._adb-tls-connect._tcp\tdevice\n"},
+		"mdns services": {mdnsHeader + "adb-AAA-bbbXYZ\t_adb-tls-connect._tcp\t192.0.2.66:41234\n"},
+	}}
+	if s, err := Connect(context.Background(), other, "adb-AAA-bbb", 30*time.Millisecond, 0, time.Millisecond); !errors.Is(err, ErrTimeout) {
+		t.Fatalf("another phone accepted: %q %v", s, err)
+	}
+	for _, c := range other.calls {
+		if strings.HasPrefix(c, "connect") {
+			t.Fatalf("connected to another guid: %q", c)
+		}
+	}
+	renamed := &fakeADB{answers: map[string][]string{
+		"devices": {"List of devices attached\nadb-AAA-bbb (2)._adb-tls-connect._tcp\tdevice\n"},
+	}}
+	if s, err := Connect(context.Background(), renamed, "adb-AAA-bbb", time.Second, time.Hour, time.Millisecond); err != nil || s != "adb-AAA-bbb (2)._adb-tls-connect._tcp" {
+		t.Fatalf("%q %v", s, err)
+	}
+	svc := &fakeADB{answers: map[string][]string{"mdns services": {mdnsHeader + "adb-AAA-bbbXYZ\t_adb-tls-connect._tcp\t192.0.2.66:1\nadb-AAA-bbb (2)\t_adb-tls-connect._tcp\t192.0.2.10:2\n"}}}
+	if s, err := WaitService(context.Background(), svc, "adb-AAA-bbb", ConnectType, time.Second, time.Millisecond); err != nil || s.Addr != "192.0.2.10:2" {
+		t.Fatalf("%+v %v", s, err)
+	}
+}
+
+func TestConnectChecksTheOutputAndRetries(t *testing.T) {
+	f := &fakeADB{answers: map[string][]string{
+		"devices":                  {"List of devices attached\n192.0.2.10:41234\tdevice\n"},
+		"mdns services":            {mdnsHeader + "adb-AAA-bbb\t_adb-tls-connect._tcp\t192.0.2.10:41234\n"},
+		"connect 192.0.2.10:41234": {"failed to connect to 192.0.2.10:41234\n", "already connected to 192.0.2.10:41234\n"},
+	}}
+	serial, err := Connect(context.Background(), f, "adb-AAA-bbb", 5*time.Second, 0, time.Millisecond)
+	if err != nil || serial != "192.0.2.10:41234" {
+		t.Fatalf("%q %v", serial, err)
+	}
+	connects, polls := 0, 0
+	for _, c := range f.calls {
+		switch c {
+		case "connect 192.0.2.10:41234":
+			connects++
+		case "devices":
+			polls++
+		}
+	}
+	if connects != 2 || polls != 7 {
+		t.Fatalf("%d connects over %d polls: %q", connects, polls, f.calls)
+	}
+	// Several matching services: only the first that answers is used.
+	two := &fakeADB{answers: map[string][]string{
+		"devices":              {"List of devices attached\n", "List of devices attached\n192.0.2.10:1\tdevice\n"},
+		"mdns services":        {mdnsHeader + "adb-AAA-bbb\t_adb-tls-connect._tcp\t192.0.2.10:1\nadb-AAA-bbb (2)\t_adb-tls-connect._tcp\t192.0.2.11:2\n"},
+		"connect 192.0.2.10:1": {"connected to 192.0.2.10:1\n"},
+		"connect 192.0.2.11:2": {"connected to 192.0.2.11:2\n"},
+	}}
+	if s, err := Connect(context.Background(), two, "adb-AAA-bbb", 5*time.Second, 0, time.Millisecond); err != nil || s != "192.0.2.10:1" {
+		t.Fatalf("%q %v", s, err)
+	}
+	for _, c := range two.calls {
+		if c == "connect 192.0.2.11:2" {
+			t.Fatal("connected to a second service")
+		}
+	}
+}
+
+func TestParseServicesDropsHostileEntries(t *testing.T) {
+	out := mdnsHeader +
+		"\x1b[31mADBuddy-abc\t_adb-tls-pairing._tcp\t192.0.2.66:37000\n" +
+		"ADBuddy-abc​\t_adb-tls-pairing._tcp\t192.0.2.66:37001\n" +
+		"ADBuddy-abc\tx\t_adb-tls-pairing._tcp\t192.0.2.66:37002\n" +
+		"ADBuddy-abc\t_adb-tls-pairing._tcp\t-s\n" +
+		"ADBuddy-abc\t_adb-tls-pairing._tcp\t192.0.2.66:0\n" +
+		"ADBuddy-abc\t_adb-tls-pairing._tcp\t192.0.2.66:70000\n" +
+		"ADBuddy-abc\t_adb-tls-pairing._tcp\thost.example:37000\n" +
+		"ADBuddy-abc \t_adb-tls-pairing._tcp\t192.0.2.66:37003\n" +
+		"ADBuddy-abc\t_adb-tls-pairing._tcp\t192.0.2.10:37000\n"
+	ss := ParseServices(out)
+	if len(ss) != 2 || ss[0].Name != "ADBuddy-abc " || ss[1] != (Service{"ADBuddy-abc", PairingType, "192.0.2.10:37000"}) {
+		t.Fatalf("%+q", ss)
+	}
+	s, err := WaitService(context.Background(), &fakeADB{answers: map[string][]string{"mdns services": {out}}}, "ADBuddy-abc", PairingType, time.Second, time.Millisecond)
+	if err != nil || s.Addr != "192.0.2.10:37000" {
+		t.Fatalf("%+v %v", s, err)
+	}
+}
+
+func TestPairQRTriesEveryCandidate(t *testing.T) {
+	q := QR{Name: "ADBuddy-abc", Password: "secret"}
+	// A name with "\n" injected a fake line before the phone's own.
+	f := &fakeADB{answers: map[string][]string{
+		"mdns services":         {mdnsHeader + "\nADBuddy-abc\t_adb-tls-pairing._tcp\t192.0.2.66:37000\n\t_adb-tls-pairing._tcp\t192.0.2.66:1\nADBuddy-abc\t_adb-tls-pairing._tcp\t192.0.2.10:37000\n"},
+		"pair 192.0.2.66:37000": {"Failed: Wrong password or connection was dropped.\n"},
+		"pair 192.0.2.10:37000": {"Successfully paired to 192.0.2.10:37000 [guid=adb-AAA-bbb]\n"},
+	}}
+	guid, err := PairQR(context.Background(), f, q, 5*time.Second)
+	if err != nil || guid != "adb-AAA-bbb" {
+		t.Fatalf("%q %v (calls %q)", guid, err, f.calls)
+	}
+}
+
+func TestAdbTextIsPrintable(t *testing.T) {
+	f := &fakeADB{
+		answers: map[string][]string{"pair 192.0.2.10:1": {"Failed: \x1b[2Jboom\n"}},
+		fail:    map[string]string{"pair 192.0.2.10:2": "error: \x1b]0;title\x07"},
+	}
+	for _, addr := range []string{"192.0.2.10:1", "192.0.2.10:2"} {
+		if _, err := Pair(context.Background(), f, addr, "123456"); err == nil || strings.ContainsAny(err.Error(), "\x1b\x07") {
+			t.Fatalf("%s: %q", addr, err)
+		}
+	}
+}
+
+func TestPollingToleratesAFewAdbErrors(t *testing.T) {
+	f := &fakeADB{
+		answers:   map[string][]string{"mdns services": {mdnsHeader + "ADBuddy-x\t_adb-tls-pairing._tcp\t192.0.2.10:37000\n"}},
+		failTimes: map[string]int{"mdns services": 3},
+	}
+	if _, err := WaitService(context.Background(), f, "ADBuddy-x", PairingType, 5*time.Second, time.Millisecond); err != nil {
+		t.Fatalf("3 errors: %v", err)
+	}
+	f = &fakeADB{failTimes: map[string]int{"devices": 4}}
+	if _, err := Connect(context.Background(), f, "adb-AAA-bbb", 5*time.Second, time.Hour, time.Millisecond); err == nil || errors.Is(err, ErrTimeout) {
+		t.Fatalf("4 errors: %v", err)
+	}
+}
+
+func TestPairValidatesItsInput(t *testing.T) {
+	f := &fakeADB{}
+	for _, c := range []struct{ addr, code string }{
+		{"192.0.2.10:37000", "123456\npair 192.0.2.66:1"},
+		{"192.0.2.10:37000", "123\r456"},
+		{"-s", "123456"},
+		{"192.0.2.10", "123456"},
+	} {
+		if _, err := Pair(context.Background(), f, c.addr, c.code); err == nil {
+			t.Errorf("%q %q accepted", c.addr, c.code)
+		}
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("adb called: %q", f.calls)
+	}
+}
+
+func TestPairReadsOnlyAWellFormedGuid(t *testing.T) {
+	f := &fakeADB{answers: map[string][]string{
+		"pair 192.0.2.10:1": {"Successfully paired to 192.0.2.10:1 [guid=adb-AAA\x1bbbb]\n"},
+		"pair 192.0.2.10:2": {"Successfully paired to 192.0.2.10:2 [guid=adb-AAA-bbb.x_y]\n"},
+	}}
+	if g, err := Pair(context.Background(), f, "192.0.2.10:1", "123456"); err == nil {
+		t.Fatalf("guid %q accepted", g)
+	}
+	if g, err := Pair(context.Background(), f, "192.0.2.10:2", "123456"); err != nil || g != "adb-AAA-bbb.x_y" {
+		t.Fatalf("%q %v", g, err)
+	}
+}
+
+func TestRandomStringRejectsBiasedBytes(t *testing.T) {
+	old := randReader
+	t.Cleanup(func() { randReader = old })
+	// 255 is past the last whole multiple of the alphabet size: skipped.
+	randReader = bytes.NewReader([]byte{255, 0, 254, 1})
+	s, err := randomString(2)
+	if err != nil || s != alphabet[0:2] {
+		t.Fatalf("%q %v", s, err)
+	}
+}
+
+func TestQRHidesThePassword(t *testing.T) {
+	q := QR{Name: "ADBuddy-abc", Password: "hunter2hunter2xx"}
+	if s := fmt.Sprintf("%v %+v %#v %s", q, q, q, q); strings.Contains(s, q.Password) {
+		t.Fatalf("password printed: %s", s)
+	}
+}
+
+func TestQRHasAFourModuleQuietZone(t *testing.T) {
+	art, err := RenderQR("WIFI:T:ADB;S:ADBuddy-abc;P:x;;", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(art, "\n"), "\n")
+	for i, l := range lines {
+		r := []rune(l)
+		blank := func(s []rune) bool { return strings.TrimLeft(string(s), " ") == "" }
+		if (i < 2 || i >= len(lines)-2) && !blank(r) || !blank(r[:4]) || !blank(r[len(r)-4:]) {
+			t.Fatalf("line %d %q", i, l)
+		}
 	}
 }

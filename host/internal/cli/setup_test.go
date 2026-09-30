@@ -191,3 +191,19 @@ func TestBareAdbuddyStartsSetupWhenNotConfigured(t *testing.T) {
 		t.Fatalf("configured: exit %d stdout %q", code, out)
 	}
 }
+
+func TestSetupCodeMustBeSixDigits(t *testing.T) {
+	for _, bad := range []string{"12345", "1234567", "12a456", "123 456"} {
+		e := newSetupEnv(t, phoneRules())
+		_, errOut, code := runWithInput(t, "192.0.2.10:37000\n"+bad+"\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+		if code != ExitUsage || !strings.Contains(errOut, "6 digits") {
+			t.Fatalf("%q: exit %d stderr %q", bad, code, errOut)
+		}
+		calls, _ := testutil.ReadLog(e.log)
+		for _, c := range calls {
+			if strings.HasPrefix(c.Joined(), "pair") {
+				t.Fatalf("%q: adb pair called", bad)
+			}
+		}
+	}
+}

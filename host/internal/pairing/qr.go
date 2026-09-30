@@ -15,7 +15,7 @@ func RenderQR(text string, color bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	const quiet = 2
+	const quiet = 4 // the quiet zone the QR standard asks for
 	size := code.Size + 2*quiet
 	dark := func(x, y int) bool { return code.Black(x-quiet, y-quiet) }
 	var b strings.Builder

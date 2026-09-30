@@ -4,6 +4,8 @@
 //
 // mDNS discovery uses adb's own resolver (`adb mdns services`) through
 // ADBuddy's private adb server, so the host needs no mDNS code of its own.
+// Everything mDNS reports comes from the local network: names and addresses
+// are checked before use, and adb's text is made printable before it is shown.
 package pairing
 
 import (
@@ -13,9 +15,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
 )
 
 // mDNS service types of wireless debugging.
@@ -35,25 +44,90 @@ type Service struct {
 }
 
 // ParseServices parses `adb mdns services` ("name\ttype\tip:port" lines).
+// Lines whose name has control or format characters, or whose address is
+// not IP:port, are dropped.
 func ParseServices(out string) []Service {
 	var ss []Service
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Split(strings.TrimRight(line, "\r"), "\t")
-		if len(f) == 3 && strings.HasPrefix(f[1], "_adb") {
-			ss = append(ss, Service{Name: strings.TrimSpace(f[0]), Type: strings.TrimSpace(f[1]), Addr: strings.TrimSpace(f[2])})
+		if len(f) != 3 {
+			continue
+		}
+		s := Service{Name: f[0], Type: strings.TrimSpace(f[1]), Addr: strings.TrimSpace(f[2])}
+		if strings.HasPrefix(s.Type, "_adb") && cleanName(s.Name) && validAddr(s.Addr) {
+			ss = append(ss, s)
 		}
 	}
 	return ss
 }
 
+func cleanName(s string) bool {
+	if s == "" || !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
+			return false
+		}
+	}
+	return true
+}
+
+// validAddr accepts only IP:port with a port in 1-65535.
+func validAddr(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || !cleanName(addr) {
+		return false
+	}
+	if _, err := netip.ParseAddr(host); err != nil {
+		return false
+	}
+	p, err := strconv.ParseUint(port, 10, 16)
+	return err == nil && p > 0
+}
+
+// matchName reports whether got is the mDNS instance want, possibly renamed
+// by mDNS after a clash ("want (2)").
+func matchName(want, got string) bool {
+	if got == want {
+		return true
+	}
+	rest, ok := strings.CutPrefix(got, want+" (")
+	if !ok {
+		return false
+	}
+	n, ok := strings.CutSuffix(rest, ")")
+	if !ok || n == "" || len(n) > 4 {
+		return false
+	}
+	for _, r := range n {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isGuidSerial reports whether serial is the adb serial of the phone guid
+// connected through mDNS.
+func isGuidSerial(guid, serial string) bool {
+	inst, ok := strings.CutSuffix(serial, "."+ConnectType)
+	return ok && matchName(guid, inst)
+}
+
+// run runs adb and returns its stdout. If ctx ended meanwhile, it returns
+// ctx.Err() (a killed adb reports "signal: killed" instead).
 func run(ctx context.Context, a ADB, stdin io.Reader, args ...string) (string, error) {
 	var out, errb bytes.Buffer
 	code, err := a.Run(ctx, "", args, stdin, &out, &errb)
+	if cerr := ctx.Err(); cerr != nil {
+		return "", cerr
+	}
 	if err != nil {
 		return "", err
 	}
 	if code != 0 {
-		msg := strings.TrimSpace(errb.String() + " " + out.String())
+		msg := classify.Printable(strings.TrimSpace(errb.String() + " " + out.String()))
 		return "", fmt.Errorf("adb %s: %s", args[0], msg)
 	}
 	return out.String(), nil
@@ -71,29 +145,90 @@ func Services(ctx context.Context, a ADB) ([]Service, error) {
 // ErrTimeout means the phone did not show up in time.
 var ErrTimeout = errors.New("timed out waiting for the phone")
 
-// WaitService polls until a service with that name (a prefix for connect
-// services) and type appears.
-func WaitService(ctx context.Context, a ADB, name, typ string, timeout, every time.Duration) (Service, error) {
-	deadline := time.Now().Add(timeout)
+// maxPollErrors is how many adb failures in a row a wait tolerates (adb may
+// fail while its server starts).
+const maxPollErrors = 3
+
+// poll runs step every `every` until it is done, ctx ends or adb fails more
+// than maxPollErrors times in a row. The last wait is cut to ctx's deadline.
+func poll(ctx context.Context, every time.Duration, step func() (bool, error)) error {
+	errs := 0
 	for {
-		ss, err := Services(ctx, a)
+		done, err := step()
+		if err == nil && done {
+			return nil
+		}
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
-			return Service{}, err
-		}
-		for _, s := range ss {
-			if s.Type == typ && (s.Name == name || (typ == ConnectType && strings.HasPrefix(s.Name, name))) {
-				return s, nil
+			if errs++; errs > maxPollErrors {
+				return err
 			}
+		} else {
+			errs = 0
 		}
-		if time.Now().After(deadline) {
-			return Service{}, ErrTimeout
+		wait := every
+		if dl, ok := ctx.Deadline(); ok {
+			wait = max(min(wait, time.Until(dl)), 0)
 		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
-			return Service{}, ctx.Err()
-		case <-time.After(every):
+			t.Stop()
+			return ctx.Err()
+		case <-t.C:
 		}
 	}
+}
+
+// timeoutErr turns the end of our own deadline into ErrTimeout; the caller's
+// cancel or deadline is returned as is.
+func timeoutErr(parent context.Context, err error) error {
+	if errors.Is(err, context.DeadlineExceeded) && parent.Err() == nil {
+		return ErrTimeout
+	}
+	return err
+}
+
+// waitServices polls until services with that name (or "name (N)") and type
+// appear, and returns all of them.
+func waitServices(ctx context.Context, a ADB, name, typ string, timeout, every time.Duration) ([]Service, error) {
+	if name == "" {
+		return nil, errors.New("no service name to wait for")
+	}
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var found []Service
+	err := poll(ctx, every, func() (bool, error) {
+		ss, err := Services(ctx, a)
+		if err != nil {
+			return false, err
+		}
+		found = found[:0]
+		for _, s := range ss {
+			if s.Type == typ && matchName(name, s.Name) {
+				found = append(found, s)
+			}
+		}
+		return len(found) > 0, nil
+	})
+	if err != nil {
+		return nil, timeoutErr(parent, err)
+	}
+	return found, nil
+}
+
+// WaitService polls until a service with that name (or "name (N)", as mDNS
+// renames clashes) and type appears. It gives up with ErrTimeout after
+// timeout, even if adb hangs.
+func WaitService(ctx context.Context, a ADB, name, typ string, timeout, every time.Duration) (Service, error) {
+	ss, err := waitServices(ctx, a, name, typ, timeout, every)
+	if err != nil {
+		return Service{}, err
+	}
+	return ss[0], nil
 }
 
 // QR is a pairing QR code: the phone scans it in
@@ -103,17 +238,38 @@ type QR struct {
 	Password string
 }
 
+// String hides the password from %v and %s.
+func (q QR) String() string { return q.Name }
+
+// GoString hides the password from %#v.
+func (q QR) GoString() string { return fmt.Sprintf("pairing.QR{Name:%q}", q.Name) }
+
+// randReader is the source of randomness (tests replace it).
+var randReader io.Reader = rand.Reader
+
+// pairTimeout bounds one `adb pair`.
+var pairTimeout = 30 * time.Second
+
 const alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
+// randomString draws n characters of alphabet without bias: bytes past the
+// last whole multiple of the alphabet size are skipped.
 func randomString(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
+	limit := 256 - 256%len(alphabet)
+	out := make([]byte, 0, n)
+	buf := make([]byte, n)
+	for len(out) < n {
+		b := buf[:n-len(out)]
+		if _, err := io.ReadFull(randReader, b); err != nil {
+			return "", err
+		}
+		for _, c := range b {
+			if int(c) < limit {
+				out = append(out, alphabet[int(c)%len(alphabet)])
+			}
+		}
 	}
-	for i := range b {
-		b[i] = alphabet[int(b[i])%len(alphabet)]
-	}
-	return string(b), nil
+	return string(out), nil
 }
 
 // NewQR creates a fresh name and password. Both use only letters and digits,
@@ -133,34 +289,58 @@ func NewQR() (QR, error) {
 // Payload is the QR content (spec §3.1): WIFI:T:ADB;S:<name>;P:<password>;;
 func (q QR) Payload() string { return "WIFI:T:ADB;S:" + q.Name + ";P:" + q.Password + ";;" }
 
-var guidRe = regexp.MustCompile(`\[guid=([^\]\s]+)\]`)
+var guidRe = regexp.MustCompile(`\[guid=(adb-[A-Za-z0-9._-]{1,128})\]`)
 
 // Pair runs `adb pair <addr>` and types the code on its stdin (a code in
 // argv would be visible to other processes). It returns the phone's adb
-// guid, the mDNS name of its connect service.
+// guid, the mDNS name of its connect service. adb gets pairTimeout to answer.
 func Pair(ctx context.Context, a ADB, addr, code string) (string, error) {
+	if !validAddr(addr) {
+		return "", fmt.Errorf("%q is not an IP address and port", classify.Printable(addr))
+	}
+	if strings.ContainsAny(code, "\r\n") {
+		return "", errors.New("the pairing code cannot contain line breaks")
+	}
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, pairTimeout)
+	defer cancel()
 	out, err := run(ctx, a, strings.NewReader(code+"\n"), "pair", addr)
 	if err != nil {
+		if timeoutErr(parent, err) == ErrTimeout {
+			return "", fmt.Errorf("adb pair %s did not answer in %s: %w", addr, pairTimeout, ErrTimeout)
+		}
 		return "", err
 	}
 	if !strings.Contains(out, "Successfully paired") {
-		return "", fmt.Errorf("adb pair: %s", strings.TrimSpace(out))
+		return "", fmt.Errorf("adb pair: %s", classify.Printable(strings.TrimSpace(out)))
 	}
 	m := guidRe.FindStringSubmatch(out)
 	if m == nil {
-		return "", fmt.Errorf("adb pair did not report the phone's guid: %s", strings.TrimSpace(out))
+		return "", fmt.Errorf("adb pair did not report the phone's guid: %s", classify.Printable(strings.TrimSpace(out)))
 	}
 	return m[1], nil
 }
 
 // PairQR waits for the phone that scanned q to announce its pairing service
-// and pairs with it.
+// and pairs with it. Anyone on the network can announce the same name, so
+// every matching service is tried: only the phone knows the password.
 func PairQR(ctx context.Context, a ADB, q QR, timeout time.Duration) (string, error) {
-	s, err := WaitService(ctx, a, q.Name, PairingType, timeout, time.Second)
+	ss, err := waitServices(ctx, a, q.Name, PairingType, timeout, time.Second)
 	if err != nil {
 		return "", err
 	}
-	return Pair(ctx, a, s.Addr, q.Password)
+	var last error
+	for _, s := range ss {
+		guid, err := Pair(ctx, a, s.Addr, q.Password)
+		if err == nil {
+			return guid, nil
+		}
+		if cerr := ctx.Err(); cerr != nil {
+			return "", cerr
+		}
+		last = err
+	}
+	return "", last
 }
 
 // Device is one line of `adb devices`.
@@ -172,51 +352,82 @@ func devices(ctx context.Context, a ADB) ([]Device, error) {
 		return nil, err
 	}
 	var ds []Device
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.Fields(line)
-		if len(f) >= 2 && !strings.HasPrefix(line, "List of") && !strings.HasPrefix(line, "*") {
-			ds = append(ds, Device{Serial: f[0], State: f[1]})
+	// "serial\tstate": split on the tab, since an mDNS serial may have a
+	// space ("adb-<guid> (2)._adb-tls-connect._tcp").
+	for _, line := range strings.Split(strings.ReplaceAll(out, "\r", ""), "\n") {
+		if strings.HasPrefix(line, "List of") || strings.HasPrefix(line, "*") {
+			continue
+		}
+		serial, rest, ok := strings.Cut(line, "\t")
+		state := strings.Fields(rest)
+		if ok && serial != "" && len(state) > 0 {
+			ds = append(ds, Device{Serial: serial, State: state[0]})
 		}
 	}
 	return ds, nil
 }
 
+// connectRetryPolls is how often (in polls) `adb connect` is tried again
+// while the phone does not show up.
+const connectRetryPolls = 5
+
 // Connect waits until the paired phone (guid) is online in state "device"
 // and returns its serial. adb connects paired phones found by mDNS on its
 // own (15-20 s on a fresh server); after autoConnectWait the connect service
-// is looked up and `adb connect` is run explicitly.
+// is looked up and `adb connect` is run explicitly, again every few polls
+// while the phone is missing. It gives up with ErrTimeout after timeout,
+// even if adb hangs.
 func Connect(ctx context.Context, a ADB, guid string, timeout, autoConnectWait, every time.Duration) (string, error) {
+	if guid == "" {
+		return "", errors.New("no phone guid to connect to")
+	}
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	start := time.Now()
-	deadline := start.Add(timeout)
-	connectedTo := ""
-	for {
+	connectedTo, serial := "", ""
+	polls, lastTry := 0, 0
+	err := poll(ctx, every, func() (bool, error) {
 		ds, err := devices(ctx, a)
 		if err != nil {
-			return "", err
+			return false, err
 		}
 		for _, d := range ds {
-			if d.State == "device" && (strings.HasPrefix(d.Serial, guid) || (connectedTo != "" && d.Serial == connectedTo)) {
-				return d.Serial, nil
+			if d.State == "device" && (isGuidSerial(guid, d.Serial) || connectedTo != "" && d.Serial == connectedTo) {
+				serial = d.Serial
+				return true, nil
 			}
 		}
-		if connectedTo == "" && time.Since(start) >= autoConnectWait {
-			if ss, err := Services(ctx, a); err == nil {
-				for _, s := range ss {
-					if s.Type == ConnectType && strings.HasPrefix(s.Name, guid) {
-						if _, err := run(ctx, a, nil, "connect", s.Addr); err == nil {
-							connectedTo = s.Addr
-						}
-					}
-				}
+		polls++
+		if time.Since(start) >= autoConnectWait && (lastTry == 0 || polls-lastTry >= connectRetryPolls) {
+			lastTry = polls
+			if addr := connectService(ctx, a, guid); addr != "" {
+				connectedTo = addr
 			}
 		}
-		if time.Now().After(deadline) {
-			return "", ErrTimeout
+		return false, nil
+	})
+	if err != nil {
+		return "", timeoutErr(parent, err)
+	}
+	return serial, nil
+}
+
+// connectService runs `adb connect` to the first connect service of guid
+// that answers "connected to" (or "already connected to"), and returns its
+// address ("" if none did).
+func connectService(ctx context.Context, a ADB, guid string) string {
+	ss, err := Services(ctx, a)
+	if err != nil {
+		return ""
+	}
+	for _, s := range ss {
+		if s.Type != ConnectType || !matchName(guid, s.Name) {
+			continue
 		}
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-time.After(every):
+		if out, err := run(ctx, a, nil, "connect", s.Addr); err == nil && strings.Contains(out, "connected to") {
+			return s.Addr
 		}
 	}
+	return ""
 }
