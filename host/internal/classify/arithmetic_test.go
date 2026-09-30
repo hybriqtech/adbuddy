@@ -399,3 +399,52 @@ func TestComparingCommandOutputAsTextIsGreen(t *testing.T) {
 		}
 	}
 }
+
+// T3 fix 6, re-review: a justified variable the enclosing shell exports
+// reaches the nested one, where -f, -n or -a read it as an operand.
+func TestExportedJustifiedVariableTaintsTheNestedShell(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		`typeset -xR2 f=16#ab; export ab='x[$(reboot)]'; sh -c '[ -f "$1" 1 ]' _ -eq`,
+		`typeset -xR2 f=16#ab; export ab='x[$(reboot)]'; sh -c 'op=-eq; [ -f "$op" 1 ]'`,
+		`typeset -xR2 a=16#ab; export ab='x[$(reboot)]'; sh -c '[ -a "$1" 1 ]' _ -eq`,
+		`export -R2 f=16#ab; export ab='x[$(reboot)]'; sh -c '[ -f "$1" 1 ]' _ -eq`,
+		`typeset -xi16 -R2 f=171; export ab='x[$(reboot)]'; sh -c '[ -f "$1" 1 ]' _ -eq`,
+		// Declared justified without a value in this command.
+		`typeset -xR2 f; export ab='x[$(reboot)]'; sh -c '[ -f "$1" 1 ]' _ -eq`,
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special || !hasRule(r, "shell.script") {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special shell.script", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+}
+
+// T3 fix 6, re-review: a declaration run through builtin or command checks
+// its names like a parsed one.
+func TestWrappedDeclarationNamesAreChecked(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		"builtin typeset 'a[$(reboot)]'",
+		"command export 'a[$(reboot)]=1'",
+		"command readonly $X",
+		"builtin local 'a[$(reboot)]'",
+		"builtin export PATH=/data/local/tmp; ls",
+		"builtin typeset -n r=PATH",
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+	for _, line := range []string{
+		"builtin typeset x=1",
+		`command export x="$(getprop y)"`,
+		"builtin typeset -x FOO",
+	} {
+		r := c.Classify(sh(line))
+		if r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want not special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+}

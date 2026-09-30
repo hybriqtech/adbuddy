@@ -367,34 +367,43 @@ func (c *Classifier) evalWords(ws []Word, sc scope) []Finding {
 		out = append(out, sc.vars.testFindings(ws)...)
 	case "shift", "ulimit":
 		out = append(out, sc.vars.argsFindings(ws)...)
-	case "integer":
-		out = append(out, integerArgs(ws)...)
+	case "integer", "typeset", "export", "readonly", "local", "declare":
+		// Here only when run through a wrapper (builtin typeset …) or, for
+		// integer, always: the parser reads the others as declarations
+		// (checkDeclClause).
+		out = append(out, declArgs(ws)...)
 	}
 	return out
 }
 
-// integerArgs checks mksh's integer (typeset -i): each value is evaluated
-// as arithmetic (see varTable.integerFindings); a name only known on the
-// phone, or a variable that hides code or a file, cannot be analysed.
-func integerArgs(ws []Word) []Finding {
+// declArgs checks a declaration the parser did not read as one: mksh's
+// integer (typeset -i, whose values are evaluated as arithmetic, see
+// varTable.integerFindings) and typeset, export, readonly, local or
+// declare run through builtin or command. Like checkDeclClause, it cannot
+// analyse a name only known on the phone, an array element (a[i] evaluates
+// i, $(…) included), -n (a reference to another variable) or a variable
+// that hides code or a file.
+func declArgs(ws []Word) []Finding {
+	cmd := ws[0].Value
 	var out []Finding
 	for _, w := range ws[1:] {
 		if w.node != nil {
 			if name, _, ok := splitAssignWord(w.node); ok {
 				if dangerousVar(name) {
-					out = append(out, assignFinding(name, []string{"integer", name}))
+					out = append(out, assignFinding(name, []string{cmd, name}))
 				}
 				continue
 			}
 		}
 		switch {
 		case w.Dynamic:
-			out = append(out, unanalysable("shell.script", "integer with a name only known on the phone", []string{"integer", w.Value}, textScript))
+			out = append(out, unanalysable("shell.script", cmd+" with a name only known on the phone", []string{cmd, w.Value}, textScript))
+		case strings.HasPrefix(w.Value, "-") && strings.ContainsRune(w.Value[1:], 'n'):
+			out = append(out, unanalysable("shell.script", cmd+" -n makes a variable a reference to another", []string{cmd, w.Value}, textScript))
 		case strings.Contains(w.Value, "["):
-			// integer a[i] evaluates i, $(…) included.
-			out = append(out, unanalysable("shell.script", "integer of an array element, whose index is evaluated as arithmetic", []string{"integer", w.Value}, textScript))
+			out = append(out, unanalysable("shell.script", cmd+" of an array element, whose index is evaluated as arithmetic", []string{cmd, w.Value}, textScript))
 		case dangerousVar(w.Value):
-			out = append(out, assignFinding(w.Value, []string{"integer", w.Value}))
+			out = append(out, assignFinding(w.Value, []string{cmd, w.Value}))
 		}
 	}
 	return out

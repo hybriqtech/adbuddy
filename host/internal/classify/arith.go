@@ -27,7 +27,11 @@ type scope struct {
 }
 
 // child is the scope of a shell started by the current script: every
-// variable the script set to something not proven numeric may reach it.
+// variable the script set to something not proven numeric, or declared
+// justified (typeset -L/-R/-Z, with or without a value), may reach it.
+// testOperatorWord trusts a variable the nested shell does not set only
+// because this marks everything else: a new mark in varInfo that makes a
+// variable not numeric must be added here too.
 func (s scope) child() scope {
 	t := map[string]bool{}
 	for k := range s.tainted {
@@ -35,7 +39,7 @@ func (s scope) child() scope {
 	}
 	if s.vars != nil {
 		for name, vi := range s.vars.info {
-			if vi.assigned && (vi.nonNumeric || vi.unknown) {
+			if (vi.assigned && (vi.nonNumeric || vi.unknown)) || vi.justified {
 				t[name] = true
 			}
 		}
@@ -615,7 +619,9 @@ var testUnaryOps = map[string]bool{
 // binary operator to a unary one ([ -f -eq 1 ] compares -f), and as an
 // operand -f reads the variable f. They only count when the script and its
 // enclosing shells never set that variable (the value then comes from
-// adbd's environment).
+// adbd's environment). That assumption holds only because scope.child()
+// taints every variable an enclosing shell leaves not numeric or justified:
+// a new mark in varInfo must be checked there.
 func (t *varTable) testOperatorWord(w Word) bool {
 	if w.Dynamic {
 		return false
