@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -164,18 +163,12 @@ func TestACommandInFlightIsStoppedBeforeAdb(t *testing.T) {
 	held := newHeld()
 	e.d.o.Confirmer = held
 	var red chan result
-	var once sync.Once
-	// The tap is paused (not really) right after the door: the 🔴 starts
-	// asking in between.
-	var checks atomic.Int32
-	e.d.o.Paused = func() bool {
-		if checks.Add(1) == 2 { // the tap's check before adb
-			once.Do(func() {
-				red = e.execAsync("shell", "reboot")
-				<-held.asked
-			})
+	// Right before the tap is admitted to run, the 🔴 starts asking.
+	e.d.beforeRun = func(argv []string) {
+		if argv[1] == "input" {
+			red = e.execAsync("shell", "reboot")
+			<-held.asked
 		}
-		return false
 	}
 	_, exit := e.exec(t, "shell", "input", "tap", "1", "1")
 	if exit.Code != ExitDenied {

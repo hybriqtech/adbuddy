@@ -61,6 +61,7 @@ type Server struct {
 	announced bool // the last OnConnect call was true; guarded by connMu
 
 	mu     sync.Mutex
+	token  string // the only token accepted now (SetToken)
 	seq    uint64
 	ring   []Message // the last BufferSize events, oldest first
 	client *client
@@ -69,6 +70,8 @@ type Server struct {
 type client struct {
 	send   chan Message
 	cancel context.CancelFunc
+	token  string // the token it authenticated with
+	conn   *websocket.Conn
 }
 
 // New returns a Server.
@@ -88,7 +91,32 @@ func New(o Options) *Server {
 	if o.Snapshot == nil {
 		o.Snapshot = func() Snapshot { return Snapshot{Pending: []ConfirmRequest{}, Journal: []json.RawMessage{}} }
 	}
-	return &Server{o: o, helloTimeout: helloTimeout}
+	return &Server{o: o, helloTimeout: helloTimeout, token: o.Token}
+}
+
+// SetToken makes tok the only token accepted from now on, and closes the
+// app connected with another one: a token handed over before is worth
+// nothing once a new one is (spec §5.2: a new token on each start or
+// connection).
+func (s *Server) SetToken(tok string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.token = tok
+	if s.client != nil && s.client.token != tok {
+		// Closed with a policy violation, like a wrong token; detach then
+		// announces the app gone. Close waits for the app's answer: not
+		// under the lock.
+		go s.client.conn.Close(websocket.StatusPolicyViolation, "token changed")
+		s.client = nil
+	}
+}
+
+// validToken reports whether tok is the current token, in constant time.
+func (s *Server) validToken(tok string) bool {
+	s.mu.Lock()
+	cur := s.token
+	s.mu.Unlock()
+	return cur != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(cur)) == 1
 }
 
 // Listen opens the server's port on the loopback interface only (spec §5.2).
@@ -189,7 +217,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		c.Close(websocket.StatusPolicyViolation, "unauthorized")
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(hello.Token), []byte(s.o.Token)) != 1 || s.o.Token == "" {
+	if !s.validToken(hello.Token) {
 		c.Close(websocket.StatusPolicyViolation, "unauthorized")
 		return
 	}
@@ -202,8 +230,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cl := &client{send: make(chan Message, sendQueue), cancel: cancel}
-	backlog, first := s.attach(cl, hello)
+	cl := &client{send: make(chan Message, sendQueue), cancel: cancel, token: hello.Token, conn: c}
+	backlog, first, ok := s.attach(cl, hello)
+	if !ok { // the token changed since it was checked
+		c.Close(websocket.StatusPolicyViolation, "unauthorized")
+		return
+	}
 	defer s.detach(cl)
 
 	welcome, _ := json.Marshal(Welcome{Protocol: ProtocolVersion, Session: s.o.Session, FromSeq: first, HostVersion: s.o.HostVersion})
@@ -259,25 +291,32 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 // attach makes cl the connected app and returns what it missed (see swap).
-// It calls OnConnect(true) unless an app was already announced.
-func (s *Server) attach(cl *client, h Hello) (backlog []Message, first uint64) {
+// It calls OnConnect(true) unless an app was already announced. It fails
+// (ok false) when cl's token is no longer the current one.
+func (s *Server) attach(cl *client, h Hello) (backlog []Message, first uint64, ok bool) {
 	s.connMu.Lock()
 	defer s.connMu.Unlock()
-	backlog, first = s.swap(cl, h)
+	backlog, first, ok = s.swap(cl, h)
+	if !ok {
+		return nil, 0, false
+	}
 	if !s.announced {
 		s.announced = true
 		s.o.OnConnect(true)
 	}
-	return backlog, first
+	return backlog, first, true
 }
 
 // swap replaces the connected app with cl and returns the events after the
 // hello's lastSeq, or a snapshot when they are no longer kept or when the
 // app's lastSeq belongs to another host: a restarted host has another session
 // and numbers its events from 1 again.
-func (s *Server) swap(cl *client, h Hello) (backlog []Message, first uint64) {
+func (s *Server) swap(cl *client, h Hello) (backlog []Message, first uint64, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if subtle.ConstantTimeCompare([]byte(cl.token), []byte(s.token)) != 1 {
+		return nil, 0, false
+	}
 	if s.client != nil {
 		s.client.cancel()
 	}
@@ -297,14 +336,14 @@ func (s *Server) swap(cl *client, h Hello) (backlog []Message, first uint64) {
 		if len(s.ring) > BufferSize {
 			s.ring = s.ring[len(s.ring)-BufferSize:]
 		}
-		return []Message{m}, m.Seq
+		return []Message{m}, m.Seq, true
 	}
 	for _, m := range s.ring {
 		if m.Seq > h.LastSeq {
 			backlog = append(backlog, m)
 		}
 	}
-	return backlog, h.LastSeq + 1
+	return backlog, h.LastSeq + 1, true
 }
 
 // detach removes cl if it is still the connected app and reports whether it

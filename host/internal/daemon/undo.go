@@ -199,9 +199,13 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if d.o.Paused() { // paused while waiting for the lock
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
 	}
-	if t := d.waitingFor(); t != "" { // a question started while undo waited for the lock
-		return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: waitingMessage(t)}
+	// Admitted as a change in flight: a question waits for the inverses.
+	// A question started while undo waited for the lock stops it here.
+	release, other := d.admit(undoPrefix(d.o.Lang)+req.Target, true)
+	if other != "" {
+		return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: waitingMessage(other)}
 	}
+	defer release()
 	entries, _, err := d.o.Journal.Load()
 	if err != nil {
 		return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNREADABLE", Error: err.Error()}

@@ -55,6 +55,7 @@ type Options struct {
 	Version        string
 	OnEntry        func(journal.Entry) // final records, for the live view; fields are untrusted, escape before printing; called concurrently
 	OnWarning      func(string)        // problems the person running serve should see; called concurrently
+	OnNotice       func(string)        // what the person running serve should know (a 🔴 waiting for changes in flight); escaped; called concurrently
 	// Workspace is the root of the agent's environment: adb pull and adb
 	// bugreport may only write inside it. Empty: they always need confirmation.
 	Workspace string
@@ -80,10 +81,20 @@ type Daemon struct {
 	changes sync.Mutex
 
 	// asking is the 🔴 question waiting for an answer, on the phone or in
-	// the terminal. While there is one, every other command is refused: an
+	// the terminal, or waiting for the changes in flight to finish before
+	// it is asked. While there is one, every other command is refused: an
 	// `input tap` sent meanwhile could press Allow on the phone.
-	askMu  sync.Mutex
-	asking *question
+	// inFlight are the 🟡/🔴 commands and undos admitted to adb and not
+	// finished yet: a question is only shown once there are none, so a
+	// `sleep 3; input tap` already running cannot press Allow either. 🟢
+	// commands cannot inject touches and are not counted.
+	askMu    sync.Mutex
+	asking   *question
+	inFlight map[*flight]bool
+	idle     chan struct{} // closed when inFlight becomes empty
+
+	// beforeRun, in tests, runs right before a command is admitted to adb.
+	beforeRun func(argv []string)
 }
 
 // question is a 🔴 confirmation in progress.
@@ -94,6 +105,9 @@ type question struct {
 
 // errWithdrawn is why a question is withdrawn when the agent is paused.
 var errWithdrawn = errors.New("paused from the phone")
+
+// flight is a change admitted to adb.
+type flight struct{ title string }
 
 // ask makes q the question waiting for an answer. If another one is
 // waiting, q is not registered and ask returns the other's title.
@@ -107,12 +121,86 @@ func (d *Daemon) ask(q *question) (other string) {
 	return ""
 }
 
-// answered removes q once its answer is in.
-func (d *Daemon) answered(q *question) {
+// answered removes q once its answer is in. An allowed question's command
+// is admitted to adb in the same step, so a 🔴 that registers right after
+// waits for it instead of blocking it; call the returned release when it
+// finishes.
+func (d *Daemon) answered(q *question, allowed bool) (release func()) {
 	d.askMu.Lock()
 	defer d.askMu.Unlock()
 	if d.asking == q {
 		d.asking = nil
+	}
+	if !allowed {
+		return func() {}
+	}
+	return d.flyLocked(q.title)
+}
+
+// admit lets a command reach adb unless a question is waiting (then it
+// returns that question's title). A change (change true) counts as in
+// flight until release is called.
+func (d *Daemon) admit(title string, change bool) (release func(), other string) {
+	d.askMu.Lock()
+	defer d.askMu.Unlock()
+	if d.asking != nil {
+		return nil, d.asking.title
+	}
+	if !change {
+		return func() {}, ""
+	}
+	return d.flyLocked(title), ""
+}
+
+// flyLocked adds a change in flight; askMu must be held.
+func (d *Daemon) flyLocked(title string) (release func()) {
+	f := &flight{title: title}
+	if d.inFlight == nil {
+		d.inFlight = map[*flight]bool{}
+	}
+	if len(d.inFlight) == 0 {
+		d.idle = make(chan struct{})
+	}
+	d.inFlight[f] = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			d.askMu.Lock()
+			defer d.askMu.Unlock()
+			delete(d.inFlight, f)
+			if len(d.inFlight) == 0 {
+				close(d.idle)
+			}
+		})
+	}
+}
+
+// waitChanges waits until no change is in flight before q is asked, and
+// says so once. It ends early when ctx does (the agent left, or a pause
+// withdrew q).
+func (d *Daemon) waitChanges(ctx context.Context, q *question) error {
+	told := false
+	for {
+		d.askMu.Lock()
+		if len(d.inFlight) == 0 {
+			d.askMu.Unlock()
+			return nil
+		}
+		idle, running := d.idle, ""
+		for f := range d.inFlight {
+			running = f.title
+			break
+		}
+		d.askMu.Unlock()
+		if !told {
+			told = true
+			d.o.OnNotice(`Waiting for "` + classify.Printable(running) + `" to finish before asking "` + classify.Printable(q.title) + `"`)
+		}
+		select {
+		case <-idle:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -155,6 +243,9 @@ func New(o Options) *Daemon {
 	if o.OnWarning == nil {
 		o.OnWarning = func(string) {}
 	}
+	if o.OnNotice == nil {
+		o.OnNotice = func(string) {}
+	}
 	if o.Paused == nil {
 		o.Paused = func() bool { return false }
 	}
@@ -193,6 +284,13 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		e.Source = journal.SourceAgent
 	}
 
+	// release ends this command's time in flight (see admit).
+	var release func()
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
 	g, args := classify.SplitGlobal(req.Argv)
 	res := d.o.Classifier.Classify(args) // pure: nothing reaches adb yet
 	if d.o.Paused() {
@@ -265,28 +363,38 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			key = e.Rule + "\x00" + req.Cwd + "\x00" + strings.Join(req.Argv, "\x00")
 		}
 		qctx, withdraw := context.WithCancelCause(ctx)
-		cctx, cancel := context.WithTimeout(qctx, d.o.ConfirmTimeout)
+		defer withdraw(nil)
 		q := &question{title: e.Description, withdraw: withdraw}
-		done := func() {
-			d.answered(q)
-			cancel()
-			withdraw(nil)
-		}
 		if other := d.ask(q); other != "" {
-			done()
 			return d.block(e, s, waitingMessage(other))
 		}
 		// A pause that came before the question was registered did not
 		// withdraw it: look again now that it is.
 		if d.o.Paused() {
-			done()
+			d.answered(q, false)
 			return d.block(e, s, PausedMessage)
 		}
+		// Registered first, so nothing new starts; then the changes
+		// already running must end before the question shows up.
+		if err := d.waitChanges(qctx, q); err != nil {
+			d.answered(q, false)
+			if d.o.Paused() {
+				return d.block(e, s, PausedMessage)
+			}
+			code := ExitDenied
+			e.Status, e.Reason, e.ExitCode = journal.StatusDenied, "abandoned by the agent before it was asked", &code
+			d.record(e)
+			return ipc.Exit{Code: ExitDenied}
+		}
+		// The expiry counts from when the question is shown.
+		asked := d.o.Now().UTC()
+		cctx, cancel := context.WithTimeout(qctx, d.o.ConfirmTimeout)
 		decision := d.o.Confirmer.Confirm(cctx, confirm.Request{
 			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: classify.DisplayCommand(req.Argv),
-			ExpiresAt: now.Add(d.o.ConfirmTimeout), Special: res.Special, Key: key,
+			ExpiresAt: asked.Add(d.o.ConfirmTimeout), Special: res.Special, Key: key,
 		})
-		done()
+		cancel()
+		release = d.answered(q, decision == confirm.Allow)
 		// Paused while it was asked: whatever the answer (or none, if the
 		// pause withdrew it), it ends blocked.
 		if d.o.Paused() {
@@ -317,14 +425,22 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 	}
 
+	if d.beforeRun != nil {
+		d.beforeRun(req.Argv)
+	}
 	// Paused during the confirmation (an Allow may come after the pause) or
 	// the prechecks: refuse before any running record and before adb.
 	if d.o.Paused() {
 		return d.block(e, s, PausedMessage)
 	}
-	// A question that started after this command got past the door.
-	if t := d.waitingFor(); t != "" {
-		return d.block(e, s, waitingMessage(t))
+	// Admitted to adb, unless a question started after this command got
+	// past the door. A 🔴 was admitted with its Allow.
+	if level != classify.Red {
+		r, other := d.admit(e.Description, level >= classify.Yellow)
+		if other != "" {
+			return d.block(e, s, waitingMessage(other))
+		}
+		release = r
 	}
 	if level >= classify.Yellow {
 		running := e

@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -66,33 +67,44 @@ func chatPort(e *env) (int, error) {
 	return 0, fmt.Errorf("no free port found for the app channel")
 }
 
+// newToken makes the token of each handover (a variable so a test can make
+// it fail).
+var newToken = bridge.NewToken
+
 // startPhoneLink starts the app channel when the app is installed. Without
-// the app it returns a link that confirms with fallback and never pauses.
+// the app, or when the channel cannot start, it returns a link that
+// confirms with fallback and never pauses, and says why: no failure of the
+// app's channel stops serve. Its only error is Interrupted (ctx ended).
 func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
 	l := &phoneLink{log: app.Stderr, agent: agentName}
+	l.conf = bridge.NewConfirmer(noApp{}, fallback)
+	without := func(why string) (*phoneLink, error) {
+		fmt.Fprintf(app.Stderr, "⚠ %s. 🔴 confirmations happen here, without the phone app.\n", why)
+		return l, nil
+	}
 	version, err := phoneapp.InstalledVersion(ctx, a)
+	if ctx.Err() != nil {
+		return nil, Interrupted()
+	}
 	if err != nil {
-		return nil, NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
+		return without("Could not check whether the ADBuddy app is on the phone (" + classify.Printable(err.Error()) + ")")
 	}
 	if version == "" {
 		fmt.Fprintln(app.Stderr, "The ADBuddy app is not on the phone: 🔴 confirmations happen here. Run `adbuddy setup` to install it.")
-		l.conf = bridge.NewConfirmer(noApp{}, fallback)
 		return l, nil
 	}
 	port, err := chatPort(e)
 	if err != nil {
-		return nil, NewError("CHAT_PORT_FAILED", err.Error(), "Set chat_port in "+e.dirs.ConfigFile()+".")
-	}
-	token, err := bridge.NewToken()
-	if err != nil {
-		return nil, NewError("TOKEN_FAILED", err.Error(), "")
+		return without("Could not choose a port for the phone app's channel (" + classify.Printable(err.Error()) + "); set chat_port in " + e.dirs.ConfigFile())
 	}
 	listener, err := bridge.Listen(port)
 	if err != nil {
-		return nil, NewError("CHAT_PORT_IN_USE", err.Error(), "Another program uses port "+fmt.Sprint(port)+": change chat_port in "+e.dirs.ConfigFile()+".")
+		return without("Port " + strconv.Itoa(port) + " for the phone app's channel is in use (" + classify.Printable(err.Error()) + "); change chat_port in " +
+			e.dirs.ConfigFile() + " to a free port between 1024 and 65535 and start adbuddy serve again")
 	}
+	// No token until connect hands one over: nobody gets in before.
 	l.srv = bridge.New(bridge.Options{
-		Token: token, Session: session, HostVersion: Version,
+		Session: session, HostVersion: Version,
 		OnMessage: l.onMessage,
 		Snapshot:  l.snapshot,
 		OnReject: func(h bridge.Hello) {
@@ -101,12 +113,15 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 		OnConnect: func(on bool) {
 			if on {
 				fmt.Fprintln(app.Stderr, "📱 The phone app is connected: 🔴 confirmations go to the phone.")
-			} else {
-				fmt.Fprintln(app.Stderr, "📱 The phone app disconnected: 🔴 confirmations happen here.")
-				// A question already on the phone would wait there for
-				// nobody: it moves here too.
-				l.conf.AppGone()
+				return
 			}
+			fmt.Fprintln(app.Stderr, "📱 The phone app disconnected: 🔴 confirmations happen here.")
+			if l.Paused() {
+				fmt.Fprintln(app.Stderr, "⏸ Still paused: resume from the app when it reconnects, or restart adbuddy serve.")
+			}
+			// A question already on the phone would wait there for
+			// nobody: it moves here too.
+			l.conf.AppGone()
 		},
 	})
 	l.conf = bridge.NewConfirmer(l.srv, fallback)
@@ -120,16 +135,32 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 	go l.srv.Serve(ctx, listener)
 	host, _ := os.Hostname()
 	host = phoneapp.HostName(host)
+	// connect hands the channel over again with a new token (spec §5.2): the
+	// server takes only that one and drops an app with the old one before
+	// the tunnel is back, so a token captured meanwhile is worth nothing.
 	connect := func() error {
+		token, err := newToken()
+		if err != nil {
+			return fmt.Errorf("could not make a token: %w", err)
+		}
+		l.srv.SetToken(token)
 		if err := phoneapp.Tunnel(ctx, a, port); err != nil {
 			return err
 		}
 		return phoneapp.Handshake(ctx, a, token, port, host)
 	}
-	if err := connect(); err != nil {
-		fmt.Fprintf(app.Stderr, "⚠ Could not reach the phone app (%v): 🔴 confirmations happen here until it connects.\n", err)
+	err = connect()
+	if ctx.Err() != nil {
+		return nil, Interrupted()
+	}
+	if err != nil {
+		fmt.Fprintf(app.Stderr, "⚠ Could not reach the phone app (%s): 🔴 confirmations happen here until it connects.\n", classify.Printable(err.Error()))
 	}
 	go func() {
+		// connected: the last connect() worked. If not, it is tried again
+		// on each tick; if so, only when adb lost the tunnel. A failure is
+		// said once until it works again.
+		connected, warned := err == nil, err != nil
 		t := time.NewTicker(tunnelCheck)
 		defer t.Stop()
 		for {
@@ -137,11 +168,19 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				if ok, err := phoneapp.TunnelOpen(ctx, a, port); err == nil && !ok {
-					if err := connect(); err != nil && ctx.Err() == nil {
-						fmt.Fprintf(app.Stderr, "⚠ Could not reopen the phone app's channel: %v\n", err)
-					}
+			}
+			if connected {
+				if open, err := phoneapp.TunnelOpen(ctx, a, port); err != nil || open {
+					continue
 				}
+			}
+			err := connect()
+			connected = err == nil
+			if connected {
+				warned = false
+			} else if !warned && ctx.Err() == nil {
+				warned = true
+				fmt.Fprintf(app.Stderr, "⚠ Could not reopen the phone app's channel: %s\n", classify.Printable(err.Error()))
 			}
 		}
 	}()

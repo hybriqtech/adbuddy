@@ -163,6 +163,8 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			}
 			var outMu sync.Mutex
 			session := journal.NewID("s_", time.Now())
+			// Without the app, or if its channel fails, confirmations stay
+			// here: only Ctrl+C stops serve at this step.
 			link, err := startPhoneLink(ctx, app, &e, runner, session, agentName, confirmer)
 			if err != nil {
 				return err
@@ -183,6 +185,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 					link.Entry(j)
 				},
 				OnWarning: func(w string) { fmt.Fprintln(app.Stderr, "⚠ "+w) },
+				OnNotice:  func(n string) { fmt.Fprintln(app.Stderr, "⏳ "+n) },
 			})
 			link.OnPause(d.CancelConfirmations)
 			srv, err := ipc.Listen(e.dirs.Data, secret, func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {

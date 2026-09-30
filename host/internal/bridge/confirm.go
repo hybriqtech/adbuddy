@@ -153,19 +153,26 @@ func (c *Confirmer) notify(title string, moved bool) {
 	}
 }
 
-// Reply handles a confirm.reply from the app. Replies for unknown or already
-// answered ids are ignored.
+// StaleReplyText tells the app its answer came too late.
+const StaleReplyText = "That question was already answered or moved to the PC terminal."
+
+// Reply handles a confirm.reply from the app. A reply for an id that is not
+// waiting (answered, withdrawn or moved to the terminal) does nothing but
+// tell the app so.
 func (c *Confirmer) Reply(raw json.RawMessage) {
 	var rep ConfirmReply
 	if json.Unmarshal(raw, &rep) != nil {
 		return
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	p, ok := c.pending[rep.ID]
 	if !ok {
+		c.mu.Unlock()
+		// Publish takes the server's lock: never under c.mu.
+		_ = c.App.Publish(TypeNotice, Notice{Level: "info", Text: StaleReplyText})
 		return
 	}
+	defer c.mu.Unlock()
 	d := confirm.Deny
 	switch rep.Decision {
 	case "allow":

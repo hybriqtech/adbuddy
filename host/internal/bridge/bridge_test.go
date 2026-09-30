@@ -493,11 +493,18 @@ type fakeApp struct {
 	mu        sync.Mutex
 	connected bool
 	published []ConfirmRequest
+	notices   []Notice
 	onPublish func(ConfirmRequest)
 }
 
 func (f *fakeApp) Connected() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.connected }
 func (f *fakeApp) Publish(typ string, payload any) error {
+	if n, ok := payload.(Notice); ok {
+		f.mu.Lock()
+		f.notices = append(f.notices, n)
+		f.mu.Unlock()
+		return nil
+	}
 	r := payload.(ConfirmRequest)
 	f.mu.Lock()
 	f.published = append(f.published, r)

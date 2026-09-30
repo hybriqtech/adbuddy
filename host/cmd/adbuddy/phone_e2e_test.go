@@ -61,6 +61,37 @@ func (p *phone) until(typ string) bridge.Message {
 	}
 }
 
+// finalEntry reads journal entries until the final one of the question id
+// (not "running") and returns its text fields. The app takes the question
+// off the screen when an entry with its id arrives: the keys are checked as
+// written ("id", "status"), not as a case-insensitive decoder reads them.
+func (p *phone) finalEntry(id string) map[string]string {
+	p.t.Helper()
+	for {
+		m := p.until(bridge.TypeJournalEntry)
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(m.Payload, &raw); err != nil {
+			p.t.Fatal(err)
+		}
+		fields := map[string]string{}
+		for k, v := range raw {
+			var s string
+			if json.Unmarshal(v, &s) == nil {
+				fields[k] = s
+			}
+		}
+		if fields["id"] != id {
+			continue
+		}
+		if _, ok := raw["status"]; !ok {
+			p.t.Fatalf("entry without \"status\": %s", m.Payload)
+		}
+		if fields["status"] != "running" {
+			return fields
+		}
+	}
+}
+
 // phoneAppRules make the fake adb answer like a phone with the app installed
 // that takes the handshake: ping returns the nonce of the last handshake.
 func phoneAppRules(port string) []testutil.FakeRule {
@@ -135,13 +166,8 @@ func TestPhoneAppConfirmsAndPauses(t *testing.T) {
 	if code := <-done; code != 0 {
 		t.Fatalf("allowed command exit %d", code)
 	}
-	for {
-		m = p.until(bridge.TypeJournalEntry)
-		var e struct{ ID, Status string }
-		json.Unmarshal(m.Payload, &e)
-		if e.ID == req.ID && e.Status == "ok" {
-			break
-		}
+	if e := p.finalEntry(req.ID); e["status"] != "ok" {
+		t.Fatalf("final entry %v", e)
 	}
 	if strings.Contains(h.serveErr.String(), "Code: ") {
 		t.Fatal("the terminal asked too")
@@ -219,15 +245,8 @@ func TestPhonePauseWithdrawsTheQuestion(t *testing.T) {
 	if code, errOut := waitDone(t, done, h); code != "126" || !strings.Contains(errOut, "Blocked by ADBuddy: paused from the phone") {
 		t.Fatalf("%s %q", code, errOut)
 	}
-	for {
-		var e struct{ ID, Status, Reason string }
-		json.Unmarshal(p.until(bridge.TypeJournalEntry).Payload, &e)
-		if e.ID == req.ID {
-			if e.Status != "blocked" || !strings.Contains(e.Reason, "paused") {
-				t.Fatalf("journal %+v", e)
-			}
-			break
-		}
+	if e := p.finalEntry(req.ID); e["status"] != "blocked" || !strings.Contains(e["reason"], "paused") {
+		t.Fatalf("journal %v", e)
 	}
 	for _, c := range h.adbCalls() {
 		if strings.Contains(c, "reboot") || strings.Contains(c, "input") {
@@ -237,4 +256,18 @@ func TestPhonePauseWithdrawsTheQuestion(t *testing.T) {
 	if strings.Contains(h.serveErr.String(), "Code: ") {
 		t.Fatal("the terminal asked")
 	}
+}
+
+// Minor 7: the app disconnects while the agent is paused: the terminal says
+// it is still paused and how to resume.
+func TestPhoneDisconnectWhilePaused(t *testing.T) {
+	port := strconv.Itoa(freePort(t))
+	h := startWith(t, "chat_port = "+port+"\n", phoneAppRules(port)...)
+	p := connectPhone(t, h, port)
+	p.send(bridge.TypePause, struct{}{})
+	p.until(bridge.TypeSessionState)
+	p.c.CloseNow()
+	waitFor(t, func() bool {
+		return strings.Contains(h.serveErr.String(), "Still paused: resume from the app when it reconnects, or restart adbuddy serve.")
+	}, h.serveErr)
 }
