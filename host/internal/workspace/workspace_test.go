@@ -272,7 +272,11 @@ func TestAgentsCoversDoctorAndBoundedCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := read(t, filepath.Join(dir, "AGENTS.md"))
-	for _, want := range []string{"`adbuddy doctor [--json]`", "13. Always bound commands", "`logcat -d`", "14. Never ask the user to type a password"} {
+	for _, want := range []string{"`adbuddy doctor [--json]`", "13. Always bound commands", "`logcat -d`", "14. Never ask the user to type a password",
+		// Review of task 7: Run lines are the agent's; "Ask the user" lines are the user's.
+		"Run its `Run:` lines yourself", "`Ask the user`",
+		// Bounded is not enough: these still wait for the user's confirmation.
+		"`screenrecord`, `getevent` and `monkey` with more than one event wait for the user's confirmation"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("AGENTS.md lacks %q", want)
 		}

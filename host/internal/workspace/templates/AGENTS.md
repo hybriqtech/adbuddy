@@ -16,7 +16,7 @@ You are working in an ADBuddy environment. From here you manage the user's Andro
 - `adb pull` only into this environment; anything else asks for confirmation.
 - `adbuddy journal [--session current|<id>] [--json]`: what has been done, with the inverse of each change. In `--json` each entry has `"verified"`: only `true` means ADBuddy wrote it.
 - `adbuddy undo [last|<id>|session]`: undo the last change, one journal entry, or the whole session.
-- `adbuddy doctor [--json]`: when adb or adbuddy fails in a way you do not understand, run it before guessing. Run its `run` lines yourself (they are safe); relay its `guidance` lines to the user word for word, because only they can do them.
+- `adbuddy doctor [--json]`: when adb or adbuddy fails in a way you do not understand, run it before guessing. Run its `Run:` lines yourself (`run` in `--json`): they are safe. Its `Guidance:` lines (`guidance`), including those that start with `Ask the user`, are for the user: relay them word for word, because only they can do them.
 
 ## Risk levels
 
@@ -38,5 +38,5 @@ You are working in an ADBuddy environment. From here you manage the user's Andro
 10. If `adb` answers `ADBuddy host not running (run: adbuddy serve)`, ask the user to start `adbuddy serve`; do not look for another adb.
 11. Use `adbuddy undo` only to revert your own mistake or when the user asks for it, and tell the user what you undid.
 12. Do not try to bypass ADBuddy (another adb binary, another adb server, scripts that call adb). It protects the user's phone; working around it breaks their trust.
-13. Always bound commands that never end on their own, or they hang your shell: `logcat -d` (not `logcat`), `top -n 1`, `screenrecord --time-limit 30 …`, `monkey` with an event count, `getevent -c <n>`.
+13. Always bound commands that never end on their own, or they hang your shell: `logcat -d` (not `logcat`), `top -n 1`, `screenrecord --time-limit 30 …`, `monkey` with an event count, `getevent -c <n>`. Even bounded, `screenrecord`, `getevent` and `monkey` with more than one event wait for the user's confirmation (🔴), so use them only when you need them.
 14. Never ask the user to type a password, a PIN or an API key in the chat: ADBuddy never needs them, and the phone asks for its own when it must.
