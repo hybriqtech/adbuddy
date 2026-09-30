@@ -316,14 +316,16 @@ func baseVars(ws []Word) map[string]string {
 }
 
 var (
-	textUnknown     = Text{EN: "Run a command ADBuddy does not recognise: {cmd}", ES: "Ejecutar un comando que ADBuddy no reconoce: {cmd}"}
-	textDynamic     = Text{EN: "Run a command whose arguments are only known on the phone: {cmd}", ES: "Ejecutar un comando cuyos argumentos solo se conocen en el móvil: {cmd}"}
-	textInteractive = Text{EN: "Open an interactive shell on the phone", ES: "Abrir una shell interactiva en el móvil"}
-	textScript      = Text{EN: "Run a script on the phone: {cmd}", ES: "Ejecutar un script en el móvil: {cmd}"}
-	textParse       = Text{EN: "Run shell code ADBuddy cannot analyse: {cmd}", ES: "Ejecutar código de shell que ADBuddy no puede analizar: {cmd}"}
-	textRedirect    = Text{EN: "Write to a file on the phone: {cmd}", ES: "Escribir en un fichero del móvil: {cmd}"}
-	textAssign      = Text{EN: "Change a shell variable that affects which programs run: {cmd}", ES: "Cambiar una variable de la shell que afecta a qué programas se ejecutan: {cmd}"}
-	textMultiChange = Text{EN: "Make several changes in one command", ES: "Hacer varios cambios en un solo comando"}
+	textUnknown      = Text{EN: "Run a command ADBuddy does not recognise: {cmd}", ES: "Ejecutar un comando que ADBuddy no reconoce: {cmd}"}
+	textDynamic      = Text{EN: "Run a command whose arguments are only known on the phone: {cmd}", ES: "Ejecutar un comando cuyos argumentos solo se conocen en el móvil: {cmd}"}
+	textInteractive  = Text{EN: "Open an interactive shell on the phone", ES: "Abrir una shell interactiva en el móvil"}
+	textScript       = Text{EN: "Run a script on the phone: {cmd}", ES: "Ejecutar un script en el móvil: {cmd}"}
+	textParse        = Text{EN: "Run shell code ADBuddy cannot analyse: {cmd}", ES: "Ejecutar código de shell que ADBuddy no puede analizar: {cmd}"}
+	textRedirect     = Text{EN: "Write to a file on the phone: {cmd}", ES: "Escribir en un fichero del móvil: {cmd}"}
+	textAssign       = Text{EN: "Change a shell variable that affects which programs run: {cmd}", ES: "Cambiar una variable de la shell que afecta a qué programas se ejecutan: {cmd}"}
+	textMultiChange  = Text{EN: "Make several changes in one command", ES: "Hacer varios cambios en un solo comando"}
+	textRunAsADBuddy = Text{EN: "Read or change ADBuddy's private files: {cmd}", ES: "Leer o cambiar los ficheros privados de ADBuddy: {cmd}"}
+	textBackground   = Text{EN: "Leave a command running on the phone after this one returns: {cmd}", ES: "Dejar un comando en marcha en el móvil después de devolver el control: {cmd}"}
 )
 
 func redFinding(rule, reason string, words []string, title Text) Finding {

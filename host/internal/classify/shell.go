@@ -29,6 +29,16 @@ func (c *Classifier) classifyScript(src string, depth int) []Finding {
 	var out []Finding
 	syntax.Walk(file, func(n syntax.Node) bool {
 		switch n := n.(type) {
+		case *syntax.Stmt:
+			// `cmd &` (at the end or in the middle) and mksh's `cmd |&`.
+			if n.Background || n.Coprocess || n.Disown {
+				var b strings.Builder
+				if syntax.NewPrinter(syntax.SingleLine(true)).Print(&b, n) != nil {
+					b.Reset()
+					b.WriteString("&")
+				}
+				out = append(out, backgroundFinding("runs in the background", []string{b.String()}))
+			}
 		case *syntax.CallExpr:
 			out = append(out, c.evalCall(n, depth)...)
 		case *syntax.Redirect:
@@ -69,7 +79,7 @@ func (c *Classifier) classifyScript(src string, depth int) []Finding {
 		case *syntax.FuncDecl:
 			out = append(out, redFinding("shell.function", "defines a shell function", []string{n.Name.Value}, textScript))
 		case *syntax.CoprocClause:
-			out = append(out, redFinding("shell.coproc", "coprocess", []string{"coproc"}, textParse))
+			out = append(out, backgroundFinding("coprocess", []string{"coproc"}))
 		}
 		return true
 	})
@@ -226,10 +236,18 @@ func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 		}
 		ws = append([]Word{ws[0]}, rest...)
 	}
-	if ws[0].Value == "run-as" && len(ws) > 1 && strings.Contains(strings.ToLower(ws[1].Value), ADBuddyPackage) {
-		f := redFinding("run-as.adbuddy", "reads or changes the ADBuddy app's private files", vals, textUnknown)
-		f.Special = true
-		return []Finding{f}
+	switch ws[0].Value {
+	case "run-as":
+		// A package only known on the phone may be ADBuddy's.
+		if len(ws) > 1 && (ws[1].Dynamic || strings.Contains(strings.ToLower(ws[1].Value), ADBuddyPackage)) {
+			f := redFinding("run-as.adbuddy", "reads or changes the ADBuddy app's private files", vals, textRunAsADBuddy)
+			f.Special = true
+			return []Finding{f}
+		}
+	case "setsid", "daemonize", "start-stop-daemon", "disown":
+		// toybox setsid returns at once unless -w, and it still detaches the
+		// command from adb's session: judged the same whatever the options.
+		return []Finding{backgroundFinding(ws[0].Value+" detaches a process", vals)}
 	}
 	if inner, handled, reason := unwrap(ws); handled {
 		if reason != "" {
@@ -241,6 +259,15 @@ func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 		return c.evalWords(inner, depth)
 	}
 	return []Finding{c.evalRule("shell", ws)}
+}
+
+// backgroundFinding is for anything that keeps running on the phone after
+// the command returns: later it could press "Allow" on ADBuddy's confirmation
+// (a delayed input tap), so it is always special.
+func backgroundFinding(reason string, words []string) Finding {
+	f := redFinding("shell.background", reason, words, textBackground)
+	f.Special = true
+	return f
 }
 
 // cmdAliases maps `cmd <service>` to the equivalent command.

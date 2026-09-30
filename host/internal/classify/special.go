@@ -98,11 +98,21 @@ func specialReason(scope string, ws []Word, level Level) string {
 		// ADBuddy's own channel (token, consent): even reading it is off
 		// limits for the agent (its private files: see run-as in shell.go).
 		// Uri.getAuthority() decodes %xx, so compare the decoded words.
-		if strings.Contains(strings.ToLower(percentDecode(strings.Join(v, " "))), ADBuddyPackage) {
+		all := strings.ToLower(percentDecode(strings.Join(v, " ")))
+		if strings.Contains(all, ADBuddyPackage) {
 			return "talks to the ADBuddy app's own channel or files"
 		}
-		if level != Green && strings.Contains(strings.ToLower(percentDecode(strings.Join(v, " "))), "settings") {
+		if hasDynamic(ws[1:]) {
+			// $(…), $VAR, a loop variable or xargs' stdin: on the phone it
+			// may become ADBuddy's authority.
+			return "arguments only known on the phone could point at the ADBuddy app's own channel"
+		}
+		if level != Green && strings.Contains(all, "settings") {
 			return "changes system settings directly, including the connection ones"
+		}
+	case "am":
+		if r := amSpecial(ws); r != "" {
+			return r
 		}
 	case "cmd":
 		if len(v) > 1 && (v[1] == "wifi" || v[1] == "connectivity") && level != Green {
@@ -122,12 +132,46 @@ func specialReason(scope string, ws []Word, level Level) string {
 	if level != Green && touchesCriticalApp(name, ws, v) {
 		return "affects an app the phone needs to stay connected or to start"
 	}
+	if level != Green && (name == "pm" || name == "appops" || name == "am") && hasDynamic(ws[1:]) {
+		return "arguments only known on the phone could name ADBuddy or a critical app"
+	}
 	return ""
 }
 
+// amMemory are am subcommands that read or change an app's memory (in a
+// debuggable build, ADBuddy's token included), whatever the process.
+var amMemory = map[string]bool{"dumpheap": true, "attach-agent": true, "profile": true}
+
+// amStartMemory are am start options that do the same to the app it opens.
+var amStartMemory = map[string]bool{
+	"--attach-agent": true, "--attach-agent-bind": true, "--start-profiler": true, "-P": true,
+}
+
+func amSpecial(ws []Word) string {
+	sub := subOf(ws)
+	if amMemory[sub] {
+		return "reads or changes an app's memory"
+	}
+	wait := false
+	for _, w := range ws[1:] {
+		if amStartMemory[w.Value] {
+			return "reads or changes the memory of the app it opens"
+		}
+		wait = wait || w.Value == "-w"
+	}
+	if sub == "instrument" && !wait {
+		// It returns at once and the instrumentation, which can drive the
+		// screen, keeps running.
+		return "am instrument without -w keeps running after it returns"
+	}
+	return ""
+}
+
+// mentionsADBuddy compares the words decoded and in lower case: intent: URIs
+// and Uri.getAuthority() decode %xx.
 func mentionsADBuddy(v []string) bool {
 	for _, s := range v {
-		if strings.Contains(s, ADBuddyPackage) {
+		if strings.Contains(strings.ToLower(percentDecode(s)), ADBuddyPackage) {
 			return true
 		}
 	}
