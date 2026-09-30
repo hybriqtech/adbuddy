@@ -91,7 +91,7 @@ func TestRunExportsTheIdentity(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	fakeDaemon(t, data, ipc.Ping{Version: Version, Session: "s_1", Serial: "192.0.2.10:41000", Identity: "adb-AAA-bbb._adb-tls-connect._tcp", Journal: workspace.JournalDir(ws)}, ipc.Exit{})
+	fakeDaemon(t, data, ipc.Ping{Version: Version, Session: "s_1", Serial: "192.0.2.10:41000", Identity: "adb-AAAA1111-bbb._adb-tls-connect._tcp", Journal: workspace.JournalDir(ws)}, ipc.Exit{})
 	log := filepath.Join(t.TempDir(), "agent.log")
 	t.Setenv("FAKEADB_SCRIPT", "")
 	t.Setenv("FAKEADB_LOG", log)
@@ -100,7 +100,7 @@ func TestRunExportsTheIdentity(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
 	}
 	calls, err := testutil.ReadLog(log)
-	if err != nil || len(calls) != 1 || calls[0].Serial != "adb-AAA-bbb._adb-tls-connect._tcp" {
+	if err != nil || len(calls) != 1 || calls[0].Serial != "adb-AAAA1111-bbb._adb-tls-connect._tcp" {
 		t.Fatalf("agent calls %+v (%v)", calls, err)
 	}
 }

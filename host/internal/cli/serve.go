@@ -22,6 +22,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
+	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -105,6 +106,8 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			switch {
 			case err != nil && ctx.Err() != nil:
 				return Interrupted()
+			case hasCode(err, "WRONG_PHONE") || hasCode(err, "DEVICE_UNREADABLE"):
+				return err
 			case errors.Is(err, adb.ErrNoDevice) && k.AddrErr != nil:
 				return TransientError("DEVICE_NOT_FOUND", "the phone did not show up, and its saved address "+addr+" did not work: "+AsError(k.AddrErr).Message,
 					"The port changes each time wireless debugging is turned on: "+reconnect)
@@ -116,10 +119,16 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			case err != nil:
 				return NewError("ADB_FAILED", err.Error(), "Check the adb path ("+adbPath+").")
 			}
-			if k.Used != "" && !k.Verified {
-				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s).\n", k.Used, unverifiedWhy(serial))
-			}
 			active := k.Active
+			// The journal and undo know the phone by its stable name only when
+			// its identity was checked: otherwise by the serial of this session,
+			// so undo of older changes stops at OTHER_DEVICE.
+			identity := active
+			if k.Verified {
+				identity = phoneIdentity(serial, active)
+			} else if _, byGuid := pairing.GuidOf(serial); byGuid || k.Used != "" {
+				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s); the journal knows it as %s this time.\n", active, unverifiedWhy(serial), active)
+			}
 			runner.Serial = active
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
 			if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy serve"); err != nil {
@@ -152,7 +161,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			session := journal.NewID("s_", time.Now())
 			d := daemon.New(daemon.Options{
 				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: confirmer,
-				Serial: active, Identity: phoneIdentity(serial, active), Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
+				Serial: active, Identity: identity, Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
 				UndoneLog: undoneLogPath(e.dirs.Data, workspace.JournalDir(ws)),
 				OnEntry: func(j journal.Entry) {
 					outMu.Lock()

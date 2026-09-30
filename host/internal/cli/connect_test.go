@@ -38,7 +38,7 @@ func saveConfig(t *testing.T, e setupEnv, serial string) config.Config {
 }
 
 func TestConnectSavesTheAddress(t *testing.T) {
-	e := newSetupEnv(t, addrRules("AAA"))
+	e := newSetupEnv(t, addrRules("AAAA1111"))
 	saveConfig(t, e, phoneSerial)
 	out, errOut, code := runWithInput(t, "", "connect", tsAddr, "--json")
 	if code != 0 {
@@ -70,7 +70,7 @@ func TestConnectSavesTheAddress(t *testing.T) {
 
 	// Without a saved phone there is nothing to check against: connected,
 	// saved, not verified, and said so.
-	e = newSetupEnv(t, addrRules("AAA"))
+	e = newSetupEnv(t, addrRules("AAAA1111"))
 	saveConfig(t, e, "")
 	out, errOut, code = runWithInput(t, "", "connect", tsAddr, "--json")
 	if code != 0 || !strings.Contains(out, `"verified":false`) || !strings.Contains(errOut, "could not check") {
@@ -83,7 +83,7 @@ func TestConnectSavesTheAddress(t *testing.T) {
 
 // Another phone answers at that address: nothing is saved.
 func TestConnectRefusesAnotherPhone(t *testing.T) {
-	e := newSetupEnv(t, addrRules("ZZZ"))
+	e := newSetupEnv(t, addrRules("ZZZZ9999"))
 	saveConfig(t, e, phoneSerial)
 	out, errOut, code := runWithInput(t, "", "connect", tsAddr, "--json")
 	if code != ExitFailure || !strings.Contains(out, `"WRONG_PHONE"`) || !strings.Contains(out, "that address is another phone; check the IP and port on the phone you set up") {
@@ -116,7 +116,7 @@ func TestConnectFails(t *testing.T) {
 // A bad address is a usage error, found before adb runs.
 func TestConnectAddressMustBeIPAndPort(t *testing.T) {
 	for _, bad := range []string{"100.64.0.5", "phone.local:41234", "100.64.0.5:0", "100.64.0.5:65536", "100.64.0.5:port"} {
-		e := newSetupEnv(t, addrRules("AAA"))
+		e := newSetupEnv(t, addrRules("AAAA1111"))
 		saveConfig(t, e, phoneSerial)
 		_, errOut, code := runWithInput(t, "", "connect", bad)
 		if code != ExitUsage || !strings.Contains(errOut, "IP address and port") {
@@ -133,7 +133,7 @@ func TestConnectAddressMustBeIPAndPort(t *testing.T) {
 
 // Like setup: never from the agent's session, never under a running serve.
 func TestConnectRefusesTheAgentAndARunningServe(t *testing.T) {
-	e := newSetupEnv(t, addrRules("AAA"))
+	e := newSetupEnv(t, addrRules("AAAA1111"))
 	saveConfig(t, e, phoneSerial)
 	t.Setenv("ADBUDDY_SOURCE", "agent")
 	if _, errOut, code := runWithInput(t, "", "connect", tsAddr); code != ExitFailure || !strings.Contains(errOut, "AGENT_SESSION") {

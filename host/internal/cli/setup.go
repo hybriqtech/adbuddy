@@ -182,11 +182,15 @@ connection address with --connect (or type it when asked).`,
 						return ctx.Err() // Ctrl+C: no guide nor QR code
 					}
 					savedFailed = k.AddrErr != nil
+					// Something else answering as the phone: never set it up as it.
+					if hasCode(err, "WRONG_PHONE") || hasCode(err, "DEVICE_UNREADABLE") {
+						return err
+					}
 					if err == nil {
 						serial, usedAddr = k.Active, k.Used
 						guid, _ = pairing.GuidOf(e.cfg.Serial) // keeps the saved name
-						if k.Used != "" && !k.Verified {
-							say("Note: could not check that the phone at %s is the one you set up (%s).\n", k.Used, unverifiedWhy(e.cfg.Serial))
+						if !k.Verified && (guid != "" || k.Used != "") {
+							say("Note: could not check that the phone at %s is the one you set up (%s).\n", serial, unverifiedWhy(e.cfg.Serial))
 						}
 						say("Found it: already paired.\n")
 					}
@@ -209,6 +213,16 @@ connection address with --connect (or type it when asked).`,
 					serial, err = pairing.Connect(ctx, runner, guid, wait, auto, time.Second)
 					if ctx.Err() != nil {
 						return ctx.Err()
+					}
+					if err == nil {
+						// Found by mDNS: anything on the network can announce the guid.
+						k, err := checkFound(ctx, runner, serial, guid, true)
+						if err != nil {
+							return err
+						}
+						if !k.Verified {
+							say("Note: could not check that the phone at %s is the one just paired.\n", serial)
+						}
 					}
 					if err != nil {
 						addr := connectFlag

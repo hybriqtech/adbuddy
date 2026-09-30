@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	phoneSerial = "adb-AAA-bbb._adb-tls-connect._tcp"
+	phoneSerial = "adb-AAAA1111-bbb._adb-tls-connect._tcp"
 	tcpPortRule = `^shell getprop service\.adb\.tcp\.port$`
 	phoneOnline = "List of devices attached\n" + phoneSerial + "\tdevice\n"
 	phoneGone   = "List of devices attached\n"
@@ -215,6 +215,9 @@ func TestServeInterruptedDuringTheInvariant(t *testing.T) {
 	}
 }
 
+// serialnoRule answers ro.serialno as the phone of phoneSerial does.
+var serialnoRule = testutil.FakeRule{Match: `^shell getprop ro\.serialno$`, Stdout: "AAAA1111\n"}
+
 // guidCases are a phone saved by its mDNS name that adb lists under another
 // serial: its address, after a fallback `adb connect`, or its name renamed
 // by mDNS after a clash.
@@ -224,12 +227,14 @@ var guidCases = map[string]struct {
 }{
 	"address": {rules: []testutil.FakeRule{
 		{Match: "^devices$", Stdout: "List of devices attached\n192.0.2.10:41000\tdevice\n"},
-		{Match: "^mdns services$", Stdout: "List of discovered mdns services\nadb-AAA-bbb\t_adb-tls-connect._tcp\t192.0.2.10:41000\n"},
+		{Match: "^mdns services$", Stdout: "List of discovered mdns services\nadb-AAAA1111-bbb\t_adb-tls-connect._tcp\t192.0.2.10:41000\n"},
 		{Match: `^connect 192\.0\.2\.10:41000$`, Stdout: "already connected to 192.0.2.10:41000\n"},
+		serialnoRule,
 	}, active: "192.0.2.10:41000"},
 	"renamed": {rules: []testutil.FakeRule{
-		{Match: "^devices$", Stdout: "List of devices attached\nadb-AAA-bbb (2)._adb-tls-connect._tcp\tdevice\n"},
-	}, active: "adb-AAA-bbb (2)._adb-tls-connect._tcp"},
+		{Match: "^devices$", Stdout: "List of devices attached\nadb-AAAA1111-bbb (2)._adb-tls-connect._tcp\tdevice\n"},
+		serialnoRule,
+	}, active: "adb-AAAA1111-bbb (2)._adb-tls-connect._tcp"},
 }
 
 // phoneCallsUse reports whether every call to the phone (shell, usb) went

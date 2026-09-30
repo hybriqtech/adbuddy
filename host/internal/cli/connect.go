@@ -24,6 +24,7 @@ var (
 	connectAddrWait = 20 * time.Second // `adb connect` plus the wait for the phone to be online
 	disconnectWait  = 5 * time.Second  // bounds `adb disconnect` of another phone
 	knownAddrWait   = 5 * time.Second  // the try of the saved address before the wait for mDNS
+	identityWait    = 8 * time.Second  // bounds the check of the phone's identity (getprop ro.serialno)
 )
 
 // wrongPhoneFix is the fix of WRONG_PHONE.
@@ -131,7 +132,7 @@ func unverifiedWhy(saved string) string {
 	if saved == "" {
 		return "no phone is set up in config.toml yet"
 	}
-	return "its saved name does not carry its serial number"
+	return "its saved name does not carry a serial number that tells phones apart"
 }
 
 // connectAddr connects runner's adb server to the phone at addr (waiting at
@@ -157,19 +158,28 @@ func connectAddr(ctx context.Context, runner adb.Runner, addr, guid string, time
 	return active, verified, nil
 }
 
-// verifyAt checks that the phone online as active (an address) is the one
-// with guid. verified is false when guid does not carry a serial number.
-// Another phone is disconnected from ADBuddy's adb server and is WRONG_PHONE.
+// verifyAt checks that the phone online as active (an address, or the name
+// mDNS gave it) is the one with guid, waiting at most identityWait for it
+// to answer. verified is false when guid carries no usable serial number
+// (see pairing.GuidSerialNo). Another phone is disconnected from ADBuddy's
+// adb server and is WRONG_PHONE; a phone that does not answer in time is a
+// transient DEVICE_UNREADABLE.
 func verifyAt(ctx context.Context, runner adb.Runner, active, guid string) (verified bool, err error) {
 	if _, ok := pairing.GuidSerialNo(guid); !ok {
 		return false, nil
 	}
 	phone := runner
 	phone.Serial = active
-	err = pairing.VerifyIdentity(ctx, phone, guid)
+	vctx, cancel := context.WithTimeout(ctx, identityWait)
+	err = pairing.VerifyIdentity(vctx, phone, guid)
+	timedOut := vctx.Err() != nil
+	cancel()
 	switch {
 	case ctx.Err() != nil:
 		return false, ctx.Err()
+	case err != nil && timedOut:
+		return false, TransientError("DEVICE_UNREADABLE", fmt.Sprintf("the phone at %s did not answer in %s", classify.Printable(active), identityWait),
+			"Unlock the phone and check that it is still connected, then try again.")
 	case errors.Is(err, pairing.ErrWrongPhone):
 		host := runner
 		host.Serial = ""
@@ -179,7 +189,7 @@ func verifyAt(ctx context.Context, runner adb.Runner, active, guid string) (veri
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
-		return false, NewError("WRONG_PHONE", "the phone at "+active+" is not the phone you set up", wrongPhoneFix)
+		return false, NewError("WRONG_PHONE", "the phone at "+classify.Printable(active)+" is not the phone you set up", wrongPhoneFix)
 	case err != nil:
 		return false, NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
 	}
@@ -190,7 +200,7 @@ func verifyAt(ctx context.Context, runner adb.Runner, active, guid string) (veri
 type knownPhone struct {
 	Active   string // the serial adb lists it with
 	Used     string // the saved address it was reached at; "" when not by address
-	Verified bool   // its identity was checked at Used
+	Verified bool   // its identity was checked (ro.serialno against the guid)
 	AddrErr  error  // why the saved address was not used; nil if it was not tried
 }
 
@@ -202,53 +212,77 @@ type knownPhone struct {
 //  3. `adb connect addr` works within knownAddrWait, and it is that phone;
 //  4. the usual wait for it by mDNS (findPhone), at most wait.
 //
-// Another phone at addr is disconnected, said on log and skipped. A phone
-// that does not show up is adb.ErrNoDevice; AddrErr then tells why addr
-// did not help. When ctx ends, the error is ctx's.
+// Whatever the step, a phone saved by its guid is checked to be that phone
+// (anything on the network can announce the guid): another one is
+// WRONG_PHONE. Another phone at addr is disconnected, said on log and
+// skipped instead. A phone that does not show up is adb.ErrNoDevice;
+// AddrErr then tells why addr did not help. When ctx ends, the error is
+// ctx's.
 func findKnownPhone(ctx context.Context, runner adb.Runner, serial, addr string, wait time.Duration, log io.Writer) (knownPhone, error) {
-	if addr == "" { // nothing to try first: the usual wait, as before
-		active, err := findPhone(ctx, runner, serial, wait)
-		return knownPhone{Active: active}, err
-	}
 	var k knownPhone
 	guid, byGuid := pairing.GuidOf(serial)
-	online, err := runner.Online(ctx) // host command: Online drops the serial
-	if ctx.Err() != nil {
-		return knownPhone{}, ctx.Err()
-	}
-	if err == nil {
-		for _, d := range online {
-			if byGuid && pairing.IsGuidSerial(guid, d.Serial) || !byGuid && serial != "" && d.Serial == serial {
-				return knownPhone{Active: d.Serial}, nil
+	if addr != "" {
+		online, err := runner.Online(ctx) // host command: Online drops the serial
+		if ctx.Err() != nil {
+			return knownPhone{}, ctx.Err()
+		}
+		if err == nil {
+			for _, d := range online {
+				if byGuid && pairing.IsGuidSerial(guid, d.Serial) || !byGuid && serial != "" && d.Serial == serial {
+					return checkFound(ctx, runner, d.Serial, guid, byGuid)
+				}
+			}
+			if hasSerial(online, addr) {
+				fmt.Fprintf(log, "Checking the phone at %s (the address saved last time)…\n", addr)
+				verified, err := verifyAt(ctx, runner, addr, guid)
+				if ctx.Err() != nil {
+					return knownPhone{}, ctx.Err()
+				}
+				if err == nil {
+					return knownPhone{Active: addr, Used: addr, Verified: verified}, nil
+				}
+				k.AddrErr = err
+				skipAddr(log, addr, err)
 			}
 		}
-		if hasSerial(online, addr) {
-			fmt.Fprintf(log, "Checking the phone at %s (the address saved last time)…\n", addr)
-			verified, err := verifyAt(ctx, runner, addr, guid)
+		if k.AddrErr == nil {
+			fmt.Fprintf(log, "Connecting to %s (the address saved last time)…\n", addr)
+			active, verified, err := connectAddr(ctx, runner, addr, guid, knownAddrWait)
 			if ctx.Err() != nil {
 				return knownPhone{}, ctx.Err()
 			}
 			if err == nil {
-				return knownPhone{Active: addr, Used: addr, Verified: verified}, nil
+				return knownPhone{Active: active, Used: addr, Verified: verified}, nil
 			}
 			k.AddrErr = err
 			skipAddr(log, addr, err)
 		}
 	}
-	if k.AddrErr == nil {
-		fmt.Fprintf(log, "Connecting to %s (the address saved last time)…\n", addr)
-		active, verified, err := connectAddr(ctx, runner, addr, guid, knownAddrWait)
-		if ctx.Err() != nil {
-			return knownPhone{}, ctx.Err()
-		}
-		if err == nil {
-			return knownPhone{Active: active, Used: addr, Verified: verified}, nil
-		}
-		k.AddrErr = err
-		skipAddr(log, addr, err)
+	active, err := findPhone(ctx, runner, serial, wait)
+	if err != nil {
+		return k, err
 	}
-	k.Active, err = findPhone(ctx, runner, serial, wait)
-	return k, err
+	found, err := checkFound(ctx, runner, active, guid, byGuid)
+	found.AddrErr = k.AddrErr
+	return found, err
+}
+
+// mdnsWrongPhoneFix is the fix of WRONG_PHONE for a phone found by mDNS.
+const mdnsWrongPhoneFix = "Something else on this network answers with your phone's name: turn off wireless debugging on your other devices and try again."
+
+// checkFound checks the phone found under active by its guid (or by mDNS).
+func checkFound(ctx context.Context, runner adb.Runner, active, guid string, byGuid bool) (knownPhone, error) {
+	if !byGuid {
+		return knownPhone{Active: active}, nil
+	}
+	verified, err := verifyAt(ctx, runner, active, guid)
+	if hasCode(err, "WRONG_PHONE") {
+		err = NewError("WRONG_PHONE", "the phone found as "+classify.Printable(active)+" is not the phone you set up", mdnsWrongPhoneFix)
+	}
+	if err != nil {
+		return knownPhone{}, err
+	}
+	return knownPhone{Active: active, Verified: verified}, nil
 }
 
 // skipAddr says why the saved address addr is not used.

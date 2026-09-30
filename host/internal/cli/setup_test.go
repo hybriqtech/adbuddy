@@ -24,9 +24,10 @@ import (
 func phoneRules() []testutil.FakeRule {
 	return []testutil.FakeRule{
 		{Match: "^start-server$"},
-		{Match: "^devices$", Stdout: "List of devices attached\nadb-AAA-bbb._adb-tls-connect._tcp\tdevice\n"},
-		{Match: "^pair 192\\.0\\.2\\.10:37000$", Stdout: "Enter pairing code: Successfully paired to 192.0.2.10:37000 [guid=adb-AAA-bbb]\n", EchoStdin: true},
+		{Match: "^devices$", Stdout: "List of devices attached\nadb-AAAA1111-bbb._adb-tls-connect._tcp\tdevice\n"},
+		{Match: "^pair 192\\.0\\.2\\.10:37000$", Stdout: "Enter pairing code: Successfully paired to 192.0.2.10:37000 [guid=adb-AAAA1111-bbb]\n", EchoStdin: true},
 		{Match: "^shell getprop service\\.adb\\.tcp\\.port$", Stdout: "\n"},
+		{Match: "^shell getprop ro\\.serialno$", Stdout: "AAAA1111\n"}, // the guid's serial number
 		{Match: "^shell getprop ro\\.product\\.model$", Stdout: "Pixel 9 Pro XL\n"},
 		{Match: "^shell getprop ro\\.product\\.manufacturer$", Stdout: "Google\n"},
 		{Match: "^shell getprop ro\\.product\\.brand$", Stdout: "google\n"},
@@ -84,7 +85,7 @@ func TestSetupPairsWithCodeAndPreparesEverything(t *testing.T) {
 		OK   bool
 		Data setupResult
 	}
-	if err := json.Unmarshal([]byte(out), &env); err != nil || !env.OK || env.Data.Serial != "adb-AAA-bbb._adb-tls-connect._tcp" || env.Data.Agent != "claude" || env.Data.Device.Model != "Pixel 9 Pro XL" {
+	if err := json.Unmarshal([]byte(out), &env); err != nil || !env.OK || env.Data.Serial != "adb-AAAA1111-bbb._adb-tls-connect._tcp" || env.Data.Agent != "claude" || env.Data.Device.Model != "Pixel 9 Pro XL" {
 		t.Fatalf("stdout %q (%v)", out, err)
 	}
 	for _, want := range []string{"Wireless debugging", HelpURL, "pairing code"} {
@@ -110,7 +111,7 @@ func TestSetupPairsWithCodeAndPreparesEverything(t *testing.T) {
 		t.Fatalf("pair not called with the code on stdin: %+v", calls)
 	}
 	cfg, err := config.Load(filepath.Join(e.cfgDir, "config.toml"))
-	if err != nil || cfg.Serial != "adb-AAA-bbb._adb-tls-connect._tcp" || cfg.Workspace != e.ws || cfg.Agent != "claude" || cfg.ADBPath != fakeADB(t) {
+	if err != nil || cfg.Serial != "adb-AAAA1111-bbb._adb-tls-connect._tcp" || cfg.Workspace != e.ws || cfg.Agent != "claude" || cfg.ADBPath != fakeADB(t) {
 		t.Fatalf("config %+v %v", cfg, err)
 	}
 	agents, _ := os.ReadFile(filepath.Join(e.ws, "AGENTS.md"))
@@ -125,7 +126,7 @@ func TestSetupPairsWithCodeAndPreparesEverything(t *testing.T) {
 func TestSetupSkipsPairingForAKnownPhone(t *testing.T) {
 	e := newSetupEnv(t, phoneRules())
 	cfg := config.Default()
-	cfg.Serial = "adb-AAA-bbb._adb-tls-connect._tcp"
+	cfg.Serial = "adb-AAAA1111-bbb._adb-tls-connect._tcp"
 	if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -357,7 +358,7 @@ func TestSetupInterruptedWhileWaitingForThePhone(t *testing.T) {
 			{Match: "^start-server$"},
 			{Match: "^devices$", Stdout: "List of devices attached\n"},
 			{Match: "^mdns services$", Stdout: "List of discovered mdns services\n"},
-			{Match: `^pair 192\.0\.2\.10:37000$`, Stdout: "Successfully paired to 192.0.2.10:37000 [guid=adb-AAA-bbb]\n", EchoStdin: true},
+			{Match: `^pair 192\.0\.2\.10:37000$`, Stdout: "Successfully paired to 192.0.2.10:37000 [guid=adb-AAAA1111-bbb]\n", EchoStdin: true},
 		}, input: "192.0.2.10:37000\n123456\n", args: []string{"--code"}, cancelOn: "Paired. Connecting"},
 		// Nobody types the IP address and port.
 		"prompt": {rules: []testutil.FakeRule{{Match: "^start-server$"}}, args: []string{"--code"}, block: true,
@@ -371,6 +372,7 @@ func TestSetupInterruptedWhileWaitingForThePhone(t *testing.T) {
 			{Match: "^devices$", Stdout: phoneOnline, Times: 1},
 			{Match: "^devices$", Stdout: phoneGone},
 			{Match: tcpPortRule, Stdout: "5555\n"},
+			serialnoRule,
 		}, known: true, cancelOn: "Closed adb's network port"},
 	}
 	for name, c := range cases {
@@ -490,7 +492,7 @@ func TestSetupAgainKeepsTheWorkspace(t *testing.T) {
 func TestSetupSavesTheStableSerial(t *testing.T) {
 	rules := append([]testutil.FakeRule{
 		{Match: "^devices$", Stdout: "List of devices attached\n192.0.2.10:41000\tdevice\n"},
-		{Match: "^mdns services$", Stdout: "List of discovered mdns services\nadb-AAA-bbb\t_adb-tls-connect._tcp\t192.0.2.10:41000\n"},
+		{Match: "^mdns services$", Stdout: "List of discovered mdns services\nadb-AAAA1111-bbb\t_adb-tls-connect._tcp\t192.0.2.10:41000\n"},
 		{Match: `^connect 192\.0\.2\.10:41000$`, Stdout: "connected to 192.0.2.10:41000\n"},
 	}, phoneRules()...)
 	e := newSetupEnv(t, rules)
@@ -499,13 +501,13 @@ func TestSetupSavesTheStableSerial(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
-	if cfg := loadSetupConfig(t, e); cfg.Serial != "adb-AAA-bbb._adb-tls-connect._tcp" {
+	if cfg := loadSetupConfig(t, e); cfg.Serial != "adb-AAAA1111-bbb._adb-tls-connect._tcp" {
 		t.Fatalf("serial %q", cfg.Serial)
 	}
 	// Final review of M1b, R2-4: the JSON tells the saved serial from the
 	// one of this session.
 	var env struct{ Data setupResult }
-	if err := json.Unmarshal([]byte(out), &env); err != nil || env.Data.Serial != "adb-AAA-bbb._adb-tls-connect._tcp" || env.Data.Active != "192.0.2.10:41000" {
+	if err := json.Unmarshal([]byte(out), &env); err != nil || env.Data.Serial != "adb-AAAA1111-bbb._adb-tls-connect._tcp" || env.Data.Active != "192.0.2.10:41000" {
 		t.Fatalf("stdout %s (%v)", out, err)
 	}
 }
@@ -544,7 +546,7 @@ func TestSetupDoesNotSaveAnAddressAsSerial(t *testing.T) {
 func TestSetupKeepsTheConfiguredAgent(t *testing.T) {
 	e := newSetupEnv(t, phoneRules())
 	cfg := config.Default()
-	cfg.Serial, cfg.Agent = "adb-AAA-bbb._adb-tls-connect._tcp", "codex"
+	cfg.Serial, cfg.Agent = "adb-AAAA1111-bbb._adb-tls-connect._tcp", "codex"
 	if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
 		t.Fatal(err)
 	}

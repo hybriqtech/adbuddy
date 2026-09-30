@@ -60,7 +60,7 @@ ADBuddy finds the phone by mDNS, which only works on the same network. Over Tail
 
 1. Pair with the code: `adbuddy setup --code`. On that screen (Wireless debugging → Pair device with pairing code) Android shows the phone's Tailscale IP when Tailscale is on; type that IP and port and the 6-digit code.
 2. Give the connection address, the IP:port on the main Wireless debugging screen: either with `adbuddy setup --code --connect 100.64.0.5:41234`, or type it when setup asks "Connection address" (only at a terminal). Without either, setup fails with `DEVICE_NOT_FOUND` as before.
-3. Later, when the address changes, connect again with `adbuddy connect <ip:port>`. It checks that the phone at that address is the one you set up (`WRONG_PHONE` otherwise, and nothing is saved) and saves the address in `config.toml`. `adbuddy serve` and `adbuddy setup` try that address first (a few seconds at most, checking it is your phone) and then wait for the phone on the local network as usual.
+3. Later, when the address changes, connect again with `adbuddy connect <ip:port>`. It checks that the phone at that address is the one you set up (`WRONG_PHONE` otherwise, and nothing is saved) and saves the address in `config.toml`. `adbuddy serve` and `adbuddy setup` try that address first (about 15 seconds at most, checking it is your phone) and then wait for the phone on the local network as usual.
 
 The connection port changes each time wireless debugging is turned on again: `serve` then fails with `DEVICE_NOT_FOUND` and asks you to run `adbuddy connect <new ip:port>`.
 

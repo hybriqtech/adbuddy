@@ -459,10 +459,12 @@ var ErrWrongPhone = errors.New("this is not the paired phone")
 var guidSerialRe = regexp.MustCompile(`^adb-([A-Za-z0-9][A-Za-z0-9._-]{0,127})-([A-Za-z0-9]{1,32})$`)
 
 // GuidSerialNo returns the serial number (ro.serialno) in the middle of the
-// phone's guid, adb-<serialno>-<suffix>; false if guid has another form.
+// phone's guid, adb-<serialno>-<suffix>; false if guid has another form or
+// its serial number does not tell phones apart ("unknown", fewer than 4
+// characters): then the phone's identity cannot be checked.
 func GuidSerialNo(guid string) (string, bool) {
 	m := guidSerialRe.FindStringSubmatch(guid)
-	if m == nil {
+	if m == nil || len(m[1]) < 4 || strings.EqualFold(m[1], "unknown") {
 		return "", false
 	}
 	return m[1], true

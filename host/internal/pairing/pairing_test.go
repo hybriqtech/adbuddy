@@ -569,3 +569,20 @@ func TestConnectAddr(t *testing.T) {
 		}
 	})
 }
+
+// Final review of M1c, M1: a serial number that does not tell phones apart
+// ("unknown", or shorter than 4 characters) cannot be checked.
+func TestWeakSerialNumbersCannotBeChecked(t *testing.T) {
+	for _, guid := range []string{"adb-unknown-abc123", "adb-UNKNOWN-abc123", "adb-ABC-xyz", "adb-A-xyz"} {
+		f := &fakeADB{answers: map[string][]string{"shell getprop ro.serialno": {"ZZZZ9999\n"}}}
+		if _, ok := GuidSerialNo(guid); ok {
+			t.Errorf("%q has a usable serial number", guid)
+		}
+		if err := VerifyIdentity(context.Background(), f, guid); err != nil || len(f.calls) != 0 {
+			t.Errorf("%q: %v, calls %q", guid, err, f.calls)
+		}
+	}
+	if s, ok := GuidSerialNo("adb-ABCD-xyz"); !ok || s != "ABCD" {
+		t.Fatalf("4 characters: %q %v", s, ok)
+	}
+}
