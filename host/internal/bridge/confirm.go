@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"sync"
 
@@ -38,7 +39,12 @@ func NewConfirmer(app Publisher, fallback confirm.Confirmer) *Confirmer {
 }
 
 // Confirm implements confirm.Confirmer.
+// A request without an ID, or with the ID of one still waiting, is denied
+// without asking: its answer could be taken for another question's.
 func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Decision {
+	if r.ID == "" {
+		return confirm.Deny
+	}
 	// "Allow during the session" covers only the same rule with the same
 	// arguments, and never a command that may cut the connection.
 	allowSession := r.Key != "" && !r.Special
@@ -55,6 +61,10 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 		ExpiresAt: r.ExpiresAt.UTC(), Special: r.Special, AllowSession: allowSession}
 	p := pendingReq{req: req, reply: make(chan confirm.Decision, 1), key: r.Key}
 	c.mu.Lock()
+	if _, dup := c.pending[r.ID]; dup {
+		c.mu.Unlock()
+		return confirm.Deny
+	}
 	c.pending[r.ID] = p
 	c.mu.Unlock()
 	defer func() {
@@ -69,7 +79,7 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 	case d := <-p.reply:
 		return d
 	case <-ctx.Done():
-		if ctx.Err() == context.DeadlineExceeded {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return confirm.Timeout
 		}
 		return confirm.Deny

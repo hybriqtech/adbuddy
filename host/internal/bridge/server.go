@@ -15,11 +15,15 @@ import (
 	"github.com/coder/websocket"
 )
 
+// helloTimeout is how long a new connection has to send its hello. A var so a
+// test can shorten it; New copies it into the Server.
+var helloTimeout = 5 * time.Second
+
 const (
-	helloTimeout = 5 * time.Second
-	maxMessage   = 1 << 20 // text messages; attachments (binary frames) arrive in M3
-	sendQueue    = 256
-	pingEvery    = 20 * time.Second
+	helloLimit = 4 << 10 // read limit until the token is checked
+	maxMessage = 1 << 20 // text messages; attachments (binary frames) arrive in M3
+	sendQueue  = 256
+	pingEvery  = 20 * time.Second
 )
 
 // Options configure a Server.
@@ -28,11 +32,17 @@ type Options struct {
 	Session     string
 	HostVersion string
 	// OnMessage receives the app's messages after a valid hello, one at a
-	// time. Its payload comes from the app: validate before use.
+	// time. Its payload comes from the app: validate before use. Its TS is
+	// what the app sent, or zero when that was not a valid time.
 	OnMessage func(Message)
-	// Snapshot describes the current state when the app missed too much.
+	// Snapshot describes the current state when the app missed too much. It
+	// is called with the server's lock held: it must not call Publish or
+	// Connected.
 	Snapshot func() Snapshot
-	// OnConnect is called with true when an app authenticates and false when it leaves.
+	// OnConnect is called with true when an app authenticates and none was
+	// connected, and with false when the app is gone and no other took its
+	// place: replacing a connection calls neither. Calls come one at a time
+	// and in order, and may call Publish and Connected.
 	OnConnect func(bool)
 	// OnReject is called when an authenticated app is too old to talk to.
 	OnReject func(Hello)
@@ -42,7 +52,13 @@ type Options struct {
 // Server is the WebSocket server of the app channel. It serves one app at a
 // time: a new authenticated connection replaces the previous one.
 type Server struct {
-	o Options
+	o            Options
+	helloTimeout time.Duration
+
+	// connMu orders attach and detach together with their OnConnect calls,
+	// which run outside mu.
+	connMu    sync.Mutex
+	announced bool // the last OnConnect call was true; guarded by connMu
 
 	mu     sync.Mutex
 	seq    uint64
@@ -72,7 +88,7 @@ func New(o Options) *Server {
 	if o.Snapshot == nil {
 		o.Snapshot = func() Snapshot { return Snapshot{Pending: []ConfirmRequest{}, Journal: []json.RawMessage{}} }
 	}
-	return &Server{o: o}
+	return &Server{o: o, helloTimeout: helloTimeout}
 }
 
 // Listen opens the server's port on the loopback interface only (spec §5.2).
@@ -130,12 +146,32 @@ func (s *Server) Publish(typ string, payload any) error {
 		case s.client.send <- m:
 		default: // too slow: drop it; it reconnects and resumes from lastSeq
 			s.client.cancel()
+			s.client = nil
 		}
 	}
 	return nil
 }
 
+// localHost reports whether the request's Host is how the app reaches the
+// server: 127.0.0.1 or localhost, with the port it listens on. Any other name
+// is a page whose name was rebound to 127.0.0.1 (DNS rebinding).
+func localHost(r *http.Request) bool {
+	la, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok {
+		return false
+	}
+	_, port, err := net.SplitHostPort(la.String())
+	if err != nil {
+		return false
+	}
+	return r.Host == "127.0.0.1:"+port || r.Host == "localhost:"+port
+}
+
 func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
+	if !localHost(r) {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
 	// No Origin exceptions: a web page on the phone cannot open this socket
 	// (coder/websocket rejects a foreign Origin), and without the token no
 	// other app gets past the hello.
@@ -143,11 +179,12 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	c.SetReadLimit(maxMessage)
+	defer c.CloseNow()
+	c.SetReadLimit(helloLimit)
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	hello, err := readHello(ctx, c)
+	hello, err := s.readHello(ctx, c)
 	if err != nil {
 		c.Close(websocket.StatusPolicyViolation, "unauthorized")
 		return
@@ -156,6 +193,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		c.Close(websocket.StatusPolicyViolation, "unauthorized")
 		return
 	}
+	c.SetReadLimit(maxMessage)
 
 	if hello.Protocol < MinAppProtocol {
 		// Only after the token: nobody learns anything about the host without it.
@@ -165,10 +203,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cl := &client{send: make(chan Message, sendQueue), cancel: cancel}
-	backlog, first := s.attach(cl, hello.LastSeq)
+	backlog, first := s.attach(cl, hello)
 	defer s.detach(cl)
-	s.o.OnConnect(true)
-	defer s.o.OnConnect(false)
 
 	welcome, _ := json.Marshal(Welcome{Protocol: ProtocolVersion, Session: s.o.Session, FromSeq: first, HostVersion: s.o.HostVersion})
 	if err := write(ctx, c, Message{V: ProtocolVersion, Type: TypeWelcome, TS: s.o.Now().UTC(), Payload: welcome}); err != nil {
@@ -183,9 +219,16 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer cancel()
 		for {
-			var m Message
-			if err := readJSON(ctx, c, &m); err != nil {
-				return
+			typ, data, err := c.Read(ctx)
+			if err != nil {
+				return // the connection is gone
+			}
+			if typ != websocket.MessageText {
+				continue // binary frames (attachments) arrive in M3
+			}
+			m, err := decode(data)
+			if err != nil {
+				continue // a malformed message does not cut the channel
 			}
 			if m.V != ProtocolVersion || m.Type == "" || m.Type == TypeHello {
 				continue
@@ -215,10 +258,24 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// attach makes cl the connected app and returns what it missed: the events
-// after lastSeq, or a snapshot when they are no longer kept (or the host
-// restarted and the numbering began again).
-func (s *Server) attach(cl *client, lastSeq uint64) (backlog []Message, first uint64) {
+// attach makes cl the connected app and returns what it missed (see swap).
+// It calls OnConnect(true) unless an app was already announced.
+func (s *Server) attach(cl *client, h Hello) (backlog []Message, first uint64) {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	backlog, first = s.swap(cl, h)
+	if !s.announced {
+		s.announced = true
+		s.o.OnConnect(true)
+	}
+	return backlog, first
+}
+
+// swap replaces the connected app with cl and returns the events after the
+// hello's lastSeq, or a snapshot when they are no longer kept or when the
+// app's lastSeq belongs to another host: a restarted host has another session
+// and numbers its events from 1 again.
+func (s *Server) swap(cl *client, h Hello) (backlog []Message, first uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.client != nil {
@@ -229,7 +286,8 @@ func (s *Server) attach(cl *client, lastSeq uint64) (backlog []Message, first ui
 	if len(s.ring) > 0 {
 		oldest = s.ring[0].Seq
 	}
-	if lastSeq > s.seq || lastSeq+1 < oldest {
+	restarted := h.LastSeq > 0 && h.Session != s.o.Session
+	if restarted || h.LastSeq > s.seq || h.LastSeq+1 < oldest {
 		snap, _ := json.Marshal(s.o.Snapshot())
 		// The snapshot takes the next number, so the app's lastSeq moves past
 		// everything it replaces.
@@ -242,26 +300,51 @@ func (s *Server) attach(cl *client, lastSeq uint64) (backlog []Message, first ui
 		return []Message{m}, m.Seq
 	}
 	for _, m := range s.ring {
-		if m.Seq > lastSeq {
+		if m.Seq > h.LastSeq {
 			backlog = append(backlog, m)
 		}
 	}
-	return backlog, lastSeq + 1
+	return backlog, h.LastSeq + 1
 }
 
-func (s *Server) detach(cl *client) {
+// detach removes cl if it is still the connected app and reports whether it
+// did. It calls OnConnect(false) when that leaves no app, and also when cl
+// was already dropped for being slow (Publish) and nobody took its place.
+func (s *Server) detach(cl *client) bool {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.client == cl {
+	removed := s.client == cl
+	if removed {
 		s.client = nil
 	}
+	gone := s.client == nil
+	s.mu.Unlock()
+	if gone && s.announced {
+		s.announced = false
+		s.o.OnConnect(false)
+	}
+	return removed
 }
 
-func readHello(ctx context.Context, c *websocket.Conn) (Hello, error) {
-	hctx, cancel := context.WithTimeout(ctx, helloTimeout)
-	defer cancel()
-	var m Message
-	if err := readJSON(hctx, c, &m); err != nil {
+// readHello reads the first message. If it does not arrive in time the
+// connection is closed with a policy violation, like a wrong hello: a
+// deadline on the Read itself would drop it without a close code.
+func (s *Server) readHello(ctx context.Context, c *websocket.Conn) (Hello, error) {
+	t := time.AfterFunc(s.helloTimeout, func() { c.Close(websocket.StatusPolicyViolation, "no hello") })
+	defer t.Stop()
+	var data []byte
+	for data == nil {
+		typ, d, err := c.Read(ctx)
+		if err != nil {
+			return Hello{}, err
+		}
+		if typ == websocket.MessageText {
+			data = d
+		}
+	}
+	m, err := decode(data)
+	if err != nil {
 		return Hello{}, err
 	}
 	if m.V != ProtocolVersion || m.Type != TypeHello {
@@ -274,17 +357,21 @@ func readHello(ctx context.Context, c *websocket.Conn) (Hello, error) {
 	return h, nil
 }
 
-func readJSON(ctx context.Context, c *websocket.Conn, v any) error {
-	for {
-		typ, data, err := c.Read(ctx)
-		if err != nil {
-			return err
-		}
-		if typ != websocket.MessageText {
-			continue // binary frames (attachments) arrive in M3
-		}
-		return json.Unmarshal(data, v)
+// decode reads a message from the app. Its ts is not checked: an invalid one
+// leaves TS zero instead of losing the message.
+func decode(data []byte) (Message, error) {
+	var in struct {
+		V       int             `json:"v"`
+		Type    string          `json:"type"`
+		TS      json.RawMessage `json:"ts"`
+		Payload json.RawMessage `json:"payload"`
 	}
+	if err := json.Unmarshal(data, &in); err != nil {
+		return Message{}, err
+	}
+	m := Message{V: in.V, Type: in.Type, Payload: in.Payload}
+	_ = json.Unmarshal(in.TS, &m.TS)
+	return m, nil
 }
 
 func write(ctx context.Context, c *websocket.Conn, m Message) error {

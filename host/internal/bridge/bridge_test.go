@@ -3,7 +3,9 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -28,10 +30,16 @@ func start(t *testing.T, o Options) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, msgs: make(chan Message, 100)}
 	if o.Token == "" {
 		o.Token = token
 	}
+	return startRaw(t, l, o)
+}
+
+// startRaw starts a server with o as given (an empty token stays empty).
+func startRaw(t *testing.T, l net.Listener, o Options) *harness {
+	t.Helper()
+	h := &harness{t: t, msgs: make(chan Message, 100)}
 	o.Session = "s_TEST"
 	o.OnMessage = func(m Message) { h.msgs <- m }
 	h.srv = New(o)
@@ -43,18 +51,98 @@ func start(t *testing.T, o Options) *harness {
 	return h
 }
 
-// dial connects and sends hello; it returns the connection.
+// dial connects and sends hello, repeating the session of the server's
+// welcome as the app does; it returns the connection.
 func (h *harness) dial(tok string, lastSeq uint64) *websocket.Conn {
+	h.t.Helper()
+	return h.dialHello(Hello{Protocol: ProtocolVersion, Token: tok, LastSeq: lastSeq, Session: "s_TEST", AppVersion: "test"})
+}
+
+// dialHello connects and sends hl.
+func (h *harness) dialHello(hl Hello) *websocket.Conn {
+	h.t.Helper()
+	c := h.connect(nil)
+	send(h.t, c, TypeHello, hl)
+	return c
+}
+
+// connect opens the socket without sending anything.
+func (h *harness) connect(o *websocket.DialOptions) *websocket.Conn {
 	h.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	c, _, err := websocket.Dial(ctx, h.url, nil)
+	c, _, err := websocket.Dial(ctx, h.url, o)
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	h.t.Cleanup(func() { c.CloseNow() })
-	send(h.t, c, TypeHello, Hello{Protocol: ProtocolVersion, Token: tok, LastSeq: lastSeq, AppVersion: "test"})
 	return c
+}
+
+func (h *harness) port() string {
+	_, p, _ := net.SplitHostPort(strings.TrimSuffix(strings.TrimPrefix(h.url, "ws://"), "/v1"))
+	return p
+}
+
+func sendRaw(t *testing.T, c *websocket.Conn, typ websocket.MessageType, data []byte) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.Write(ctx, typ, data); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// closeStatus reads until the connection ends and returns its close code.
+func closeStatus(t *testing.T, c *websocket.Conn) websocket.StatusCode {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		_, _, err := c.Read(ctx)
+		if err != nil {
+			return websocket.CloseStatus(err)
+		}
+	}
+}
+
+func wantMsg(t *testing.T, h *harness, typ string) Message {
+	t.Helper()
+	select {
+	case m := <-h.msgs:
+		if m.Type != typ {
+			t.Fatalf("got %+v, want %s", m, typ)
+		}
+		return m
+	case <-time.After(3 * time.Second):
+		t.Fatalf("%s not delivered", typ)
+	}
+	return Message{}
+}
+
+// calls records the calls to OnConnect.
+type calls struct {
+	mu sync.Mutex
+	v  []bool
+}
+
+func (c *calls) add(b bool) { c.mu.Lock(); c.v = append(c.v, b); c.mu.Unlock() }
+
+func (c *calls) get() []bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]bool(nil), c.v...)
+}
+
+func (c *calls) waitFor(t *testing.T, want []bool, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for !reflect.DeepEqual(c.get(), want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("OnConnect calls %v, want %v", c.get(), want)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func send(t *testing.T, c *websocket.Conn, typ string, payload any) {
@@ -134,9 +222,180 @@ func TestForeignOriginIsRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("a web page from another origin could open the socket")
 	}
-	if resp != nil && resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status %d, want 403", resp.StatusCode)
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("%v (response %+v), want 403", err, resp)
 	}
+}
+
+// DNS rebinding: a page on evil.example whose name now points to 127.0.0.1
+// sends Host and Origin evil.example:<port>, which match each other.
+func TestForeignHostIsRejected(t *testing.T) {
+	h := start(t, Options{})
+	host := "evil.example:" + h.port()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, resp, err := websocket.Dial(ctx, h.url, &websocket.DialOptions{Host: host, HTTPHeader: http.Header{"Origin": []string{"http://" + host}}})
+	if err == nil {
+		t.Fatal("a page from a rebound name could open the socket")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("%v (response %+v), want 403", err, resp)
+	}
+	// The names the app uses through adb reverse still work.
+	for _, ok := range []string{"127.0.0.1:" + h.port(), "localhost:" + h.port()} {
+		c := h.connect(&websocket.DialOptions{Host: ok})
+		send(t, c, TypeHello, Hello{Protocol: ProtocolVersion, Token: token, Session: "s_TEST"})
+		if m := recv(t, c); m.Type != TypeWelcome {
+			t.Fatalf("host %s: %+v", ok, m)
+		}
+		c.Close(websocket.StatusNormalClosure, "")
+		waitConnected(t, h.srv, false)
+	}
+}
+
+func TestSilentClientIsClosedWithPolicyViolation(t *testing.T) {
+	old := helloTimeout
+	helloTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { helloTimeout = old })
+	h := start(t, Options{})
+	c := h.connect(nil)
+	if got := closeStatus(t, c); got != websocket.StatusPolicyViolation {
+		t.Fatalf("close %v, want policy violation", got)
+	}
+}
+
+func TestEmptyServerTokenRejectsEveryone(t *testing.T) {
+	l, err := Listen(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := startRaw(t, l, Options{})
+	c := h.dialHello(Hello{Protocol: ProtocolVersion, Token: "", AppVersion: "test"})
+	if got := closeStatus(t, c); got != websocket.StatusPolicyViolation {
+		t.Fatalf("close %v, want policy violation", got)
+	}
+	if h.srv.Connected() {
+		t.Fatal("an empty token lets an app in")
+	}
+}
+
+func TestOversizedHelloIsRejected(t *testing.T) {
+	h := start(t, Options{})
+	c := h.dialHello(Hello{Protocol: ProtocolVersion, Token: token, AppVersion: strings.Repeat("x", 5<<10)})
+	if got := closeStatus(t, c); got != websocket.StatusMessageTooBig {
+		t.Fatalf("close %v, want message too big", got)
+	}
+}
+
+func TestOversizedMessageClosesTheConnection(t *testing.T) {
+	h := start(t, Options{})
+	c := h.dial(token, 0)
+	recv(t, c)
+	sendRaw(t, c, websocket.MessageText, []byte(`{"v":1,"type":"chat.send","payload":"`+strings.Repeat("x", maxMessage)+`"}`))
+	if got := closeStatus(t, c); got != websocket.StatusMessageTooBig {
+		t.Fatalf("close %v, want message too big", got)
+	}
+	waitConnected(t, h.srv, false)
+}
+
+func TestMalformedMessagesAreIgnored(t *testing.T) {
+	h := start(t, Options{})
+	c := h.dial(token, 0)
+	recv(t, c)
+	sendRaw(t, c, websocket.MessageText, []byte(`{not json`))
+	sendRaw(t, c, websocket.MessageText, []byte(`{"v":1,"type":"pause","ts":"yesterday","payload":{}}`))
+	wantMsg(t, h, TypePause)
+	send(t, c, TypeResume, struct{}{})
+	wantMsg(t, h, TypeResume)
+	if !h.srv.Connected() {
+		t.Fatal("a malformed message cut the channel")
+	}
+}
+
+func TestBinaryFramesAreIgnored(t *testing.T) {
+	h := start(t, Options{})
+	c := h.dial(token, 0)
+	recv(t, c)
+	sendRaw(t, c, websocket.MessageBinary, []byte{0, 1, 2, 3})
+	send(t, c, TypePause, struct{}{})
+	wantMsg(t, h, TypePause)
+}
+
+// A restarted host numbers its events again from 1: an app that saw 3 events
+// of the previous host must not take events 4 and 5 of this one as the rest.
+func TestRestartedHostSendsASnapshot(t *testing.T) {
+	h := start(t, Options{})
+	for i := 0; i < 5; i++ {
+		h.srv.Publish(TypeNotice, Notice{Text: "x"})
+	}
+	// Same host: resume after 3, no snapshot.
+	c := h.dialHello(Hello{Protocol: ProtocolVersion, Token: token, LastSeq: 3, Session: "s_TEST"})
+	var wel Welcome
+	json.Unmarshal(recv(t, c).Payload, &wel)
+	if wel.FromSeq != 4 {
+		t.Fatalf("same session: from %d, want 4", wel.FromSeq)
+	}
+	for _, want := range []uint64{4, 5} {
+		if m := recv(t, c); m.Type != TypeNotice || m.Seq != want {
+			t.Fatalf("same session: %+v, want notice %d", m, want)
+		}
+	}
+	c.Close(websocket.StatusNormalClosure, "")
+	waitConnected(t, h.srv, false)
+
+	// Another host (the session the app remembers is not this one): snapshot.
+	c = h.dialHello(Hello{Protocol: ProtocolVersion, Token: token, LastSeq: 3, Session: "s_OLD"})
+	json.Unmarshal(recv(t, c).Payload, &wel)
+	m := recv(t, c)
+	if m.Type != TypeSnapshot || wel.FromSeq != m.Seq {
+		t.Fatalf("other session: welcome %+v, then %+v; want a snapshot", wel, m)
+	}
+}
+
+func TestReplacingAConnectionKeepsTheAppConnected(t *testing.T) {
+	var got calls
+	h := start(t, Options{OnConnect: got.add})
+	c1 := h.dial(token, 0)
+	recv(t, c1)
+	waitConnected(t, h.srv, true)
+	c2 := h.dial(token, 0)
+	recv(t, c2)
+	closeStatus(t, c1)                 // the old connection is closed…
+	time.Sleep(200 * time.Millisecond) // …and its handler has had time to finish
+	if v := got.get(); !reflect.DeepEqual(v, []bool{true}) || !h.srv.Connected() {
+		t.Fatalf("after replacing: OnConnect %v, connected %v; want [true] and connected", v, h.srv.Connected())
+	}
+	c2.Close(websocket.StatusNormalClosure, "")
+	got.waitFor(t, []bool{true, false}, 3*time.Second)
+	waitConnected(t, h.srv, false)
+}
+
+// A client that does not keep up is dropped at once, and counts as gone.
+func TestSlowClientIsDropped(t *testing.T) {
+	s := New(Options{})
+	cancelled := false
+	s.client = &client{send: make(chan Message), cancel: func() { cancelled = true }}
+	s.Publish(TypeNotice, Notice{Text: "x"})
+	if !cancelled || s.Connected() {
+		t.Fatalf("cancelled %v, connected %v; want cancelled and not connected", cancelled, s.Connected())
+	}
+}
+
+func TestSlowClientOverTheNetwork(t *testing.T) {
+	var got calls
+	h := start(t, Options{OnConnect: got.add})
+	c := h.dial(token, 0)
+	recv(t, c)
+	waitConnected(t, h.srv, true)
+	big := strings.Repeat("x", 16<<10)
+	for i := 0; i < 20000 && h.srv.Connected(); i++ { // the app stops reading
+		h.srv.Publish(TypeNotice, Notice{Text: big})
+	}
+	if h.srv.Connected() {
+		t.Fatal("a client that does not read is never dropped")
+	}
+	c.CloseNow()
+	got.waitFor(t, []bool{true, false}, 15*time.Second)
 }
 
 func TestWelcomeEventsAndResume(t *testing.T) {
@@ -301,13 +560,53 @@ func TestAllowSessionCoversOnlyTheSameCommand(t *testing.T) {
 		reply(c, r.ID, "allow_session")
 	}
 	s := confirm.Request{ID: "j_4", Key: "k3", Special: true, ExpiresAt: time.Now().Add(time.Minute)}
-	c.Confirm(context.Background(), s)
+	if got := c.Confirm(context.Background(), s); got != confirm.Allow {
+		t.Fatalf("j_4: %v, want allow", got)
+	}
 	app.onPublish = nil
 	s.ID = "j_5"
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel2()
 	if c.Confirm(ctx2, s) != confirm.Timeout {
 		t.Fatal("a special command was remembered for the session")
+	}
+}
+
+func TestConfirmRejectsEmptyOrDuplicateIDs(t *testing.T) {
+	app := &fakeApp{connected: true}
+	c := NewConfirmer(app, fixed(confirm.Allow))
+	short, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if got := c.Confirm(short, confirm.Request{ExpiresAt: time.Now().Add(time.Minute)}); got != confirm.Deny {
+		t.Fatalf("empty id: %v, want deny", got)
+	}
+	if len(app.published) != 0 {
+		t.Fatalf("empty id was asked: %+v", app.published)
+	}
+	asked := make(chan struct{})
+	app.onPublish = func(ConfirmRequest) { close(asked) }
+	first := make(chan confirm.Decision)
+	req := confirm.Request{ID: "j_1", Title: "first", ExpiresAt: time.Now().Add(time.Minute)}
+	go func() { first <- c.Confirm(context.Background(), req) }()
+	<-asked
+	app.mu.Lock()
+	app.onPublish = nil
+	app.mu.Unlock()
+	req.Title = "second"
+	if got := c.Confirm(short, req); got != confirm.Deny {
+		t.Fatalf("duplicate id: %v, want deny", got)
+	}
+	if p := c.Pending(); len(p) != 1 || p[0].Title != "first" {
+		t.Fatalf("the duplicate replaced the first question: %+v", p)
+	}
+	reply(c, "j_1", "allow")
+	if got := <-first; got != confirm.Allow {
+		t.Fatalf("first: %v, want allow", got)
+	}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	if len(app.published) != 1 {
+		t.Fatalf("published %d, want 1", len(app.published))
 	}
 }
 

@@ -61,6 +61,7 @@ type Hello struct {
 	Protocol     int    `json:"protocol"` // the app's protocol version (ProtocolVersion when both match)
 	Token        string `json:"token"`
 	LastSeq      uint64 `json:"lastSeq"`
+	Session      string `json:"session,omitempty"` // the session of the last welcome: another one means the host restarted
 	AppVersion   string `json:"appVersion"`
 	DeviceSerial string `json:"deviceSerial"`
 }
