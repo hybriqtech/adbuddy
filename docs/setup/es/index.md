@@ -69,6 +69,7 @@ El código QR solo funciona en la misma red. Por Tailscale, o en una Wi-Fi que b
 - **El móvil no aparece:** comprueba que los dos están en la misma Wi-Fi, que la depuración inalámbrica sigue activa (Android la apaga al cambiar de red, salvo en redes de confianza) y que la red no aísla a sus clientes (las redes de invitados suelen hacerlo).
 - **Se acabó el tiempo (`PAIRING_TIMEOUT`):** el móvil tiene unos 3 minutos para escanear el código QR desde que aparece. Vuelve a ejecutar `adbuddy setup`; se salta lo que ya está hecho.
 - **"Wrong password" (contraseña incorrecta):** el código cambia cada vez que se abre el cuadro; usa el que se ve en ese momento.
+- **`protocol fault` al emparejar con código:** el cuadro se cerró antes de terminar el emparejamiento. También se cierra si cambias a otra app para copiar el código. Mantenlo abierto y escribe el código desde el PC (o desde otro dispositivo), o ábrelo de nuevo para obtener un código nuevo.
 - **Windows pregunta por el cortafuegos:** permite adb (la herramienta de depuración de Android, que ADBuddy descarga) en redes privadas; solo habla con dispositivos de tu Wi-Fi.
 
 ## Qué hace ADBuddy con este acceso

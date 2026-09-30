@@ -46,13 +46,20 @@ var (
 	qrHintDelay         = 10 * time.Second // when to say that no phone is visible while a QR code waits
 )
 
-const phoneGuide = `Prepare your phone (only once):
+// phoneGuide is the phone preparation text; step 3 depends on how it is paired.
+func phoneGuide(useCode bool) string {
+	network := "Keep the phone on the same Wi-Fi network as this PC."
+	if useCode {
+		network = "Keep the phone on the same Wi-Fi network as this PC, or reachable over Tailscale: then use the IP address and port the pairing popup shows."
+	}
+	return `Prepare your phone (only once):
   1. Settings → About phone → tap "Build number" 7 times to turn on Developer options.
   2. Developer options (Settings → System on a Pixel) → turn on "Wireless debugging".
      When the phone asks, tick "Always allow on this network".
-  3. Keep the phone on the same Wi-Fi network as this PC.
+  3. ` + network + `
 Step-by-step guide with pictures (scan it with the phone's camera):
 `
+}
 
 type setupResult struct {
 	Device    device.Profile `json:"device"`
@@ -353,7 +360,7 @@ var pairingCodeRe = regexp.MustCompile(`^[0-9]{6}$`)
 
 // pair shows the guide and pairs by QR code or by code.
 func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask func(string) (string, error), say func(string, ...any)) (string, error) {
-	say("%s", phoneGuide)
+	say("%s", phoneGuide(useCode))
 	if art, err := pairing.RenderQR(HelpURL, colorOK(app)); err == nil {
 		say("%s", art)
 	}
@@ -375,7 +382,7 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 		}
 		guid, err := pairing.Pair(ctx, runner, addr, code)
 		if err != nil {
-			return "", NewError("PAIRING_FAILED", err.Error(), "Check the address and the code (they change every time) and try again.")
+			return "", NewError("PAIRING_FAILED", err.Error(), "Keep the pairing popup open until setup says Paired: the code stops working as soon as it closes, also when you switch to another app to copy it. Open it again and use the new address and code.")
 		}
 		return guid, nil
 	}

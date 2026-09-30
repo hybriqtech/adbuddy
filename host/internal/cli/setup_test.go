@@ -197,6 +197,32 @@ func TestSetupFailsCleanly(t *testing.T) {
 	}
 }
 
+func TestPhoneGuideDependsOnTheMode(t *testing.T) {
+	const plain = "Keep the phone on the same Wi-Fi network as this PC."
+	if g := phoneGuide(false); !strings.Contains(g, plain+"\n") || strings.Contains(g, "Tailscale") {
+		t.Fatalf("QR guide: %q", g)
+	}
+	if g := phoneGuide(true); !strings.Contains(g, "reachable over Tailscale") || strings.Contains(g, plain+"\n") {
+		t.Fatalf("code guide: %q", g)
+	}
+	e := newSetupEnv(t, phoneRules())
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != 0 || !strings.Contains(errOut, "reachable over Tailscale") || strings.Contains(errOut, plain+"\n") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+}
+
+func TestSetupCodeProtocolFaultSaysToKeepThePopupOpen(t *testing.T) {
+	rules := append([]testutil.FakeRule{
+		{Match: "^pair ", Stdout: "error: protocol fault (couldn't read status message)\n"},
+	}, phoneRules()...)
+	e := newSetupEnv(t, rules)
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitFailure || !strings.Contains(errOut, "PAIRING_FAILED") || !strings.Contains(errOut, "Keep the pairing popup open") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+}
+
 func TestSetupReportsDownloadFailure(t *testing.T) {
 	newSetupEnv(t, phoneRules())
 	_, errOut, code := runWithInput(t, "", "setup")
