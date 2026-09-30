@@ -1,0 +1,73 @@
+# Builtins, reserved words and predefined aliases of @(#)MIRBSD KSH R59 2020/10/31 Android (whence -v). Written by TestRecordOracle.
+.	special builtin
+:	special builtin
+[	builtin
+alias	builtin
+autoload	alias
+bg	builtin
+bind	builtin
+break	special builtin
+builtin	builtin
+case	reserved
+cd	builtin
+chdir	builtin
+command	builtin
+continue	special builtin
+do	reserved
+done	reserved
+echo	builtin
+elif	reserved
+else	reserved
+esac	reserved
+eval	special builtin
+exec	special builtin
+exit	special builtin
+export	special builtin
+false	builtin
+fc	builtin
+fg	builtin
+fi	reserved
+for	reserved
+function	reserved
+functions	alias
+getopts	builtin
+hash	alias
+history	alias
+if	reserved
+in	reserved
+integer	alias
+jobs	builtin
+kill	builtin
+let	builtin
+local	alias
+login	alias
+nameref	alias
+nohup	alias
+print	builtin
+pwd	builtin
+r	alias
+read	builtin
+readonly	special builtin
+rename	builtin
+return	special builtin
+select	reserved
+set	special builtin
+shift	special builtin
+source	builtin
+suspend	builtin
+test	builtin
+then	reserved
+time	reserved
+times	special builtin
+trap	special builtin
+true	builtin
+type	alias
+typeset	builtin
+ulimit	builtin
+umask	builtin
+unalias	builtin
+unset	special builtin
+until	reserved
+wait	builtin
+whence	builtin
+while	reserved

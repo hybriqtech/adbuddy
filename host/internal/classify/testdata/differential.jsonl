@@ -1,0 +1,101 @@
+{"sh": "@S@", "why": "control: the sentinel as a command"}
+{"sh": "echo @S@", "why": "control: the sentinel as text"}
+{"sh": "echo '$(@S@)'", "why": "control: a substitution in single quotes is text"}
+{"sh": "echo $(@S@)", "why": "a substitution runs"}
+{"sh": "echo `@S@`", "why": "a substitution in backquotes runs"}
+{"sh": "echo \"$(@S@)\"", "why": "a substitution in double quotes runs"}
+{"sh": "ls; @S@", "why": "list"}
+{"sh": "ls && @S@", "why": "and"}
+{"sh": "ls /nonexistent || @S@", "why": "or"}
+{"sh": "ls | @S@", "why": "pipeline"}
+{"sh": "ls & @S@", "why": "background"}
+{"sh": "(@S@)", "why": "subshell"}
+{"sh": "{ @S@; }", "why": "block"}
+{"sh": "! @S@", "why": "negation"}
+{"sh": "ls\n@S@", "why": "second line"}
+{"sh": "if true; then @S@; fi", "why": "if"}
+{"sh": "while true; do @S@; break; done", "why": "while"}
+{"sh": "for f in a; do @S@; done", "why": "for"}
+{"sh": "case x in x) @S@;; esac", "why": "case"}
+{"sh": "cat <<EOF\n$(@S@)\nEOF", "why": "here-document body"}
+{"sh": "cat <<'EOF'\n$(@S@)\nEOF", "why": "quoted here-document body is text"}
+{"sh": "echo ${ @S@;}", "why": "mksh function substitution"}
+{"sh": "[[ -e $(@S@) ]]", "why": "substitution inside [[ ]]"}
+{"sh": "(( $(@S@) ))", "why": "substitution inside (( ))"}
+{"sh": "sh -c '@S@'", "why": "sh -c"}
+{"sh": "sh -c \"sh -c '@S@'\"", "why": "nested sh -c"}
+{"sh": "echo @S@ | sh", "why": "a shell reading stdin"}
+{"sh": "eval '@S@'", "why": "eval"}
+{"sh": "nohup @S@", "why": "nohup"}
+{"sh": "timeout 5 @S@", "why": "timeout"}
+{"sh": "env @S@", "why": "env"}
+{"sh": "exec @S@", "why": "exec"}
+{"sh": "command @S@", "why": "command"}
+{"sh": "builtin eval @S@", "why": "builtin eval"}
+{"sh": "echo @S@ | xargs sh -c", "why": "xargs"}
+{"sh": "find /system/bin/sh -exec @S@ \\;", "why": "find -exec"}
+{"sh": "find /system/bin/sh -exec sh -c '@S@' \\;", "why": "find -exec sh -c"}
+{"sh": "watch -n 1 @S@", "why": "watch runs its argument"}
+{"sh": "toybox sh -c '@S@'", "why": "toybox"}
+{"sh": "x=@S@; $x", "why": "a command name from a variable"}
+{"sh": "${x:-@S@}", "why": "a command name from a default"}
+{"sh": "PS4='$(@S@)'; set -x; true", "why": "PS4 is expanded before each traced line"}
+{"sh": "export PS4='$(@S@)'; set -x; true", "why": "PS4 through export"}
+{"sh": "typeset PS4='$(@S@)'; set -x; true", "why": "PS4 through typeset"}
+{"sh": "for PS4 in '$(@S@)'; do set -x; true; done", "why": "PS4 as a loop variable"}
+{"sh": ": ${PS4='$(@S@)'}; set -x; true", "why": "PS4 through ${x=…}"}
+{"sh": "echo '$(@S@)' | { read -r PS4; set -x; true; }", "why": "PS4 through read"}
+{"sh": "set -A PS4 '$(@S@)'; set -x; true", "why": "PS4 through set -A"}
+{"sh": "PS4='$(@S@)' sh -xc true", "why": "PS4 in the environment of a shell"}
+{"sh": "env PS4='$(@S@)' sh -xc true", "why": "PS4 through env"}
+{"sh": "ps4='$(@S@)'; set -x; true", "why": "a lower-case name is not PS4"}
+{"sh": "ENV=@S@ sh -i -c true", "why": "ENV is a start-up file"}
+{"sh": "PATH=/data/local/tmp; m25-sentinel", "why": "PATH picks the file a name runs"}
+{"sh": "p=/data/local/tmp; PATH=$p; m25-sentinel", "why": "PATH from a variable"}
+{"sh": "path=/data/local/tmp; m25-sentinel", "why": "a lower-case name is not PATH"}
+{"sh": "IFS=/; x=@S@; $x", "why": "IFS changes how words split"}
+{"sh": "trap '@S@' EXIT", "why": "trap runs a string when the shell ends"}
+{"sh": "trap @S@ 0", "why": "trap with a signal number"}
+{"sh": "alias ls=@S@; ls", "why": "an alias in the same line"}
+{"sh": "alias ls=@S@\nls", "why": "an alias on the next line"}
+{"sh": "ls() { @S@; }; ls", "why": "a function"}
+{"sh": "function ls { @S@; }; ls", "why": "a function, ksh style"}
+{"sh": "x='a[$(@S@)]'; echo $((x))", "why": "arithmetic expansion"}
+{"sh": "x='a[$(@S@)]'; ((x))", "why": "arithmetic command"}
+{"sh": "let x='a[$(@S@)]'", "why": "let"}
+{"sh": "typeset -i n='a[$(@S@)]'", "why": "an integer variable evaluates its value"}
+{"sh": "integer n='a[$(@S@)]'", "why": "the integer alias"}
+{"sh": "x='a[$(@S@)]'; [ \"$x\" -eq 1 ]", "why": "an integer comparison in ["}
+{"sh": "x='a[$(@S@)]'; [[ $x -eq 1 ]]", "why": "an integer comparison in [[ ]]"}
+{"sh": "x='a[$(@S@)]'; echo ${s:x:1}", "why": "a substring offset"}
+{"sh": "x='a[$(@S@)]'; echo ${a[x]}", "why": "an array index"}
+{"sh": "x='a[$(@S@)]'; a[x]=1", "why": "an array index in an assignment"}
+{"sh": "x=1; x='a[$(@S@)]'; echo $((x))", "why": "a later assignment that is not a number"}
+{"sh": "echo $((x)); x='a[$(@S@)]'", "why": "an assignment after the use does not count"}
+{"sh": "for i in 1 2; do echo $((x)); x='a[$(@S@)]'; done", "why": "an assignment after the use, in a loop"}
+{"sh": "SECONDS='a[$(@S@)]'", "why": "a variable that is an integer from the start"}
+{"sh": "x='a[$(@S@)]'; shift x", "why": "shift evaluates its argument"}
+{"sh": "x='a[$(@S@)]'; shift $x", "why": "shift with an expansion"}
+{"sh": "x='a[$(@S@)] -eq 1'; [ $x ]", "why": "a value that splits into an integer comparison"}
+{"sh": "sh -c '[ \"$@\" ]' _ 'a[$(@S@)]' -eq 1", "why": "positional parameters that are an integer comparison"}
+{"sh": "x='a[$(@S@)]' sh -c 'echo $((x))'", "why": "a value exported to a nested shell"}
+{"sh": "export x='a[$(@S@)]'; sh -c 'echo $((x))'", "why": "a value exported with export"}
+{"sh": "x='a[$(@S@)]'; sh -c 'echo $((x))'", "why": "a value that is not exported does not reach a nested shell"}
+{"sh": "x='a[$(@S@)]'; op=-eq; [ \"$x\" \"$op\" 1 ]", "why": "an operator from a variable"}
+{"sh": "x='a[$(@S@)]'; op=-eq; test \"$x\" \"$op\" 1", "why": "the same with test"}
+{"sh": "n='a[$(@S@)]'; op=-eq; [ -n \"$op\" 1 ]", "why": "-n read as the variable n"}
+{"sh": "a='x[$(@S@)]'; op=-eq; [ -a \"$op\" 1 ]", "why": "-a read as the variable a"}
+{"sh": "f='x[$(@S@)]'; op=-eq; [ -f \"$op\" 1 ]", "why": "-f read as the variable f"}
+{"sh": "x='a[$(@S@)]'; op=-eq; [ -n \"$op\" \"$x\" ]", "why": "a binary operator wins over a unary one"}
+{"sh": "typeset -R2 x=16#ab; ab='a[$(@S@)]'; echo $((x))", "why": "typeset -R cuts 16#ab into ab"}
+{"sh": "x=0xab; typeset -R2 x; ab='a[$(@S@)]'; echo $((x))", "why": "typeset -R after the assignment"}
+{"sh": "typeset -R13 PATH; cd /data/local/tmp 2>/dev/null; m25-sentinel", "why": "typeset -R on PATH"}
+{"sh": "unset 'a[$(@S@)]'", "why": "unset of an array element"}
+{"sh": "read 'a[$(@S@)]' </dev/null", "why": "read into an array element"}
+{"sh": "set -A 'a[$(@S@)]' 1", "why": "set -A of an array element"}
+{"sh": "typeset 'a[$(@S@)]'", "why": "typeset of an array element"}
+{"sh": "x='$(@S@)'; a=([x]=1)", "why": "M-3: an array literal with an index"}
+{"sh": "a=([$(@S@)]=1)", "why": "an array literal with a substitution as index"}
+{"sh": "x=y; echo $(( $x = 1 )); y='a[$(@S@)]'; echo $((y))", "why": "an arithmetic assignment to a name only known on the phone"}
+{"sh": "echo x >$(@S@)", "why": "a substitution as the target of a redirection"}
+{"sh": "echo x 2>&1 >/dev/null | @S@", "why": "a pipeline after redirections"}

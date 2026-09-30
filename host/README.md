@@ -136,3 +136,16 @@ go test ./...
 ```
 
 The tests never touch a phone: they use a fake adb (`internal/testutil/fakeadb`).
+
+### The classifier's oracle
+
+What the phone's shell (mksh) really does is not taken from memory: `internal/classify/testdata/oracle.jsonl` records, for every case of `differential.jsonl` and every generated one, whether a real mksh ran the sentinel `@S@`. `go test` fails if a case is not recorded, or if mksh ran the sentinel and the classifier did not answer 🔴 special. `mksh-builtins.tsv` lists the builtins of that mksh, and each must be admitted with a grammar or never analysed.
+
+To record them again after adding a case, use the Android emulator (SDK packages `emulator` and `system-images;android-37.0;google_apis;x86_64`). It has its own adb server, and the recorder refuses any device that is not an emulator:
+
+```sh
+eval "$(scripts/emulator.sh start)"     # from the repository root; about a minute
+cd host && go test -timeout 60m -count=1 -run TestRecordOracle ./internal/classify   # about 10 minutes
+go test ./internal/classify
+../scripts/emulator.sh stop
+```

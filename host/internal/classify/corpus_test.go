@@ -144,6 +144,9 @@ func TestNoCorpusCommandPanics(t *testing.T) {
 			all = append(all, k.argv())
 		}
 	}
+	for _, k := range differentialCases(t) {
+		all = append(all, sh(withSentinel(k.Sh)))
+	}
 	// Every command on its own and cut after each word: a command with
 	// fewer words than its check expects must not panic either.
 	for _, argv := range all {
