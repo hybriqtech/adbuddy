@@ -238,6 +238,9 @@ func checkDate(ws []Word) checkResult {
 // start with --reset or --clear (procstats --clear, batterystats --reset-all,
 // usagestats --clear…) wipe the service's data.
 func checkDumpsys(ws []Word) checkResult {
+	if len(ws) < 3 {
+		return ok() // dumpsys alone, or only a service
+	}
 	for _, w := range ws[2:] {
 		switch v := w.Value; {
 		case strings.HasPrefix(v, "--reset"), strings.HasPrefix(v, "--clear"):

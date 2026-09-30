@@ -7,6 +7,8 @@ host/go.mod text eol=lf
 host/go.sum text eol=lf
 host/**/*.yaml text eol=lf
 host/**/*.md text eol=lf
+host/**/*.jsonl text eol=lf
+host/**/*.tsv text eol=lf
 .github/**/*.yml text eol=lf
 
 # android/: LF (Gradle, Kotlin and Android resources)

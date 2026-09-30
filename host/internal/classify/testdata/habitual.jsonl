@@ -1,0 +1,162 @@
+{"sh":"getprop ro.product.model","level":"green"}
+{"sh":"getprop","level":"green"}
+{"sh":"getprop ro.build.version.sdk && getprop ro.product.manufacturer","level":"green"}
+{"sh":"getprop | grep -i version","level":"green"}
+{"sh":"dumpsys","level":"green"}
+{"sh":"dumpsys battery","level":"green"}
+{"sh":"dumpsys diskstats","level":"green"}
+{"sh":"dumpsys package com.android.chrome | grep version","level":"green"}
+{"sh":"dumpsys package com.android.chrome | grep -E 'versionName|firstInstallTime'","level":"green"}
+{"sh":"dumpsys meminfo | awk -F: '/Total RAM/ {print $2}'","level":"green"}
+{"sh":"dumpsys activity activities | grep mResumedActivity","level":"green"}
+{"sh":"dumpsys deviceidle whitelist","level":"green"}
+{"sh":"pm list packages","level":"green"}
+{"sh":"pm list packages -s -3","level":"green"}
+{"sh":"pm list packages -d","level":"green"}
+{"sh":"pm list packages -f -3","level":"green"}
+{"sh":"pm list packages | wc -l","level":"green"}
+{"sh":"pm list packages tech.hybriq.adbuddy","level":"green"}
+{"sh":"pm list packages $X","level":"green"}
+{"sh":"pm path com.android.chrome","level":"green"}
+{"sh":"pm path $P","level":"green"}
+{"sh":"cmd package list packages","level":"green"}
+{"sh":"cmd package list packages -u","level":"green"}
+{"sh":"cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME","level":"green"}
+{"sh":"settings get global window_animation_scale","level":"green"}
+{"sh":"settings --user 0 get secure android_id","level":"green"}
+{"sh":"settings list system","level":"green"}
+{"sh":"settings list global","level":"green"}
+{"sh":"appops get com.whatsapp RUN_IN_BACKGROUND","level":"green"}
+{"sh":"appops get $P","level":"green"}
+{"sh":"ls -la /sdcard/Download","level":"green"}
+{"sh":"ls /sdcard/*.jpg","level":"green"}
+{"sh":"ls -la /sdcard/DCIM/Camera | head -20","level":"green"}
+{"sh":"ls | xargs -n 1 echo","level":"green"}
+{"sh":"cat /proc/meminfo","level":"green"}
+{"sh":"cat /sdcard/$F","level":"green"}
+{"sh":"cat /sdcard/x 2>/dev/null || echo missing","level":"green"}
+{"sh":"df -h","level":"green"}
+{"sh":"du -sh /sdcard/* | sort -h","level":"green"}
+{"sh":"du -sh /sdcard/Android/data/* 2>/dev/null | sort -rh | head -10","level":"green"}
+{"sh":"stat /sdcard/DCIM","level":"green"}
+{"sh":"screencap -p","level":"green"}
+{"sh":"uiautomator dump","level":"green"}
+{"sh":"uiautomator dump --compressed","level":"green"}
+{"sh":"logcat -d -t 100","level":"green"}
+{"sh":"logcat -b crash -d","level":"green"}
+{"sh":"logcat -d | grep -i crash","level":"green"}
+{"sh":"content query --uri content://settings/global","level":"green"}
+{"sh":"find /sdcard -name '*.apk' -size +10M","level":"green"}
+{"sh":"find /sdcard -name '*.jpg'","level":"green"}
+{"sh":"find /sdcard -type f -name '*.tmp'","level":"green"}
+{"sh":"sed -n '1,10p' /proc/cpuinfo","level":"green"}
+{"sh":"sed 's/a/b/g' /proc/version","level":"green"}
+{"sh":"awk '{print $1}' /proc/loadavg","level":"green"}
+{"sh":"date","level":"green"}
+{"sh":"date +%s","level":"green"}
+{"sh":"wm size","level":"green"}
+{"sh":"wm density","level":"green"}
+{"sh":"ip addr show wlan0","level":"green"}
+{"sh":"ifconfig wlan0","level":"green"}
+{"sh":"ps -A | grep chrome | head -5","level":"green"}
+{"sh":"echo hello","level":"green"}
+{"sh":"echo $PATH","level":"green"}
+{"sh":"echo $EXTERNAL_STORAGE","level":"green"}
+{"sh":"id; whoami; uname -a","level":"green"}
+{"sh":"ls >/dev/null 2>&1","level":"green"}
+{"sh":"toybox ls /sdcard","level":"green"}
+{"sh":"/system/bin/ls /sdcard","level":"green"}
+{"sh":"timeout 5 logcat -d","level":"green"}
+{"sh":"timeout 5 ls","level":"green"}
+{"sh":"nohup ls","level":"green"}
+{"sh":"env LANG=C ls","level":"green"}
+{"sh":"command -v pm","level":"green"}
+{"sh":"sleep 1 && echo ok","level":"green"}
+{"sh":"sh -c 'getprop ro.product.model'","level":"green"}
+{"sh":"sh -c \"pm list packages | grep google\"","level":"green"}
+{"sh":"sh -c 'ls /sdcard'","level":"green"}
+{"sh":"su -c 'ls /data'","level":"green"}
+{"sh":"su 0 ls /data","level":"green"}
+{"sh":"cat <<EOF\nhello\nEOF","level":"green"}
+{"sh":"echo 'rm -rf /sdcard' | cat","level":"green"}
+{"sh":"for p in $(pm list packages -3); do echo $p; done","level":"green"}
+{"sh":"for p in $(pm list packages -3 | cut -d: -f2); do pm path $p; done","level":"green"}
+{"sh":"for p in a b; do echo $p; done","level":"green"}
+{"sh":"for i in 1 2; do ls; done","level":"green"}
+{"sh":"for i in 1 2 3; do echo $((i*2)); done","level":"green"}
+{"sh":"if [ -e /sdcard/x ]; then echo yes; else echo no; fi","level":"green"}
+{"sh":"[ -e /sdcard/x ]","level":"green"}
+{"sh":"[ -n \"$X\" ]","level":"green"}
+{"sh":"[ -f \"$F\" ]","level":"green"}
+{"sh":"[ \"$a\" = \"$b\" ]","level":"green"}
+{"sh":"[ \"$x\" != \"\" ]","level":"green"}
+{"sh":"test -n \"$x\"","level":"green"}
+{"sh":"[ \"$a\" = x -a \"$b\" = y ]","level":"green"}
+{"sh":"[ -f \"$F\" -a -r \"$F\" ]","level":"green"}
+{"sh":"[ -z \"$x\" -o \"$x\" = 0 ]","level":"green"}
+{"sh":"[ $# -eq 0 ]","level":"green"}
+{"sh":"[ \"$?\" -ne 0 ] && echo failed","level":"green"}
+{"sh":"[ \"$(getprop sys.boot_completed)\" = 1 ]","level":"green"}
+{"sh":"until [ \"$(getprop sys.boot_completed)\" = 1 ]; do sleep 1; done","level":"green"}
+{"sh":"i=0; while [ $i -lt 3 ]; do i=$((i+1)); done","level":"green"}
+{"sh":"n=5; echo $((n*2))","level":"green"}
+{"sh":"echo $((1+2))","level":"green"}
+{"sh":"x=$(ls)","level":"green"}
+{"sh":"set -e","level":"green"}
+{"sh":"set -o pipefail","level":"green"}
+{"sh":"settings put global window_animation_scale 0.5","level":"yellow"}
+{"sh":"settings --user 0 put secure show_ime_with_hard_keyboard 1","level":"yellow"}
+{"sh":"settings get global a; settings put global a 1","level":"yellow"}
+{"sh":"pm disable-user --user 0 com.facebook.katana","level":"yellow"}
+{"sh":"pm disable-user com.facebook.katana","level":"yellow"}
+{"sh":"cmd package disable-user --user 0 com.x","level":"yellow"}
+{"sh":"pm enable com.x","level":"yellow"}
+{"sh":"pm uninstall --user 0 com.facebook.appmanager","level":"yellow"}
+{"sh":"pm uninstall -k --user 0 com.x","level":"yellow"}
+{"sh":"appops set com.x RUN_IN_BACKGROUND ignore","level":"yellow"}
+{"sh":"cmd appops set com.x RUN_IN_BACKGROUND ignore","level":"yellow"}
+{"sh":"dumpsys deviceidle whitelist +com.x","level":"yellow"}
+{"sh":"cmd deviceidle whitelist -com.x","level":"yellow"}
+{"sh":"mv /sdcard/a.jpg /sdcard/Pictures/a.jpg","level":"yellow"}
+{"sh":"mkdir -p /sdcard/Pictures/Trips","level":"yellow"}
+{"sh":"screencap -p /sdcard/s.png","level":"yellow"}
+{"sh":"uiautomator dump /sdcard/ui.xml","level":"yellow"}
+{"sh":"input tap 100 200","level":"yellow"}
+{"sh":"input text hola","level":"yellow"}
+{"sh":"input keyevent KEYCODE_HOME","level":"yellow"}
+{"sh":"input swipe 500 1500 500 500","level":"yellow"}
+{"sh":"nohup input tap 1 1","level":"yellow"}
+{"sh":"am start -n com.android.settings/.Settings","level":"yellow"}
+{"sh":"am start -a android.intent.action.VIEW -d https://example.com","level":"yellow"}
+{"sh":"am force-stop com.x","level":"yellow"}
+{"sh":"monkey -p com.android.chrome -c android.intent.category.LAUNCHER 1","level":"yellow"}
+{"sh":"rm -rf /sdcard/DCIM","level":"red"}
+{"sh":"pm clear com.whatsapp","level":"red"}
+{"sh":"pm uninstall com.x","level":"red"}
+{"sh":"pm grant com.x android.permission.CAMERA","level":"red"}
+{"sh":"settings delete global foo","level":"red"}
+{"sh":"content delete --uri content://sms","level":"red"}
+{"sh":"echo x > /sdcard/important.txt","level":"red"}
+{"sh":"cp /sdcard/a /sdcard/b","level":"red"}
+{"sh":"kill -9 1234","level":"red"}
+{"sh":"wm size 1080x1920","level":"red"}
+{"sh":"frobnicate --all","level":"red"}
+{"sh":"settings put global adb_wifi_enabled 0","level":"red","special":true}
+{"sh":"pm disable-user --user 0 tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"svc wifi disable","level":"red","special":true}
+{"sh":"reboot","level":"red","special":true}
+{"argv":["devices","-l"],"level":"green"}
+{"argv":["version"],"level":"green"}
+{"argv":["wait-for-device"],"level":"green"}
+{"argv":["mdns","services"],"level":"green"}
+{"argv":["pull","/sdcard/DCIM/a.jpg","."],"level":"green"}
+{"argv":["logcat","-d"],"level":"green"}
+{"argv":["reverse","--list"],"level":"green"}
+{"argv":["install","app.apk"],"level":"yellow"}
+{"argv":["install","-r","app.apk"],"level":"yellow"}
+{"argv":["push","notes.txt","/sdcard/Download/notes.txt"],"level":"yellow"}
+{"argv":["uninstall","com.whatsapp"],"level":"red"}
+{"argv":["reboot"],"level":"red","special":true}
+{"argv":["kill-server"],"level":"red","special":true}
+{"argv":["tcpip","5555"],"level":"red","special":true}
+{"argv":["exec-out","screencap","-p"],"level":"green"}
