@@ -33,7 +33,7 @@
 - **Android SDK:** `/c/Users/Jose/AppData/Local/Android/Sdk` (build-tools `34.0.0`, platform `android-30`).
 - **JDK:** `/c/Users/Jose/AppData/Local/Android/jdk-17.0.20.1+1`
 - **Claude Code:** `C:\Users\Jose\.local\bin\claude.exe`
-- **Tailscale:** PC `rtx5080` = `100.111.119.69`; móvil `pixel-9-pro-xl` = `100.84.27.94`.
+- **Tailscale:** PC `rtx5080` = `100.111.119.69`; móvil `pixel-9-pro-xl` = `<ip-tailnet>`.
 - **Shell: Git Bash.**
   - `MSYS_NO_PATHCONV=1` para comandos adb con rutas del móvil (lo exporta `spikes/env.sh`).
   - `cygpath -w` para las rutas que se pasan a herramientas Java o Windows.
@@ -84,7 +84,7 @@ export MSYS_NO_PATHCONV=1
 export ADB="/c/Users/Jose/AppData/Local/Microsoft/WinGet/Packages/Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe/platform-tools/adb.exe"
 export ANDROID_SDK="/c/Users/Jose/AppData/Local/Android/Sdk"
 export JDK_HOME_UNIX="/c/Users/Jose/AppData/Local/Android/jdk-17.0.20.1+1"
-export TS_IP="100.84.27.94"   # IP de Tailscale del Pixel (tailscale status)
+export TS_IP="<ip-tailnet>"   # IP de Tailscale del Pixel (tailscale status)
 export PKG_SPIKE="tech.hybriq.adbuddy.spike.a11y"
 
 # Serial mDNS de la depuración inalámbrica (vacío si no está conectado).
@@ -130,7 +130,7 @@ spikes/s3-pty/work/.claude/
 | # | Pregunta | Resultado | Evidencia (sección del registro) |
 |---|---|---|---|
 | Q1 | ¿`adb tcpip 5555` funciona estando conectado por depuración inalámbrica en Android 17? ¿Se pierde la conexión inalámbrica al hacerlo? | | |
-| Q2 | ¿Se puede conectar a `100.84.27.94:5555` por Tailscale con el móvil en Wi-Fi? ¿Latencia? | | |
+| Q2 | ¿Se puede conectar a `<ip-tailnet>:5555` por Tailscale con el móvil en Wi-Fi? ¿Latencia? | | |
 | Q3 | ¿Y con solo datos móviles? ¿Latencia y tiempo de una captura? | | |
 | Q4 | ¿El modo `tcpip` sobrevive al cambio Wi-Fi → datos → Wi-Fi? ¿Vuelve sola la depuración inalámbrica (Wi-Fi 2.0)? | | |
 | Q5 | ¿`adb_wifi_enabled=0` corta el modo `tcpip`? ¿Y `adb_enabled=0`? | | |
@@ -219,7 +219,7 @@ git commit -m "spike(m0): entorno común y plantillas de resultados" -m "Co-Auth
 
 **Interfaces:**
 - Consume: `spikes/env.sh` (Tarea 1).
-- Produce: el móvil en modo `tcpip 5555`, conectado como `100.84.27.94:5555` (lo usa la Tarea 3).
+- Produce: el móvil en modo `tcpip 5555`, conectado como `<ip-tailnet>:5555` (lo usa la Tarea 3).
 
 - [ ] **Paso 1: Registrar la línea base**
 
@@ -266,7 +266,7 @@ Esperado: `restarting in TCP mode port: 5555`. Anota si el dispositivo `_adb-tls
 } | tee -a "$LOG"
 ```
 
-Esperado: `connected to 100.84.27.94:5555`, `OK … <n>ms` y `service.adb.tcp.port=5555`. Si el móvil muestra "¿Permitir depuración?", 👤 el usuario acepta, y se anota en el registro.
+Esperado: `connected to <ip-tailnet>:5555`, `OK … <n>ms` y `service.adb.tcp.port=5555`. Si el móvil muestra "¿Permitir depuración?", 👤 el usuario acepta, y se anota en el registro.
 
 - [ ] **Paso 4: Medir una captura por Tailscale con Wi-Fi y borrarla**
 
@@ -364,7 +364,7 @@ fi
 probe "$TS_IP:5555"
 ```
 
-Esperado: `OK 100.84.27.94:5555 …`.
+Esperado: `OK <ip-tailnet>:5555 …`.
 
 - [ ] **Paso 2: Nivel 1, `adb_wifi_enabled=0`**
 
@@ -443,7 +443,7 @@ Esperado:
 - `adb_enabled=1` y `adb_wifi_enabled=1`;
 - el `adb connect … :5555` final **falla**.
 
-Si `SERIAL` queda vacío, 👤 el usuario apaga y enciende la depuración inalámbrica. Si el puerto 5555 sigue aceptando conexiones, repite `adb -s 100.84.27.94:5555 usb`. Como último recurso, 👤 pide permiso para reiniciar el móvil (`adb reboot`), que siempre limpia el modo `tcpip`.
+Si `SERIAL` queda vacío, 👤 el usuario apaga y enciende la depuración inalámbrica. Si el puerto 5555 sigue aceptando conexiones, repite `adb -s <ip-tailnet>:5555 usb`. Como último recurso, 👤 pide permiso para reiniciar el móvil (`adb reboot`), que siempre limpia el modo `tcpip`.
 
 - [ ] **Paso 8: Rellenar Q5 y Q6, y escribir la conclusión de S1**
 

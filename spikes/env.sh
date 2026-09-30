@@ -3,7 +3,7 @@ export MSYS_NO_PATHCONV=1
 export ADB="/c/Users/Jose/AppData/Local/Microsoft/WinGet/Packages/Google.PlatformTools_Microsoft.Winget.Source_8wekyb3d8bbwe/platform-tools/adb.exe"
 export ANDROID_SDK="/c/Users/Jose/AppData/Local/Android/Sdk"
 export JDK_HOME_UNIX="/c/Users/Jose/AppData/Local/Android/jdk-17.0.20.1+1"
-export TS_IP="100.84.27.94"   # IP de Tailscale del Pixel (tailscale status)
+export TS_IP="${TS_IP:-}"   # rellénala con la IP de Tailscale del móvil (tailscale status)
 export PKG_SPIKE="tech.hybriq.adbuddy.spike.a11y"
 
 # Serial mDNS de la depuración inalámbrica (vacío si no está conectado).

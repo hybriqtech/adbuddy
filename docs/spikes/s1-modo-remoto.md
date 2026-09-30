@@ -7,7 +7,7 @@
 | # | Pregunta | Resultado | Evidencia (sección del registro) |
 |---|---|---|---|
 | Q1 | ¿`adb tcpip 5555` funciona estando conectado por depuración inalámbrica en Android 17? ¿Se pierde la conexión inalámbrica al hacerlo? | **Sí funciona** (`restarting in TCP mode port: 5555`, salida de consola). La conexión inalámbrica se corta un instante y **vuelve sola**: mismo serial mDNS, `transport_id` 25 → 28, `device` a los 6 s. | "Línea base", "Tras adb tcpip 5555" |
-| Q2 | ¿Se puede conectar a `100.84.27.94:5555` por Tailscale con el móvil en Wi-Fi? ¿Latencia? | **Sí**: `connected to 100.84.27.94:5555`, `service.adb.tcp.port=5555`. `shell echo` 165 ms (red local por mDNS: 123 ms); `tailscale ping` 5 ms por ruta directa LAN (`via <LAN>`). Captura PNG de 1,35 MB en 2488 ms. Sin diálogo "¿Permitir depuración?". | "Conexión por Tailscale con Wi-Fi" y línea "captura Wi-Fi+Tailscale" |
+| Q2 | ¿Se puede conectar a `<ip-tailnet>:5555` por Tailscale con el móvil en Wi-Fi? ¿Latencia? | **Sí**: `connected to <ip-tailnet>:5555`, `service.adb.tcp.port=5555`. `shell echo` 165 ms (red local por mDNS: 123 ms); `tailscale ping` 5 ms por ruta directa LAN (`via <LAN>`). Captura PNG de 1,35 MB en 2488 ms. Sin diálogo "¿Permitir depuración?". | "Conexión por Tailscale con Wi-Fi" y línea "captura Wi-Fi+Tailscale" |
 | Q3 | ¿Y con solo datos móviles? ¿Latencia y tiempo de una captura? | **Sí** (con mala cobertura móvil): `connected`, `OK 213ms` al primer intento (1 muestra, con mala cobertura), `service.adb.tcp.port=5555`. Tailscale sin ruta directa, por relay DERP(mad): 121-149 ms. Captura PNG de 3,99 MB en 47326 ms (~84 KB/s): usable para comandos, lenta para capturas. | "Solo datos móviles" y línea "captura datos móviles+Tailscale" |
 | Q4 | ¿El modo `tcpip` sobrevive al cambio Wi-Fi → datos → Wi-Fi? ¿Vuelve sola la depuración inalámbrica (Wi-Fi 2.0)? | **Sí a las dos, con matices.** (a) El modo `tcpip` (el puerto) sobrevive: `service.adb.tcp.port=5555` con solo datos y `OK 123ms` al volver a Wi-Fi. (b) La sesión abierta sobrevivió al paso datos → Wi-Fi: el `adb connect` al volver dice `already connected`. (c) El paso Wi-Fi → datos **no se probó con la sesión abierta**: en ese paso se hizo `disconnect` + `connect` a propósito. El serial mDNS de Wi-Fi 2.0 vuelve solo (`OK 126ms`) sin tocar nada en el móvil. | "Solo datos móviles", "De vuelta en Wi-Fi" |
 | Q5 | ¿`adb_wifi_enabled=0` corta el modo `tcpip`? ¿Y `adb_enabled=0`? | **`adb_wifi_enabled=0`: No.** La sesión abierta sigue (`OK 144ms`) y el puerto 5555 **acepta conexiones nuevas** (`disconnect`, `connect`: `OK 138ms`); solo desaparece el serial mDNS. **`adb_enabled=0`: Sí.** `cannot connect ... actively refused it (10061)`, `probe` FAIL, `adb devices` vacío. | "Cortar acceso, nivel 1", "nivel 1: conexión nueva", "nivel 2" |
@@ -57,64 +57,64 @@ serial inalámbrico ahora: adb-<serie>-<id>._adb-tls-connect._tcp
 
 ### Conexión por Tailscale con Wi-Fi (2026-09-29T17:52:24Z)
 ```
-OK 100.84.27.94:5555 165ms
+OK <ip-tailnet>:5555 165ms
 service.adb.tcp.port=5555
-pong from pixel-9-pro-xl (100.84.27.94) via <LAN> in 5ms
+pong from pixel-9-pro-xl (<ip-tailnet>) via <LAN> in 5ms
 ```
-- salida de consola de `adb connect`: `connected to 100.84.27.94:5555`
+- salida de consola de `adb connect`: `connected to <ip-tailnet>:5555`
 - captura Wi-Fi+Tailscale: 2488 ms, 1345579 bytes
 
 ### Solo datos móviles (2026-09-29T17:54:14Z)
 ```
-OK 100.84.27.94:5555 213ms
+OK <ip-tailnet>:5555 213ms
 adb_wifi_enabled=1
 service.adb.tcp.port=5555
-pong from pixel-9-pro-xl (100.84.27.94) via DERP(mad) in 121ms
-pong from pixel-9-pro-xl (100.84.27.94) via DERP(mad) in 149ms
+pong from pixel-9-pro-xl (<ip-tailnet>) via DERP(mad) in 121ms
+pong from pixel-9-pro-xl (<ip-tailnet>) via DERP(mad) in 149ms
 direct connection not established
 ```
-- salida de consola de `adb connect`: `connected to 100.84.27.94:5555`
+- salida de consola de `adb connect`: `connected to <ip-tailnet>:5555`
 - Condición de la prueba: el usuario informa de **mala cobertura móvil** durante esta sección. `probe` dio OK al primer intento (sin reintentos). Tailscale va por relay DERP (mad), sin conexión directa.
 - captura datos móviles+Tailscale: 47326 ms, 3990926 bytes
 
 ### De vuelta en Wi-Fi (2026-09-29T17:56:16Z)
 ```
-OK 100.84.27.94:5555 123ms
+OK <ip-tailnet>:5555 123ms
 serial inalámbrico: adb-<serie>-<id>._adb-tls-connect._tcp
 OK adb-<serie>-<id>._adb-tls-connect._tcp 126ms
 ```
-- salida de consola de `adb connect`: `already connected to 100.84.27.94:5555`
+- salida de consola de `adb connect`: `already connected to <ip-tailnet>:5555`
 
 ### Cortar acceso, nivel 1: adb_wifi_enabled=0 (2026-09-29T17:56:36Z)
 ```
-OK 100.84.27.94:5555 144ms
+OK <ip-tailnet>:5555 144ms
 serial inalámbrico: 
 ```
 
 ### Cortar acceso, nivel 1: conexión nueva (2026-09-29T17:58:00Z)
 ```
-adb connect: connected to 100.84.27.94:5555
-OK 100.84.27.94:5555 138ms
+adb connect: connected to <ip-tailnet>:5555
+OK <ip-tailnet>:5555 138ms
 ```
 - Nota: en este bloque no se volvió a leer `adb_wifi_enabled`. Pasaron 84 s desde que se puso a 0 (bloque anterior, 17:56:36Z) y no se tocó el móvil entremedias.
 
 ### Cortar acceso, nivel 2: adb_enabled=0 (2026-09-29T17:58:12Z)
 ```
-FAIL 100.84.27.94:5555: adb.exe: device '100.84.27.94:5555' not found
+FAIL <ip-tailnet>:5555: adb.exe: device '<ip-tailnet>:5555' not found
 ```
-- `adb connect` en el nivel 2: `cannot connect to 100.84.27.94:5555: No connection could be made because the target machine actively refused it. (10061)`: el puerto está cerrado (RST), no es que no haya ruta.
+- `adb connect` en el nivel 2: `cannot connect to <ip-tailnet>:5555: No connection could be made because the target machine actively refused it. (10061)`: el puerto está cerrado (RST), no es que no haya ruta.
 - salida de consola de `adb devices -l` tras el nivel 2: `List of devices attached` sin ningún dispositivo.
 
 ### Tras reactivar a mano (2026-09-29T17:59:04Z)
 ```
-OK 100.84.27.94:5555 120ms
+OK <ip-tailnet>:5555 120ms
 serial inalámbrico: adb-<serie>-<id>._adb-tls-connect._tcp
 service.adb.tcp.port=5555
 ```
-- salida de consola de `adb connect`: `connected to 100.84.27.94:5555`
+- salida de consola de `adb connect`: `connected to <ip-tailnet>:5555`
 
 ### Estado final (2026-09-29T17:59:19Z)
-- salida de consola de `adb -s 100.84.27.94:5555 usb`: `restarting in USB mode`
+- salida de consola de `adb -s <ip-tailnet>:5555 usb`: `restarting in USB mode`
 
 ```
 List of devices attached
@@ -123,5 +123,5 @@ adb-<serie>-<id>._adb-tls-connect._tcp device product:komodo model:Pixel_9_Pro_X
 service.adb.tcp.port=0
 adb_enabled=1
 adb_wifi_enabled=1
-cannot connect to 100.84.27.94:5555: No connection could be made because the target machine actively refused it. (10061)
+cannot connect to <ip-tailnet>:5555: No connection could be made because the target machine actively refused it. (10061)
 ```

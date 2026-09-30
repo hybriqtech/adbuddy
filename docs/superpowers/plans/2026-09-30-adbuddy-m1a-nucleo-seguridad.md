@@ -1261,7 +1261,7 @@ func TestSplitGlobal(t *testing.T) {
 		{[]string{"-s", "abc", "shell", "ls"}, "abc", "", "shell ls"},
 		{[]string{"-sabc", "shell"}, "abc", "", "shell"},
 		{[]string{"-P", "5037", "devices"}, "", "-P", "devices"},
-		{[]string{"-H", "10.0.0.1", "devices"}, "", "-H", "devices"},
+		{[]string{"-H", "192.0.2.1", "devices"}, "", "-H", "devices"},
 		{[]string{"-d", "shell"}, "", "-d", "shell"},
 		{[]string{"-a", "devices"}, "", "-a", "devices"},
 		{[]string{"-t", "3", "shell"}, "", "-t", "shell"},
