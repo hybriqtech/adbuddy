@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"syscall"
@@ -20,8 +21,10 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
+	"github.com/hybriqtech/adbuddy/host/internal/platformtools"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -53,8 +56,11 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			if adbPath == "" {
 				adbPath = e.cfg.ADBPath
 			}
+			if adbPath == "" && fileExists(platformtools.ADBPath(e.dirs.Data, runtime.GOOS)) {
+				adbPath = platformtools.ADBPath(e.dirs.Data, runtime.GOOS)
+			}
 			if adbPath == "" {
-				return ConfigError("ADB_NOT_CONFIGURED", "no adb binary configured", "Pass --adb <path to adb> or set adb_path in "+e.dirs.ConfigFile()+".")
+				return ConfigError("ADB_NOT_CONFIGURED", "ADBuddy's adb is not installed", "Run `adbuddy setup` (or pass --adb <path to adb 37 or newer>).")
 			}
 			if serial == "" {
 				serial = e.cfg.Serial
@@ -102,13 +108,24 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				return Interrupted()
 			case errors.Is(err, adb.ErrNoDevice):
 				return TransientError("DEVICE_NOT_FOUND", "no phone in state `device` on adb server port "+strconv.Itoa(e.cfg.ADBServerPort),
-					"Turn on wireless debugging on the phone (it must be paired with this PC), then run `adbuddy serve` again.")
+					"Turn on wireless debugging on the phone and keep it on the same Wi-Fi as this PC; if it was never paired, run `adbuddy setup`.")
 			case errors.Is(err, adb.ErrManyDevices):
 				return NewError("MULTIPLE_DEVICES", "more than one phone is connected", "Pass --serial <serial> (see `adb -P "+strconv.Itoa(e.cfg.ADBServerPort)+" devices`) or set serial in "+e.dirs.ConfigFile()+".")
 			case err != nil:
 				return NewError("ADB_FAILED", err.Error(), "Check the adb path ("+adbPath+").")
 			}
 			runner.Serial = active
+			// Host invariant (spec §3.3): no adb network port while remote mode is off.
+			restarted, err := device.EnsureNoTCPPort(ctx, runner)
+			if err != nil {
+				return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
+			}
+			if restarted {
+				fmt.Fprintln(app.Stderr, "Closed adb's network port on the phone (adb usb); waiting for it to reconnect…")
+				if _, err := runner.WaitSerial(ctx, active, deviceWait); err != nil {
+					return TransientError("DEVICE_NOT_FOUND", "the phone did not come back after `adb usb`", "Run `adbuddy serve` again.")
+				}
+			}
 
 			secret, err := ipc.EnsureSecret(e.dirs.Data)
 			if err != nil {

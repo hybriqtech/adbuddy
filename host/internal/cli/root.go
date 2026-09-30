@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 
+	"github.com/hybriqtech/adbuddy/host/internal/paths"
 	"github.com/spf13/cobra"
 )
 
@@ -45,7 +47,17 @@ func NewRoot(app *App) *cobra.Command {
 	root.SetVersionTemplate("adbuddy {{.Version}}\n")
 	root.PersistentFlags().BoolVar(&app.JSON, "json", false, "print machine-readable JSON on stdout")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return UsageError(err.Error()) })
-	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app))
+	setup := newSetupCmd(app)
+	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app), setup)
+	// `adbuddy` alone starts the setup the first time (spec §3.1).
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if dirs, err := paths.Default(app.Getenv); err == nil && !fileExists(dirs.ConfigFile()) {
+			fmt.Fprintln(app.Stderr, "ADBuddy is not set up yet: starting `adbuddy setup`.")
+			setup.SetContext(cmd.Context())
+			return setup.RunE(setup, nil)
+		}
+		return cmd.Help()
+	}
 	return root
 }
 

@@ -17,7 +17,7 @@ import (
 // Config is the content of config.toml. Every field is optional.
 type Config struct {
 	Agent          string   `toml:"agent"`           // default agent for `adbuddy run`
-	ADBPath        string   `toml:"adb_path"`        // real adb; empty: pass --adb; `adbuddy setup` fills it from M1b on
+	ADBPath        string   `toml:"adb_path"`        // real adb; empty = ADBuddy's own platform-tools (installed by `adbuddy setup`)
 	ADBServerPort  int      `toml:"adb_server_port"` // private adb server port (spec §3.2)
 	Serial         string   `toml:"serial"`          // active device; empty = the only connected one
 	Workspace      string   `toml:"workspace"`       // agent environment; empty = ~/ADBuddy/default
