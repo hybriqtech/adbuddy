@@ -103,7 +103,7 @@ func TestSetupPairsWithCodeAndPreparesEverything(t *testing.T) {
 		t.Fatalf("config %+v %v", cfg, err)
 	}
 	agents, _ := os.ReadFile(filepath.Join(e.ws, "AGENTS.md"))
-	if !strings.Contains(string(agents), "Pixel 9 Pro XL") || !strings.Contains(string(agents), "Android 17 (SDK 37)") {
+	if !strings.Contains(string(agents), "Pixel 9 Pro XL") || !strings.Contains(string(agents), "Android: `17` (SDK 37)") {
 		t.Fatalf("AGENTS.md profile:\n%s", agents)
 	}
 	if _, err := os.Stat(filepath.Join(e.ws, "device.json")); err != nil {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/agent"
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/device"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
@@ -141,7 +142,7 @@ environment. Run it again at any time; it skips what is already done.`,
 			if err != nil {
 				return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
 			}
-			say("Phone: %s, Android %s.\n", prof.Model, prof.Android)
+			say("Phone: %s, Android %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android))
 
 			// 6. Agent.
 			chosen, err := chooseAgent(app, agentFlag, e.cfg.Agent, yes, ask, say)
@@ -177,7 +178,7 @@ environment. Run it again at any time; it skips what is already done.`,
 			if app.JSON {
 				return WriteData(app.Stdout, res)
 			}
-			fmt.Fprintf(app.Stdout, "Ready: %s (Android %s), environment %s, agent %s.\n", prof.Model, prof.Android, ws, chosen)
+			fmt.Fprintf(app.Stdout, "Ready: %s (Android %s), environment %s, agent %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android), ws, chosen)
 			say("Next: run `adbuddy serve` and keep it open, then `adbuddy run` in another terminal.\n")
 			return nil
 		},
