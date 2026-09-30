@@ -45,4 +45,28 @@ class HandshakeTest {
         assertFalse(Caller.isShell(0))
         assertFalse(Caller.isShell(10123))
     }
+    @Test fun hostNamesAreTrimmed() {
+        val h = HandshakeParser.parse("""{"host":"  DESKTOP-1  ","nonce":"$nonce","port":47123,"token":"$token"}""".toByteArray())!!
+        assertEquals("DESKTOP-1", h.host)
+        val blank = HandshakeParser.parse("""{"host":"   ","nonce":"$nonce","port":47123,"token":"$token"}""".toByteArray())!!
+        assertEquals("PC", blank.host)
+    }
+
+    @Test fun readLimitedReadsASmallInputInPieces() {
+        val text = """{"host":"DESKTOP-1","nonce":"$nonce","port":47123,"token":"$token"}""".toByteArray()
+        val trickle = object : java.io.InputStream() {
+            private var i = 0
+            override fun read(): Int = if (i < text.size) text[i++].toInt() and 0xff else -1
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                if (i >= text.size) return -1
+                val n = minOf(3, len, text.size - i)
+                System.arraycopy(text, i, b, off, n)
+                i += n
+                return n
+            }
+        }
+        val got = HandshakeParser.readLimited(trickle)
+        assertTrue(text.contentEquals(got))
+        assertEquals("DESKTOP-1", HandshakeParser.parse(got)!!.host)
+    }
 }

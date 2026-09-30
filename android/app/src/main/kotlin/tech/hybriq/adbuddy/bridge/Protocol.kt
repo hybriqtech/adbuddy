@@ -32,6 +32,7 @@ object Protocol {
         ignoreUnknownKeys = true // newer hosts may add fields
         explicitNulls = false
         encodeDefaults = true
+        coerceInputValues = true // Go writes nil slices and pointers as null: they take the default
     }
 
     fun encodeElement(type: String, payload: JsonElement, ts: String): String =
@@ -44,11 +45,15 @@ object Protocol {
         json.decodeFromString(Message.serializer(), text).takeIf { it.v == VERSION && it.type.isNotEmpty() }
     } catch (e: IllegalArgumentException) { // SerializationException is one
         null
+    } catch (e: StackOverflowError) { // absurdly deep nesting
+        null
     }
 
     inline fun <reified T> payload(m: Message): T? = try {
         json.decodeFromJsonElement<T>(m.payload)
     } catch (e: IllegalArgumentException) {
+        null
+    } catch (e: StackOverflowError) {
         null
     }
 }

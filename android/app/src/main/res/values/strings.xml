@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name" translatable="false">ADBuddy</string>
     <string name="a11y_label">ADBuddy agent helper</string>
-    <string name="a11y_description">Lets the coding agent on your PC read the screen and tap for you, always shown on screen and with a Pause button. It never reads passwords and never runs in protected apps.</string>
+    <string name="a11y_description">The ADBuddy host on your PC turns this on during setup, for features that come later. For now it does not read the screen or act on it.</string>
 
     <string name="channel_status">Connection with the PC</string>
     <string name="channel_confirm">Confirmations</string>
@@ -27,10 +27,10 @@
 
     <string name="consent_title">Set up ADBuddy with %1$s</string>
     <string name="consent_intro">The PC "%1$s" asks to finish setting up ADBuddy. If you accept, it will:</string>
-    <string name="consent_grant">Give ADBuddy the permission to change secure settings, used only by "Cut access" to turn off debugging from the phone.</string>
+    <string name="consent_grant">Give ADBuddy the permission to change secure settings, used to cut and restore the PC\'s adb access from the phone.</string>
     <string name="consent_battery">Exempt ADBuddy from battery optimisation, so the channel with the PC stays open.</string>
     <string name="consent_a11y">Turn on ADBuddy\'s accessibility service, keeping any other one you use.</string>
-    <string name="consent_note">Nothing leaves your network: the PC and the phone talk through the adb connection you just paired.</string>
+    <string name="consent_note">ADBuddy itself sends nothing outside: the PC and the phone talk through the adb connection you paired. What the coding agent reads goes wherever that agent sends it.</string>
     <string name="consent_accept">Accept</string>
     <string name="consent_decline">Not now</string>
     <string name="consent_done">Done. You can go back to the PC.</string>

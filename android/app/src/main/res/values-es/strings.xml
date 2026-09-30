@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="a11y_label">Ayudante del agente de ADBuddy</string>
-    <string name="a11y_description">Permite que el agente de código de tu PC lea la pantalla y toque por ti, siempre visible en pantalla y con un botón de Pausa. Nunca lee contraseñas ni actúa en apps protegidas.</string>
+    <string name="a11y_description">El host de ADBuddy en tu PC la activa durante la configuración, para funciones que llegarán más adelante. Por ahora no lee la pantalla ni actúa en ella.</string>
 
     <string name="channel_status">Conexión con el PC</string>
     <string name="channel_confirm">Confirmaciones</string>
@@ -22,14 +22,14 @@
 
     <string name="confirm_title">El agente quiere: %1$s</string>
     <string name="confirm_special">Puede cortar la conexión con el PC o afectar a ADBuddy.</string>
-    <string name="confirm_expires">Caduca a las %1$s</string>
+    <string name="confirm_expires">Caduca: %1$s</string>
 
     <string name="consent_title">Configurar ADBuddy con %1$s</string>
     <string name="consent_intro">El PC "%1$s" pide terminar de configurar ADBuddy. Si aceptas, va a:</string>
-    <string name="consent_grant">Dar a ADBuddy el permiso para cambiar ajustes seguros, que solo usa "Cortar acceso" para apagar la depuración desde el móvil.</string>
+    <string name="consent_grant">Dar a ADBuddy el permiso para cambiar ajustes seguros, que usa para cortar y reactivar desde el móvil el acceso del PC por adb.</string>
     <string name="consent_battery">Quitar a ADBuddy de la optimización de batería, para que el canal con el PC siga abierto.</string>
     <string name="consent_a11y">Activar el servicio de accesibilidad de ADBuddy, sin quitar ninguno de los que ya uses.</string>
-    <string name="consent_note">Nada sale de tu red: el PC y el móvil hablan por la conexión adb que acabas de emparejar.</string>
+    <string name="consent_note">ADBuddy no envía nada fuera: el PC y el móvil hablan por la conexión adb que emparejaste. Lo que lee el agente de código va adonde ese agente lo envíe.</string>
     <string name="consent_accept">Aceptar</string>
     <string name="consent_decline">Ahora no</string>
     <string name="consent_done">Listo. Puedes volver al PC.</string>

@@ -32,4 +32,15 @@ class ProtocolTest {
         val reply = Protocol.encode(Protocol.CONFIRM_REPLY, ConfirmReply("j_1", Decision.ALLOW_SESSION), "x")
         assertTrue(reply, reply.contains(""""decision":"allow_session""""))
     }
+    @Test fun helloCarriesTheProtocol() {
+        val hello = Protocol.encode(Protocol.HELLO, Hello(token = "t", lastSeq = 0, appVersion = "0.2.0"), "x")
+        assertTrue(hello, hello.contains(""""protocol":1"""))
+    }
+
+    @Test fun deepNestingIsRefused() {
+        val deep = "[".repeat(100_000) + "]".repeat(100_000)
+        val m = Protocol.decode("""{"v":1,"type":"notice","payload":{"level":$deep,"text":"x"}}""")
+        if (m != null) assertNull(Protocol.payload<Notice>(m))
+        assertNull(Protocol.decode("""{"v":$deep,"type":"notice"}"""))
+    }
 }

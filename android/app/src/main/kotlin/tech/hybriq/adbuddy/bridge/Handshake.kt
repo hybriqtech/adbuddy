@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 /** The handshake the host writes on stdin (`content write …/handshake`, spec §5.2). */
 @Serializable
-data class Handshake(val token: String, val port: Int, val host: String = "", val nonce: String = "")
+data class Handshake(val token: String, val port: Int, val host: String = "", val nonce: String)
 
 object HandshakeParser {
     private const val MAX_BYTES = 4096
@@ -33,8 +33,8 @@ object HandshakeParser {
             return null
         }
         if (!TOKEN.matches(h.token) || h.port !in 1024..65535 || !NONCE.matches(h.nonce)) return null
-        val host = if (HOST.matches(h.host)) h.host else "PC"
-        return h.copy(host = host)
+        val name = h.host.trim()
+        return h.copy(host = if (HOST.matches(name)) name else "PC")
     }
 }
 
