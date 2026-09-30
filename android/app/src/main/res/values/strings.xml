@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">ADBuddy</string>
+    <string name="a11y_label">ADBuddy agent helper</string>
+    <string name="a11y_description">Lets the coding agent on your PC read the screen and tap for you, always shown on screen and with a Pause button. It never reads passwords and never runs in protected apps.</string>
+
+    <string name="channel_status">Connection with the PC</string>
+    <string name="channel_confirm">Confirmations</string>
+    <string name="status_connected">Connected to %1$s</string>
+    <string name="status_connecting">Connecting to the PC…</string>
+    <string name="status_waiting">Waiting for the PC (run adbuddy serve)</string>
+    <string name="status_paused">Paused: the agent cannot use the phone</string>
+    <string name="status_update_app">This app is too old for the ADBuddy on your PC: run adbuddy setup on the PC to update it</string>
+    <string name="status_update_host">The ADBuddy on your PC is too old for this app: update it on the PC</string>
+
+    <string name="action_allow">Allow</string>
+    <string name="action_deny">Deny</string>
+    <string name="action_allow_session">Allow during the session</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_resume">Resume</string>
+    <string name="action_cut">Cut access</string>
+    <string name="action_restore">Restore access</string>
+
+    <string name="confirm_title">The agent wants to: %1$s</string>
+    <string name="confirm_special">This may cut the connection with the PC or affect ADBuddy.</string>
+    <string name="confirm_expires">Expires at %1$s</string>
+
+    <string name="consent_title">Set up ADBuddy with %1$s</string>
+    <string name="consent_intro">The PC "%1$s" asks to finish setting up ADBuddy. If you accept, it will:</string>
+    <string name="consent_grant">Give ADBuddy the permission to change secure settings, used only by "Cut access" to turn off debugging from the phone.</string>
+    <string name="consent_battery">Exempt ADBuddy from battery optimisation, so the channel with the PC stays open.</string>
+    <string name="consent_a11y">Turn on ADBuddy\'s accessibility service, keeping any other one you use.</string>
+    <string name="consent_note">Nothing leaves your network: the PC and the phone talk through the adb connection you just paired.</string>
+    <string name="consent_accept">Accept</string>
+    <string name="consent_decline">Not now</string>
+    <string name="consent_done">Done. You can go back to the PC.</string>
+
+    <string name="home_title" translatable="false">ADBuddy</string>
+    <string name="home_activity">Activity</string>
+    <string name="home_empty">Nothing yet. Every adb command of the agent will appear here.</string>
+    <string name="cut_done">Debugging is off: the PC cannot reach the phone.</string>
+    <string name="cut_restored">Debugging is back on. If remote mode was on, its network port stays open until the PC connects or the phone restarts.</string>
+    <string name="cut_failed">ADBuddy lacks the permission: run adbuddy setup on the PC.</string>
+    <string name="filter_all">All</string>
+</resources>

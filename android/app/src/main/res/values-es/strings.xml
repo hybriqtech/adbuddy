@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_label">Ayudante del agente de ADBuddy</string>
+    <string name="a11y_description">Permite que el agente de código de tu PC lea la pantalla y toque por ti, siempre visible en pantalla y con un botón de Pausa. Nunca lee contraseñas ni actúa en apps protegidas.</string>
+
+    <string name="channel_status">Conexión con el PC</string>
+    <string name="channel_confirm">Confirmaciones</string>
+    <string name="status_connected">Conectado a %1$s</string>
+    <string name="status_connecting">Conectando con el PC…</string>
+    <string name="status_waiting">Esperando al PC (ejecuta adbuddy serve)</string>
+    <string name="status_paused">En pausa: el agente no puede usar el móvil</string>
+    <string name="status_update_app">Esta app es demasiado antigua para el ADBuddy de tu PC: ejecuta adbuddy setup en el PC para actualizarla</string>
+    <string name="status_update_host">El ADBuddy de tu PC es demasiado antiguo para esta app: actualízalo en el PC</string>
+
+    <string name="action_allow">Permitir</string>
+    <string name="action_deny">Rechazar</string>
+    <string name="action_allow_session">Permitir durante la sesión</string>
+    <string name="action_pause">Pausar</string>
+    <string name="action_resume">Reanudar</string>
+    <string name="action_cut">Cortar acceso</string>
+    <string name="action_restore">Reactivar acceso</string>
+
+    <string name="confirm_title">El agente quiere: %1$s</string>
+    <string name="confirm_special">Puede cortar la conexión con el PC o afectar a ADBuddy.</string>
+    <string name="confirm_expires">Caduca a las %1$s</string>
+
+    <string name="consent_title">Configurar ADBuddy con %1$s</string>
+    <string name="consent_intro">El PC "%1$s" pide terminar de configurar ADBuddy. Si aceptas, va a:</string>
+    <string name="consent_grant">Dar a ADBuddy el permiso para cambiar ajustes seguros, que solo usa "Cortar acceso" para apagar la depuración desde el móvil.</string>
+    <string name="consent_battery">Quitar a ADBuddy de la optimización de batería, para que el canal con el PC siga abierto.</string>
+    <string name="consent_a11y">Activar el servicio de accesibilidad de ADBuddy, sin quitar ninguno de los que ya uses.</string>
+    <string name="consent_note">Nada sale de tu red: el PC y el móvil hablan por la conexión adb que acabas de emparejar.</string>
+    <string name="consent_accept">Aceptar</string>
+    <string name="consent_decline">Ahora no</string>
+    <string name="consent_done">Listo. Puedes volver al PC.</string>
+
+    <string name="home_activity">Actividad</string>
+    <string name="home_empty">Nada todavía. Aquí aparecerá cada comando adb del agente.</string>
+    <string name="cut_done">La depuración está apagada: el PC no puede llegar al móvil.</string>
+    <string name="cut_restored">La depuración vuelve a estar activa. Si el modo remoto estaba activo, su puerto de red sigue abierto hasta que el PC se conecte o reinicies el móvil.</string>
+    <string name="cut_failed">ADBuddy no tiene el permiso: ejecuta adbuddy setup en el PC.</string>
+    <string name="filter_all">Todo</string>
+</resources>
