@@ -1,7 +1,8 @@
 package tech.hybriq.adbuddy.bridge
 
 import android.content.Context
-import androidx.core.content.edit
+import android.content.SharedPreferences
+import android.util.Log
 
 /**
  * What the host handed over (token, port, name) and the setup consent. Kept in
@@ -13,7 +14,10 @@ class BridgePrefs(context: Context) {
     private val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
 
     /** nonce: what the host sent with this token; ping returns it so the host knows the app took it. */
-    data class Link(val token: String, val port: Int, val host: String, val nonce: String = "")
+    data class Link(val token: String, val port: Int, val host: String, val nonce: String = "") {
+        // Keeps the token and the nonce out of logs and crash reports.
+        override fun toString() = "Link(token=<redacted>, port=$port, host=$host, nonce=<redacted>)"
+    }
 
     var link: Link?
         get() {
@@ -22,7 +26,7 @@ class BridgePrefs(context: Context) {
             if (port !in 1024..65535) return null
             return Link(token, port, prefs.getString("host", "") ?: "", prefs.getString("nonce", "") ?: "")
         }
-        set(value) = prefs.edit(commit = true) {
+        set(value) = save("link") {
             if (value == null) {
                 remove("token"); remove("port"); remove("host"); remove("nonce")
             } else {
@@ -34,9 +38,20 @@ class BridgePrefs(context: Context) {
     /** pending (asked, no answer yet), granted, denied, or "" (never asked). */
     var consent: String
         get() = prefs.getString("consent", "") ?: ""
-        set(value) = prefs.edit(commit = true) { putString("consent", value) }
+        set(value) = save("consent") { putString("consent", value) }
 
     var consentHost: String
         get() = prefs.getString("consentHost", "") ?: ""
-        set(value) = prefs.edit(commit = true) { putString("consentHost", value) }
+        set(value) = save("consentHost") { putString("consentHost", value) }
+
+    /** Writes at once (commit); a failure is logged by name only, never with the values. */
+    private fun save(what: String, change: SharedPreferences.Editor.() -> Unit) {
+        val editor = prefs.edit()
+        editor.change()
+        if (!editor.commit()) Log.w(TAG, "could not save $what")
+    }
+
+    private companion object {
+        const val TAG = "BridgePrefs"
+    }
 }

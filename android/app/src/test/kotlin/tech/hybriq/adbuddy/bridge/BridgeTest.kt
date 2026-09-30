@@ -1,5 +1,7 @@
 package tech.hybriq.adbuddy.bridge
 
+import java.net.Proxy
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
@@ -13,6 +15,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -22,16 +25,44 @@ import org.junit.Test
 class BridgeTest {
     private val server = MockWebServer()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val fromApp = LinkedBlockingQueue<String>()
-    private var hostSide: WebSocket? = null
     private val token = "0123456789abcdef".repeat(4)
+    private val tokenB = "fedcba9876543210".repeat(4)
+
+    /** Short waits so the tests run fast; production uses Timing(). */
+    private val fast = Timing(first = 100, reconnect = 100, max = 5_000)
+
+    /** The host's side of each connection, in the order the app opens them. */
+    private val hosts = List(4) { Host() }
+
+    /** One connection as the host sees it. */
+    private class Host : WebSocketListener() {
+        val opened = CountDownLatch(1)
+        val gone = CountDownLatch(1)
+        val received = LinkedBlockingQueue<String>()
+        @Volatile var ws: WebSocket? = null
+
+        override fun onOpen(webSocket: WebSocket, response: Response) { ws = webSocket; opened.countDown() }
+        override fun onMessage(webSocket: WebSocket, text: String) { received.add(text) }
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { gone.countDown() }
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { gone.countDown() }
+
+        /** The next message from the app. */
+        fun next(): Message {
+            val text = received.poll(5, TimeUnit.SECONDS) ?: throw AssertionError("nothing from the app")
+            return Protocol.decode(text)!!
+        }
+
+        fun send(text: String) = assertTrue("host send", ws!!.send(text))
+
+        fun welcome(session: String = "s_1", protocol: Int = 1) =
+            send("""{"v":1,"type":"welcome","ts":"x","payload":{"session":"$session","fromSeq":1,"protocol":$protocol}}""")
+
+        fun isGone(): Boolean = gone.await(5, TimeUnit.SECONDS)
+    }
 
     @Before fun setUp() {
-        server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) { hostSide = webSocket }
-            override fun onMessage(webSocket: WebSocket, text: String) { fromApp.add(text) }
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
-        }).build())
+        for (h in hosts) server.enqueue(MockResponse.Builder().webSocketUpgrade(h).build())
         server.start()
     }
 
@@ -40,42 +71,219 @@ class BridgeTest {
         server.close()
     }
 
+    private fun link(t: String = token) = BridgePrefs.Link(t, server.port, "PC")
+
+    private fun waitFor(what: String, cond: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 5000
+        while (!cond() && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertTrue(what, cond())
+    }
+
+    /** Reads the hello on h, welcomes the app and waits until it is connected. */
+    private fun connect(bridge: Bridge, h: Host): Hello {
+        val hello = h.next()
+        assertEquals(Protocol.HELLO, hello.type)
+        h.welcome()
+        waitFor("connected") { bridge.state.value.connection == BridgeState.Connection.CONNECTED }
+        return Protocol.payload<Hello>(hello)!!
+    }
+
     @Test fun helloQuestionAndReply() {
         val bridge = Bridge(scope, "0.2.0") { _, _ -> }
-        bridge.start(BridgePrefs.Link(token, server.port, "PC"))
+        bridge.start(link())
 
-        val hello = Protocol.decode(fromApp.poll(5, TimeUnit.SECONDS)!!)!!
+        val hello = hosts[0].next()
         assertEquals(Protocol.HELLO, hello.type)
         assertEquals(token, Protocol.payload<Hello>(hello)!!.token)
         assertEquals(Protocol.VERSION, Protocol.payload<Hello>(hello)!!.protocol)
 
-        hostSide!!.send("""{"v":1,"type":"welcome","ts":"x","payload":{"session":"s_1","fromSeq":1,"protocol":1}}""")
-        hostSide!!.send("""{"v":1,"seq":1,"type":"confirm.request","ts":"x","payload":{"id":"j_1","title":"Restart","rawCommand":"adb shell reboot","expiresAt":"2026-09-30T01:04:03Z"}}""")
-        val deadline = System.currentTimeMillis() + 5000
-        while (bridge.state.value.pending.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        hosts[0].welcome()
+        hosts[0].send("""{"v":1,"seq":1,"type":"confirm.request","ts":"x","payload":{"id":"j_1","title":"Restart","rawCommand":"adb shell reboot","expiresAt":"2026-09-30T01:04:03Z"}}""")
+        waitFor("the question arrives") { bridge.state.value.pending.isNotEmpty() }
         assertEquals(1, bridge.state.value.pending.size)
 
         assertTrue(bridge.reply("j_1", Decision.DENY))
-        val reply = Protocol.decode(fromApp.poll(5, TimeUnit.SECONDS)!!)!!
+        val reply = hosts[0].next()
         assertEquals(Protocol.CONFIRM_REPLY, reply.type)
         val r = Protocol.payload<ConfirmReply>(reply)
         assertNotNull(r)
         assertEquals("deny", r!!.decision)
-        assertTrue(bridge.state.value.pending.isEmpty())
+        // Answered but not gone: it leaves with its final journal entry.
+        assertEquals(listOf("j_1"), bridge.state.value.pending.map { it.id })
+        assertEquals(setOf("j_1"), bridge.state.value.answering)
+
+        hosts[0].send("""{"v":1,"seq":2,"type":"journal.entry","ts":"x","payload":{"id":"j_1","status":"denied","level":"red"}}""")
+        waitFor("the final entry removes it") { bridge.state.value.pending.isEmpty() }
+        assertTrue(bridge.state.value.answering.isEmpty())
         bridge.stop()
     }
 
     @Test fun aHostThatSaysUpdateStopsTheRetries() {
-        val bridge = Bridge(scope, "0.1.0") { _, _ -> }
-        bridge.start(BridgePrefs.Link(token, server.port, "PC"))
-        fromApp.poll(5, TimeUnit.SECONDS)!! // hello
-        hostSide!!.close(Protocol.CLOSE_INCOMPATIBLE, "update the ADBuddy app")
-        val deadline = System.currentTimeMillis() + 5000
-        while (bridge.state.value.connection != BridgeState.Connection.INCOMPATIBLE && System.currentTimeMillis() < deadline) Thread.sleep(10)
-        assertEquals(BridgeState.Connection.INCOMPATIBLE, bridge.state.value.connection)
+        val bridge = Bridge(scope, "0.1.0", fast) { _, _ -> }
+        bridge.start(link())
+        hosts[0].next() // hello
+        hosts[0].ws!!.close(Protocol.CLOSE_INCOMPATIBLE, "update the ADBuddy app")
+        waitFor("incompatible") { bridge.state.value.connection == BridgeState.Connection.INCOMPATIBLE }
         assertEquals(BridgeState.Outdated.APP, bridge.state.value.outdated)
-        Thread.sleep(1500) // longer than the first retry
+        Thread.sleep(1000) // ten times the first wait
         assertEquals("no reconnection after an incompatible close", 1, server.requestCount)
         bridge.stop()
+    }
+
+    @Test fun anOldHostsWelcomeStopsTheRetries() {
+        val bridge = Bridge(scope, "0.2.0", fast) { _, _ -> }
+        bridge.start(link())
+        hosts[0].next() // hello
+        hosts[0].welcome(protocol = 0)
+        waitFor("incompatible") { bridge.state.value.connection == BridgeState.Connection.INCOMPATIBLE }
+        assertEquals(BridgeState.Outdated.HOST, bridge.state.value.outdated)
+        assertTrue("the app closes the old host's socket", hosts[0].isGone())
+        Thread.sleep(1000)
+        assertEquals("no reconnection to an old host", 1, server.requestCount)
+        bridge.stop()
+    }
+
+    @Test fun reconnectsWithTheSessionAndTheLastSeq() {
+        val bridge = Bridge(scope, "0.2.0", fast) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        hosts[0].send("""{"v":1,"seq":1,"type":"session.state","ts":"x","payload":{"state":"working"}}""")
+        hosts[0].send("""{"v":1,"seq":2,"type":"session.state","ts":"x","payload":{"state":"idle"}}""")
+        waitFor("seq 2 applied") { bridge.state.value.lastSeq == 2L }
+
+        hosts[0].ws!!.close(1000, "restart")
+        val hello = Protocol.payload<Hello>(hosts[1].next())!!
+        assertEquals(token, hello.token)
+        assertEquals("s_1", hello.session)
+        assertEquals(2L, hello.lastSeq)
+        assertEquals(2, server.requestCount)
+        bridge.stop()
+    }
+
+    @Test fun aNewLinkWhileWaitingConnectsAtOnceWithIt() {
+        // Waits long enough that only the new link can explain a quick second connection.
+        val bridge = Bridge(scope, "0.2.0", Timing(first = 10_000, reconnect = 10_000, max = 10_000)) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        hosts[0].ws!!.close(1000, "restart")
+        waitFor("waiting") { bridge.state.value.connection == BridgeState.Connection.WAITING }
+        assertTrue(hosts[0].isGone())
+
+        bridge.start(link(tokenB))
+        assertEquals(tokenB, Protocol.payload<Hello>(hosts[1].next())!!.token)
+        Thread.sleep(500)
+        assertEquals(2, server.requestCount)
+        bridge.stop()
+    }
+
+    @Test fun aNewLinkWhileConnectedLeavesNoOldSocket() {
+        val bridge = Bridge(scope, "0.2.0", fast) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+
+        bridge.start(link(tokenB))
+        assertTrue("the old socket is closed", hosts[0].isGone())
+        assertEquals(tokenB, Protocol.payload<Hello>(hosts[1].next())!!.token)
+        Thread.sleep(500)
+        assertEquals(2, server.requestCount)
+        assertEquals("no third socket", 1L, hosts[2].opened.count)
+        bridge.stop()
+    }
+
+    @Test fun startingTwiceWithTheSameLinkOpensOneConnection() {
+        val bridge = Bridge(scope, "0.2.0", fast) { _, _ -> }
+        bridge.start(link())
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        Thread.sleep(500)
+        assertEquals(1, server.requestCount)
+        assertEquals("the first socket is still open", 1L, hosts[0].gone.count)
+        bridge.stop()
+    }
+
+    @Test fun stopEndsTheConnectionAndTheRetries() {
+        val bridge = Bridge(scope, "0.2.0", fast) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        bridge.stop()
+        assertTrue("the socket is closed", hosts[0].isGone())
+        Thread.sleep(1000) // ten times the wait before a retry
+        assertEquals(1, server.requestCount)
+        assertEquals(BridgeState.Connection.WAITING, bridge.state.value.connection)
+        assertFalse(bridge.reply("j_1", Decision.ALLOW))
+    }
+
+    @Test fun stopWhileWaitingEndsTheRetries() {
+        val bridge = Bridge(scope, "0.2.0", Timing(first = 300, reconnect = 300, max = 300)) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        hosts[0].ws!!.close(1000, "restart")
+        waitFor("waiting") { bridge.state.value.connection == BridgeState.Connection.WAITING }
+        bridge.stop()
+        Thread.sleep(1500)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test fun aRejectedTokenWaitsTheLongestUntilANewLink() {
+        val bridge = Bridge(scope, "0.2.0", fast) { _, _ -> }
+        bridge.start(link())
+        hosts[0].next() // hello
+        hosts[0].ws!!.close(1008, "unauthorized")
+        assertTrue(hosts[0].isGone())
+        Thread.sleep(1000) // ten times the first wait, a fifth of the longest
+        assertEquals("no quick retry with a rejected token", 1, server.requestCount)
+
+        bridge.start(link(tokenB))
+        assertEquals(tokenB, Protocol.payload<Hello>(hosts[1].next())!!.token)
+        bridge.stop()
+    }
+
+    @Test fun pauseAndResume() {
+        val bridge = Bridge(scope, "0.2.0", fast) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        assertTrue(bridge.pause(true))
+        assertEquals(Protocol.PAUSE, hosts[0].next().type)
+        assertTrue(bridge.pause(false))
+        assertEquals(Protocol.RESUME, hosts[0].next().type)
+        bridge.stop()
+    }
+
+    @Test fun withoutAConnectionNothingIsSent() {
+        val bridge = Bridge(scope, "0.2.0") { _, _ -> }
+        assertFalse(bridge.reply("j_1", Decision.ALLOW))
+        assertFalse(bridge.pause(true))
+        assertTrue(bridge.state.value.answering.isEmpty())
+    }
+
+    @Test fun theClientUsesNoProxy() {
+        // A proxy would receive the hello, token included.
+        assertEquals(Proxy.NO_PROXY, Bridge(scope, "0.2.0") { _, _ -> }.client.proxy)
+    }
+
+    @Test fun theLinkHidesItsToken() {
+        val nonce = "fedcba9876543210".repeat(2)
+        val s = BridgePrefs.Link(token, 1234, "PC", nonce).toString()
+        assertFalse(s, s.contains(token))
+        assertFalse(s, s.contains(nonce))
+        assertTrue(s, s.contains("token=<redacted>"))
+        assertTrue(s, s.contains("port=1234"))
+    }
+
+    @Test fun backoffDoublesFromHalfASecondToThirty() {
+        val b = Backoff(Timing())
+        assertEquals(listOf(500L, 1_000L, 2_000L, 4_000L, 8_000L, 16_000L, 30_000L, 30_000L), List(8) { b.after(welcomed = false, rejected = false) })
+        // Back to one second after a connection, and doubling from there.
+        assertEquals(1_000L, b.after(welcomed = true, rejected = false))
+        assertEquals(2_000L, b.after(welcomed = false, rejected = false))
+    }
+
+    @Test fun backoffAfterARejectedTokenStaysAtTheLongest() {
+        val b = Backoff(Timing())
+        assertEquals(30_000L, b.after(welcomed = false, rejected = true))
+        assertEquals(30_000L, b.after(welcomed = false, rejected = false))
+        assertEquals(30_000L, b.after(welcomed = true, rejected = true))
+        // Only a welcome (the host took the token) brings the short waits back.
+        assertEquals(1_000L, b.after(welcomed = true, rejected = false))
     }
 }

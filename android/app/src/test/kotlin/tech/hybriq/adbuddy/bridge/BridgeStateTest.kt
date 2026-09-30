@@ -112,11 +112,38 @@ class BridgeStateTest {
         assertEquals(2L, s.lastSeq)
     }
 
-    @Test fun answeredRemovesOnlyThatQuestion() {
-        var s = BridgeState().apply(msg(1, Protocol.CONFIRM_REQUEST, question))
+    @Test fun anAnsweredQuestionStaysUntilItsFinalEntry() {
+        var s = BridgeState().apply(welcome("s_1")).apply(msg(1, Protocol.CONFIRM_REQUEST, question))
         s = s.apply(msg(2, Protocol.CONFIRM_REQUEST, question.replace("j_1", "j_2")))
         s = s.answered("j_1")
+        assertEquals("sending, not gone", listOf("j_1", "j_2"), s.pending.map { it.id })
+        assertEquals(setOf("j_1"), s.answering)
+        s = s.apply(msg(3, Protocol.JOURNAL_ENTRY, """{"id":"j_1","status":"running"}"""))
+        assertEquals(setOf("j_1"), s.answering)
+        s = s.apply(msg(4, Protocol.JOURNAL_ENTRY, """{"id":"j_1","status":"denied"}"""))
         assertEquals(listOf("j_2"), s.pending.map { it.id })
+        assertTrue(s.answering.isEmpty())
+    }
+
+    @Test fun aDroppedConnectionMakesTheQuestionAnswerableAgain() {
+        val s = BridgeState().apply(welcome("s_1")).apply(msg(1, Protocol.CONFIRM_REQUEST, question))
+            .answered("j_1").disconnected()
+        assertEquals(BridgeState.Connection.WAITING, s.connection)
+        assertEquals(listOf("j_1"), s.pending.map { it.id })
+        assertTrue(s.answering.isEmpty())
+    }
+
+    @Test fun answeringAnUnknownQuestionChangesNothing() {
+        val s = BridgeState().apply(msg(1, Protocol.CONFIRM_REQUEST, question))
+        assertEquals(s, s.answered("j_9"))
+    }
+
+    @Test fun answersLeaveWithTheirQuestions() {
+        val s = BridgeState(session = "s_1").apply(msg(1, Protocol.CONFIRM_REQUEST, question)).answered("j_1")
+        assertTrue("new session", s.apply(welcome("s_2")).answering.isEmpty())
+        assertTrue("snapshot without it", s.apply(msg(2, Protocol.SNAPSHOT, """{"pending":[]}""")).answering.isEmpty())
+        assertTrue("old host", s.apply(msg(0, Protocol.WELCOME, """{"session":"s_1","fromSeq":1}""")).answering.isEmpty())
+        assertTrue("old app", s.appOutdated().answering.isEmpty())
     }
 
     @Test fun aFinalEntryOfAnotherIdKeepsTheQuestion() {

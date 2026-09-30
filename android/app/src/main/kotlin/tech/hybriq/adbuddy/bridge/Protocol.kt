@@ -75,7 +75,11 @@ data class Hello(
     val appVersion: String,
     val deviceSerial: String = "",
     val protocol: Int = Protocol.VERSION,
-)
+) {
+    // Keeps the token out of logs and crash reports.
+    override fun toString() =
+        "Hello(token=<redacted>, lastSeq=$lastSeq, session=$session, appVersion=$appVersion, deviceSerial=$deviceSerial, protocol=$protocol)"
+}
 
 @Serializable
 data class Welcome(val session: String, val fromSeq: Long, val hostVersion: String = "", val protocol: Int = 0)

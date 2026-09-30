@@ -10,6 +10,8 @@ data class BridgeState(
     val pending: List<ConfirmRequest> = emptyList(),
     val journal: List<JournalEntry> = emptyList(), // newest last
     val outdated: Outdated = Outdated.NONE,
+    /** Questions answered here whose final journal entry has not come yet: the UI shows them as sending. */
+    val answering: Set<String> = emptySet(),
 ) {
     /** INCOMPATIBLE: the app or the host must be updated; the app stops reconnecting. */
     enum class Connection { WAITING, CONNECTING, CONNECTED, INCOMPATIBLE }
@@ -39,11 +41,15 @@ data class BridgeState(
             Protocol.JOURNAL_ENTRY -> {
                 val e = Protocol.payload<JournalEntry>(m) ?: return copy(lastSeq = seq)
                 // A final record of a pending question means it was answered (here, on the PC or by expiry).
-                val stillPending = if (e.status != "running") pending.filter { it.id != e.id } else pending
+                val final = e.status != "running"
+                val stillPending = if (final) pending.filter { it.id != e.id } else pending
                 // A newer record of the same command takes its place in the list.
                 val i = journal.indexOfFirst { it.id == e.id }
                 val updated = if (i >= 0) journal.toMutableList().also { it[i] = e } else journal + e
-                copy(lastSeq = seq, pending = stillPending, journal = updated.takeLast(MAX_JOURNAL))
+                copy(
+                    lastSeq = seq, pending = stillPending, journal = updated.takeLast(MAX_JOURNAL),
+                    answering = if (final) answering - e.id else answering,
+                )
             }
             else -> copy(lastSeq = seq)
         }
@@ -53,12 +59,12 @@ data class BridgeState(
         val w = Protocol.payload<Welcome>(m)
         // A welcome this app cannot read comes from a host too old (or too odd) to talk to.
         if (w == null || w.protocol < Protocol.MIN_HOST_PROTOCOL) {
-            return copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.HOST, pending = emptyList())
+            return copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.HOST, pending = emptyList(), answering = emptySet())
         }
         // A new session (the host restarted) starts over: nothing of the old one holds.
         if (w.session != session) {
             return copy(
-                session = w.session, lastSeq = 0, sessionState = SessionState(), pending = emptyList(),
+                session = w.session, lastSeq = 0, sessionState = SessionState(), pending = emptyList(), answering = emptySet(),
                 connection = Connection.CONNECTED, outdated = Outdated.NONE,
             )
         }
@@ -68,7 +74,7 @@ data class BridgeState(
     private fun snapshot(m: Message): BridgeState {
         val seq = if (m.seq > 0) m.seq else lastSeq
         // Unreadable: the old questions may be answered already, so none is kept.
-        val s = Protocol.payload<Snapshot>(m) ?: return copy(lastSeq = seq, pending = emptyList())
+        val s = Protocol.payload<Snapshot>(m) ?: return copy(lastSeq = seq, pending = emptyList(), answering = emptySet())
         val entries = s.journal.mapNotNull {
             try {
                 Protocol.json.decodeFromJsonElement(JournalEntry.serializer(), it)
@@ -78,12 +84,27 @@ data class BridgeState(
                 null
             }
         }
-        return copy(lastSeq = seq, sessionState = s.state, pending = s.pending, journal = entries.takeLast(MAX_JOURNAL))
+        val ids = s.pending.map { it.id }.toSet()
+        return copy(
+            lastSeq = seq, sessionState = s.state, pending = s.pending, journal = entries.takeLast(MAX_JOURNAL),
+            answering = answering.filter { it in ids }.toSet(),
+        )
     }
 
     /** The host closed the channel because this app is too old. */
-    fun appOutdated(): BridgeState = copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.APP, pending = emptyList())
+    fun appOutdated(): BridgeState =
+        copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.APP, pending = emptyList(), answering = emptySet())
 
-    /** Removes a question the person just answered here. */
-    fun answered(id: String): BridgeState = copy(pending = pending.filter { it.id != id })
+    /**
+     * The socket is gone. An answer sent on it may never have reached the host,
+     * so its question can be answered again (the host ignores a repeat).
+     */
+    fun disconnected(): BridgeState = copy(connection = Connection.WAITING, answering = emptySet())
+
+    /**
+     * Marks a question the person just answered here. It stays in pending until
+     * its final journal entry, so it does not vanish if the answer is lost.
+     */
+    fun answered(id: String): BridgeState =
+        if (pending.none { it.id == id }) this else copy(answering = answering + id)
 }

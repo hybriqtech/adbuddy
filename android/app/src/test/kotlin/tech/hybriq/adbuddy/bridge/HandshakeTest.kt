@@ -69,4 +69,13 @@ class HandshakeTest {
         assertTrue(text.contentEquals(got))
         assertEquals("DESKTOP-1", HandshakeParser.parse(got)!!.host)
     }
+
+    @Test fun theHandshakeHidesItsSecrets() {
+        val s = Handshake(token, 1234, "PC", nonce).toString()
+        assertFalse(s, s.contains(token))
+        assertFalse(s, s.contains(nonce))
+        assertTrue(s, s.contains("token=<redacted>"))
+        assertTrue(s, s.contains("nonce=<redacted>"))
+        assertTrue(s, s.contains("port=1234"))
+    }
 }

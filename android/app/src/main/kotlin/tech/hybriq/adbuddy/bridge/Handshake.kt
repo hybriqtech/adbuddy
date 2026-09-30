@@ -4,7 +4,10 @@ import kotlinx.serialization.Serializable
 
 /** The handshake the host writes on stdin (`content write …/handshake`, spec §5.2). */
 @Serializable
-data class Handshake(val token: String, val port: Int, val host: String = "", val nonce: String)
+data class Handshake(val token: String, val port: Int, val host: String = "", val nonce: String) {
+    // Keeps the token and the nonce out of logs and crash reports.
+    override fun toString() = "Handshake(token=<redacted>, port=$port, host=$host, nonce=<redacted>)"
+}
 
 object HandshakeParser {
     private const val MAX_BYTES = 4096

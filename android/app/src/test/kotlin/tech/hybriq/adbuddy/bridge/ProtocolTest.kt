@@ -43,4 +43,12 @@ class ProtocolTest {
         if (m != null) assertNull(Protocol.payload<Notice>(m))
         assertNull(Protocol.decode("""{"v":$deep,"type":"notice"}"""))
     }
+
+    @Test fun helloHidesItsToken() {
+        val token = "0123456789abcdef".repeat(4)
+        val s = Hello(token = token, lastSeq = 3, session = "s1", appVersion = "0.2.0").toString()
+        assertFalse(s, s.contains(token))
+        assertTrue(s, s.contains("token=<redacted>"))
+        assertTrue(s, s.contains("lastSeq=3"))
+    }
 }
