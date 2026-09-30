@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Objetivo:** que el móvil vea y controle lo que hace el agente (spec §13, M2). El host instala la app con `adb install` y pide el consentimiento en ella. Después concede `WRITE_SECURE_SETTINGS`, activa la accesibilidad sin quitar otros servicios y abre un canal WebSocket por `adb reverse` autenticado con un token. Por ese canal llegan al móvil el diario en directo y las confirmaciones 🔴 (notificación con desbloqueo obligatorio). Desde el móvil se puede Pausar el agente o Cortar el acceso.
+**Objetivo:** que el móvil vea y controle lo que hace el agente (spec §13, M2). El host instala la app con `adb install` y pide el consentimiento en ella. Después concede `WRITE_SECURE_SETTINGS`, activa la accesibilidad sin quitar otros servicios y abre un canal WebSocket por `adb reverse` autenticado con un token. Por ese canal llegan al móvil el diario en directo y las confirmaciones 🔴 (notificación con desbloqueo obligatorio). Desde el móvil se puede Pausar el agente o Cortar el acceso. Además, `adbuddy doctor` diagnostica todo el conjunto y dice cómo arreglar cada problema, y la app y el host comprueban que sus versiones son compatibles. Las dos ideas vienen de revisar ARTEMIS de Google, igual que las reglas nuevas de `AGENTS.md`.
 
-**Arquitectura:** sobre M1b (rama `m1b`, HEAD c9a17b9).
+**Arquitectura:** sobre M1c (rama `m1c`, conexión manual por IP:puerto; HEAD eea4ec4).
 - **Host.** Dos paquetes nuevos:
   - `bridge`: el servidor WS en `127.0.0.1:<chat_port>`, el protocolo v1 de §5.3, el búfer de 2000 eventos, la reanudación con `lastSeq` o `snapshot`, y un `Confirmer` que pregunta al móvil y, si la app no está conectada, a la terminal.
   - `phoneapp`: instalar, consentimiento, permisos, túnel y entrega del token.
@@ -45,14 +45,14 @@
 - §10 (tests).
 
 **Verificación del plan:**
-- **Host (tareas 1-6):** se compiló y se probó en Windows 11 con Go 1.27.0 sobre el resultado de M1b antes de escribir el plan. Incluye un extremo a extremo con el binario real y una app simulada por WebSocket: confirmar 🔴 desde el "móvil", pausar y reanudar, y el token nunca en una línea de comandos.
-- **App (tareas 7-10): NO se ha compilado.** Esa noche no se podía usar Gradle, porque su caché queda fuera del repositorio. El código se escribió con cuidado contra las APIs documentadas, pero la primera compilación puede pedir ajustes pequeños (imports, firmas). Arréglalos sin cambiar el comportamiento, y anótalos en el informe de la tarea.
+- **Host (tareas 1-7):** se compiló y se probó en Windows 11 con Go 1.27.0 sobre el resultado de M1c antes de escribir el plan. Incluye un extremo a extremo con el binario real y una app simulada por WebSocket: confirmar 🔴 desde el "móvil", pausar y reanudar, y el token nunca en una línea de comandos.
+- **App (tareas 8-11): NO se ha compilado.** Esa noche no se podía usar Gradle, porque su caché queda fuera del repositorio. El código se escribió con cuidado contra las APIs documentadas, pero la primera compilación puede pedir ajustes pequeños (imports, firmas). Arréglalos sin cambiar el comportamiento, y anótalos en el informe de la tarea.
 - **Si un paso no sale como dice el plan,** detente y explícalo.
 
 ## Restricciones globales
 
 - **Todas las de M1a y M1b siguen vigentes:** módulo `host/`, Go 1.27, CLI con sobre JSON y códigos 0/1/2/75/78/130, LF, TDD, commits con `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`, identidad local hybriqtech, sin push y sin subagentes.
-- **Rama `m2`**, creada desde `m1b`.
+- **Rama `m2`**, creada desde `m1c`.
 - **Dependencias nuevas con versión exacta:**
   - en el host, solo `github.com/coder/websocket` v1.8.15;
   - en la app, solo las de `android/gradle/libs.versions.toml`.
@@ -71,6 +71,7 @@ host/internal/bridge/          # servidor WS del canal, protocolo v1, reanudaci�
 host/internal/phoneapp/        # instalar, consentimiento, permisos, túnel y token (comandos del propio host)
 host/internal/cli/phone.go     # serve ↔ app: puerto, token, túnel vigilado, pausa, diario al móvil
 host/internal/cli/appsetup.go  # setup, pasos 5-6 de §3.1
+host/internal/cli/doctor.go    # adbuddy doctor: diagnóstico con Run:/Guidance:
 android/                       # la app (Kotlin + Compose), sin Gradle wrapper
 .github/workflows/android.yml  # tests unitarios y lint de la app
 ```
@@ -79,7 +80,7 @@ android/                       # la app (Kotlin + Compose), sin Gradle wrapper
 
 ### Tarea 1: Canal WebSocket del host (`bridge`)
 
-§5.2-5.3: servidor WS en `127.0.0.1:<puerto>/v1`. El primer mensaje de la app debe ser `hello` con el token (comparado en tiempo constante) en menos de 5 s; si no, se cierra con *policy violation*. Una conexión nueva sustituye a la anterior. Cada evento lleva `seq`; se guardan los últimos 2000 y, al reconectar, se reenvían los posteriores a `lastSeq`, o un `snapshot` si faltan o si el host se reinició. `Confirmer` implementa `confirm.Confirmer`: publica `confirm.request`, espera `confirm.reply` y, si no hay app conectada al preguntar, usa el de reserva (terminal o denegar). "Permitir durante la sesión" solo cubre la misma `Key` (regla + argumentos exactos) y nunca un comando especial. `confirm.Request` gana el campo `Key`.
+§5.2-5.3: servidor WS en `127.0.0.1:<puerto>/v1`. El primer mensaje de la app debe ser `hello` con el token (comparado en tiempo constante) en menos de 5 s; si no, se cierra con *policy violation*. Una conexión nueva sustituye a la anterior. Cada evento lleva `seq`; se guardan los últimos 2000 y, al reconectar, se reenvían los posteriores a `lastSeq`, o un `snapshot` si faltan o si el host se reinició. `Confirmer` implementa `confirm.Confirmer`: publica `confirm.request`, espera `confirm.reply` y, si no hay app conectada al preguntar, usa el de reserva (terminal o denegar). "Permitir durante la sesión" solo cubre la misma `Key` (regla + argumentos exactos) y nunca un comando especial. `confirm.Request` gana el campo `Key`. **Compatibilidad de versiones:** el `hello` lleva `protocol` y el `welcome` también. Una app con un protocolo menor que `MinAppProtocol` se cierra con el código `CloseIncompatible` (4001) y `OnReject` avisa en la terminal. La comprobación va siempre después del token: sin token nadie aprende nada del host.
 
 **Ficheros:**
 - Crear: `host/internal/bridge/protocol.go`
@@ -90,7 +91,7 @@ android/                       # la app (Kotlin + Compose), sin Gradle wrapper
 
 **Interfaces:**
 - Consume: `confirm.Confirmer`, `confirm.Request`, `confirm.Decision` (M1a).
-- Produce (paquete `bridge`): `ProtocolVersion`, `BufferSize`; `Message{V, Seq, Type, TS, Payload}`; constantes `Type*`; `Hello`, `Welcome`, `SessionState{Agent, State, Activity, Paused}`, `ConfirmRequest{ID, Level, Title, Detail, RawCommand, ExpiresAt, Special, AllowSession}`, `ConfirmReply{ID, Decision}`, `Snapshot{State, Pending, Journal}`, `Notice{Level, Text}`; `NewToken() (string, error)`; `Options{Token, Session, HostVersion, OnMessage, Snapshot, OnConnect, Now}`; `New(Options) *Server`; `Listen(port) (net.Listener, error)`; `(*Server) Serve(ctx, l) error`, `Connected() bool`, `Publish(typ, payload) error`; `Publisher` (interfaz); `NewConfirmer(app Publisher, fallback confirm.Confirmer) *Confirmer` con `Confirm`, `Reply(json.RawMessage)`, `Pending()`.
+- Produce (paquete `bridge`): `ProtocolVersion`, `BufferSize`, `MinAppProtocol`, `CloseIncompatible`; `Message{V, Seq, Type, TS, Payload}`; constantes `Type*`; `Hello`, `Welcome`, `SessionState{Agent, State, Activity, Paused}`, `ConfirmRequest{ID, Level, Title, Detail, RawCommand, ExpiresAt, Special, AllowSession}`, `ConfirmReply{ID, Decision}`, `Snapshot{State, Pending, Journal}`, `Notice{Level, Text}`; `NewToken() (string, error)`; `Options{Token, Session, HostVersion, OnMessage, Snapshot, OnConnect, OnReject, Now}`; `Hello.Protocol`, `Welcome.Protocol`; `New(Options) *Server`; `Listen(port) (net.Listener, error)`; `(*Server) Serve(ctx, l) error`, `Connected() bool`, `Publish(typ, payload) error`; `Publisher` (interfaz); `NewConfirmer(app Publisher, fallback confirm.Confirmer) *Confirmer` con `Confirm`, `Reply(json.RawMessage)`, `Pending()`.
 - Produce (paquete `confirm`): `Request.Key string`.
 
 - [ ] **Paso 1: Escribir los tests que fallan**
@@ -153,7 +154,7 @@ func (h *harness) dial(tok string, lastSeq uint64) *websocket.Conn {
 		h.t.Fatal(err)
 	}
 	h.t.Cleanup(func() { c.CloseNow() })
-	send(h.t, c, TypeHello, Hello{Token: tok, LastSeq: lastSeq, AppVersion: "test"})
+	send(h.t, c, TypeHello, Hello{Protocol: ProtocolVersion, Token: tok, LastSeq: lastSeq, AppVersion: "test"})
 	return c
 }
 
@@ -246,7 +247,7 @@ func TestWelcomeEventsAndResume(t *testing.T) {
 	w := recv(t, c)
 	var wel Welcome
 	json.Unmarshal(w.Payload, &wel)
-	if w.Type != TypeWelcome || wel.Session != "s_TEST" || wel.FromSeq != 1 || wel.HostVersion != "1.2.3" {
+	if w.Type != TypeWelcome || wel.Protocol != ProtocolVersion || wel.Session != "s_TEST" || wel.FromSeq != 1 || wel.HostVersion != "1.2.3" {
 		t.Fatalf("welcome %+v %+v", w, wel)
 	}
 	if m := recv(t, c); m.Type != TypeNotice || m.Seq != 1 {
@@ -431,6 +432,45 @@ func TestConfirmCancelAndLateReply(t *testing.T) {
 		t.Fatal("pending not cleaned")
 	}
 }
+
+func TestAnOldAppIsToldToUpdate(t *testing.T) {
+	rejected := make(chan Hello, 1)
+	h := start(t, Options{OnReject: func(hl Hello) { rejected <- hl }})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, h.url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	send(t, c, TypeHello, Hello{Token: token, AppVersion: "0.1.0"}) // no protocol: an app older than the field
+	_, _, err = c.Read(ctx)
+	if websocket.CloseStatus(err) != websocket.StatusCode(CloseIncompatible) {
+		t.Fatalf("%v, want close %d", err, CloseIncompatible)
+	}
+	select {
+	case hl := <-rejected:
+		if hl.AppVersion != "0.1.0" {
+			t.Fatalf("%+v", hl)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("OnReject not called")
+	}
+	if h.srv.Connected() {
+		t.Fatal("an incompatible app counts as connected")
+	}
+}
+
+func TestAnOldAppWithoutTheTokenLearnsNothing(t *testing.T) {
+	h := start(t, Options{})
+	c := h.dial("wrong", 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err := c.Read(ctx)
+	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("%v: a wrong token must be rejected before the version check", err)
+	}
+}
 ```
 
 - [ ] **Paso 2: Ejecutarlos y ver que fallan**
@@ -468,6 +508,14 @@ const ProtocolVersion = 1
 // BufferSize is how many events the host keeps to resend after a reconnection.
 const BufferSize = 2000
 
+// MinAppProtocol is the oldest app protocol this host talks to. An older app
+// is closed with CloseIncompatible, so it can tell the person to update it
+// instead of misreading messages.
+const MinAppProtocol = 1
+
+// CloseIncompatible is the WebSocket close code for an app that is too old.
+const CloseIncompatible = 4001
+
 // Message is the envelope of every message in both directions.
 type Message struct {
 	V       int             `json:"v"`
@@ -502,6 +550,7 @@ const (
 
 // Hello is the first message of the app.
 type Hello struct {
+	Protocol     int    `json:"protocol"` // the app's protocol version (ProtocolVersion when both match)
 	Token        string `json:"token"`
 	LastSeq      uint64 `json:"lastSeq"`
 	AppVersion   string `json:"appVersion"`
@@ -510,6 +559,7 @@ type Hello struct {
 
 // Welcome answers a valid hello. FromSeq is the first event that follows.
 type Welcome struct {
+	Protocol    int    `json:"protocol"` // the host's protocol version; the app checks its own minimum
 	Session     string `json:"session"`
 	FromSeq     uint64 `json:"fromSeq"`
 	HostVersion string `json:"hostVersion"`
@@ -604,7 +654,9 @@ type Options struct {
 	Snapshot func() Snapshot
 	// OnConnect is called with true when an app authenticates and false when it leaves.
 	OnConnect func(bool)
-	Now       func() time.Time
+	// OnReject is called when an authenticated app is too old to talk to.
+	OnReject func(Hello)
+	Now      func() time.Time
 }
 
 // Server is the WebSocket server of the app channel. It serves one app at a
@@ -633,6 +685,9 @@ func New(o Options) *Server {
 	}
 	if o.OnConnect == nil {
 		o.OnConnect = func(bool) {}
+	}
+	if o.OnReject == nil {
+		o.OnReject = func(Hello) {}
 	}
 	if o.Snapshot == nil {
 		o.Snapshot = func() Snapshot { return Snapshot{Pending: []ConfirmRequest{}, Journal: []json.RawMessage{}} }
@@ -722,13 +777,20 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if hello.Protocol < MinAppProtocol {
+		// Only after the token: nobody learns anything about the host without it.
+		c.Close(websocket.StatusCode(CloseIncompatible), "update the ADBuddy app")
+		s.o.OnReject(hello)
+		return
+	}
+
 	cl := &client{send: make(chan Message, sendQueue), cancel: cancel}
 	backlog, first := s.attach(cl, hello.LastSeq)
 	defer s.detach(cl)
 	s.o.OnConnect(true)
 	defer s.o.OnConnect(false)
 
-	welcome, _ := json.Marshal(Welcome{Session: s.o.Session, FromSeq: first, HostVersion: s.o.HostVersion})
+	welcome, _ := json.Marshal(Welcome{Protocol: ProtocolVersion, Session: s.o.Session, FromSeq: first, HostVersion: s.o.HostVersion})
 	if err := write(ctx, c, Message{V: ProtocolVersion, Type: TypeWelcome, TS: s.o.Now().UTC(), Payload: welcome}); err != nil {
 		return
 	}
@@ -2196,7 +2258,7 @@ func TestPhoneAppConfirmsAndPauses(t *testing.T) {
 	}
 	defer c.CloseNow()
 	p := &phone{t: t, c: c}
-	p.send(bridge.TypeHello, bridge.Hello{Token: token, AppVersion: "0.2.0"})
+	p.send(bridge.TypeHello, bridge.Hello{Protocol: bridge.ProtocolVersion, Token: token, AppVersion: "0.2.0"})
 	p.until(bridge.TypeWelcome)
 	waitFor(t, func() bool { return strings.Contains(h.serveErr.String(), "phone app is connected") }, h.serveErr)
 
@@ -2351,6 +2413,9 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 		Token: token, Session: session, HostVersion: Version,
 		OnMessage: l.onMessage,
 		Snapshot:  l.snapshot,
+		OnReject: func(h bridge.Hello) {
+			fmt.Fprintf(app.Stderr, "⚠ The ADBuddy app on the phone (%s) is too old for this host: run `adbuddy setup` to update it.\n", classify.Printable(h.AppVersion))
+		},
 		OnConnect: func(on bool) {
 			if on {
 				fmt.Fprintln(app.Stderr, "📱 The phone app is connected: 🔴 confirmations go to the phone.")
@@ -2955,14 +3020,14 @@ Después:
 Antes:
 
 ```go
-	var adbFlag, agentFlag, wsFlag string
+	var adbFlag, agentFlag, wsFlag, connectFlag string
 	var useCode, yes bool
 ```
 
 Después:
 
 ```go
-	var adbFlag, agentFlag, wsFlag, apkFlag string
+	var adbFlag, agentFlag, wsFlag, connectFlag, apkFlag string
 	var useCode, yes, noApp bool
 ```
 
@@ -2991,13 +3056,13 @@ Después:
 Antes:
 
 ```go
-				res := setupResult{Device: prof, Serial: saved, Active: serial, Workspace: ws, Agent: chosen, ADB: adbPath}
+				res := setupResult{Device: prof, Serial: saved, Active: serial, Address: cfg.Address, Workspace: ws, Agent: chosen, ADB: adbPath}
 ```
 
 Después:
 
 ```go
-				res := setupResult{Device: prof, Serial: saved, Active: serial, Workspace: ws, Agent: chosen, ADB: adbPath, App: appRes}
+				res := setupResult{Device: prof, Serial: saved, Active: serial, Address: cfg.Address, Workspace: ws, Agent: chosen, ADB: adbPath, App: appRes}
 ```
 
 `host/internal/cli/setup.go`. Cambio:
@@ -3064,9 +3129,716 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-### Tarea 7: Proyecto Android y protocolo de la app
+### Tarea 7: `adbuddy doctor`: diagnóstico con arreglos guiados
 
-Esqueleto de `android/`: Gradle con catálogo de versiones, AGP 9 con Kotlin integrado (sin `org.jetbrains.kotlin.android`), minSdk 30, targetSdk/compileSdk 37 y sin Gradle wrapper. Incluye el manifiesto completo de M2, los textos en inglés y español, y una configuración de red que solo permite texto plano a `127.0.0.1`. Añade el protocolo (espejo de `host/internal/bridge`), `BridgeState` (el estado que se reconstruye a partir de los mensajes: una pregunta desaparece cuando llega la entrada final del diario con su id) y la validación del handshake. Todo esto es lógica pura con tests JVM.
+Idea tomada de ARTEMIS (`mobile_diagnose`). `adbuddy doctor` repasa en orden de dependencias todo lo que ADBuddy necesita:
+1. configuración;
+2. el adb propio (versión 37 o posterior);
+3. el servidor adb privado;
+4. `serve`;
+5. el móvil (conectado, que sea el de la configuración, sin puerto de red abierto);
+6. la app (instalada, con permiso de Cortar acceso, accesibilidad, excepción de batería y canal abierto);
+7. el entorno del agente (AGENTS.md, shim y diario escribible).
+
+Cada problema trae una línea `Run:` (un comando seguro que puede ejecutar la persona o el agente) o una línea `Guidance:` (algo que solo puede hacer la persona). Al final da un veredicto: ready, degraded o broken, con salida 1 si es broken.
+
+Solo lee: no conecta, no concede permisos y no cambia nada en el móvil. `--fix` solo reinicia el servidor adb privado cuando es eso lo que falla y `serve` no está en marcha, y se niega en la sesión del agente. `AGENTS.md` enseña al agente a usarlo, e incluye dos reglas nuevas: acotar siempre los comandos que no terminan solos (`logcat -d`, `top -n 1`…) y no pedir nunca credenciales en el chat.
+
+**Ficheros:**
+- Crear: `host/internal/cli/doctor.go`
+- Modificar: `host/internal/cli/root.go`
+- Modificar: `host/internal/workspace/templates/AGENTS.md`
+- Test: `host/internal/cli/doctor_test.go`
+
+**Interfaces:**
+- Consume: `configuredADB`, `serveWorkspace`, `unverifiedWhy` (M1c); `pairing.GuidOf`/`IsGuidSerial`/`GuidSerialNo`/`VerifyIdentity`; `device.TCPPort`; `phoneapp` (4); `journal.Store.Writable`.
+- Produce: `adbuddy doctor [--json] [--fix]`, con JSON `{verdict, fixed?, checks: [{name, status: ok|warn|fail|skip, detail, run?, guidance?}]}`; las reglas 13 y 14 y la línea de `adbuddy doctor` en `templates/AGENTS.md`.
+
+- [ ] **Paso 1: Escribir los tests que fallan**
+
+`host/internal/cli/doctor_test.go`:
+
+```go
+package cli
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/testutil"
+	"github.com/hybriqtech/adbuddy/host/internal/workspace"
+)
+
+const doctorSerial = "adb-AAAA1111-bbb._adb-tls-connect._tcp"
+
+// doctorRules answer like a healthy phone with the app set up; extra rules go first.
+func doctorRules(extra ...testutil.FakeRule) []testutil.FakeRule {
+	return append(extra,
+		testutil.FakeRule{Match: `^version$`, Stdout: "Android Debug Bridge version 1.0.41\nVersion 37.0.1-15733141\n"},
+		testutil.FakeRule{Match: `^devices$`, Stdout: "List of devices attached\n" + doctorSerial + "\tdevice\n"},
+		testutil.FakeRule{Match: `^shell getprop ro\.serialno$`, Stdout: "AAAA1111\n"},
+		testutil.FakeRule{Match: `^shell getprop service\.adb\.tcp\.port$`, Stdout: "\n"},
+		testutil.FakeRule{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n    versionName=0.2.0\n      android.permission.WRITE_SECURE_SETTINGS: granted=true\n"},
+		testutil.FakeRule{Match: `^shell settings get secure enabled_accessibility_services$`, Stdout: "tech.hybriq.adbuddy/tech.hybriq.adbuddy.a11y.AgentAccessibilityService\n"},
+		testutil.FakeRule{Match: `^shell dumpsys deviceidle whitelist$`, Stdout: "user,tech.hybriq.adbuddy,10123\n"},
+		testutil.FakeRule{Match: `^(kill-server|start-server)$`},
+	)
+}
+
+// doctorEnv writes a config for a set-up phone and creates its environment.
+func doctorEnv(t *testing.T, rules []testutil.FakeRule) setupEnv {
+	t.Helper()
+	e := newSetupEnv(t, rules)
+	cfg := config.Default()
+	cfg.Serial, cfg.ADBPath, cfg.Workspace = doctorSerial, fakeADB(t), e.ws
+	if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	exe, _ := os.Executable()
+	if _, err := workspace.Init(workspace.Options{Dir: e.ws, Exe: exe}); err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func doctorJSON(t *testing.T, out string) doctorReport {
+	t.Helper()
+	var env struct {
+		OK   bool
+		Data doctorReport
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || !env.OK {
+		t.Fatalf("%v %q", err, out)
+	}
+	return env.Data
+}
+
+func statusOf(rep doctorReport, name string) check {
+	for _, c := range rep.Checks {
+		if c.Name == name {
+			return c
+		}
+	}
+	return check{Status: "missing"}
+}
+
+func TestDoctorHealthyPhoneWithoutServeIsDegraded(t *testing.T) {
+	doctorEnv(t, doctorRules())
+	out, errOut, code := runWithInput(t, "", "doctor", "--json")
+	if code != 0 {
+		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+	}
+	rep := doctorJSON(t, out)
+	for _, name := range []string{"config", "adb", "adb server", "phone", "identity", "network port", "phone app", "environment"} {
+		if c := statusOf(rep, name); c.Status != checkOK {
+			t.Errorf("%s: %+v", name, c)
+		}
+	}
+	if c := statusOf(rep, "serve"); c.Status != checkWarn || c.Guidance == "" {
+		t.Errorf("serve: %+v", c)
+	}
+	if rep.Verdict != "degraded" {
+		t.Fatalf("verdict %s", rep.Verdict)
+	}
+}
+
+func TestDoctorOnlyReads(t *testing.T) {
+	e := doctorEnv(t, doctorRules())
+	runWithInput(t, "", "doctor")
+	calls, _ := testutil.ReadLog(e.log)
+	for _, c := range calls {
+		j := c.Joined()
+		for _, bad := range []string{"put", "grant", "connect", "usb", "install", "reverse tcp", "kill-server", "whitelist +"} {
+			if strings.Contains(j, bad) {
+				t.Errorf("doctor changed something: %q", j)
+			}
+		}
+	}
+}
+
+func TestDoctorBrokenCases(t *testing.T) {
+	cases := map[string]struct {
+		rule     testutil.FakeRule
+		name     string
+		wantHelp string
+	}{
+		"no phone":    {testutil.FakeRule{Match: `^devices$`, Stdout: "List of devices attached\n"}, "phone", "Wireless debugging"},
+		"old adb":     {testutil.FakeRule{Match: `^version$`, Stdout: "Version 35.0.2-1\n"}, "adb", "adbuddy setup"},
+		"wrong phone": {testutil.FakeRule{Match: `^shell getprop ro\.serialno$`, Stdout: "ZZZZ9999\n"}, "identity", "adbuddy connect"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			doctorEnv(t, doctorRules(tc.rule))
+			out, _, code := runWithInput(t, "", "doctor", "--json")
+			if code != 1 {
+				t.Fatalf("exit %d, want 1\n%s", code, out)
+			}
+			rep := doctorJSON(t, out)
+			c := statusOf(rep, tc.name)
+			if rep.Verdict != "broken" || c.Status != checkFail || !strings.Contains(c.Run+c.Guidance, tc.wantHelp) {
+				t.Fatalf("%s %+v", rep.Verdict, c)
+			}
+		})
+	}
+}
+
+func TestDoctorAppNotSetUpIsOnlyAWarning(t *testing.T) {
+	doctorEnv(t, doctorRules(
+		testutil.FakeRule{Match: `^shell dumpsys deviceidle whitelist$`, Stdout: "user,com.other,10124\n"},
+	))
+	out, _, code := runWithInput(t, "", "doctor", "--json")
+	rep := doctorJSON(t, out)
+	c := statusOf(rep, "phone app")
+	if code != 0 || c.Status != checkWarn || !strings.Contains(c.Detail, "battery exemption") || c.Run != "adbuddy setup" {
+		t.Fatalf("exit %d %+v", code, c)
+	}
+}
+
+func TestDoctorWithoutSetup(t *testing.T) {
+	newSetupEnv(t, doctorRules())
+	out, _, code := runWithInput(t, "", "doctor", "--json")
+	rep := doctorJSON(t, out)
+	if code != 1 || statusOf(rep, "config").Run != "adbuddy setup" {
+		t.Fatalf("exit %d %+v", code, rep)
+	}
+}
+
+func TestDoctorHumanOutput(t *testing.T) {
+	doctorEnv(t, doctorRules(testutil.FakeRule{Match: `^devices$`, Stdout: "List of devices attached\n"}))
+	out, _, _ := runWithInput(t, "", "doctor")
+	for _, want := range []string{"✓ adb: 37.0.1", "✗ phone:", "    Guidance: Turn on Wireless debugging", "Verdict: broken"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+}
+
+func TestDoctorFixRestartsTheAdbServer(t *testing.T) {
+	e := doctorEnv(t, doctorRules(testutil.FakeRule{Match: `^devices$`, Exit: 1, Stderr: "cannot connect to daemon\n", Times: 1}))
+	out, _, code := runWithInput(t, "", "doctor", "--fix", "--json")
+	rep := doctorJSON(t, out)
+	if code != 0 || len(rep.Fixed) != 1 || statusOf(rep, "adb server").Status != checkOK {
+		t.Fatalf("exit %d %+v", code, rep)
+	}
+	calls, _ := testutil.ReadLog(e.log)
+	var joined []string
+	for _, c := range calls {
+		joined = append(joined, c.Joined())
+	}
+	all := strings.Join(joined, "\n")
+	if !strings.Contains(all, "kill-server") || !strings.Contains(all, "start-server") {
+		t.Fatalf("server not restarted:\n%s", all)
+	}
+}
+
+func TestDoctorFixIsForThePersonOnly(t *testing.T) {
+	doctorEnv(t, doctorRules())
+	t.Setenv("ADBUDDY_SOURCE", "agent")
+	_, errOut, code := runWithInput(t, "", "doctor", "--fix")
+	if code != 1 || !strings.Contains(errOut, "AGENT_SESSION") {
+		t.Fatalf("exit %d %q", code, errOut)
+	}
+	if _, _, code := runWithInput(t, "", "doctor", "--json"); code != 0 {
+		t.Fatalf("the agent cannot run doctor: exit %d", code)
+	}
+}
+```
+
+- [ ] **Paso 2: Ejecutarlos y ver que fallan**
+
+```bash
+cd host && go test -count=1 ./internal/cli/ ./internal/workspace/
+```
+
+Esperado: no compila: `undefined: doctorReport`, `undefined: check`…
+
+- [ ] **Paso 3: Implementar**
+
+`host/internal/cli/doctor.go`:
+
+```go
+package cli
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/adb"
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+	"github.com/hybriqtech/adbuddy/host/internal/journal"
+	"github.com/hybriqtech/adbuddy/host/internal/pairing"
+	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
+	"github.com/hybriqtech/adbuddy/host/internal/workspace"
+	"github.com/spf13/cobra"
+)
+
+// Check statuses. A failed check stops ADBuddy from working; a warning
+// leaves it working with something missing (degraded).
+const (
+	checkOK   = "ok"
+	checkWarn = "warn"
+	checkFail = "fail"
+	checkSkip = "skip"
+)
+
+// check is one line of `adbuddy doctor`. Run is a single safe local command
+// the person or the agent may run; Guidance is something only the person can
+// do (on the phone, in another terminal); they are never both empty on a
+// failure or a warning.
+type check struct {
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Detail   string `json:"detail"`
+	Run      string `json:"run,omitempty"`
+	Guidance string `json:"guidance,omitempty"`
+}
+
+// doctorReport is the output of `adbuddy doctor`.
+type doctorReport struct {
+	Verdict string   `json:"verdict"` // ready, degraded or broken
+	Fixed   []string `json:"fixed,omitempty"`
+	Checks  []check  `json:"checks"`
+}
+
+// Doctor time limits: every adb call is bounded, so doctor always answers.
+var (
+	doctorCallWait = 10 * time.Second
+	adbVersionRe   = regexp.MustCompile(`Version (\d+)\.(\d+)\.(\d+)`)
+)
+
+func newDoctorCmd(app *App) *cobra.Command {
+	var fix bool
+	cmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Check that ADBuddy, adb, the phone and the app are ready, and say how to fix what is not",
+		Long: `Check, in order, everything ADBuddy needs: configuration, ADBuddy's adb and its
+private server, the phone (connected, the one you set up, no open network port),
+the agent environment, ` + "`adbuddy serve`" + ` and the phone app. Every problem comes with
+a "Run:" line (a safe command) or a "Guidance:" line (something only you can do).
+It only reads: nothing on the phone changes. With --fix it also restarts
+ADBuddy's private adb server when that is what fails and serve is not running.
+Exit code: 0 ready or degraded, 1 broken.`,
+		Example: "  adbuddy doctor\n  adbuddy doctor --json\n  adbuddy doctor --fix",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if fix && app.Getenv("ADBUDDY_SOURCE") == "agent" {
+				return NewError("AGENT_SESSION", "`adbuddy doctor --fix` cannot be run from the agent's session", "Run `adbuddy doctor` (without --fix) and follow its Run: lines, or ask the person to run --fix.")
+			}
+			ctx := cmd.Context()
+			rep := runDoctor(ctx, app)
+			if fix {
+				if fixed := doctorFix(ctx, app, rep); len(fixed) > 0 {
+					rep = runDoctor(ctx, app)
+					rep.Fixed = fixed
+				}
+			}
+			if app.JSON {
+				if err := WriteData(app.Stdout, rep); err != nil {
+					return err
+				}
+			} else {
+				printReport(app, rep)
+			}
+			if rep.Verdict == "broken" {
+				return ExitWith(1)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&fix, "fix", false, "also restart ADBuddy's private adb server when it is what fails (never while serve runs)")
+	return cmd
+}
+
+func printReport(app *App, rep doctorReport) {
+	icon := map[string]string{checkOK: "✓", checkWarn: "⚠", checkFail: "✗", checkSkip: "·"}
+	for _, f := range rep.Fixed {
+		fmt.Fprintf(app.Stdout, "↻ %s\n", f)
+	}
+	for _, c := range rep.Checks {
+		fmt.Fprintf(app.Stdout, "%s %s: %s\n", icon[c.Status], c.Name, classify.Printable(c.Detail))
+		if c.Run != "" {
+			fmt.Fprintf(app.Stdout, "    Run: %s\n", c.Run)
+		}
+		if c.Guidance != "" {
+			fmt.Fprintf(app.Stdout, "    Guidance: %s\n", c.Guidance)
+		}
+	}
+	switch rep.Verdict {
+	case "ready":
+		fmt.Fprintln(app.Stdout, "Verdict: ready.")
+	case "degraded":
+		fmt.Fprintln(app.Stdout, "Verdict: degraded — ADBuddy works; the ⚠ lines are optional or can wait.")
+	default:
+		fmt.Fprintln(app.Stdout, "Verdict: broken — fix the ✗ lines first, from the top.")
+	}
+}
+
+// runDoctor runs every check. It never changes anything, on the PC or on the
+// phone (starting ADBuddy's private adb server aside, as any adb call does).
+func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
+	add := func(c check) { rep.Checks = append(rep.Checks, c) }
+	defer func() { rep.Verdict = verdict(rep.Checks) }()
+
+	e, err := loadEnv(app)
+	if err != nil {
+		var ce *Error
+		fix := "Run `adbuddy setup`."
+		if errors.As(err, &ce) && ce.Fix != "" {
+			fix = ce.Fix
+		}
+		add(check{Name: "config", Status: checkFail, Detail: err.Error(), Guidance: fix})
+		return rep
+	}
+	if e.cfg.Serial == "" && e.cfg.Address == "" {
+		add(check{Name: "config", Status: checkFail, Detail: "no phone set up yet (" + e.dirs.ConfigFile() + ")", Run: "adbuddy setup"})
+	} else {
+		add(check{Name: "config", Status: checkOK, Detail: e.dirs.ConfigFile()})
+	}
+
+	adbPath := configuredADB(e, "")
+	if adbPath == "" {
+		add(check{Name: "adb", Status: checkFail, Detail: "ADBuddy's adb is not installed", Run: "adbuddy setup"})
+		return rep
+	}
+	runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
+	add(checkADB(ctx, runner, adbPath))
+
+	online, err := callWithin(ctx, func(c context.Context) ([]adb.Device, error) { return runner.Online(c) })
+	if err != nil {
+		add(check{Name: "adb server", Status: checkFail,
+			Detail:   fmt.Sprintf("ADBuddy's adb server (port %d) does not answer: %v", e.cfg.ADBServerPort, err),
+			Run:      "adbuddy doctor --fix",
+			Guidance: "If it keeps failing, stop other adb tools using port " + strconv.Itoa(e.cfg.ADBServerPort) + "."})
+		return rep
+	}
+	add(check{Name: "adb server", Status: checkOK, Detail: fmt.Sprintf("port %d, %d phone(s) connected", e.cfg.ADBServerPort, len(online))})
+
+	running, ping, perr := servePing(ctx, e.dirs.Data)
+	switch {
+	case perr != nil:
+		add(check{Name: "serve", Status: checkFail, Detail: perr.Error(), Guidance: "Stop the other `adbuddy serve`, or delete " + ipc.SocketPath(e.dirs.Data) + " if none is running."})
+	case running:
+		add(check{Name: "serve", Status: checkOK, Detail: "running, session " + ping.Session + ", phone " + ping.Serial})
+	default:
+		add(check{Name: "serve", Status: checkWarn, Detail: "not running: the agent cannot use the phone", Guidance: "Start `adbuddy serve` in a terminal and keep it open."})
+	}
+
+	active, guid := findConfiguredPhone(online, e.cfg.Serial, e.cfg.Address)
+	if active == "" {
+		how := "Turn on Wireless debugging on the phone and keep it on the same Wi-Fi as this PC."
+		if e.cfg.Address != "" {
+			how = "Turn on Wireless debugging on the phone. On another network (Tailscale), run `adbuddy connect <ip:port>` with the address shown on that screen."
+		}
+		add(check{Name: "phone", Status: checkFail, Detail: "the phone you set up is not connected to ADBuddy's adb server", Guidance: how})
+	} else {
+		add(check{Name: "phone", Status: checkOK, Detail: active})
+		phone := runner
+		phone.Serial = active
+		add(checkIdentity(ctx, phone, guid))
+		add(checkRemotePort(ctx, phone))
+		add(checkApp(ctx, phone, e, running))
+	}
+
+	ws := e.workspace("")
+	if running {
+		ws = serveWorkspace(ping)
+	}
+	add(checkWorkspace(ws))
+	return rep
+}
+
+func verdict(cs []check) string {
+	v := "ready"
+	for _, c := range cs {
+		switch c.Status {
+		case checkFail:
+			return "broken"
+		case checkWarn:
+			v = "degraded"
+		}
+	}
+	return v
+}
+
+// callWithin bounds one adb call.
+func callWithin[T any](ctx context.Context, f func(context.Context) (T, error)) (T, error) {
+	c, cancel := context.WithTimeout(ctx, doctorCallWait)
+	defer cancel()
+	return f(c)
+}
+
+func checkADB(ctx context.Context, runner adb.Runner, path string) check {
+	out, err := callWithin(ctx, func(c context.Context) (string, error) {
+		o, _, code, err := runner.Output(c, "version")
+		if err == nil && code != 0 {
+			err = fmt.Errorf("exit %d", code)
+		}
+		return o, err
+	})
+	if err != nil {
+		return check{Name: "adb", Status: checkFail, Detail: path + ": " + err.Error(), Run: "adbuddy setup"}
+	}
+	m := adbVersionRe.FindStringSubmatch(out)
+	if m == nil {
+		return check{Name: "adb", Status: checkWarn, Detail: path + ": unknown version", Run: "adbuddy setup"}
+	}
+	major, _ := strconv.Atoi(m[1])
+	version := m[1] + "." + m[2] + "." + m[3]
+	if major < 37 {
+		return check{Name: "adb", Status: checkFail, Detail: path + ": version " + version + ", ADBuddy needs 37 or newer (adb Wi-Fi 2.0)", Run: "adbuddy setup"}
+	}
+	return check{Name: "adb", Status: checkOK, Detail: version + " (" + path + ")"}
+}
+
+func servePing(ctx context.Context, dataDir string) (bool, ipc.Ping, error) {
+	pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	p, err := ipc.PingDaemon(pctx, dataDir)
+	switch {
+	case err == nil:
+		return true, p, nil
+	case errors.Is(err, ipc.ErrNotRunning):
+		return false, ipc.Ping{}, nil
+	}
+	return false, ipc.Ping{}, fmt.Errorf("the ADBuddy socket does not answer: %v", err)
+}
+
+// findConfiguredPhone finds the phone of config.toml among the connected
+// ones, by its stable name (with or without " (N)") or by its saved address.
+// It never connects anything.
+func findConfiguredPhone(online []adb.Device, serial, addr string) (active, guid string) {
+	guid, _ = pairing.GuidOf(serial)
+	for _, d := range online {
+		if (guid != "" && pairing.IsGuidSerial(guid, d.Serial)) || (guid == "" && serial != "" && d.Serial == serial) {
+			return d.Serial, guid
+		}
+	}
+	for _, d := range online {
+		if addr != "" && d.Serial == addr {
+			return d.Serial, guid
+		}
+	}
+	return "", guid
+}
+
+func checkIdentity(ctx context.Context, phone adb.Runner, guid string) check {
+	if _, ok := pairing.GuidSerialNo(guid); !ok {
+		return check{Name: "identity", Status: checkWarn, Detail: "cannot be checked: " + unverifiedWhy(guid),
+			Guidance: "Nothing to do unless you have several phones; `adbuddy undo` will not mix them up."}
+	}
+	_, err := callWithin(ctx, func(c context.Context) (struct{}, error) { return struct{}{}, pairing.VerifyIdentity(c, phone, guid) })
+	switch {
+	case errors.Is(err, pairing.ErrWrongPhone):
+		return check{Name: "identity", Status: checkFail, Detail: "the phone at " + phone.Serial + " is not the one you set up",
+			Guidance: "Check the IP and port on the phone you set up; run `adbuddy connect <ip:port>` with them."}
+	case err != nil:
+		return check{Name: "identity", Status: checkWarn, Detail: "could not read the phone's serial number: " + err.Error(), Guidance: "Unlock the phone and run `adbuddy doctor` again."}
+	}
+	return check{Name: "identity", Status: checkOK, Detail: "it is the phone you set up"}
+}
+
+func checkRemotePort(ctx context.Context, phone adb.Runner) check {
+	port, err := callWithin(ctx, func(c context.Context) (string, error) { return device.TCPPort(c, phone) })
+	switch {
+	case err != nil:
+		return check{Name: "network port", Status: checkWarn, Detail: "could not read service.adb.tcp.port: " + err.Error(), Guidance: "Unlock the phone and run `adbuddy doctor` again."}
+	case port == "" || port == "0":
+		return check{Name: "network port", Status: checkOK, Detail: "closed (no adb tcpip mode)"}
+	}
+	return check{Name: "network port", Status: checkWarn, Detail: "adb listens on port " + port + " (tcpip mode): `adbuddy serve` closes it with `adb usb` when it starts",
+		Guidance: "Nothing to do: serve closes it. Remote mode (Tailscale over mobile data) arrives in a later version."}
+}
+
+// checkApp: the phone app is optional; everything here is a warning at most.
+func checkApp(ctx context.Context, phone adb.Runner, e env, serveRunning bool) check {
+	version, err := callWithin(ctx, func(c context.Context) (string, error) { return phoneapp.InstalledVersion(c, phone) })
+	if err != nil {
+		return check{Name: "phone app", Status: checkWarn, Detail: "could not check: " + err.Error(), Guidance: "Unlock the phone and run `adbuddy doctor` again."}
+	}
+	if version == "" {
+		return check{Name: "phone app", Status: checkWarn, Detail: "not installed: 🔴 confirmations happen in the terminal running serve", Run: "adbuddy setup"}
+	}
+	var missing []string
+	pkg, _ := callWithin(ctx, func(c context.Context) (string, error) {
+		o, _, _, err := phone.Output(c, "shell", "dumpsys package "+phoneapp.Package)
+		return o, err
+	})
+	if !strings.Contains(pkg, phoneapp.SecureWrites+": granted=true") {
+		missing = append(missing, "permission for Cut access")
+	}
+	a11y, _ := callWithin(ctx, func(c context.Context) (string, error) {
+		o, _, _, err := phone.Output(c, "shell", "settings get secure enabled_accessibility_services")
+		return o, err
+	})
+	if !strings.Contains(strings.ToLower(a11y), strings.ToLower(phoneapp.A11yService)) {
+		missing = append(missing, "accessibility service")
+	}
+	idle, _ := callWithin(ctx, func(c context.Context) (string, error) {
+		o, _, _, err := phone.Output(c, "shell", "dumpsys deviceidle whitelist")
+		return o, err
+	})
+	if !strings.Contains(idle, phoneapp.Package) {
+		missing = append(missing, "battery exemption")
+	}
+	if len(missing) > 0 {
+		return check{Name: "phone app", Status: checkWarn, Detail: version + " installed, but without: " + strings.Join(missing, ", "),
+			Run: "adbuddy setup", Guidance: "Accept the consent screen in the ADBuddy app when setup asks."}
+	}
+	if serveRunning && e.cfg.ChatPort != 0 {
+		open, err := callWithin(ctx, func(c context.Context) (bool, error) { return phoneapp.TunnelOpen(c, phone, e.cfg.ChatPort) })
+		if err == nil && !open {
+			return check{Name: "phone app", Status: checkWarn, Detail: version + " installed, but the channel with serve is not open",
+				Guidance: "Open the ADBuddy app on the phone; serve reopens the channel within 15 seconds."}
+		}
+	}
+	return check{Name: "phone app", Status: checkOK, Detail: version + " installed and set up"}
+}
+
+func checkWorkspace(ws string) check {
+	var missing []string
+	for _, f := range []string{"AGENTS.md", filepath.Join(".adbuddy", "bin", exeName("adb"))} {
+		if _, err := os.Stat(filepath.Join(ws, f)); err != nil {
+			missing = append(missing, f)
+		}
+	}
+	if len(missing) > 0 {
+		return check{Name: "environment", Status: checkFail, Detail: ws + ": missing " + strings.Join(missing, ", "), Run: "adbuddy env init --dir " + quoteArg(ws)}
+	}
+	if err := journal.Open(workspace.JournalDir(ws)).Writable(); err != nil {
+		return check{Name: "environment", Status: checkFail, Detail: "the journal cannot be written (" + err.Error() + "): nothing 🟡 or 🔴 will run",
+			Guidance: "Check the permissions and free space of " + workspace.JournalDir(ws) + "."}
+	}
+	return check{Name: "environment", Status: checkOK, Detail: ws}
+}
+
+// doctorFix applies the only automatic fix: restarting ADBuddy's private adb
+// server when it does not answer and no serve is using it.
+func doctorFix(ctx context.Context, app *App, rep doctorReport) []string {
+	var failing bool
+	for _, c := range rep.Checks {
+		if c.Name == "adb server" && c.Status == checkFail {
+			failing = true
+		}
+		if c.Name == "serve" && c.Status == checkOK {
+			return nil // never under a running serve
+		}
+	}
+	if !failing {
+		return nil
+	}
+	e, err := loadEnv(app)
+	if err != nil {
+		return nil
+	}
+	runner := adb.Runner{Path: configuredADB(e, ""), ServerPort: e.cfg.ADBServerPort}
+	_, _ = callWithin(ctx, func(c context.Context) (struct{}, error) {
+		_, _, _, err := runner.Output(c, "kill-server")
+		return struct{}{}, err
+	})
+	_, _ = callWithin(ctx, func(c context.Context) (struct{}, error) {
+		_, _, _, err := runner.Output(c, "start-server")
+		return struct{}{}, err
+	})
+	return []string{fmt.Sprintf("restarted ADBuddy's adb server (port %d)", e.cfg.ADBServerPort)}
+}
+
+func exeName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
+// quoteArg quotes a path for the Run: line when it has spaces.
+func quoteArg(s string) string {
+	if strings.ContainsAny(s, " \t") {
+		return `"` + s + `"`
+	}
+	return s
+}
+```
+
+`host/internal/cli/root.go`. Cambio:
+
+Antes:
+
+```go
+	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app), newConnectCmd(app), setup)
+```
+
+Después:
+
+```go
+	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app), newConnectCmd(app), newDoctorCmd(app), setup)
+```
+
+`host/internal/workspace/templates/AGENTS.md`. Cambio:
+
+Antes:
+
+```markdown
+- `adbuddy undo [last|<id>|session]`: undo the last change, one journal entry, or the whole session.
+```
+
+Después:
+
+```markdown
+- `adbuddy undo [last|<id>|session]`: undo the last change, one journal entry, or the whole session.
+- `adbuddy doctor [--json]`: when adb or adbuddy fails in a way you do not understand, run it before guessing. Run its `run` lines yourself (they are safe); relay its `guidance` lines to the user word for word, because only they can do them.
+```
+
+`host/internal/workspace/templates/AGENTS.md`. Cambio:
+
+Antes:
+
+```markdown
+12. Do not try to bypass ADBuddy (another adb binary, another adb server, scripts that call adb). It protects the user's phone; working around it breaks their trust.
+```
+
+Después:
+
+```markdown
+12. Do not try to bypass ADBuddy (another adb binary, another adb server, scripts that call adb). It protects the user's phone; working around it breaks their trust.
+13. Always bound commands that never end on their own, or they hang your shell: `logcat -d` (not `logcat`), `top -n 1`, `screenrecord --time-limit 30 …`, `monkey` with an event count, `getevent -c <n>`.
+14. Never ask the user to type a password, a PIN or an API key in the chat: ADBuddy never needs them, and the phone asks for its own when it must.
+```
+
+- [ ] **Paso 4: Ejecutar y ver que pasan**
+
+```bash
+cd host && go mod tidy && go vet ./... && gofmt -l . && go test -count=1 ./internal/cli/ ./internal/workspace/
+```
+
+Esperado: `ok` en todos los paquetes, `gofmt -l .` sin salida y `go.mod` solo con las dependencias de las restricciones globales.
+
+- [ ] **Paso 5: Commit**
+
+```bash
+git add host
+git commit -F - <<'EOF'
+feat(host): adbuddy doctor con arreglos guiados y reglas nuevas en AGENTS.md
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+### Tarea 8: Proyecto Android y protocolo de la app
+
+Esqueleto de `android/`: Gradle con catálogo de versiones, AGP 9 con Kotlin integrado (sin `org.jetbrains.kotlin.android`), minSdk 30, targetSdk/compileSdk 37 y sin Gradle wrapper. Incluye el manifiesto completo de M2, los textos en inglés y español, y una configuración de red que solo permite texto plano a `127.0.0.1`. Añade el protocolo (espejo de `host/internal/bridge`), `BridgeState` (el estado que se reconstruye a partir de los mensajes: una pregunta desaparece cuando llega la entrada final del diario con su id) y la validación del handshake. Todo esto es lógica pura con tests JVM. El `hello` lleva la versión de protocolo de la app y el `welcome` la del host: con un host demasiado antiguo el estado pasa a `INCOMPATIBLE` (`Outdated.HOST`).
 
 **Ficheros:**
 - Crear: `android/settings.gradle.kts`
@@ -3090,7 +3862,7 @@ Esqueleto de `android/`: Gradle con catálogo de versiones, AGP 9 con Kotlin int
 **Interfaces:**
 - Produce (paquete `tech.hybriq.adbuddy.bridge`): `Protocol` (`VERSION`, tipos, `json`, `encode`, `encodeElement`, `decode`, `payload<T>`); `Message`, `Hello`, `Welcome`, `SessionState`, `ConfirmRequest`, `ConfirmReply`, `Notice`, `JournalEntry`, `Inverse`, `Snapshot`, `Decision`; `BridgeState` (`apply(Message)`, `answered(id)`, `Connection`); `Handshake`, `HandshakeParser.parse/readLimited`; `Caller.isShell(uid)`.
 
-> **Sin compilar al escribir el plan** (ver "Verificación del plan"). El manifiesto ya declara las clases de las tareas 8-10: hasta la tarea 10, `assembleDebug` fallará por clases que faltan. En esta tarea solo se ejecutan los tests unitarios, y los fuentes que compilan son los de esta tarea.
+> **Sin compilar al escribir el plan** (ver "Verificación del plan"). El manifiesto ya declara las clases de las tareas 9-11: hasta la tarea 11, `assembleDebug` fallará por clases que faltan. En esta tarea solo se ejecutan los tests unitarios, y los fuentes que compilan son los de esta tarea.
 
 > Gradle 9.8.0 y JDK 17 deben estar instalados. Usa `gradle --no-daemon`; con `GRADLE_USER_HOME` apuntando dentro de `android/.gradle/`, si no quieres caché global.
 
@@ -3152,7 +3924,7 @@ class BridgeStateTest {
 
     @Test fun questionsLeaveWhenTheirEntryIsFinal() {
         var s = BridgeState()
-        s = s.apply(msg(0, Protocol.WELCOME, """{"session":"s_1","fromSeq":1}"""))
+        s = s.apply(msg(0, Protocol.WELCOME, """{"session":"s_1","fromSeq":1,"protocol":1}"""))
         assertEquals(BridgeState.Connection.CONNECTED, s.connection)
         s = s.apply(msg(1, Protocol.CONFIRM_REQUEST, question))
         assertEquals(1, s.pending.size)
@@ -3176,7 +3948,7 @@ class BridgeStateTest {
 
     @Test fun anotherSessionStartsOver() {
         var s = BridgeState(session = "s_1", lastSeq = 50).apply(msg(1, Protocol.CONFIRM_REQUEST, question))
-        s = s.apply(msg(0, Protocol.WELCOME, """{"session":"s_2","fromSeq":1}"""))
+        s = s.apply(msg(0, Protocol.WELCOME, """{"session":"s_2","fromSeq":1,"protocol":1}"""))
         assertEquals(0L, s.lastSeq)
         assertTrue(s.pending.isEmpty())
     }
@@ -3185,6 +3957,19 @@ class BridgeStateTest {
         val s = BridgeState().apply(msg(4, Protocol.CONFIRM_REQUEST, """{"id":5}"""))
         assertTrue(s.pending.isEmpty())
         assertEquals(4L, s.lastSeq)
+    }
+
+    @Test fun anOldHostIsIncompatible() {
+        val s = BridgeState().apply(msg(0, Protocol.WELCOME, """{"session":"s_1","fromSeq":1}"""))
+        assertEquals(BridgeState.Connection.INCOMPATIBLE, s.connection)
+        assertEquals(BridgeState.Outdated.HOST, s.outdated)
+    }
+
+    @Test fun anOldAppIsIncompatible() {
+        val s = BridgeState(pending = listOf(Protocol.json.decodeFromString(ConfirmRequest.serializer(), question))).appOutdated()
+        assertEquals(BridgeState.Connection.INCOMPATIBLE, s.connection)
+        assertEquals(BridgeState.Outdated.APP, s.outdated)
+        assertTrue(s.pending.isEmpty())
     }
 }
 ```
@@ -3487,6 +4272,8 @@ dependencies {
     <string name="status_connecting">Connecting to the PC…</string>
     <string name="status_waiting">Waiting for the PC (run adbuddy serve)</string>
     <string name="status_paused">Paused: the agent cannot use the phone</string>
+    <string name="status_update_app">This app is too old for the ADBuddy on your PC: run adbuddy setup on the PC to update it</string>
+    <string name="status_update_host">The ADBuddy on your PC is too old for this app: update it on the PC</string>
 
     <string name="action_allow">Allow</string>
     <string name="action_deny">Deny</string>
@@ -3534,6 +4321,8 @@ dependencies {
     <string name="status_connecting">Conectando con el PC…</string>
     <string name="status_waiting">Esperando al PC (ejecuta adbuddy serve)</string>
     <string name="status_paused">En pausa: el agente no puede usar el móvil</string>
+    <string name="status_update_app">Esta app es demasiado antigua para el ADBuddy de tu PC: ejecuta adbuddy setup en el PC para actualizarla</string>
+    <string name="status_update_host">El ADBuddy de tu PC es demasiado antiguo para esta app: actualízalo en el PC</string>
 
     <string name="action_allow">Permitir</string>
     <string name="action_deny">Rechazar</string>
@@ -3611,6 +4400,12 @@ import kotlinx.serialization.json.encodeToJsonElement
 object Protocol {
     const val VERSION = 1
 
+    /** The oldest host protocol this app talks to. */
+    const val MIN_HOST_PROTOCOL = 1
+
+    /** Close code the host uses for an app that is too old (bridge.CloseIncompatible). */
+    const val CLOSE_INCOMPATIBLE = 4001
+
     const val HELLO = "hello"
     const val WELCOME = "welcome"
     const val SNAPSHOT = "snapshot"
@@ -3657,10 +4452,16 @@ data class Message(
 )
 
 @Serializable
-data class Hello(val token: String, val lastSeq: Long, val appVersion: String, val deviceSerial: String = "")
+data class Hello(
+    val token: String,
+    val lastSeq: Long,
+    val appVersion: String,
+    val deviceSerial: String = "",
+    val protocol: Int = Protocol.VERSION,
+)
 
 @Serializable
-data class Welcome(val session: String, val fromSeq: Long, val hostVersion: String = "")
+data class Welcome(val session: String, val fromSeq: Long, val hostVersion: String = "", val protocol: Int = 0)
 
 @Serializable
 data class SessionState(val agent: String = "", val state: String = "idle", val activity: String = "", val paused: Boolean = false)
@@ -3731,8 +4532,13 @@ data class BridgeState(
     val sessionState: SessionState = SessionState(),
     val pending: List<ConfirmRequest> = emptyList(),
     val journal: List<JournalEntry> = emptyList(), // newest last
+    val outdated: Outdated = Outdated.NONE,
 ) {
-    enum class Connection { WAITING, CONNECTING, CONNECTED }
+    /** INCOMPATIBLE: the app or the host must be updated; the app stops reconnecting. */
+    enum class Connection { WAITING, CONNECTING, CONNECTED, INCOMPATIBLE }
+
+    /** Which side is too old when the connection is INCOMPATIBLE. */
+    enum class Outdated { NONE, APP, HOST }
 
     companion object {
         const val MAX_JOURNAL = 500
@@ -3744,6 +4550,9 @@ data class BridgeState(
         return when (m.type) {
             Protocol.WELCOME -> {
                 val w = Protocol.payload<Welcome>(m) ?: return this
+                if (w.protocol < Protocol.MIN_HOST_PROTOCOL) {
+                    return copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.HOST)
+                }
                 // A new session (the host restarted) starts over.
                 if (w.session != session) copy(session = w.session, lastSeq = 0, pending = emptyList(), connection = Connection.CONNECTED)
                 else copy(connection = Connection.CONNECTED)
@@ -3769,6 +4578,9 @@ data class BridgeState(
             else -> copy(lastSeq = seq)
         }
     }
+
+    /** The host closed the channel because this app is too old. */
+    fun appOutdated(): BridgeState = copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.APP, pending = emptyList())
 
     /** Removes a question the person just answered here. */
     fun answered(id: String): BridgeState = copy(pending = pending.filter { it.id != id })
@@ -3845,7 +4657,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-### Tarea 8: `TokenProvider`: la puerta del host en la app
+### Tarea 9: `TokenProvider`: la puerta del host en la app
 
 §5.2 y §3.1, paso 6.1. Es un `ContentProvider` exportado que solo atiende al uid 2000: `call` devuelve `error=not the shell user` a cualquier otro, y `openFile` lanza `SecurityException`. Métodos:
 - `ping`: versión y puerto;
@@ -3861,7 +4673,7 @@ EOF
 - Test: `android/app/src/androidTest/kotlin/tech/hybriq/adbuddy/TokenProviderTest.kt`
 
 **Interfaces:**
-- Consume: `HandshakeParser`, `Caller` (7).
+- Consume: `HandshakeParser`, `Caller` (8).
 - Produce: `BridgePrefs` (`link: Link?`, `consent`, `consentHost`), `BridgePrefs.Link(token, port, host)`; `BuildConfigInfo.versionName(context)`; `TokenProvider`.
 
 > El test instrumentado necesita un emulador (`gradle :app:connectedDebugAndroidTest`); nunca el móvil del usuario.
@@ -4085,13 +4897,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-### Tarea 9: Cliente del canal y servicio en primer plano
+### Tarea 10: Cliente del canal y servicio en primer plano
 
 `Bridge` es el cliente OkHttp de `ws://127.0.0.1:<puerto>/v1`:
 - manda `hello` con el token y `lastSeq`;
 - aplica cada mensaje a `BridgeState`;
 - reconecta con espera exponencial (de 0,5 s hasta 30 s; vuelve a 1 s tras haber estado conectado);
-- responde `confirm.reply` y envía `pause`/`resume`.
+- responde `confirm.reply` y envía `pause`/`resume`;
+- si el host cierra con 4001 (app demasiado antigua) o su `welcome` es de un protocolo antiguo, deja de reconectar y el estado dice qué hay que actualizar.
 
 `BridgeService` es el servicio en primer plano `specialUse` que mantiene vivo el proceso: una notificación fija con el estado y el botón Pausar/Reanudar. `AdbuddyApp` crea los canales de notificación y guarda el `Bridge`. El test JVM usa MockWebServer como host falso.
 
@@ -4102,7 +4915,7 @@ EOF
 - Test: `android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/BridgeTest.kt`
 
 **Interfaces:**
-- Consume: `Protocol`, `BridgeState` (7), `BridgePrefs` (8).
+- Consume: `Protocol`, `BridgeState` (8), `BridgePrefs` (9).
 - Produce: `Bridge(scope, appVersion, onMessage)` con `state: StateFlow<BridgeState>`, `start(Link)`, `stop()`, `reply(id, decision): Boolean`, `pause(Boolean): Boolean`; `BridgeService.start(context)`, `ACTION_PAUSE`/`ACTION_RESUME`; `AdbuddyApp.bridge`, `CHANNEL_STATUS`, `CHANNEL_CONFIRM`.
 
 - [ ] **Paso 1: Escribir los tests que fallan**
@@ -4158,8 +4971,9 @@ class BridgeTest {
         val hello = Protocol.decode(fromApp.poll(5, TimeUnit.SECONDS)!!)!!
         assertEquals(Protocol.HELLO, hello.type)
         assertEquals(token, Protocol.payload<Hello>(hello)!!.token)
+        assertEquals(Protocol.VERSION, Protocol.payload<Hello>(hello)!!.protocol)
 
-        hostSide!!.send("""{"v":1,"type":"welcome","ts":"x","payload":{"session":"s_1","fromSeq":1}}""")
+        hostSide!!.send("""{"v":1,"type":"welcome","ts":"x","payload":{"session":"s_1","fromSeq":1,"protocol":1}}""")
         hostSide!!.send("""{"v":1,"seq":1,"type":"confirm.request","ts":"x","payload":{"id":"j_1","title":"Restart","rawCommand":"adb shell reboot","expiresAt":"2026-09-30T01:04:03Z"}}""")
         val deadline = System.currentTimeMillis() + 5000
         while (bridge.state.value.pending.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
@@ -4172,6 +4986,20 @@ class BridgeTest {
         assertNotNull(r)
         assertEquals("deny", r!!.decision)
         assertTrue(bridge.state.value.pending.isEmpty())
+        bridge.stop()
+    }
+
+    @Test fun aHostThatSaysUpdateStopsTheRetries() {
+        val bridge = Bridge(scope, "0.1.0") { _, _ -> }
+        bridge.start(BridgePrefs.Link(token, server.port, "PC"))
+        fromApp.poll(5, TimeUnit.SECONDS)!! // hello
+        hostSide!!.close(Protocol.CLOSE_INCOMPATIBLE, "update the ADBuddy app")
+        val deadline = System.currentTimeMillis() + 5000
+        while (bridge.state.value.connection != BridgeState.Connection.INCOMPATIBLE && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertEquals(BridgeState.Connection.INCOMPATIBLE, bridge.state.value.connection)
+        assertEquals(BridgeState.Outdated.APP, bridge.state.value.outdated)
+        Thread.sleep(1500) // longer than the first retry
+        assertEquals("no reconnection after an incompatible close", 1, server.requestCount)
         bridge.stop()
     }
 }
@@ -4244,6 +5072,7 @@ class Bridge(
                 val closed = CompletableDeferred<Unit>()
                 connect(link, closed)
                 closed.await()
+                if (_state.value.connection == BridgeState.Connection.INCOMPATIBLE) break // retrying cannot help
                 val wasConnected = _state.value.connection == BridgeState.Connection.CONNECTED
                 _state.update { it.copy(connection = BridgeState.Connection.WAITING) }
                 // Back off while the host is not there (serve not running, PC asleep).
@@ -4261,7 +5090,7 @@ class Bridge(
     }
 
     private fun connect(link: BridgePrefs.Link, closed: CompletableDeferred<Unit>) {
-        _state.update { it.copy(connection = BridgeState.Connection.CONNECTING) }
+        _state.update { it.copy(connection = BridgeState.Connection.CONNECTING, outdated = BridgeState.Outdated.NONE) }
         val req = Request.Builder().url("ws://127.0.0.1:${link.port}/v1").build()
         socket = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -4272,10 +5101,20 @@ class Bridge(
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val m = Protocol.decode(text) ?: return
                 val next = _state.updateAndGetCompat { it.apply(m) }
+                if (next.connection == BridgeState.Connection.INCOMPATIBLE) {
+                    webSocket.close(1000, "host too old")
+                    return
+                }
                 onMessage(m, next)
             }
 
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                if (code == Protocol.CLOSE_INCOMPATIBLE) _state.update { it.appOutdated() }
+                webSocket.close(1000, null)
+            }
+
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (code == Protocol.CLOSE_INCOMPATIBLE) _state.update { it.appOutdated() }
                 closed.complete(Unit)
             }
 
@@ -4365,6 +5204,8 @@ class BridgeService : LifecycleService() {
 
     private fun statusNotification(s: BridgeState): Notification {
         val text = when {
+            s.connection == BridgeState.Connection.INCOMPATIBLE && s.outdated == BridgeState.Outdated.APP -> getString(R.string.status_update_app)
+            s.connection == BridgeState.Connection.INCOMPATIBLE -> getString(R.string.status_update_host)
             s.sessionState.paused -> getString(R.string.status_paused)
             s.connection == BridgeState.Connection.CONNECTED -> getString(R.string.status_connected, s.hostName)
             s.connection == BridgeState.Connection.CONNECTING -> getString(R.string.status_connecting)
@@ -4455,7 +5296,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-### Tarea 10: Confirmaciones, consentimiento, actividad y Cortar acceso
+### Tarea 11: Confirmaciones, consentimiento, actividad y Cortar acceso
 
 Esta tarea completa la interfaz de §6 y §4.5-4.6:
 - **Confirmaciones:** cada pregunta 🔴 es una notificación de prioridad alta con Rechazar, Permitir y, si el host lo ofrece, Permitir durante la sesión. Permitir exige desbloquear (`setAuthenticationRequired`, Android 12+). La notificación caduca con la pregunta y desaparece cuando se responde en otro sitio. Con la app abierta, la misma pregunta sale en un diálogo.
@@ -4815,6 +5656,8 @@ fun HomeScreen(state: BridgeState, bridge: Bridge, focusConfirm: String?) {
         Text(stringResource(R.string.home_title), style = MaterialTheme.typography.headlineSmall)
         Text(
             when {
+                state.connection == BridgeState.Connection.INCOMPATIBLE && state.outdated == BridgeState.Outdated.APP -> stringResource(R.string.status_update_app)
+                state.connection == BridgeState.Connection.INCOMPATIBLE -> stringResource(R.string.status_update_host)
                 state.sessionState.paused -> stringResource(R.string.status_paused)
                 state.connection == BridgeState.Connection.CONNECTED -> stringResource(R.string.status_connected, state.hostName)
                 state.connection == BridgeState.Connection.CONNECTING -> stringResource(R.string.status_connecting)
@@ -4920,7 +5763,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-### Tarea 11: CI de la app, finales de línea y documentación
+### Tarea 12: CI de la app, finales de línea y documentación
 
 La CI compila y prueba la app en Linux, solo en `pull_request` y en push a `main` con cambios en `android/`. `.gitattributes` fija LF en los ficheros de la app. El README del host explica la app, y la lista de antes de publicar recoge la clave de firma y la release del APK.
 
@@ -5107,15 +5950,17 @@ EOF
 | Requisito (spec) | Tarea |
 |---|---|
 | §3.1.5: instalar la app con `adb install` (release con checksum o `--apk`); si ya está, se salta | 4, 6 |
-| §3.1.6: consentimiento en la app (`requestSetup`), `pm grant WRITE_SECURE_SETTINGS` y accesibilidad sin quitar las otras | 4, 6, 8, 10 |
+| §3.1.6: consentimiento en la app (`requestSetup`), `pm grant WRITE_SECURE_SETTINGS` y accesibilidad sin quitar las otras | 4, 6, 9, 11 |
 | §3.1.7: túnel `adb reverse` y entrega del token | 4, 5 |
-| §4.5: `confirm.request` al móvil, notificación de prioridad alta, Permitir / Rechazar / Permitir durante la sesión (misma regla y argumentos), desbloqueo en Android 12+, diálogo con la app abierta, terminal de reserva, caducidad | 1, 2, 5, 10 |
-| §4.6 Pausar: el daemon bloquea todo lo del shim | 2, 5, 9, 10 |
-| §4.6 Cortar acceso: `adb_wifi_enabled=0` y `adb_enabled=0`; Reactivar, con el aviso del puerto remoto | 10 |
-| §5.2: solo `127.0.0.1`, puerto fijo, token de 256 bits por arranque, `TokenProvider` solo con uid 2000, `hello`/`welcome`, reanudación con búfer de 2000 o `snapshot` | 1, 4, 5, 8, 9 |
-| §5.3: sobre `{v, seq, type, ts, payload}`; los tipos de M2 (`session.state`, `confirm.request`/`reply`, `journal.entry`, `notice`, `pause`/`resume`) | 1, 7 |
-| §6: servicio en primer plano `specialUse`, permisos, pantallas de consentimiento y actividad, textos EN/ES, minSdk 30 | 7-10 |
-| §10: el `TokenProvider` rechaza a quien no es shell (test instrumentado); una app sin token no entra (test del servidor); protocolo contra una app simulada (e2e); el token no aparece en líneas de comandos (e2e) | 1, 5, 8 |
+| §4.5: `confirm.request` al móvil, notificación de prioridad alta, Permitir / Rechazar / Permitir durante la sesión (misma regla y argumentos), desbloqueo en Android 12+, diálogo con la app abierta, terminal de reserva, caducidad | 1, 2, 5, 11 |
+| §4.6 Pausar: el daemon bloquea todo lo del shim | 2, 5, 10, 11 |
+| §4.6 Cortar acceso: `adb_wifi_enabled=0` y `adb_enabled=0`; Reactivar, con el aviso del puerto remoto | 11 |
+| §5.2: solo `127.0.0.1`, puerto fijo, token de 256 bits por arranque, `TokenProvider` solo con uid 2000, `hello`/`welcome`, reanudación con búfer de 2000 o `snapshot` | 1, 4, 5, 9, 10 |
+| §5.3: sobre `{v, seq, type, ts, payload}`; los tipos de M2 (`session.state`, `confirm.request`/`reply`, `journal.entry`, `notice`, `pause`/`resume`) | 1, 8 |
+| §6: servicio en primer plano `specialUse`, permisos, pantallas de consentimiento y actividad, textos EN/ES, minSdk 30 | 8-11 |
+| §9 (fallos): diagnóstico guiado de configuración, adb, móvil, app y entorno, con `Run:` y `Guidance:` (idea de ARTEMIS) | 7 |
+| §5.3: compatibilidad de versiones entre la app y el host (cierre 4001, estado INCOMPATIBLE) | 1, 8, 10, 11 |
+| §10: el `TokenProvider` rechaza a quien no es shell (test instrumentado); una app sin token no entra (test del servidor); protocolo contra una app simulada (e2e); el token no aparece en líneas de comandos (e2e) | 1, 5, 9 |
 
 Fuera de M2 (con su hito):
 - chat, PTY y `attach` (M3);
@@ -5128,7 +5973,7 @@ Fuera de M2 (con su hito):
 ## Validaciones manuales pendientes (necesitan al usuario y un móvil)
 
 1. **Compilar la app por primera vez** (`gradle :app:assembleDebug`) y corregir lo que pida la compilación, sin cambiar el comportamiento.
-2. **`content write` en Android 11-17.** La entrega del token por stdin depende de `adb shell content write --uri … < stdin`. Hay que comprobar que existe y que llega al `openFile` del proveedor en el Pixel (Android 17) y en un Android 11-13. Si no, la alternativa es `content call` con el token en un fichero temporal de `/data/local/tmp` que se borra enseguida (peor: queda un instante en disco).
+2. **`content write` en Android 11-17.** La entrega del token por stdin depende de `adb shell content write --uri … < stdin`. Hay que comprobar que existe y que llega al `openFile` del proveedor en el Pixel (Android 17) y en un Android 11-13. Si no, la alternativa es la de ARTEMIS: un receptor de broadcast protegido con `android:permission="android.permission.WRITE_SECURE_SETTINGS"` (solo el usuario shell o el sistema pueden enviarlo). Pero ahí el token va en la línea de comandos de `am broadcast` un instante. Si se adopta, hay que rotar el token en cada conexión y decidirlo como ruling.
 3. **Arrancar el servicio en primer plano desde el proveedor**, con la app fuera de la optimización de batería y en segundo plano: Android 12+ lo restringe. Si falla, el host puede lanzar `am start-foreground-service -n tech.hybriq.adbuddy/.bridge.BridgeService` tras el handshake.
 4. **Accesibilidad por adb en un Android 13-15 de otro fabricante** (criterio 4 de §1), con otro servicio ya activo, para comprobar que no se quita.
 5. **Confirmar desde la notificación con el móvil bloqueado:** debe pedir el desbloqueo antes de Permitir, y Rechazar no debe pedirlo.

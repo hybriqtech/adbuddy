@@ -513,10 +513,10 @@ Validado el 2026-09-29: `adb reverse` por depuración inalámbrica funciona en a
 |---|---|---|
 | M0 | Spikes S1-S3 | Decisiones confirmadas o ajustadas |
 | M1 | Host base: descarga de adb, guía de activación en el terminal y URL de la página de ayuda con capturas (§3.1 paso 2; servida desde GitHub Pages o el README del repo, sin servidores propios, §12), emparejamiento (QR y código), perfil, entorno y contexto mínimo, shim, clasificador, diario, `undo`, confirmación en la terminal del PC | Cualquier agente gestiona el móvil de forma segura desde el PC |
-| M2 | App base: instalación de la app con `adb install` y pasos 5-7 de §3.1, validar la activación de la accesibilidad por adb en un Android 13-15 de otro fabricante (S2 solo cubrió Android 17; §1, criterio 4), onboarding, `TokenProvider`, `BridgeService` y WS, panel de confianza (notificación y actividad), confirmaciones en el móvil, Pausar y Cortar acceso | El móvil ve y controla lo que hace el agente |
+| M2 | App base: instalación de la app con `adb install` y pasos 5-7 de §3.1, validar la activación de la accesibilidad por adb en un Android 13-15 de otro fabricante (S2 solo cubrió Android 17; §1, criterio 4), onboarding, `TokenProvider`, `BridgeService` y WS, panel de confianza (notificación y actividad), confirmaciones en el móvil, Pausar y Cortar acceso, compatibilidad de versiones entre la app y el host, y `adbuddy doctor` (diagnóstico con arreglos guiados, idea de ARTEMIS) | El móvil ve y controla lo que hace el agente |
 | M3 | Chat: daemon con PTY y `attach`, vista de terminal, envío de mensajes, adjuntos en los dos sentidos, notificaciones y burbuja | Chat con cualquier agente desde el móvil |
 | M4 | Adaptador de Claude Code: hooks, transcript en burbujas, permisos con botones | La experiencia completa con el agente recomendado |
-| M5 | Ayudas al agente (accesibilidad y superposición, notificaciones opcionales) y modo remoto | Más rápido, con Unicode, y usable fuera de casa |
+| M5 | Ayudas al agente (accesibilidad y superposición, notificaciones opcionales; revisar y reutilizar lo aplicable de la app auxiliar de ARTEMIS, ver `plans/pendientes-m3-m5.md`) y modo remoto | Más rápido, con Unicode, y usable fuera de casa |
 | M6 | Skills completas, i18n EN/ES, pipeline de releases (goreleaser, APK, winget, brew, script, IzzyOnDroid), documentación y donaciones | Release pública v1.0 |
 
 ## 14. Fuera de la v1
