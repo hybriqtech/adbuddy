@@ -204,7 +204,7 @@ func TestQuestionWaitsForAnUndoInFlight(t *testing.T) {
 // serve stopping (Ctrl+C) ends the 🔴 without asking, and leaves no
 // question behind. The journal blames the agent only when it left.
 func TestWaitingForChangesInFlightEnds(t *testing.T) {
-	for _, how := range []string{"pause", "agent gone", "serve stopped"} {
+	for _, how := range []string{"pause", "pause and resume", "agent gone", "serve stopped"} {
 		t.Run(how, func(t *testing.T) {
 			e := newEnv(t)
 			e.d.o.OnEntry = func(journal.Entry) {}
@@ -233,6 +233,10 @@ func TestWaitingForChangesInFlightEnds(t *testing.T) {
 			case "pause":
 				paused.Store(true)
 				e.d.CancelConfirmations()
+			case "pause and resume":
+				// Paused and resumed before the wait saw it: the pause
+				// withdrew the question all the same.
+				e.d.CancelConfirmations()
 			case "agent gone":
 				cancel(nil)
 				want = ""
@@ -249,12 +253,13 @@ func TestWaitingForChangesInFlightEnds(t *testing.T) {
 			}
 			j := e.last(t)
 			wantReason := map[string]string{
-				"pause":         PausedMessage,
-				"agent gone":    "abandoned by the agent before it was asked",
-				"serve stopped": "abandoned: ADBuddy stopped before asking",
+				"pause":            PausedMessage,
+				"pause and resume": PausedMessage,
+				"agent gone":       "abandoned by the agent before it was asked",
+				"serve stopped":    "abandoned: ADBuddy stopped before asking",
 			}[how]
 			wantStatus := journal.StatusDenied
-			if how == "pause" {
+			if how == "pause" || how == "pause and resume" {
 				wantStatus = journal.StatusBlocked
 			}
 			if j.Status != wantStatus || j.Reason != wantReason {

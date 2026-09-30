@@ -215,6 +215,17 @@ func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 		return c.evalSu(ws, depth)
 	case ".", "source", "eval":
 		return []Finding{unanalysable("shell.script", "runs code from a file or a string", vals, textScript)}
+	case "trap":
+		if trapRunsCode(ws[1:]) {
+			return []Finding{unanalysable("shell.script", "trap runs a string as shell code", vals, textScript)}
+		}
+	case "alias":
+		// An alias makes a name run other shell code from the next line on.
+		if len(ws) > 1 {
+			return []Finding{unanalysable("shell.script", "alias makes a name run other shell code", vals, textScript)}
+		}
+	case "find":
+		return c.evalFind(ws, depth)
 	case "toybox", "busybox":
 		if len(ws) == 1 {
 			return []Finding{{Rule: "toybox.list", Level: Green, Title: Text{EN: "List toybox commands", ES: "Listar los comandos de toybox"}, Words: vals}}
@@ -280,6 +291,78 @@ func unanalysable(rule, reason string, words []string, title Text) Finding {
 	f := redFinding(rule, reason, words, title)
 	f.Special = true
 	return f
+}
+
+// trapRunsCode reports whether `trap <args>` sets an action: a string the
+// shell runs later as code, like eval. `trap`, `trap -p`, `trap -l`, a reset
+// (`trap - EXIT`) and an empty action (which ignores the signals) run
+// nothing.
+func trapRunsCode(args []Word) bool {
+	if len(args) > 0 && !args[0].Dynamic && args[0].Value == "--" {
+		args = args[1:]
+	}
+	if len(args) == 0 {
+		return false
+	}
+	a := args[0]
+	if a.Dynamic {
+		return true
+	}
+	switch a.Value {
+	case "-", "-p", "-l", "":
+		return false
+	}
+	return true
+}
+
+// findRuns are find's actions that run a command, ended by ";" (or by "+"
+// right after "{}").
+var findRuns = map[string]bool{"-exec": true, "-execdir": true, "-ok": true, "-okdir": true}
+
+// evalFind classifies find with its rule and, as commands of their own, the
+// ones it runs with -exec, -execdir, -ok or -okdir, where {} is a file name
+// only known on the phone. A word of find's own only known on the phone may
+// split into one of those actions: that cannot be analysed.
+func (c *Classifier) evalFind(ws []Word, depth int) []Finding {
+	vals := values(ws)
+	var runs [][]Word
+	ownDynamic := false
+	for i := 1; i < len(ws); i++ {
+		w := ws[i]
+		if w.Dynamic {
+			ownDynamic = true
+			continue
+		}
+		if !findRuns[w.Value] {
+			continue
+		}
+		var cmd []Word
+		for i++; i < len(ws); i++ {
+			v := ws[i]
+			if !v.Dynamic && (v.Value == ";" || (v.Value == "+" && len(cmd) > 0 && cmd[len(cmd)-1].Value == "{}")) {
+				break
+			}
+			if strings.Contains(v.Value, "{}") {
+				v.Dynamic = true
+			}
+			cmd = append(cmd, v)
+		}
+		runs = append(runs, cmd)
+	}
+	var out []Finding
+	if ownDynamic {
+		out = append(out, unanalysable("wrapper", "find with an argument only known on the phone may run a command", vals, textDynamic))
+	} else {
+		out = append(out, c.evalRule("shell", ws))
+	}
+	for _, cmd := range runs {
+		if len(cmd) == 0 {
+			out = append(out, unanalysable("wrapper", "find runs a command it does not name", vals, textUnknown))
+			continue
+		}
+		out = append(out, c.evalWords(cmd, depth)...)
+	}
+	return out
 }
 
 // cmdAliases maps `cmd <service>` to the equivalent command.
@@ -377,6 +460,14 @@ func unwrapWords(ws []Word) (inner []Word, start int, handled bool, reason strin
 		}
 		if len(rest) > 0 && rest[0].Value == "-p" {
 			rest = rest[1:]
+		}
+		return rest, at(rest), true, ""
+	case "builtin":
+		// builtin [--] name args…: runs a shell builtin, like command.
+		if len(rest) > 0 && rest[0].Value == "--" {
+			rest = rest[1:]
+		} else if len(rest) > 0 && strings.HasPrefix(rest[0].Value, "-") {
+			return nil, 0, true, "builtin with options"
 		}
 		return rest, at(rest), true, ""
 	case "run-as":

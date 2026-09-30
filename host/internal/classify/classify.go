@@ -99,7 +99,42 @@ func (c *Classifier) UserRuleCount() int { return len(c.rules.user) }
 // Classify classifies adb arguments with the global options already removed
 // (see SplitGlobal).
 func (c *Classifier) Classify(argv []string) Result {
-	return aggregate(c.classifyAdb(argv))
+	return namesTheApp(aggregate(c.classifyAdb(argv)), argv)
+}
+
+// namesTheApp is a defence in depth: a 🔴 that is not special but names the
+// app in its raw text (hybriq or adbudd, in any case, after decoding %xx and
+// ignoring quotes and backslashes) becomes special. A path to the app channel
+// that the rules miss then still warns and offers no "allow during the
+// session". It never changes a 🟢 or a 🟡.
+func namesTheApp(r Result, argv []string) Result {
+	if r.Level != Red || r.Special || !mentionsAppText(strings.Join(argv, " ")) {
+		return r
+	}
+	r.Special = true
+	r.Findings = append(r.Findings, redFinding("adbuddy.mention", "names the ADBuddy app", argv, textMentionsApp))
+	r.Findings[len(r.Findings)-1].Special = true
+	return r
+}
+
+// mentionsAppText looks for the app's name in s, decoding %xx until nothing
+// changes (a few rounds at most).
+func mentionsAppText(s string) bool {
+	unquote := strings.NewReplacer(`'`, "", `"`, "", `\`, "")
+	s = strings.ToLower(s)
+	for range 4 {
+		for _, t := range []string{s, unquote.Replace(s)} {
+			if strings.Contains(t, "hybriq") || strings.Contains(t, "adbudd") {
+				return true
+			}
+		}
+		d := strings.ToLower(percentDecode(s))
+		if d == s {
+			break
+		}
+		s = d
+	}
+	return false
 }
 
 func (c *Classifier) classifyAdb(argv []string) []Finding {
@@ -326,6 +361,7 @@ var (
 	textMultiChange  = Text{EN: "Make several changes in one command", ES: "Hacer varios cambios en un solo comando"}
 	textRunAsADBuddy = Text{EN: "Read or change ADBuddy's private files: {cmd}", ES: "Leer o cambiar los ficheros privados de ADBuddy: {cmd}"}
 	textBackground   = Text{EN: "Leave a command running on the phone after this one returns: {cmd}", ES: "Dejar un comando en marcha en el móvil después de devolver el control: {cmd}"}
+	textMentionsApp  = Text{EN: "Name the ADBuddy app in a command: {cmd}", ES: "Nombrar la app ADBuddy en un comando: {cmd}"}
 )
 
 func redFinding(rule, reason string, words []string, title Text) Finding {

@@ -80,3 +80,16 @@ func TestUndoOtherDeviceHasAFix(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
 	}
 }
+
+// T3 re-review 2, minor: the fix for WAITING_FOR_ANSWER fits both cases,
+// whether the question is already on screen or still waits to be asked.
+func TestUndoWaitingForAnswerFixFitsBothCases(t *testing.T) {
+	const want = "A 🔴 command is waiting for confirmation (in the ADBuddy app or the serve terminal); retry when it is answered."
+	for _, reason := range []string{`waiting to ask about "Restart the phone"`, `waiting for your answer to "Restart the phone"`} {
+		data := isolate(t)
+		fakeDaemon(t, data, nil, ipc.Exit{Code: 1, ErrorCode: "WAITING_FOR_ANSWER", Error: reason})
+		if _, errOut, code := run(t, "undo"); code != ExitFailure || !strings.Contains(errOut, reason) || !strings.Contains(errOut, want) {
+			t.Fatalf("exit %d, stderr %q", code, errOut)
+		}
+	}
+}

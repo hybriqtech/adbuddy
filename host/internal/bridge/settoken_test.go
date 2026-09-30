@@ -111,3 +111,36 @@ func TestAMessageReadBeforeTheRevocationIsNotDispatched(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 	}
 }
+
+// T3 re-review 2, minor: a revoked connection that still writes keeps being
+// closed as revoked ("token changed", 1008), not as going away.
+func TestARevokedConnectionThatWritesIsClosedAsRevoked(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		held, release := make(chan struct{}), make(chan struct{})
+		old := beforeDispatch
+		beforeDispatch = func(m Message) {
+			if m.Type == TypeConfirmReply {
+				close(held)
+				<-release
+			}
+		}
+		h := start(t, Options{})
+		beforeDispatch = old
+		c := h.dial(token, 0)
+		if m := recv(t, c); m.Type != TypeWelcome {
+			t.Fatalf("got %+v", m)
+		}
+		waitConnected(t, h.srv, true)
+		send(t, c, TypeConfirmReply, ConfirmReply{ID: "j_1", Decision: "allow"})
+		select {
+		case <-held:
+		case <-time.After(3 * time.Second):
+			t.Fatal("the reply never reached the reader")
+		}
+		h.srv.SetToken(strings.Repeat("cd", 32))
+		close(release)
+		if st := closeStatus(t, c); st != websocket.StatusPolicyViolation {
+			t.Fatalf("attempt %d: close %v, want 1008 (token changed)", i, st)
+		}
+	}
+}

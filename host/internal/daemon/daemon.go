@@ -244,6 +244,12 @@ func (d *Daemon) CancelConfirmations() {
 	}
 }
 
+// withdrawnByPause reports whether a pause withdrew the question of qctx
+// (see CancelConfirmations).
+func withdrawnByPause(qctx context.Context) bool {
+	return errors.Is(context.Cause(qctx), errWithdrawn)
+}
+
 // abandoned picks the journal's reason for a 🔴 that ends because its
 // request did: byAgent when the agent left, byServe when serve stopped
 // (Ctrl+C), which is not the agent's doing.
@@ -400,7 +406,8 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		// already running must end before the question shows up.
 		if err := d.waitChanges(qctx, q); err != nil {
 			d.answered(q, false)
-			if d.o.Paused() {
+			// Withdrawn by a pause, even one already resumed.
+			if d.o.Paused() || withdrawnByPause(qctx) {
 				return d.block(e, s, PausedMessage)
 			}
 			code := ExitDenied
@@ -420,8 +427,8 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		cancel()
 		release = d.answered(q, decision == confirm.Allow)
 		// Paused while it was asked: whatever the answer (or none, if the
-		// pause withdrew it), it ends blocked.
-		if d.o.Paused() {
+		// pause withdrew it, even if it was resumed since), it ends blocked.
+		if d.o.Paused() || withdrawnByPause(qctx) {
 			return d.block(e, s, PausedMessage)
 		}
 		if decision != confirm.Allow {
@@ -434,6 +441,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			case confirm.Timeout:
 				e.Status, e.Reason = journal.StatusTimeout, "confirmation expired"
 				msg += " (confirmation expired)"
+			}
+			if errors.Is(context.Cause(ctx), ipc.ErrClosed) {
+				// Ctrl+C on serve while asking: nobody said no. The shim's
+				// message stays the literal one.
+				e.Status, e.Reason = journal.StatusDenied, "abandoned: ADBuddy stopped while asking"
 			}
 			code := ExitDenied
 			e.ExitCode = &code

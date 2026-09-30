@@ -281,8 +281,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			s.beforeDispatch(m)
 			if !s.current(cl) {
 				// Revoked by SetToken, replaced or dropped: its close may
-				// take a while, but nothing it sends counts any more.
-				return
+				// take a while, but nothing it sends counts any more. Keep
+				// reading until that close ends the connection, so it is
+				// not closed first as going away.
+				continue
 			}
 			s.o.OnMessage(m)
 		}

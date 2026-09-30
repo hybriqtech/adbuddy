@@ -230,3 +230,51 @@ func TestPauseJustBeforeTheQuestion(t *testing.T) {
 		t.Fatalf("journal %+v", j)
 	}
 }
+
+// T3 re-review 2, minor: a pause that withdraws the question on screen ends
+// the 🔴 blocked as paused, even if it is resumed before the answer is
+// looked at; it is not "denied by user".
+func TestAQuestionWithdrawnByAPauseIsPausedEvenIfResumed(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.OnEntry = func(journal.Entry) {}
+	held := newHeld()
+	e.d.o.Confirmer = held
+	red := e.execAsync("shell", "reboot")
+	asked(t, held)
+	e.d.CancelConfirmations() // paused and resumed at once: Paused() is false again
+	r := waitResult(t, red)
+	if want := "Blocked by ADBuddy: " + PausedMessage; r.exit.Code != ExitDenied || strings.TrimSpace(r.s.errOut.String()) != want {
+		t.Fatalf("%+v %q, want %q", r.exit, r.s.errOut.String(), want)
+	}
+	if j := e.last(t); j.Status != journal.StatusBlocked || j.Reason != PausedMessage {
+		t.Fatalf("journal %+v", j)
+	}
+}
+
+// T3 re-review 2, minor: Ctrl+C on serve while the question is on screen
+// is not "denied by user" in the journal; the shim's message stays literal.
+func TestServeStoppedWhileAskingIsNotDeniedByUser(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.OnEntry = func(journal.Entry) {}
+	held := newHeld()
+	e.d.o.Confirmer = held
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	red := make(chan result, 1)
+	go func() {
+		s := &stream{}
+		red <- result{s, e.d.Handle(ctx, ipc.Request{Kind: ipc.KindExec, Argv: []string{"shell", "reboot"}, Cwd: e.ws}, s)}
+	}()
+	asked(t, held)
+	cancel(ipc.ErrClosed) // what the IPC server's Close does
+	r := waitResult(t, red)
+	if want := "Denied by user: Restart the phone"; r.exit.Code != ExitDenied || strings.TrimSpace(r.s.errOut.String()) != want {
+		t.Fatalf("%+v %q, want %q", r.exit, r.s.errOut.String(), want)
+	}
+	if j := e.last(t); j.Status != journal.StatusDenied || j.Reason != "abandoned: ADBuddy stopped while asking" {
+		t.Fatalf("journal %+v", j)
+	}
+	if len(e.adb.ran()) != 0 {
+		t.Fatalf("ran %q", e.adb.ran())
+	}
+}

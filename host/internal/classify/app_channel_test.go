@@ -232,9 +232,30 @@ func TestWhatCannotBeAnalysedIsSpecial(t *testing.T) {
 		{deep, "shell.depth"},
 		{"nohup -x ls", "wrapper"},
 		{"timeout -z 5 ls", "wrapper"},
+		// T3 re-review 2: find runs the command after -exec, -execdir, -ok
+		// and -okdir; {} is a file name only known on the phone.
+		{`find /sdcard -name x -exec reboot \;`, "sys.reboot"},
+		{`find /sdcard -exec svc wifi disable \;`, "sys.svc"},
+		{"find /sdcard -exec reboot ;", "sys.reboot"}, // as adb joins it: no terminator
+		{"find /sdcard -execdir reboot {} +", "sys.reboot"},
+		{`find /sdcard -ok reboot \;`, "sys.reboot"},
+		{`find /sdcard -okdir svc power shutdown \;`, "sys.svc"},
+		{`find /sdcard -name x -exec sh -c 'content query --uri content://tech.hybriq.adbudd$1.bridge' _ y \;`, ""},
+		{`find /sdcard -exec {} \;`, "dynamic"},
+		{`find /sdcard -exec \;`, "wrapper"},
+		{"find /sdcard $X", "wrapper"}, // $X may split into -exec …
+		// builtin runs a builtin like command does.
+		{"builtin eval 'sleep 5 & input tap 1 1'", "shell.script"},
+		{"builtin -- eval reboot", "shell.script"},
+		// trap and alias run a string as shell code, like eval.
+		{"trap 'reboot' EXIT", "shell.script"},
+		{"trap -- 'input tap 1 1' EXIT", "shell.script"},
+		{"trap \"$X\" EXIT", "shell.script"},
+		{"alias ls='content query --uri content://tech.hybriq.adbuddy.bridge'", "shell.script"},
+		{"trap 'run-as tech.hybriq.adbudd$Y ls' EXIT", ""},
 	} {
 		r := c.Classify(sh(k.line))
-		if r.Level != Red || !r.Special || !hasRule(r, k.rule) {
+		if r.Level != Red || !r.Special || (k.rule != "" && !hasRule(r, k.rule)) {
 			t.Errorf("%s: %v special=%v (%s: %s), want red special %s", display([]string{k.line}), r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.rule)
 		}
 	}
@@ -261,11 +282,64 @@ func TestWhatCannotBeAnalysedIsSpecial(t *testing.T) {
 		{"/system/bin/ls /sdcard", Green},
 		{"timeout 5 ls", Green},
 		{"find /sdcard -name '*.jpg' -exec ls -l {} +", Red},
+		{"find /sdcard -name '*.jpg'", Green},
+		{`find /sdcard -name '*.jpg' -exec ls {} \;`, Red},
+		{"find /sdcard -type f -name '*.tmp'", Green},
+		{"trap - EXIT", Red},
+		{"trap", Red},
+		{"alias", Red},
+		{"builtin", Green},
 	} {
 		r := c.Classify(sh(k.line))
 		if r.Level != k.level || r.Special {
 			t.Errorf("%q: %v special=%v (%s: %s), want %v not special", k.line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.level)
 		}
+	}
+	// find -exec is never below the command it runs with a dynamic argument.
+	for _, cmd := range []string{"ls", "cat", "input tap 1", "pm path", "rm"} {
+		alone := c.Classify(sh(cmd + " $F"))
+		viaFind := c.Classify(sh("find /sdcard -exec " + cmd + ` {} \;`))
+		if viaFind.Level < alone.Level || (alone.Special && !viaFind.Special) {
+			t.Errorf("find -exec %s: %v special=%v, below %v special=%v", cmd, viaFind.Level, viaFind.Special, alone.Level, alone.Special)
+		}
+	}
+}
+
+// T3 re-review 2, defence in depth: a 🔴 that names the app in its raw text
+// (any case, after decoding %xx) is special even if no rule saw the app
+// channel. It never changes a 🟢 or a 🟡.
+func TestARedThatNamesTheAppIsSpecial(t *testing.T) {
+	c := mustNew(t, "")
+	for _, argv := range [][]string{
+		sh("rm /sdcard/Download/Hybriq.txt"),
+		sh("rm /sdcard/ADBUDDY-notes"),
+		sh("rm /sdcard/%41dbudd"),   // %41 is A
+		sh("rm /sdcard/%2541dbudd"), // %25 is %: decoded twice
+		sh("rm /sdcard/hyb'r'iq"),   // quotes do not hide it
+		sh("unknowncmd tech.hybriq.adbudd$Y"),
+		{"shell", "trap", "'run-as tech.hybriq.adbudd$Y ls'", "EXIT"},
+	} {
+		r := c.Classify(argv)
+		if r.Level != Red || !r.Special {
+			t.Errorf("%q: %v special=%v (%s), want red special", argv, r.Level, r.Special, r.Primary.Rule)
+		}
+	}
+	for _, k := range []struct {
+		line  string
+		level Level
+	}{
+		{"ls /sdcard/hybriq", Green},
+		{"cat /sdcard/Download/adbuddy.log", Green},
+		{"input text hybriq", Yellow},
+	} {
+		r := c.Classify(sh(k.line))
+		if r.Level != k.level || r.Special {
+			t.Errorf("%q: %v special=%v (%s: %s), want %v not special", k.line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.level)
+		}
+	}
+	// A plain 🔴 without the name is still not special.
+	if r := c.Classify(sh("rm /sdcard/x")); r.Level != Red || r.Special {
+		t.Errorf("rm /sdcard/x: %v special=%v", r.Level, r.Special)
 	}
 }
 
