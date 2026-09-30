@@ -20,7 +20,8 @@ El agente recomendado es Claude Code, porque además puede programar e instalart
 - seguridad por defecto;
 - funcionamiento por Wi-Fi primero;
 - chat con el agente desde el móvil;
-- libertad para usar cualquier agente.
+- libertad para usar cualquier agente;
+- sin claves de API ni LLM propio: funciona con la suscripción del agente que el usuario ya paga (por ejemplo, un plan de Claude Code). ARTEMIS necesita su propio LLM y sus claves.
 
 **Usuario objetivo de la v1:** alguien que ya usa un agente de código en su PC (Windows, macOS o Linux) y tiene un Android 11+. No necesita saber qué es adb.
 

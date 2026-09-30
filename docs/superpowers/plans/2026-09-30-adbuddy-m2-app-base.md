@@ -46,7 +46,8 @@
 
 **Verificación del plan:**
 - **Host (tareas 1-7):** se compiló y se probó en Windows 11 con Go 1.27.0 sobre el resultado de M1c antes de escribir el plan. Incluye un extremo a extremo con el binario real y una app simulada por WebSocket: confirmar 🔴 desde el "móvil", pausar y reanudar, y el token nunca en una línea de comandos.
-- **App (tareas 8-11): NO se ha compilado.** Esa noche no se podía usar Gradle, porque su caché queda fuera del repositorio. El código se escribió con cuidado contra las APIs documentadas, pero la primera compilación puede pedir ajustes pequeños (imports, firmas). Arréglalos sin cambiar el comportamiento, y anótalos en el informe de la tarea.
+- **App (tareas 8-10):** se compiló y se probó en Windows 11 con Gradle 9.8.0, JDK 17 y el SDK 37, reproduciendo las tareas una a una desde su texto: las tareas 8 y 9 pasan sus tests JVM, y la 10 pasa `testDebugUnitTest`, `assembleDebug` y `lintDebug` sin errores ni avisos. El test instrumentado del `TokenProvider` necesita un emulador y no se ha ejecutado.
+- **Cambios de la ejecución:** las revisiones de las tareas 1-3 cambiaron el host respecto a este texto (por ejemplo, `Hello.session` para que el host detecte que se reinició). La app de las tareas 8-10 ya los incluye.
 - **Si un paso no sale como dice el plan,** detente y explícalo.
 
 ## Restricciones globales
@@ -3857,6 +3858,7 @@ Esqueleto de `android/`: Gradle con catálogo de versiones, AGP 9 con Kotlin int
 - Crear: `android/app/src/main/res/values-es/strings.xml`
 - Crear: `android/app/src/main/res/xml/network_security_config.xml`
 - Crear: `android/app/src/main/res/xml/accessibility_service.xml`
+- Crear: `android/app/src/main/res/xml/data_extraction_rules.xml`
 - Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/Protocol.kt`
 - Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/BridgeState.kt`
 - Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/Handshake.kt`
@@ -3867,7 +3869,7 @@ Esqueleto de `android/`: Gradle con catálogo de versiones, AGP 9 con Kotlin int
 **Interfaces:**
 - Produce (paquete `tech.hybriq.adbuddy.bridge`): `Protocol` (`VERSION`, tipos, `json`, `encode`, `encodeElement`, `decode`, `payload<T>`); `Message`, `Hello`, `Welcome`, `SessionState`, `ConfirmRequest`, `ConfirmReply`, `Notice`, `JournalEntry`, `Inverse`, `Snapshot`, `Decision`; `BridgeState` (`apply(Message)`, `answered(id)`, `Connection`); `Handshake`, `HandshakeParser.parse/readLimited`; `Caller.isShell(uid)`.
 
-> **Sin compilar al escribir el plan** (ver "Verificación del plan"). El manifiesto ya declara las clases de las tareas 9-11: hasta la tarea 11, `assembleDebug` fallará por clases que faltan. En esta tarea solo se ejecutan los tests unitarios, y los fuentes que compilan son los de esta tarea.
+> El manifiesto ya declara las clases de la tarea 10: hasta esa tarea, `assembleDebug` fallará por clases que faltan. En esta tarea solo se ejecutan los tests unitarios.
 
 > Gradle 9.8.0 y JDK 17 deben estar instalados. Usa `gradle --no-daemon`; con `GRADLE_USER_HOME` apuntando dentro de `android/.gradle/`, si no quieres caché global.
 
@@ -3904,8 +3906,9 @@ class ProtocolTest {
     }
 
     @Test fun encodesHelloAndReplies() {
-        val hello = Protocol.encode(Protocol.HELLO, Hello(token = "t", lastSeq = 3, appVersion = "0.2.0"), "2026-09-30T00:00:00Z")
+        val hello = Protocol.encode(Protocol.HELLO, Hello(token = "t", lastSeq = 3, session = "s1", appVersion = "0.2.0"), "2026-09-30T00:00:00Z")
         assertTrue(hello, hello.contains(""""type":"hello"""") && hello.contains(""""lastSeq":3""") && hello.contains(""""v":1"""))
+        assertTrue(hello, hello.contains(""""session":"s1""""))
         val reply = Protocol.encode(Protocol.CONFIRM_REPLY, ConfirmReply("j_1", Decision.ALLOW_SESSION), "x")
         assertTrue(reply, reply.contains(""""decision":"allow_session""""))
     }
@@ -4143,6 +4146,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -4204,6 +4208,7 @@ dependencies {
     <application
         android:name=".AdbuddyApp"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:label="@string/app_name"
         android:icon="@android:drawable/sym_def_app_icon"
         android:supportsRtl="true"
@@ -4231,7 +4236,8 @@ dependencies {
         <provider
             android:name=".bridge.TokenProvider"
             android:authorities="tech.hybriq.adbuddy.bridge"
-            android:exported="true" />
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
 
         <service
             android:name=".bridge.BridgeService"
@@ -4267,7 +4273,7 @@ dependencies {
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ADBuddy</string>
+    <string name="app_name" translatable="false">ADBuddy</string>
     <string name="a11y_label">ADBuddy agent helper</string>
     <string name="a11y_description">Lets the coding agent on your PC read the screen and tap for you, always shown on screen and with a Pause button. It never reads passwords and never runs in protected apps.</string>
 
@@ -4302,7 +4308,7 @@ dependencies {
     <string name="consent_decline">Not now</string>
     <string name="consent_done">Done. You can go back to the PC.</string>
 
-    <string name="home_title">ADBuddy</string>
+    <string name="home_title" translatable="false">ADBuddy</string>
     <string name="home_activity">Activity</string>
     <string name="home_empty">Nothing yet. Every adb command of the agent will appear here.</string>
     <string name="cut_done">Debugging is off: the PC cannot reach the phone.</string>
@@ -4389,6 +4395,30 @@ dependencies {
     android:description="@string/a11y_description" />
 ```
 
+`android/app/src/main/res/xml/data_extraction_rules.xml`:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nothing leaves the phone: the link token and the consent stay on this device
+     (Android 12+ ignores allowBackup for device-to-device transfers). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
+```
+
 `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/Protocol.kt`:
 
 ```kotlin
@@ -4460,6 +4490,7 @@ data class Message(
 data class Hello(
     val token: String,
     val lastSeq: Long,
+    val session: String = "", // the session of the last welcome: another one means the host restarted
     val appVersion: String,
     val deviceSerial: String = "",
     val protocol: Int = Protocol.VERSION,
@@ -4662,67 +4693,112 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-### Tarea 9: `TokenProvider`: la puerta del host en la app
+### Tarea 9: Cliente del canal y preferencias del enlace
 
-§5.2 y §3.1, paso 6.1. Es un `ContentProvider` exportado que solo atiende al uid 2000: `call` devuelve `error=not the shell user` a cualquier otro, y `openFile` lanza `SecurityException`. Métodos:
-- `ping`: versión y puerto;
-- `requestSetup`: guarda el nombre del PC y deja el consentimiento en `pending`;
-- `getSetupConsent`.
+`Bridge` es el cliente OkHttp de `ws://127.0.0.1:<puerto>/v1`:
+- manda `hello` con el token, `lastSeq` y la `session` del último `welcome` (si no coincide, el host sabe que se reinició y manda un `snapshot`);
+- aplica cada mensaje a `BridgeState`;
+- reconecta con espera exponencial (de 0,5 s hasta 30 s; vuelve a 1 s tras haber estado conectado);
+- responde `confirm.reply` y envía `pause`/`resume`;
+- si el host cierra con 4001 (app demasiado antigua) o su `welcome` es de un protocolo antiguo, deja de reconectar y el estado dice qué hay que actualizar.
 
-`openFile("/handshake", "w")` devuelve una tubería. El JSON que escribe el host se valida (token de 64 hex, puerto 1024-65535, nombre saneado) y se guarda en las preferencias privadas; después se arranca `BridgeService`.
+`BridgePrefs` guarda en las preferencias privadas el enlace (token, puerto y nombre del PC) y el consentimiento. `AdbuddyApp` crea los canales de notificación y guarda el `Bridge`. El test JVM usa MockWebServer como host falso.
 
 **Ficheros:**
 - Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/BuildConfigInfo.kt`
 - Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/BridgePrefs.kt`
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/TokenProvider.kt`
-- Test: `android/app/src/androidTest/kotlin/tech/hybriq/adbuddy/TokenProviderTest.kt`
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/Bridge.kt`
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/AdbuddyApp.kt`
+- Test: `android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/BridgeTest.kt`
 
 **Interfaces:**
-- Consume: `HandshakeParser`, `Caller` (8).
-- Produce: `BridgePrefs` (`link: Link?`, `consent`, `consentHost`), `BridgePrefs.Link(token, port, host)`; `BuildConfigInfo.versionName(context)`; `TokenProvider`.
-
-> El test instrumentado necesita un emulador (`gradle :app:connectedDebugAndroidTest`); nunca el móvil del usuario.
+- Consume: `Protocol`, `BridgeState` (8).
+- Produce: `BridgePrefs` (`link: Link?`, `consent`, `consentHost`), `BridgePrefs.Link(token, port, host)`; `BuildConfigInfo.versionName(context)`; `Bridge(scope, appVersion, onMessage)` con `state: StateFlow<BridgeState>`, `start(Link)`, `stop()`, `reply(id, decision): Boolean`, `pause(Boolean): Boolean`; `AdbuddyApp.bridge`, `CHANNEL_STATUS`, `CHANNEL_CONFIRM`.
 
 - [ ] **Paso 1: Escribir los tests que fallan**
 
-`android/app/src/androidTest/kotlin/tech/hybriq/adbuddy/TokenProviderTest.kt`:
+`android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/BridgeTest.kt`:
 
 ```kotlin
-package tech.hybriq.adbuddy
+package tech.hybriq.adbuddy.bridge
 
-import android.net.Uri
-import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.fail
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
 
-/**
- * Spec §10: the TokenProvider refuses anyone but the shell user. The test
- * runs in the app's own process (not uid 2000), like any other app would.
- */
-@RunWith(AndroidJUnit4::class)
-class TokenProviderTest {
-    private val context = InstrumentationRegistry.getInstrumentation().targetContext
-    private val uri = Uri.parse("content://tech.hybriq.adbuddy.bridge")
+/** The client against a fake host speaking the protocol. */
+class BridgeTest {
+    private val server = MockWebServer()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val fromApp = LinkedBlockingQueue<String>()
+    private var hostSide: WebSocket? = null
+    private val token = "0123456789abcdef".repeat(4)
 
-    @Test fun callsFromAnAppAreRefused() {
-        for (method in listOf("ping", "requestSetup", "getSetupConsent")) {
-            val res = context.contentResolver.call(uri, method, null, null)!!
-            assertEquals(method, "not the shell user", res.getString("error"))
-        }
+    @Before fun setUp() {
+        server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) { hostSide = webSocket }
+            override fun onMessage(webSocket: WebSocket, text: String) { fromApp.add(text) }
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
+        }).build())
+        server.start()
     }
 
-    @Test fun handshakeFromAnAppIsRefused() {
-        try {
-            context.contentResolver.openOutputStream(Uri.parse("content://tech.hybriq.adbuddy.bridge/handshake"))!!.use {
-                it.write("{}".toByteArray())
-            }
-            fail("an app could write the handshake")
-        } catch (e: SecurityException) {
-            // expected
-        }
+    @After fun tearDown() {
+        scope.cancel()
+        server.close()
+    }
+
+    @Test fun helloQuestionAndReply() {
+        val bridge = Bridge(scope, "0.2.0") { _, _ -> }
+        bridge.start(BridgePrefs.Link(token, server.port, "PC"))
+
+        val hello = Protocol.decode(fromApp.poll(5, TimeUnit.SECONDS)!!)!!
+        assertEquals(Protocol.HELLO, hello.type)
+        assertEquals(token, Protocol.payload<Hello>(hello)!!.token)
+        assertEquals(Protocol.VERSION, Protocol.payload<Hello>(hello)!!.protocol)
+
+        hostSide!!.send("""{"v":1,"type":"welcome","ts":"x","payload":{"session":"s_1","fromSeq":1,"protocol":1}}""")
+        hostSide!!.send("""{"v":1,"seq":1,"type":"confirm.request","ts":"x","payload":{"id":"j_1","title":"Restart","rawCommand":"adb shell reboot","expiresAt":"2026-09-30T01:04:03Z"}}""")
+        val deadline = System.currentTimeMillis() + 5000
+        while (bridge.state.value.pending.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertEquals(1, bridge.state.value.pending.size)
+
+        assertTrue(bridge.reply("j_1", Decision.DENY))
+        val reply = Protocol.decode(fromApp.poll(5, TimeUnit.SECONDS)!!)!!
+        assertEquals(Protocol.CONFIRM_REPLY, reply.type)
+        val r = Protocol.payload<ConfirmReply>(reply)
+        assertNotNull(r)
+        assertEquals("deny", r!!.decision)
+        assertTrue(bridge.state.value.pending.isEmpty())
+        bridge.stop()
+    }
+
+    @Test fun aHostThatSaysUpdateStopsTheRetries() {
+        val bridge = Bridge(scope, "0.1.0") { _, _ -> }
+        bridge.start(BridgePrefs.Link(token, server.port, "PC"))
+        fromApp.poll(5, TimeUnit.SECONDS)!! // hello
+        hostSide!!.close(Protocol.CLOSE_INCOMPATIBLE, "update the ADBuddy app")
+        val deadline = System.currentTimeMillis() + 5000
+        while (bridge.state.value.connection != BridgeState.Connection.INCOMPATIBLE && System.currentTimeMillis() < deadline) Thread.sleep(10)
+        assertEquals(BridgeState.Connection.INCOMPATIBLE, bridge.state.value.connection)
+        assertEquals(BridgeState.Outdated.APP, bridge.state.value.outdated)
+        Thread.sleep(1500) // longer than the first retry
+        assertEquals("no reconnection after an incompatible close", 1, server.requestCount)
+        bridge.stop()
     }
 }
 ```
@@ -4733,7 +4809,7 @@ class TokenProviderTest {
 cd android && gradle --no-daemon :app:testDebugUnitTest
 ```
 
-Esperado: no compila: `Unresolved reference: BridgePrefs`.
+Esperado: no compila: `Unresolved reference: Bridge`.
 
 - [ ] **Paso 3: Implementar**
 
@@ -4795,6 +4871,274 @@ class BridgePrefs(context: Context) {
         set(value) = prefs.edit(commit = true) { putString("consentHost", value) }
 }
 ```
+
+`android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/Bridge.kt`:
+
+```kotlin
+package tech.hybriq.adbuddy.bridge
+
+import java.time.Instant
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+
+/**
+ * The app end of the channel (spec §5.2): a WebSocket client to
+ * ws://127.0.0.1:<port>/v1, which `adb reverse` carries to the host. One per
+ * process; BridgeService keeps the process alive while it runs.
+ */
+class Bridge(
+    private val scope: CoroutineScope,
+    private val appVersion: String,
+    private val onMessage: (Message, BridgeState) -> Unit,
+) {
+    private val client = OkHttpClient.Builder()
+        .pingInterval(20, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+
+    private val _state = MutableStateFlow(BridgeState())
+    val state: StateFlow<BridgeState> = _state.asStateFlow()
+
+    private var socket: WebSocket? = null
+    private var loop: Job? = null
+    @Volatile private var link: BridgePrefs.Link? = null
+
+    /** Connects with link, and keeps reconnecting until stop(). */
+    fun start(link: BridgePrefs.Link) {
+        this.link = link
+        _state.update { it.copy(hostName = link.host) }
+        loop?.cancel()
+        socket?.close(1000, "new link")
+        loop = scope.launch {
+            var backoff = 500L
+            while (true) {
+                val closed = CompletableDeferred<Unit>()
+                connect(link, closed)
+                closed.await()
+                if (_state.value.connection == BridgeState.Connection.INCOMPATIBLE) break // retrying cannot help
+                val wasConnected = _state.value.connection == BridgeState.Connection.CONNECTED
+                _state.update { it.copy(connection = BridgeState.Connection.WAITING) }
+                // Back off while the host is not there (serve not running, PC asleep).
+                backoff = if (wasConnected) 1_000L else (backoff * 2).coerceAtMost(30_000L)
+                delay(backoff)
+            }
+        }
+    }
+
+    fun stop() {
+        loop?.cancel()
+        socket?.close(1000, "bye")
+        socket = null
+        _state.update { it.copy(connection = BridgeState.Connection.WAITING) }
+    }
+
+    private fun connect(link: BridgePrefs.Link, closed: CompletableDeferred<Unit>) {
+        _state.update { it.copy(connection = BridgeState.Connection.CONNECTING, outdated = BridgeState.Outdated.NONE) }
+        val req = Request.Builder().url("ws://127.0.0.1:${link.port}/v1").build()
+        socket = client.newWebSocket(req, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                val hello = Hello(token = link.token, lastSeq = _state.value.lastSeq, session = _state.value.session, appVersion = appVersion)
+                webSocket.send(Protocol.encode(Protocol.HELLO, hello, now()))
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val m = Protocol.decode(text) ?: return
+                val next = _state.updateAndGetCompat { it.apply(m) }
+                if (next.connection == BridgeState.Connection.INCOMPATIBLE) {
+                    webSocket.close(1000, "host too old")
+                    return
+                }
+                onMessage(m, next)
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                if (code == Protocol.CLOSE_INCOMPATIBLE) _state.update { it.appOutdated() }
+                webSocket.close(1000, null)
+            }
+
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (code == Protocol.CLOSE_INCOMPATIBLE) _state.update { it.appOutdated() }
+                closed.complete(Unit)
+            }
+
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                closed.complete(Unit)
+            }
+        })
+    }
+
+    /** Sends the answer to a 🔴 question. Returns false when the host is not reachable. */
+    fun reply(id: String, decision: String): Boolean {
+        val ok = socket?.send(Protocol.encode(Protocol.CONFIRM_REPLY, ConfirmReply(id, decision), now())) ?: false
+        if (ok) _state.update { it.answered(id) }
+        return ok
+    }
+
+    fun pause(paused: Boolean): Boolean =
+        socket?.send(Protocol.encodeElement(if (paused) Protocol.PAUSE else Protocol.RESUME, JsonObject(emptyMap()), now())) ?: false
+
+    private fun now() = Instant.now().toString()
+
+    private inline fun MutableStateFlow<BridgeState>.updateAndGetCompat(f: (BridgeState) -> BridgeState): BridgeState {
+        while (true) {
+            val prev = value
+            val next = f(prev)
+            if (compareAndSet(prev, next)) return next
+        }
+    }
+}
+```
+
+`android/app/src/main/kotlin/tech/hybriq/adbuddy/AdbuddyApp.kt`:
+
+```kotlin
+package tech.hybriq.adbuddy
+
+import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import tech.hybriq.adbuddy.bridge.Bridge
+
+class AdbuddyApp : Application() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** The channel with the host, shared by the service, the receivers and the UI. */
+    lateinit var bridge: Bridge
+        private set
+
+    override fun onCreate() {
+        super.onCreate()
+        bridge = Bridge(scope, BuildConfigInfo.versionName(this)) { _, _ -> }
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_STATUS, getString(R.string.channel_status), NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_CONFIRM, getString(R.string.channel_confirm), NotificationManager.IMPORTANCE_HIGH))
+    }
+
+    companion object {
+        const val CHANNEL_STATUS = "status"
+        const val CHANNEL_CONFIRM = "confirm"
+    }
+}
+```
+
+- [ ] **Paso 4: Ejecutar y ver que pasan**
+
+```bash
+cd android && gradle --no-daemon :app:testDebugUnitTest
+```
+
+Esperado: `BUILD SUCCESSFUL` y todos los tests en verde.
+
+- [ ] **Paso 5: Commit**
+
+```bash
+git add android
+git commit -F - <<'EOF'
+feat(android): cliente del canal con reconexión y preferencias del enlace
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+EOF
+```
+
+### Tarea 10: `TokenProvider`, servicio en primer plano e interfaz
+
+Esta tarea completa la app de §3.1 (paso 6.1), §4.5-4.6, §5.2 y §6. Sus piezas se usan entre sí (el proveedor arranca el servicio, el servicio abre `MainActivity` y sincroniza las notificaciones), por eso van juntas.
+- **`TokenProvider`:** `ContentProvider` exportado que solo atiende al uid 2000: `call` devuelve `error=not the shell user` a cualquier otro, y `openFile` lanza `SecurityException`. Métodos: `ping` (versión y puerto), `requestSetup` (guarda el nombre del PC y deja el consentimiento en `pending`) y `getSetupConsent`. `openFile("/handshake", "w")` devuelve una tubería; el JSON que escribe el host se valida (token de 64 hex, puerto 1024-65535, nombre saneado), se guarda en `BridgePrefs` y se arranca `BridgeService`.
+- **`BridgeService`:** servicio en primer plano `specialUse` (con tipo solo desde Android 14) que mantiene vivo el proceso, con una notificación fija con el estado y el botón Pausar/Reanudar.
+- **Confirmaciones:** cada pregunta 🔴 es una notificación de prioridad alta con Rechazar, Permitir y, si el host lo ofrece, Permitir durante la sesión. Permitir exige desbloquear (`setAuthenticationRequired`, Android 12+). La notificación caduca con la pregunta y desaparece cuando se responde en otro sitio. Con la app abierta, la misma pregunta sale en un diálogo.
+- **Consentimiento:** la pantalla solo aparece mientras el host espera, con lo que hará el PC.
+- **Inicio:** estado de la conexión, Pausar/Reanudar, Cortar/Reactivar acceso (S1: `adb_wifi_enabled=0` y `adb_enabled=0`) y el diario con filtro por nivel.
+- **Accesibilidad:** el servicio mínimo que activa el host; su trabajo llega en M5.
+
+**Ficheros:**
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/TokenProvider.kt`
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/BridgeService.kt`
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/confirm/ConfirmNotifier.kt`
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/confirm/ConfirmReceiver.kt`
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/control/CutAccess.kt`
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/a11y/AgentAccessibilityService.kt`
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/MainActivity.kt`
+- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/Screens.kt`
+- Test: `android/app/src/androidTest/kotlin/tech/hybriq/adbuddy/TokenProviderTest.kt`
+
+**Interfaces:**
+- Consume: todo lo anterior.
+- Produce: `TokenProvider`; `BridgeService.start(context)`, `ACTION_PAUSE`/`ACTION_RESUME`; `ConfirmNotifier.sync(context, state)`, `ConfirmReceiver` (`ACTION_REPLY`, `EXTRA_ID`, `EXTRA_DECISION`); `CutAccess.cut/restore/isCut`; `AgentAccessibilityService`; `MainActivity` (`ACTION_SETUP`, `EXTRA_CONFIRM`); `ConsentScreen`, `HomeScreen`, `ConfirmDialog`.
+
+> Tras esta tarea el proyecto debe compilar entero y sin avisos de lint: `gradle :app:assembleDebug :app:lintDebug`.
+
+> El test instrumentado del `TokenProvider` necesita un emulador (`gradle :app:connectedDebugAndroidTest`); nunca el móvil del usuario.
+
+- [ ] **Paso 1: Escribir los tests que fallan**
+
+`android/app/src/androidTest/kotlin/tech/hybriq/adbuddy/TokenProviderTest.kt`:
+
+```kotlin
+package tech.hybriq.adbuddy
+
+import android.net.Uri
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/**
+ * Spec §10: the TokenProvider refuses anyone but the shell user. The test
+ * runs in the app's own process (not uid 2000), like any other app would.
+ */
+@RunWith(AndroidJUnit4::class)
+class TokenProviderTest {
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val uri = Uri.parse("content://tech.hybriq.adbuddy.bridge")
+
+    @Test fun callsFromAnAppAreRefused() {
+        for (method in listOf("ping", "requestSetup", "getSetupConsent")) {
+            val res = context.contentResolver.call(uri, method, null, null)!!
+            assertEquals(method, "not the shell user", res.getString("error"))
+        }
+    }
+
+    @Test fun handshakeFromAnAppIsRefused() {
+        try {
+            context.contentResolver.openOutputStream(Uri.parse("content://tech.hybriq.adbuddy.bridge/handshake"))!!.use {
+                it.write("{}".toByteArray())
+            }
+            fail("an app could write the handshake")
+        } catch (e: SecurityException) {
+            // expected
+        }
+    }
+}
+```
+
+- [ ] **Paso 2: Ejecutarlos y ver que fallan**
+
+```bash
+cd android && gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+```
+
+Esperado: `assembleDebug` falla: el manifiesto declara `TokenProvider`, `BridgeService`, `MainActivity`, `ConfirmReceiver` y `AgentAccessibilityService`, que aún no existen.
+
+- [ ] **Paso 3: Implementar**
 
 `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/TokenProvider.kt`:
 
@@ -4883,274 +5227,6 @@ class TokenProvider : ContentProvider() {
 }
 ```
 
-- [ ] **Paso 4: Ejecutar y ver que pasan**
-
-```bash
-cd android && gradle --no-daemon :app:testDebugUnitTest
-```
-
-Esperado: `BUILD SUCCESSFUL` y todos los tests en verde.
-
-- [ ] **Paso 5: Commit**
-
-```bash
-git add android
-git commit -F - <<'EOF'
-feat(android): TokenProvider que solo atiende al usuario shell y guarda el handshake
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-EOF
-```
-
-### Tarea 10: Cliente del canal y servicio en primer plano
-
-`Bridge` es el cliente OkHttp de `ws://127.0.0.1:<puerto>/v1`:
-- manda `hello` con el token y `lastSeq`;
-- aplica cada mensaje a `BridgeState`;
-- reconecta con espera exponencial (de 0,5 s hasta 30 s; vuelve a 1 s tras haber estado conectado);
-- responde `confirm.reply` y envía `pause`/`resume`;
-- si el host cierra con 4001 (app demasiado antigua) o su `welcome` es de un protocolo antiguo, deja de reconectar y el estado dice qué hay que actualizar.
-
-`BridgeService` es el servicio en primer plano `specialUse` que mantiene vivo el proceso: una notificación fija con el estado y el botón Pausar/Reanudar. `AdbuddyApp` crea los canales de notificación y guarda el `Bridge`. El test JVM usa MockWebServer como host falso.
-
-**Ficheros:**
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/Bridge.kt`
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/BridgeService.kt`
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/AdbuddyApp.kt`
-- Test: `android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/BridgeTest.kt`
-
-**Interfaces:**
-- Consume: `Protocol`, `BridgeState` (8), `BridgePrefs` (9).
-- Produce: `Bridge(scope, appVersion, onMessage)` con `state: StateFlow<BridgeState>`, `start(Link)`, `stop()`, `reply(id, decision): Boolean`, `pause(Boolean): Boolean`; `BridgeService.start(context)`, `ACTION_PAUSE`/`ACTION_RESUME`; `AdbuddyApp.bridge`, `CHANNEL_STATUS`, `CHANNEL_CONFIRM`.
-
-- [ ] **Paso 1: Escribir los tests que fallan**
-
-`android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/BridgeTest.kt`:
-
-```kotlin
-package tech.hybriq.adbuddy.bridge
-
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import org.junit.After
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertTrue
-import org.junit.Before
-import org.junit.Test
-
-/** The client against a fake host speaking the protocol. */
-class BridgeTest {
-    private val server = MockWebServer()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val fromApp = LinkedBlockingQueue<String>()
-    private var hostSide: WebSocket? = null
-    private val token = "0123456789abcdef".repeat(4)
-
-    @Before fun setUp() {
-        server.enqueue(MockResponse.Builder().webSocketUpgrade(object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) { hostSide = webSocket }
-            override fun onMessage(webSocket: WebSocket, text: String) { fromApp.add(text) }
-        }).build())
-        server.start()
-    }
-
-    @After fun tearDown() {
-        scope.cancel()
-        server.close()
-    }
-
-    @Test fun helloQuestionAndReply() {
-        val bridge = Bridge(scope, "0.2.0") { _, _ -> }
-        bridge.start(BridgePrefs.Link(token, server.port, "PC"))
-
-        val hello = Protocol.decode(fromApp.poll(5, TimeUnit.SECONDS)!!)!!
-        assertEquals(Protocol.HELLO, hello.type)
-        assertEquals(token, Protocol.payload<Hello>(hello)!!.token)
-        assertEquals(Protocol.VERSION, Protocol.payload<Hello>(hello)!!.protocol)
-
-        hostSide!!.send("""{"v":1,"type":"welcome","ts":"x","payload":{"session":"s_1","fromSeq":1,"protocol":1}}""")
-        hostSide!!.send("""{"v":1,"seq":1,"type":"confirm.request","ts":"x","payload":{"id":"j_1","title":"Restart","rawCommand":"adb shell reboot","expiresAt":"2026-09-30T01:04:03Z"}}""")
-        val deadline = System.currentTimeMillis() + 5000
-        while (bridge.state.value.pending.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(10)
-        assertEquals(1, bridge.state.value.pending.size)
-
-        assertTrue(bridge.reply("j_1", Decision.DENY))
-        val reply = Protocol.decode(fromApp.poll(5, TimeUnit.SECONDS)!!)!!
-        assertEquals(Protocol.CONFIRM_REPLY, reply.type)
-        val r = Protocol.payload<ConfirmReply>(reply)
-        assertNotNull(r)
-        assertEquals("deny", r!!.decision)
-        assertTrue(bridge.state.value.pending.isEmpty())
-        bridge.stop()
-    }
-
-    @Test fun aHostThatSaysUpdateStopsTheRetries() {
-        val bridge = Bridge(scope, "0.1.0") { _, _ -> }
-        bridge.start(BridgePrefs.Link(token, server.port, "PC"))
-        fromApp.poll(5, TimeUnit.SECONDS)!! // hello
-        hostSide!!.close(Protocol.CLOSE_INCOMPATIBLE, "update the ADBuddy app")
-        val deadline = System.currentTimeMillis() + 5000
-        while (bridge.state.value.connection != BridgeState.Connection.INCOMPATIBLE && System.currentTimeMillis() < deadline) Thread.sleep(10)
-        assertEquals(BridgeState.Connection.INCOMPATIBLE, bridge.state.value.connection)
-        assertEquals(BridgeState.Outdated.APP, bridge.state.value.outdated)
-        Thread.sleep(1500) // longer than the first retry
-        assertEquals("no reconnection after an incompatible close", 1, server.requestCount)
-        bridge.stop()
-    }
-}
-```
-
-- [ ] **Paso 2: Ejecutarlos y ver que fallan**
-
-```bash
-cd android && gradle --no-daemon :app:testDebugUnitTest
-```
-
-Esperado: no compila: `Unresolved reference: Bridge`.
-
-- [ ] **Paso 3: Implementar**
-
-`android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/Bridge.kt`:
-
-```kotlin
-package tech.hybriq.adbuddy.bridge
-
-import java.time.Instant
-import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonObject
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-
-/**
- * The app end of the channel (spec §5.2): a WebSocket client to
- * ws://127.0.0.1:<port>/v1, which `adb reverse` carries to the host. One per
- * process; BridgeService keeps the process alive while it runs.
- */
-class Bridge(
-    private val scope: CoroutineScope,
-    private val appVersion: String,
-    private val onMessage: (Message, BridgeState) -> Unit,
-) {
-    private val client = OkHttpClient.Builder()
-        .pingInterval(20, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .build()
-
-    private val _state = MutableStateFlow(BridgeState())
-    val state: StateFlow<BridgeState> = _state.asStateFlow()
-
-    private var socket: WebSocket? = null
-    private var loop: Job? = null
-    @Volatile private var link: BridgePrefs.Link? = null
-
-    /** Connects with link, and keeps reconnecting until stop(). */
-    fun start(link: BridgePrefs.Link) {
-        this.link = link
-        _state.update { it.copy(hostName = link.host) }
-        loop?.cancel()
-        socket?.close(1000, "new link")
-        loop = scope.launch {
-            var backoff = 500L
-            while (true) {
-                val closed = CompletableDeferred<Unit>()
-                connect(link, closed)
-                closed.await()
-                if (_state.value.connection == BridgeState.Connection.INCOMPATIBLE) break // retrying cannot help
-                val wasConnected = _state.value.connection == BridgeState.Connection.CONNECTED
-                _state.update { it.copy(connection = BridgeState.Connection.WAITING) }
-                // Back off while the host is not there (serve not running, PC asleep).
-                backoff = if (wasConnected) 1_000L else (backoff * 2).coerceAtMost(30_000L)
-                delay(backoff)
-            }
-        }
-    }
-
-    fun stop() {
-        loop?.cancel()
-        socket?.close(1000, "bye")
-        socket = null
-        _state.update { it.copy(connection = BridgeState.Connection.WAITING) }
-    }
-
-    private fun connect(link: BridgePrefs.Link, closed: CompletableDeferred<Unit>) {
-        _state.update { it.copy(connection = BridgeState.Connection.CONNECTING, outdated = BridgeState.Outdated.NONE) }
-        val req = Request.Builder().url("ws://127.0.0.1:${link.port}/v1").build()
-        socket = client.newWebSocket(req, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                val hello = Hello(token = link.token, lastSeq = _state.value.lastSeq, appVersion = appVersion)
-                webSocket.send(Protocol.encode(Protocol.HELLO, hello, now()))
-            }
-
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                val m = Protocol.decode(text) ?: return
-                val next = _state.updateAndGetCompat { it.apply(m) }
-                if (next.connection == BridgeState.Connection.INCOMPATIBLE) {
-                    webSocket.close(1000, "host too old")
-                    return
-                }
-                onMessage(m, next)
-            }
-
-            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                if (code == Protocol.CLOSE_INCOMPATIBLE) _state.update { it.appOutdated() }
-                webSocket.close(1000, null)
-            }
-
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (code == Protocol.CLOSE_INCOMPATIBLE) _state.update { it.appOutdated() }
-                closed.complete(Unit)
-            }
-
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                closed.complete(Unit)
-            }
-        })
-    }
-
-    /** Sends the answer to a 🔴 question. Returns false when the host is not reachable. */
-    fun reply(id: String, decision: String): Boolean {
-        val ok = socket?.send(Protocol.encode(Protocol.CONFIRM_REPLY, ConfirmReply(id, decision), now())) ?: false
-        if (ok) _state.update { it.answered(id) }
-        return ok
-    }
-
-    fun pause(paused: Boolean): Boolean =
-        socket?.send(Protocol.encodeElement(if (paused) Protocol.PAUSE else Protocol.RESUME, JsonObject(emptyMap()), now())) ?: false
-
-    private fun now() = Instant.now().toString()
-
-    private inline fun MutableStateFlow<BridgeState>.updateAndGetCompat(f: (BridgeState) -> BridgeState): BridgeState {
-        while (true) {
-            val prev = value
-            val next = f(prev)
-            if (compareAndSet(prev, next)) return next
-        }
-    }
-}
-```
-
 `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/BridgeService.kt`:
 
 ```kotlin
@@ -5161,6 +5237,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
@@ -5180,8 +5257,9 @@ class BridgeService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, statusNotification(BridgeState()),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        // specialUse exists from Android 14; before that the service has no type.
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, statusNotification(BridgeState()), type)
         val app = application as AdbuddyApp
         lifecycleScope.launch {
             app.bridge.state.collect { s ->
@@ -5246,94 +5324,6 @@ class BridgeService : LifecycleService() {
     }
 }
 ```
-
-`android/app/src/main/kotlin/tech/hybriq/adbuddy/AdbuddyApp.kt`:
-
-```kotlin
-package tech.hybriq.adbuddy
-
-import android.app.Application
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import tech.hybriq.adbuddy.bridge.Bridge
-
-class AdbuddyApp : Application() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    /** The channel with the host, shared by the service, the receivers and the UI. */
-    lateinit var bridge: Bridge
-        private set
-
-    override fun onCreate() {
-        super.onCreate()
-        bridge = Bridge(scope, BuildConfigInfo.versionName(this)) { _, _ -> }
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL_STATUS, getString(R.string.channel_status), NotificationManager.IMPORTANCE_LOW))
-        nm.createNotificationChannel(NotificationChannel(CHANNEL_CONFIRM, getString(R.string.channel_confirm), NotificationManager.IMPORTANCE_HIGH))
-    }
-
-    companion object {
-        const val CHANNEL_STATUS = "status"
-        const val CHANNEL_CONFIRM = "confirm"
-    }
-}
-```
-
-- [ ] **Paso 4: Ejecutar y ver que pasan**
-
-```bash
-cd android && gradle --no-daemon :app:testDebugUnitTest
-```
-
-Esperado: `BUILD SUCCESSFUL` y todos los tests en verde.
-
-- [ ] **Paso 5: Commit**
-
-```bash
-git add android
-git commit -F - <<'EOF'
-feat(android): cliente del canal con reconexión y servicio en primer plano con Pausar
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-EOF
-```
-
-### Tarea 11: Confirmaciones, consentimiento, actividad y Cortar acceso
-
-Esta tarea completa la interfaz de §6 y §4.5-4.6:
-- **Confirmaciones:** cada pregunta 🔴 es una notificación de prioridad alta con Rechazar, Permitir y, si el host lo ofrece, Permitir durante la sesión. Permitir exige desbloquear (`setAuthenticationRequired`, Android 12+). La notificación caduca con la pregunta y desaparece cuando se responde en otro sitio. Con la app abierta, la misma pregunta sale en un diálogo.
-- **Consentimiento:** la pantalla solo aparece mientras el host espera, con lo que hará el PC.
-- **Inicio:** estado de la conexión, Pausar/Reanudar, Cortar/Reactivar acceso (S1: `adb_wifi_enabled=0` y `adb_enabled=0`) y el diario con filtro por nivel.
-- **Accesibilidad:** el servicio mínimo que activa el host; su trabajo llega en M5.
-
-**Ficheros:**
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/confirm/ConfirmNotifier.kt`
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/confirm/ConfirmReceiver.kt`
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/control/CutAccess.kt`
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/a11y/AgentAccessibilityService.kt`
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/MainActivity.kt`
-- Crear: `android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/Screens.kt`
-
-**Interfaces:**
-- Consume: todo lo anterior.
-- Produce: `ConfirmNotifier.sync(context, state)`, `ConfirmReceiver` (`ACTION_REPLY`, `EXTRA_ID`, `EXTRA_DECISION`); `CutAccess.cut/restore/isCut`; `AgentAccessibilityService`; `MainActivity` (`ACTION_SETUP`, `EXTRA_CONFIRM`); `ConsentScreen`, `HomeScreen`, `ConfirmDialog`.
-
-> Tras esta tarea el proyecto debe compilar entero: `gradle :app:assembleDebug :app:lintDebug`.
-
-- [ ] **Paso 1: Escribir los tests que fallan**
-
-- [ ] **Paso 2: Ejecutarlos y ver que fallan**
-
-```bash
-cd android && gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
-```
-
-Esperado: `assembleDebug` falla: el manifiesto declara `MainActivity`, `ConfirmReceiver` y `AgentAccessibilityService`, que aún no existen.
-
-- [ ] **Paso 3: Implementar**
 
 `android/app/src/main/kotlin/tech/hybriq/adbuddy/confirm/ConfirmNotifier.kt`:
 
@@ -5533,6 +5523,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
@@ -5569,6 +5560,7 @@ class MainActivity : ComponentActivity() {
                         host = prefs.consentHost,
                         onAnswer = { accepted ->
                             prefs.consent = if (accepted) "granted" else "denied"
+                            if (accepted) Toast.makeText(this, R.string.consent_done, Toast.LENGTH_LONG).show()
                             showConsent = false
                         },
                     )
@@ -5677,15 +5669,16 @@ fun HomeScreen(state: BridgeState, bridge: Bridge, focusConfirm: String?) {
                 }
             }
             val cut = CutAccess.isCut(context.contentResolver)
+            val cutFailed = stringResource(R.string.cut_failed)
+            val cutRestored = stringResource(R.string.cut_restored)
+            val cutDone = stringResource(R.string.cut_done)
             OutlinedButton(onClick = {
                 val ok = if (cut) CutAccess.restore(context.contentResolver) else CutAccess.cut(context.contentResolver)
-                message = context.getString(
-                    when {
-                        !ok -> R.string.cut_failed
-                        cut -> R.string.cut_restored
-                        else -> R.string.cut_done
-                    },
-                )
+                message = when {
+                    !ok -> cutFailed
+                    cut -> cutRestored
+                    else -> cutDone
+                }
             }) { Text(stringResource(if (cut) R.string.action_restore else R.string.action_cut)) }
         }
         message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
@@ -5762,13 +5755,13 @@ Esperado: `BUILD SUCCESSFUL` y todos los tests en verde.
 ```bash
 git add android
 git commit -F - <<'EOF'
-feat(android): confirmaciones con desbloqueo, consentimiento, panel de actividad y Cortar acceso
+feat(android): TokenProvider, servicio en primer plano, confirmaciones con desbloqueo, consentimiento, panel y Cortar acceso
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
 ```
 
-### Tarea 12: CI de la app, finales de línea y documentación
+### Tarea 11: CI de la app, finales de línea y documentación
 
 La CI compila y prueba la app en Linux, solo en `pull_request` y en push a `main` con cambios en `android/`. `.gitattributes` fija LF en los ficheros de la app. El README del host explica la app, y la lista de antes de publicar recoge la clave de firma y la release del APK.
 
@@ -5955,17 +5948,17 @@ EOF
 | Requisito (spec) | Tarea |
 |---|---|
 | §3.1.5: instalar la app con `adb install` (release con checksum o `--apk`); si ya está, se salta | 4, 6 |
-| §3.1.6: consentimiento en la app (`requestSetup`), `pm grant WRITE_SECURE_SETTINGS` y accesibilidad sin quitar las otras | 4, 6, 9, 11 |
+| §3.1.6: consentimiento en la app (`requestSetup`), `pm grant WRITE_SECURE_SETTINGS` y accesibilidad sin quitar las otras | 4, 6, 9, 10 |
 | §3.1.7: túnel `adb reverse` y entrega del token | 4, 5 |
-| §4.5: `confirm.request` al móvil, notificación de prioridad alta, Permitir / Rechazar / Permitir durante la sesión (misma regla y argumentos), desbloqueo en Android 12+, diálogo con la app abierta, terminal de reserva, caducidad | 1, 2, 5, 11 |
-| §4.6 Pausar: el daemon bloquea todo lo del shim | 2, 5, 10, 11 |
-| §4.6 Cortar acceso: `adb_wifi_enabled=0` y `adb_enabled=0`; Reactivar, con el aviso del puerto remoto | 11 |
+| §4.5: `confirm.request` al móvil, notificación de prioridad alta, Permitir / Rechazar / Permitir durante la sesión (misma regla y argumentos), desbloqueo en Android 12+, diálogo con la app abierta, terminal de reserva, caducidad | 1, 2, 5, 10 |
+| §4.6 Pausar: el daemon bloquea todo lo del shim | 2, 5, 9, 10 |
+| §4.6 Cortar acceso: `adb_wifi_enabled=0` y `adb_enabled=0`; Reactivar, con el aviso del puerto remoto | 10 |
 | §5.2: solo `127.0.0.1`, puerto fijo, token de 256 bits por arranque, `TokenProvider` solo con uid 2000, `hello`/`welcome`, reanudación con búfer de 2000 o `snapshot` | 1, 4, 5, 9, 10 |
 | §5.3: sobre `{v, seq, type, ts, payload}`; los tipos de M2 (`session.state`, `confirm.request`/`reply`, `journal.entry`, `notice`, `pause`/`resume`) | 1, 8 |
-| §6: servicio en primer plano `specialUse`, permisos, pantallas de consentimiento y actividad, textos EN/ES, minSdk 30 | 8-11 |
+| §6: servicio en primer plano `specialUse`, permisos, pantallas de consentimiento y actividad, textos EN/ES, minSdk 30 | 8-10 |
 | §9 (fallos): diagnóstico guiado de configuración, adb, móvil, app y entorno, con `Run:` y `Guidance:` (idea de ARTEMIS) | 7 |
-| §5.3: compatibilidad de versiones entre la app y el host (cierre 4001, estado INCOMPATIBLE) | 1, 8, 10, 11 |
-| §10: el `TokenProvider` rechaza a quien no es shell (test instrumentado); una app sin token no entra (test del servidor); protocolo contra una app simulada (e2e); el token no aparece en líneas de comandos (e2e) | 1, 5, 9 |
+| §5.3: compatibilidad de versiones entre la app y el host (cierre 4001, estado INCOMPATIBLE) | 1, 8, 9, 10 |
+| §10: el `TokenProvider` rechaza a quien no es shell (test instrumentado); una app sin token no entra (test del servidor); protocolo contra una app simulada (e2e); el token no aparece en líneas de comandos (e2e) | 1, 5, 10 |
 
 Fuera de M2 (con su hito):
 - chat, PTY y `attach` (M3);
@@ -5977,7 +5970,7 @@ Fuera de M2 (con su hito):
 
 ## Validaciones manuales pendientes (necesitan al usuario y un móvil)
 
-1. **Compilar la app por primera vez** (`gradle :app:assembleDebug`) y corregir lo que pida la compilación, sin cambiar el comportamiento.
+1. **Test instrumentado del `TokenProvider`** en un emulador (`gradle :app:connectedDebugAndroidTest`).
 2. **`content write` en Android 11-17.** La entrega del token por stdin depende de `adb shell content write --uri … < stdin`. Hay que comprobar que existe y que llega al `openFile` del proveedor en el Pixel (Android 17) y en un Android 11-13. Si no, la alternativa es la de ARTEMIS: un receptor de broadcast protegido con `android:permission="android.permission.WRITE_SECURE_SETTINGS"` (solo el usuario shell o el sistema pueden enviarlo). Pero ahí el token va en la línea de comandos de `am broadcast` un instante. Si se adopta, hay que rotar el token en cada conexión y decidirlo como ruling.
 3. **Arrancar el servicio en primer plano desde el proveedor**, con la app fuera de la optimización de batería y en segundo plano: Android 12+ lo restringe. Si falla, el host puede lanzar `am start-foreground-service -n tech.hybriq.adbuddy/.bridge.BridgeService` tras el handshake.
 4. **Accesibilidad por adb en un Android 13-15 de otro fabricante** (criterio 4 de §1), con otro servicio ya activo, para comprobar que no se quita.
