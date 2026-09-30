@@ -351,3 +351,62 @@ func hasRule(r Result, rule string) bool {
 	}
 	return false
 }
+
+// T3 round 4: variables the shell itself runs or expands as code (PS4 before
+// each `set -x` line, prompts, ENV, BASH_ENV, FPATH, EXECSHELL) hide code
+// from the classifier: assigning one, in any form, is special.
+func TestAssigningACodeVariableIsSpecial(t *testing.T) {
+	c := mustNew(t, "")
+	for _, line := range []string{
+		"PS4='$(reboot)'; set -x; ls",
+		"export PS4='$(reboot)'; set -x; ls",
+		"PS4='$(reboot)' sh -xc ls",
+		"env ENV=/data/local/tmp/x sh -i -c ls",
+		"FPATH=/data/local/tmp; foo",
+		"PS4=x",
+		"typeset PS4=x",
+		"readonly PS4=x",
+		"export ENV=/data/local/tmp/x",
+		"typeset -x FPATH=/data/local/tmp",
+		`sh -c "PS4='\$(reboot)'; set -x; ls"`,
+		"echo $(PS4=x; set -x; ls)",
+		"for PS4 in '$(reboot)'; do set -x; ls; done",
+		": ${PS4='$(reboot)'}",
+		"echo '$(reboot)' | read PS4",
+		"read -r PS4?prompt",
+		"read $X",
+		"set -A PS4 x",
+		"env -i PS4=x ls",
+		"env -u A PS4=x ls",
+		"BASH_ENV=/data/local/tmp/x ls",
+		"EXECSHELL=/data/local/tmp/x ls",
+		"PS1='$(reboot)'",
+		"typeset -n r=PS4; r=x",
+		`typeset "$X"=x`,
+		"(( PS4 = 1 ))",
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red || !r.Special || !hasRule(r, "shell.script") {
+			t.Errorf("%q: %v special=%v (%s: %s), want red special shell.script", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+		}
+	}
+	// Without a code variable, nothing changes.
+	for _, k := range []struct {
+		line    string
+		level   Level
+		special bool
+	}{
+		{"set -x; ls", Green, false},
+		{"X=1; echo $X", Green, false},
+		{"export FOO=1", Green, false},
+		{"for p in a b; do echo $p; done", Green, false},
+		{"PATH=/data/local/tmp ls", Red, false},
+		{"read line", Red, false},
+		{"set -- PS4", Green, false},
+	} {
+		r := c.Classify(sh(k.line))
+		if r.Level != k.level || r.Special != k.special {
+			t.Errorf("%q: %v special=%v (%s: %s), want %v special=%v", k.line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason, k.level, k.special)
+		}
+	}
+}

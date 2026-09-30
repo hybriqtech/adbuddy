@@ -50,13 +50,13 @@ func (c *Classifier) classifyScript(src string, depth int) []Finding {
 		case *syntax.WordIter:
 			// The loop variable of `for NAME in …` / `select NAME in …`.
 			if n.Name != nil && dangerousVar(n.Name.Value) {
-				out = append(out, redFinding("shell.assign", "sets "+n.Name.Value, []string{n.Name.Value}, textAssign))
+				out = append(out, assignFinding(n.Name.Value, []string{n.Name.Value}))
 			}
 		case *syntax.ParamExp:
 			// ${X=…} and ${X:=…} assign to X as a side effect.
 			if n.Exp != nil && n.Param != nil && dangerousVar(n.Param.Value) &&
 				(n.Exp.Op == syntax.AssignUnset || n.Exp.Op == syntax.AssignUnsetOrNull) {
-				out = append(out, redFinding("shell.assign", "sets "+n.Param.Value, []string{n.Param.Value}, textAssign))
+				out = append(out, assignFinding(n.Param.Value, []string{n.Param.Value}))
 			}
 		case *syntax.BinaryArithm:
 			if isArithAssign(n.Op) {
@@ -91,7 +91,7 @@ func (c *Classifier) evalCall(ce *syntax.CallExpr, depth int) []Finding {
 	var out []Finding
 	for _, a := range ce.Assigns {
 		if a.Name != nil && dangerousVar(a.Name.Value) {
-			out = append(out, redFinding("shell.assign", "sets "+a.Name.Value, []string{a.Name.Value}, textAssign))
+			out = append(out, assignFinding(a.Name.Value, []string{a.Name.Value}))
 		}
 	}
 	if len(ce.Args) == 0 {
@@ -104,8 +104,29 @@ func (c *Classifier) evalCall(ce *syntax.CallExpr, depth int) []Finding {
 	return append(out, c.evalWords(ws, depth)...)
 }
 
+// codeVars are variables the shell itself runs or expands as code, with no
+// command that says so: PS4 (expanded, $(…) included, before each line
+// that `set -x` traces), the prompts PS1 to PS3, ENV and BASH_ENV (startup
+// files), FPATH (where an unknown command name is autoloaded from as a
+// function) and EXECSHELL (the shell that runs a file without #!).
+var codeVars = map[string]bool{
+	"PS1": true, "PS2": true, "PS3": true, "PS4": true, "ENV": true, "BASH_ENV": true, "FPATH": true, "EXECSHELL": true,
+}
+
+// assignFinding is for an assignment to a dangerous variable: a code
+// variable hides code from the classifier, so it cannot be analysed.
+func assignFinding(name string, words []string) Finding {
+	if codeVars[name] {
+		return unanalysable("shell.script", "sets "+name+", which the shell runs or expands as code", words, textScript)
+	}
+	return redFinding("shell.assign", "sets "+name, words, textAssign)
+}
+
 // dangerousVar reports variables that change which program or library runs.
 func dangerousVar(name string) bool {
+	if codeVars[name] {
+		return true
+	}
 	switch name {
 	case "PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "IFS", "ENV", "BASH_ENV", "FPATH",
 		"CLASSPATH", "BOOTCLASSPATH", "SYSTEMSERVERCLASSPATH", "ANDROID_ROOT", "ANDROID_DATA", "ANDROID_RUNTIME_ROOT":
@@ -119,14 +140,18 @@ func dangerousVar(name string) bool {
 // variant, for a `-n` option in any combination (which turns a name into a
 // reference to another variable), for any argument whose variable name is not
 // a static literal (quoted, computed or a $(…) that could expand to an
-// assignment), and for an assignment to a dangerous variable.
+// assignment), and for an assignment to a dangerous variable. The names it
+// cannot read, like an assignment to a code variable, are special: they may
+// hide code (see codeVars).
 func checkDeclClause(d *syntax.DeclClause) []Finding {
 	var out []Finding
-	red := func(reason string, words ...string) {
-		out = append(out, redFinding("shell.assign", reason, words, textAssign))
+	// A name the classifier cannot read may be a code variable (see
+	// codeVars): it cannot be analysed.
+	unknownName := func(reason string, words ...string) {
+		out = append(out, unanalysable("shell.script", reason, words, textScript))
 	}
 	if d.Variant.Value == "nameref" {
-		red("nameref makes a variable a reference to another", d.Variant.Value)
+		unknownName("nameref makes a variable a reference to another", d.Variant.Value)
 	}
 	for _, a := range d.Args {
 		switch {
@@ -136,20 +161,20 @@ func checkDeclClause(d *syntax.DeclClause) []Finding {
 			w := wordOf(a.Value)
 			switch {
 			case w.Dynamic:
-				red("declare argument only known on the phone", d.Variant.Value)
+				unknownName("declare argument only known on the phone", d.Variant.Value)
 			case strings.HasPrefix(w.Value, "-"):
 				if strings.ContainsRune(w.Value[1:], 'n') {
-					red("typeset -n makes a variable a reference to another", w.Value)
+					unknownName("typeset -n makes a variable a reference to another", w.Value)
 				}
 			case strings.HasPrefix(w.Value, "+"):
 				// +x, +n… only remove attributes; harmless.
 			default:
 				// e.g. typeset "PATH"=/x: the name was quoted, so it is not
 				// a static literal the classifier can trust.
-				red("declare with a quoted or computed variable name", w.Value)
+				unknownName("declare with a quoted or computed variable name", w.Value)
 			}
 		case (a.Value != nil || a.Array != nil) && dangerousVar(a.Name.Value):
-			red("sets "+a.Name.Value, d.Variant.Value, a.Name.Value)
+			out = append(out, assignFinding(a.Name.Value, []string{d.Variant.Value, a.Name.Value}))
 		}
 	}
 	return out
@@ -180,7 +205,7 @@ func checkArithTarget(x syntax.ArithmExpr) []Finding {
 		return []Finding{redFinding("shell.assign", "arithmetic assignment to a name only known on the phone", []string{"$((…))"}, textAssign)}
 	}
 	if dangerousVar(got.Value) {
-		return []Finding{redFinding("shell.assign", "sets "+got.Value, []string{got.Value}, textAssign)}
+		return []Finding{assignFinding(got.Value, []string{got.Value})}
 	}
 	return nil
 }
@@ -226,6 +251,10 @@ func (c *Classifier) evalWords(ws []Word, depth int) []Finding {
 		}
 	case "find":
 		return c.evalFind(ws, depth)
+	case "env", "read", "getopts", "set":
+		if why := setsCodeVar(ws); why != "" {
+			return []Finding{unanalysable("shell.script", why, vals, textScript)}
+		}
 	case "toybox", "busybox":
 		if len(ws) == 1 {
 			return []Finding{{Rule: "toybox.list", Level: Green, Title: Text{EN: "List toybox commands", ES: "Listar los comandos de toybox"}, Words: vals}}
@@ -313,6 +342,55 @@ func trapRunsCode(args []Word) bool {
 		return false
 	}
 	return true
+}
+
+// setsCodeVar reports why env, read, getopts or set -A assigns a code
+// variable (see codeVars), or a variable whose name is only known on the
+// phone, which may be one; "" if none does.
+func setsCodeVar(ws []Word) string {
+	switch ws[0].Value {
+	case "env":
+		for i := 1; i < len(ws); i++ {
+			v := ws[i].Value
+			switch {
+			case v == "-u":
+				i++
+			case strings.HasPrefix(v, "-"):
+			case strings.Contains(v, "="):
+				if name := v[:strings.Index(v, "=")]; codeVars[name] {
+					return "env sets " + name + ", which the shell runs or expands as code"
+				}
+			default:
+				return "" // the command
+			}
+		}
+	case "read", "getopts":
+		// read [options] name?prompt…; getopts optstring name [args…]. Any
+		// word may be the name: fail closed.
+		for _, w := range ws[1:] {
+			if w.Dynamic {
+				return ws[0].Value + " into a variable only known on the phone"
+			}
+			if name, _, _ := strings.Cut(w.Value, "?"); codeVars[name] {
+				return ws[0].Value + " sets " + name + ", which the shell runs or expands as code"
+			}
+		}
+	case "set":
+		// set -A NAME / +A NAME assigns to an array variable.
+		for i := 1; i+1 < len(ws); i++ {
+			v := ws[i].Value
+			if v == "--" || v == "-" || len(v) < 2 || (v[0] != '-' && v[0] != '+') {
+				return ""
+			}
+			if strings.Contains(v[1:], "A") {
+				if n := ws[i+1]; n.Dynamic || codeVars[n.Value] {
+					return "set -A sets " + n.Value + ", which the shell may run or expand as code"
+				}
+				return ""
+			}
+		}
+	}
+	return ""
 }
 
 // findRuns are find's actions that run a command, ended by ";" (or by "+"
