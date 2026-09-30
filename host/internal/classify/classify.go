@@ -7,6 +7,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // Op is a change the host knows how to precheck and invert (spec §4.3).
@@ -170,7 +172,7 @@ func (c *Classifier) classifyExecOut(args []string) []Finding {
 	if strings.TrimSpace(line) == "" {
 		return []Finding{redFinding("shell.interactive", "exec-out without a command", args, textInteractive)}
 	}
-	return c.classifyScript(line, 0)
+	return c.classifyScript(line, scope{})
 }
 
 // adbEscapeArg quotes like adb's escape_arg: always single quotes, with each
@@ -201,7 +203,7 @@ func (c *Classifier) classifyShellCommand(args []string, options bool) []Finding
 	if strings.TrimSpace(line) == "" {
 		return []Finding{redFinding("shell.interactive", "interactive shell: the commands would come from stdin", args, textInteractive)}
 	}
-	return c.classifyScript(line, 0)
+	return c.classifyScript(line, scope{})
 }
 
 // aggregate combines fragment findings: highest level wins; more than one
@@ -287,6 +289,7 @@ func SplitGlobal(argv []string) (Global, []string) {
 type Word struct {
 	Value   string
 	Dynamic bool
+	node    *syntax.Word // the parsed word, if it came from the shell line
 }
 
 func lits(ss []string) []Word {

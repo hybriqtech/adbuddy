@@ -400,7 +400,7 @@ func TestAssigningACodeVariableIsSpecial(t *testing.T) {
 		{"X=1; echo $X", Green, false},
 		{"export FOO=1", Green, false},
 		{"for p in a b; do echo $p; done", Green, false},
-		{"PATH=/data/local/tmp ls", Red, false},
+		{"IFS=x; ls", Red, false}, // PATH is special since round 5
 		{"read line", Red, false},
 		{"set -- PS4", Green, false},
 	} {
