@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/coder/websocket v1.8.15
 	github.com/mattn/go-isatty v0.0.24
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1

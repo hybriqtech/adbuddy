@@ -25,7 +25,8 @@ type Request struct {
 	Detail     string
 	RawCommand string
 	ExpiresAt  time.Time
-	Special    bool // may cut the connection or affect ADBuddy
+	Special    bool   // may cut the connection or affect ADBuddy
+	Key        string // the rule and the exact arguments: what "allow during the session" covers
 }
 
 // Decision is the answer.
