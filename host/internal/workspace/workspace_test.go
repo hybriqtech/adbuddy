@@ -294,6 +294,9 @@ func TestAgentsSaysCompareCommandOutputAsText(t *testing.T) {
 	for _, want := range []string{
 		"Compare command output as text: `[ \"$(getprop sys.boot_completed)\" = 1 ]`, not `-eq`",
 		"numeric comparisons of command output need confirmation",
+		// M2.5: the shell ADBuddy reads, so the agent does not ask in vain.
+		"variables of your own with lower-case names (`pkg=…`, not `PKG=…`)",
+		"is not analysed and waits for the user's confirmation every time",
 	} {
 		if !strings.Contains(a, want) {
 			t.Errorf("AGENTS.md lacks %q", want)

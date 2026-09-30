@@ -145,6 +145,7 @@ Tailscale es opcional y se recomienda en la documentación y en la app.
   - se separan `;`, `&&`, `||`, `|` y los subshells;
   - `sh -c "…"` y `su -c` se analizan de forma recursiva;
   - gana el nivel más alto de todos los fragmentos.
+- **Lista blanca de shell (M2.5).** El evaluador solo admite lo que lista: órdenes simples, listas, tuberías, `if`, `for … in`, `while`/`until`, `( )`, `{ }`, `[ … ]`, `$(…)`, aritmética con números probados, redirecciones a `/dev/null` y variables propias del script, con nombre en minúsculas y nunca exportadas. Cualquier otra construcción, expansión, builtin o nombre de variable es 🔴 especial. El detalle está en [la spec de M2.5](2026-09-30-adbuddy-m2.5-clasificador-lista-blanca-design.md).
 - **Niveles:**
   - 🟢 **Lectura:** se ejecuta sin más y se registra.
     - Ejemplos: `devices`, `getprop`, `dumpsys`, `pm list`, `pm path`, `ls`, `cat`, `stat`, `du`, `df`, `screencap`, `uiautomator dump`, `settings get`, `pull`, `logcat -d`, `cmd package list`, `content query`.
@@ -462,6 +463,8 @@ Las rutas exactas de skills y contexto de Codex, Gemini CLI y OpenCode se verifi
 ## 10. Tests y calidad
 
 - **Clasificador (lo más crítico):** batería de tests por tablas con cientos de comandos reales y su nivel, inverso y descripción esperados. Incluye casos de engaño: `sh -c` anidados, comillas, `;` escondidos, variables, `$(…)`, heredocs y alias. Cada regla nueva lleva su test.
+  - **Corpus como datos** (`host/internal/classify/testdata/`): las órdenes habituales con el nivel que deben conservar, y las que subieron en M2.5 con su motivo.
+  - **Tests diferenciales contra mksh real:** cada caso lleva una orden centinela y se ejecuta en el mksh de un emulador de Android. El resultado queda grabado en `oracle.jsonl`; si mksh ejecuta la centinela, el clasificador debe dar 🔴 especial. Los casos de la lista blanca se generan: cada forma admitida, con cada manera de meterle un valor peligroso.
 - **Host:**
   - diario y deshacer (incluidas las copias de seguridad de `push`);
   - protocolo WS contra una app simulada;

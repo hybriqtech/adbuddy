@@ -1,0 +1,50 @@
+name: emulator
+
+# Tests that need a real Android: the classifier's oracle (what the phone's
+# mksh does with each differential case). Like host.yml: only on pull
+# requests and pushes to main, and only when what it checks changes.
+on:
+  pull_request:
+    paths: ["host/internal/classify/**", "scripts/emulator.sh", ".github/workflows/emulator.yml"]
+  push:
+    branches: [main]
+    paths: ["host/internal/classify/**", "scripts/emulator.sh", ".github/workflows/emulator.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  mksh:
+    name: oracle against the emulator's mksh
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: host/go.mod
+          cache-dependency-path: host/go.sum
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # The image's SDK package is "android-37.0", as in android.yml.
+      - name: Install the emulator and the system image
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" emulator "system-images;android-37.0;google_apis;x86_64" > /dev/null
+      - name: Start the emulator
+        shell: bash # with pipefail: a failed start fails this step, not the next one
+        run: scripts/emulator.sh start | sed "s/^export //; s/'//g" >> "$GITHUB_ENV"
+      - name: Record the oracle
+        working-directory: host
+        # Without the variables the test would skip and the step would pass.
+        run: test -n "$ADBUDDY_MKSH_SERIAL" && go test -timeout 60m -count=1 -run TestRecordOracle ./internal/classify
+      - name: The recorded oracle is the one in the repository
+        run: git diff --exit-code -- host/internal/classify/testdata
+      - name: Stop the emulator
+        if: always()
+        run: scripts/emulator.sh stop

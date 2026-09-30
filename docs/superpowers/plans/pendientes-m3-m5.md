@@ -1,15 +1,25 @@
-# Pendientes para planes futuros (M2.5, M3, M5, M6 y v1.1+)
+# Pendientes para planes futuros (M2.5b, M3, M5, M6 y v1.1+)
 
 Notas que hay que incorporar cuando se escriban esos planes (desde el 2026-09-29).
 
-## M2.5 · Clasificador con lista blanca y mksh real
+## M2.5b · La app en el emulador
 
-Motivo (M2, Tarea 3): seis rondas de arreglos cerrando, uno a uno, engaños de mksh que ejecutan texto sin analizar (`PS4`/`ENV`/`FPATH`, `trap`/`alias`/`builtin`, `find -exec`, trabajos en segundo plano, aritmética que reevalúa variables, operadores dinámicos de `test`, `typeset -L/-R/-Z` y su herencia a shells hijas). Además, varias conclusiones se tomaron "de memoria del código de mksh", sin comprobarlas.
+Spec: `docs/superpowers/specs/2026-09-30-adbuddy-m2.5-clasificador-lista-blanca-design.md` (§7). M2.5a (clasificador con lista blanca, corpus como datos, oráculo de mksh y arnés del emulador) está hecho.
 
-- **Lista blanca para 🟢/🟡:** una orden solo baja de 🔴 si el parser la entiende entera: órdenes conocidas con palabras literales, o variables probadas (literales, números, bucles `for` sobre literales). Cualquier construcción no reconocida (builtins de shell no listados, expansiones no probadas en contextos que evalúan, asignaciones a variables especiales) es 🔴 especial. Empezar por inventariar lo que hoy es 🟢 en el corpus y asegurar que sigue igual.
-- **Tests diferenciales contra mksh real:** compilar el mksh de AOSP para el PC (o usar un emulador) y ejecutar un corpus de engaños con una orden centinela (`touch /tmp/pwned`) en lugar de `reboot`: si la centinela aparece, el clasificador debe haber dado 🔴 especial. Mismo corpus para las órdenes habituales (no deben subir).
-- **Emulador Android** (imagen de sistema sin permisos de administrador si WHPX/Hyper-V ya está activo) para `connectedDebugAndroidTest` (`TokenProviderTest` con el uid del shell) y para automatizar validaciones manuales de M2: `content write` por stdin, servicio en primer plano desde el proveedor, Cortar/Reactivar.
-- Menores aparcados de M2 que caen aquí: `a=([X]=1)` con índice en el literal (M-3); `$(( $X = 1 ))` con nombre desconocido.
+- **Tests instrumentados** (`connectedDebugAndroidTest`) y **tests del host contra el emulador** (paquete `host/internal/emutest`, con `ADBUDDY_EMULATOR_SERIAL`, que `scripts/emulator.sh start` ya exporta).
+- **Validaciones manuales de M2 que se automatizan:** 1 (`TokenProvider` y el uid del shell), 2 (`content write` por stdin), 3 (servicio en primer plano desde el proveedor), 6 (Cortar acceso y Reactivar) y 10 (`ContentObserver` de `adb_wifi_enabled`). La 7 (extremo a extremo), solo si sale sin tocar el protocolo ni la app.
+- **Primera tarea del plan:** comprobar si el emulador sobrevive a `adb_enabled=0` y vuelve al reactivar; de eso depende cómo se automatiza la 6.
+- **El job `emulator` de la CI** ya existe: M2.5b le añade los tests de la app y `android/**` a sus rutas.
+- `android/local.properties` no se versiona: crearlo con `sdk.dir=C\:/Users/<usuario>/AppData/Local/Android/Sdk`.
+
+### Ampliaciones de la lista blanca, si el uso real las pide
+
+Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y una regrabación del oráculo:
+
+- `case … esac`;
+- `[[ ]]` con operadores de texto y de fichero;
+- nombres de variable en mayúsculas que no sean de la shell ni del entorno (hoy solo minúsculas: `PKG=…` pide confirmación);
+- `print`, `wait`, `unset` de nombres propios.
 
 ## M3 · Chat: daemon con PTY
 
@@ -43,6 +53,8 @@ Motivo (M2, Tarea 3): seis rondas de arreglos cerrando, uno a uno, engaños de m
 - **Fijar en el host el SHA-256 del certificado de firma del APK** (revisión de la Tarea 4 de M2): el `.sha256` de la release solo protege la integridad, no una release comprometida en la primera instalación.
 
 ## Más adelante (v1.1+)
+
+- **Reescribir la orden antes de ejecutarla** (spec de M2.5, §2.3): el host regeneraría el script desde el árbol, con cada palabra literal entre comillas simples, y ejecutaría esa forma canónica en vez del texto del agente. Cierra del todo la diferencia entre el parser de Go y mksh, que hoy solo vigilan los tests diferenciales. Cambia lo que se ejecuta (el diario tendría dos textos) y toca el shim y el daemon.
 
 - **Proxy del protocolo del servidor adb.** Herramientas como ARTEMIS (`adbutils`, `uiautomator2`) hablan con el servidor adb por su protocolo, sin el binario `adb`, así que se saltan el shim. Un proxy que atienda ese protocolo y clasifique las peticiones `host:transport` / `shell:` las pondría bajo el clasificador, el diario y las confirmaciones. Es un trabajo grande: evaluarlo cuando haya demanda.
 
