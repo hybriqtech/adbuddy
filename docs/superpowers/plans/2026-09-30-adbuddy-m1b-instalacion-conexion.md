@@ -1558,7 +1558,7 @@ Une M1b (§3.1): `setup` descarga platform-tools (o usa `--adb`), arranca el ser
 - Consume: `platformtools`, `pairing`, `device` (tareas 1-3); de M1a `adb.Runner`, `config`, `workspace.Init` (con `Profile` y `Force`), `agent.Known`/`InstallHint`, `isTerminal`, `loadEnv`, `deviceWait`.
 - Produce: `agent.Found`, `agent.Detect(lookPath)`; `cli.HelpURL`; `adbuddy setup [--adb] [--agent] [--workspace] [--code] [--yes]` con los errores `AGENT_SESSION`, `TOOLS_DOWNLOAD_FAILED` (75), `ADB_FAILED`, `PAIRING_FAILED`, `PAIRING_TIMEOUT` (75), `DEVICE_NOT_FOUND` (75), `DEVICE_UNREADABLE`, `WORKSPACE_FAILED`, `CONFIG_UNWRITABLE` (78); `ADBUDDY_REPOSITORY_URL` para tests; el helper `fileExists`.
 
-> `setup_test.go` añade un `TestMain` al paquete `cli` que compila el adb falso: ningún otro fichero de test de `cli` puede tener otro `TestMain`.
+> `setup_test.go` usa `fakeADB(t)` de `main_test.go` (M1a), que compila el adb falso una vez con el `go` del PATH: `newSetupEnv` lo llama antes de cambiar `PATH`, porque si no el primer test de `setup` no encontraría `go`.
 
 > El test de extremo a extremo de M1a cambia una línea: `serve` consulta ahora `getprop service.adb.tcp.port` al conectar.
 
