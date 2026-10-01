@@ -15,6 +15,17 @@ object Links {
         return uri.host?.lowercase()
     }
 
+    /**
+     * The text a link is drawn with: its own text and, unless that already is the address or its domain, the real domain in
+     * brackets. The visible text can never pass for another site: `[https://mibanco.com](https://evil.example)` reads
+     * `https://mibanco.com (evil.example)`. Null url domain (not a web link): the text alone.
+     */
+    fun label(text: String, url: String): String {
+        val d = domain(url) ?: return text
+        val t = text.trim()
+        return if (t == url || t.equals(d, ignoreCase = true)) text else "$text ($d)"
+    }
+
     data class Span(val start: Int, val end: Int, val url: String)
 
     private val URL = Regex("https?://[^\\s<>\"]+")

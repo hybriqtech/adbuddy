@@ -95,7 +95,7 @@ private fun annotate(inlines: List<Inline>, onLink: (String) -> Unit, link: Text
             is Inline.Strong -> withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(i.text) }
             is Inline.Em -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(i.text) }
             is Inline.Code -> withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg)) { append(i.text) }
-            is Inline.Link -> withLink(LinkAnnotation.Clickable(tag = i.url, styles = link, linkInteractionListener = { onLink(i.url) })) { append(i.text) }
+            is Inline.Link -> withLink(LinkAnnotation.Clickable(tag = i.url, styles = link, linkInteractionListener = { onLink(i.url) })) { append(Links.label(i.text, i.url)) }
         }
     }
 }

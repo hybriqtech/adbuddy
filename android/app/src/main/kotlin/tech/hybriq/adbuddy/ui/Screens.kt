@@ -151,7 +151,13 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
     AlertDialog(
         onDismissRequest = onClose,
         // The title comes from the host's rules, but it never takes the whole dialog.
-        title = { Text(stringResource(R.string.confirm_title, r.title), maxLines = 3, overflow = TextOverflow.Ellipsis) },
+        title = {
+            Column {
+                // Whose question it is: ADBuddy's own (the shim), not the agent's (PermissionCard).
+                Text(stringResource(R.string.confirm_label), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.confirm_title, r.title), maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+        },
         text = {
             val view = LocalView.current
             DisposableEffect(view) {

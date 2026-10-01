@@ -1,7 +1,6 @@
 package tech.hybriq.adbuddy.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -19,6 +18,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -26,10 +27,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.PermissionRequest
+import tech.hybriq.adbuddy.chat.ChatController
 import tech.hybriq.adbuddy.chat.PermissionUi
 import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
@@ -38,25 +42,49 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
  * The agent's own questions (Claude Code's permissions, spec M4 §7.3), above the input: the oldest one, with
  * its full text, and a count of the others. Not an ADBuddy 🔴 question (ConfirmDialog): the label says whose it is.
  * The card is not removed here: it goes when the host's permission.resolved arrives, wherever it was answered.
+ * Whether it may be answered is [ChatController]'s (canAnswer, guardLeftMs): this only re-reads it when something changes
+ * (the list, the connection, an answer on its way) and while a second or the promote guard runs out.
  */
 @Composable
 fun PermissionCards(
     permissions: List<PermissionRequest>,
     connected: Boolean,
     hostNow: () -> Long,
-    onAnswer: (PermissionRequest, String) -> Unit,
+    chat: ChatController,
     modifier: Modifier = Modifier,
 ) {
     if (permissions.isEmpty()) return
+    val answeringIds by chat.answering.collectAsStateWithLifecycle()
+    val first = permissions.first()
     var now by remember { mutableLongStateOf(hostNow()) }
-    LaunchedEffect(permissions) {
+    var guardLeft by remember { mutableLongStateOf(chat.guardLeftMs(first.id)) }
+    var canAnswer by remember { mutableStateOf(chat.canAnswer(first.id)) }
+    // Keyed also by the connection and the answers: a reconnection re-arms the guard, and that is not a change of the list.
+    LaunchedEffect(permissions, connected, answeringIds) {
+        var recheck = true
         while (true) {
             now = hostNow()
-            delay(PermissionUi.nextTickMs(permissions, now) ?: break)
+            guardLeft = chat.guardLeftMs(first.id)
+            canAnswer = chat.canAnswer(first.id)
+            val tick = PermissionUi.nextTickMs(permissions, now, guardLeft)
+            if (tick != null) {
+                delay(tick)
+            } else if (recheck) {
+                // The controller re-arms the guard in its own coroutine, maybe just after this one first read it.
+                recheck = false
+                delay(RECHECK_MS)
+            } else {
+                break
+            }
         }
     }
-    PermissionCard(permissions.first(), permissions.size - 1, connected, now, onAnswer, modifier)
+    PermissionCard(first, permissions.size - 1, connected, now, first.id in answeringIds, guardLeft, canAnswer, modifier) { p, d -> chat.answerPermission(p.id, d) }
 }
+
+private const val RECHECK_MS = 100L
+
+/** The detail may be this tall on screen; taller, and the person must scroll to its end before any button works. */
+private val DETAIL_MAX_HEIGHT = 120.dp
 
 @Composable
 fun PermissionCard(
@@ -64,8 +92,12 @@ fun PermissionCard(
     others: Int,
     connected: Boolean,
     hostNow: Long,
-    onAnswer: (PermissionRequest, String) -> Unit,
+    answering: Boolean,
+    guardLeftMs: Long,
+    /** ChatController.canAnswer(p.id): the first card, not answered, past its guard. The card does not work this out. */
+    controllerCanAnswer: Boolean,
     modifier: Modifier = Modifier,
+    onAnswer: (PermissionRequest, String) -> Unit,
 ) {
     Surface(
         color = MaterialTheme.colorScheme.tertiaryContainer,
@@ -77,16 +109,22 @@ fun PermissionCard(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(stringResource(R.string.perm_title), style = MaterialTheme.typography.labelMedium)
             Text(p.summary.ifEmpty { p.tool }, style = MaterialTheme.typography.titleMedium)
-            if (p.detail.isNotEmpty() && p.detail != p.summary) {
+            // The scroll state starts "can scroll forward" until the text is measured: the buttons stay off until it is known there is no more to read.
+            val scroll = key(p.id, p.detail) { rememberScrollState() }
+            val hasDetail = p.detail.isNotEmpty() && p.detail != p.summary
+            val unread = hasDetail && scroll.canScrollForward
+            if (hasDetail) {
                 Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), shape = MaterialTheme.shapes.small) {
+                    // Wrapped (never sideways: no text hides to the right) and never taller than the cap without a way to read the rest.
                     Text(
                         p.detail,
-                        Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(8.dp),
+                        Modifier.heightIn(max = DETAIL_MAX_HEIGHT).verticalScroll(scroll).padding(8.dp),
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
-                        softWrap = false,
+                        softWrap = true,
                     )
                 }
+                if (unread) Text(stringResource(R.string.perm_scroll), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
             }
             val left = PermissionUi.secondsLeft(p, hostNow)
             val status = when {
@@ -98,7 +136,7 @@ fun PermissionCard(
             if (status != null) Text(status, style = MaterialTheme.typography.labelSmall)
             if (others > 0) Text(pluralStringResource(R.plurals.perm_more, others, others), style = MaterialTheme.typography.labelSmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val can = { d: String -> PermissionUi.canAnswer(p, d, connected, hostNow) }
+                val can = { d: String -> controllerCanAnswer && !unread && PermissionUi.canAnswer(p, d, connected, hostNow, answering, guardLeftMs) }
                 Button(onClick = { onAnswer(p, PermissionUi.ALLOW) }, enabled = can(PermissionUi.ALLOW)) { Text(stringResource(R.string.perm_allow)) }
                 if (p.allowAlways) {
                     OutlinedButton(onClick = { onAnswer(p, PermissionUi.ALLOW_ALWAYS) }, enabled = can(PermissionUi.ALLOW_ALWAYS)) {
@@ -117,7 +155,8 @@ private fun PermissionCardPreview() {
     AdbuddyTheme(dynamic = false) {
         PermissionCard(
             PermissionRequest("p1", "Bash", "Create the notes file", "touch notes.txt", "2026-10-01T10:10:00Z", true),
-            others = 1, connected = true, hostNow = java.time.Instant.parse("2026-10-01T10:08:30Z").toEpochMilli(), onAnswer = { _, _ -> },
+            others = 1, connected = true, hostNow = java.time.Instant.parse("2026-10-01T10:08:30Z").toEpochMilli(),
+            answering = false, guardLeftMs = 0, controllerCanAnswer = true, onAnswer = { _, _ -> },
         )
     }
 }

@@ -34,7 +34,7 @@ object PermissionUi {
      * Not while an answer to it is on its way ([answering]: until permission.resolved or a lost connection) nor
      * while it has just been promoted ([guardLeftMs], ChatController.guardLeftMs).
      */
-    fun canAnswer(p: PermissionRequest, decision: String, connected: Boolean, hostNowMs: Long, answering: Boolean = false, guardLeftMs: Long = 0): Boolean {
+    fun canAnswer(p: PermissionRequest, decision: String, connected: Boolean, hostNowMs: Long, answering: Boolean, guardLeftMs: Long): Boolean {
         if (!connected || answering || guardLeftMs > 0) return false
         if (!isDecision(decision)) return false
         if (decision == ALLOW_ALWAYS && !p.allowAlways) return false
@@ -45,7 +45,7 @@ object PermissionUi {
      * The next time (in ms from now) a card changes by itself (its seconds, or its expiry), or null when none does.
      * [guardLeftMs]: what is left of the promote guard of the first card, which also ends by itself.
      */
-    fun nextTickMs(permissions: List<PermissionRequest>, hostNowMs: Long, guardLeftMs: Long = 0): Long? {
+    fun nextTickMs(permissions: List<PermissionRequest>, hostNowMs: Long, guardLeftMs: Long): Long? {
         val counting = permissions.any { secondsLeft(it, hostNowMs)?.let { s -> s > 0 } == true }
         return when {
             guardLeftMs > 0 -> if (counting) minOf(guardLeftMs, 1000L) else guardLeftMs

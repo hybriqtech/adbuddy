@@ -34,9 +34,11 @@ import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.ChatMessage
 import tech.hybriq.adbuddy.bridge.ChatState
+import tech.hybriq.adbuddy.chat.ChatController
 import tech.hybriq.adbuddy.chat.Links
 import tech.hybriq.adbuddy.chat.Outgoing
 import tech.hybriq.adbuddy.chat.Timeline
+import tech.hybriq.adbuddy.chat.ToolStrip
 import tech.hybriq.adbuddy.files.DownloadState
 import tech.hybriq.adbuddy.files.Draft
 import tech.hybriq.adbuddy.term.TerminalFeed
@@ -76,6 +78,9 @@ fun ChatScreen(
     terminal: TerminalFeed?,
     snackbar: SnackbarHostState,
     actions: ChatActions,
+    /** The agent's permission cards are the controller's: with none (a preview) there are none. */
+    chat: ChatController? = null,
+    hostNow: () -> Long = { 0L },
     /** The remote-mode switch (RemoteCard), shown above the conversation; a preview passes an empty one. */
     remoteCard: @Composable () -> Unit,
 ) {
@@ -85,8 +90,11 @@ fun ChatScreen(
     var link by remember { mutableStateOf<Pair<String, String>?>(null) }
     var askNew by rememberSaveable { mutableStateOf(false) }
     val items = Timeline.of(state.chat, state.sessionState.conversation, outgoing)
+    val tools = ToolStrip.of(state.chat, state.sessionState.state)
     val listState = rememberLazyListState()
-    LaunchedEffect(items.size) { if (items.isNotEmpty()) listState.animateScrollToItem(items.size - 1) }
+    // The strip is the last item: the list follows it too, so what the agent is doing is in view.
+    val rows = items.size + if (tools.isEmpty()) 0 else 1
+    LaunchedEffect(rows) { if (rows > 0) listState.animateScrollToItem(rows - 1) }
     val terminalOn = terminalShown && terminal != null
 
     Scaffold(
@@ -116,8 +124,12 @@ fun ChatScreen(
                         onAttachment = actions.attachment, onRetry = actions.retry, onDiscard = actions.discard,
                     )
                 }
+                if (tools.isNotEmpty()) item(key = "tools") { ToolStripView(tools) }
             }
             if (terminalOn) QuickKeysRow { terminal!!.input(it.bytes) }
+            if (chat != null) {
+                PermissionCards(state.chat.permissions, state.connection == BridgeState.Connection.CONNECTED, hostNow, chat)
+            }
             DraftChips(drafts, actions.removeDraft, actions.retryDraft)
             InputBar(
                 text, { text = it }, drafts, actions.pickPhotos, actions.pickFile, actions.capture,

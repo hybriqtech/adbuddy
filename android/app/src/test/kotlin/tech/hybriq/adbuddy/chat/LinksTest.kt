@@ -34,4 +34,15 @@ class LinksTest {
         assertNull(Links.domain("https://"))
         assertNull(Links.domain("mailto:a@b.c"))
     }
+
+    @Test fun aLinkTextNeverPassesForAnotherDomain() {
+        assertEquals("https://mibanco.com (evil.example)", Links.label("https://mibanco.com", "https://evil.example"))
+        assertEquals("mibanco.com (evil.example)", Links.label("mibanco.com", "https://evil.example/x"))
+        assertEquals("la web (example.com)", Links.label("la web", "https://example.com/a"))
+        assertEquals("evil.example", Links.label("evil.example", "https://EVIL.example/x"))
+        assertEquals("https://a.com/x", Links.label("https://a.com/x", "https://a.com/x"))
+        // userinfo does not fool the domain: the host is what follows the @
+        assertEquals("https://mibanco.com@evil.example (evil.example)", Links.label("https://mibanco.com@evil.example", "https://mibanco.com@evil.example/p"))
+        assertEquals("evil.example", Links.domain("https://mibanco.com@evil.example/p"))
+    }
 }

@@ -81,6 +81,7 @@
     <string name="perm_title">Claude Code pregunta</string>
     <string name="perm_allow">Sí</string>
     <string name="perm_always">Sí, siempre</string>
+    <string name="perm_scroll">Hay más texto: desplaza hasta el final para responder</string>
     <string name="perm_deny">No</string>
     <string name="perm_offline">Sin conexión: respóndelo en el PC</string>
     <string name="perm_expired">Se acabó el tiempo: respóndelo en el PC</string>
@@ -89,6 +90,10 @@
         <item quantity="one">%1$d más esperando</item>
         <item quantity="other">%1$d más esperando</item>
     </plurals>
+    <string name="tool_running">en curso</string>
+    <string name="tool_done">hecho</string>
+    <string name="tool_error">falló</string>
+    <string name="confirm_label">ADBuddy: acción delicada</string>
     <string name="notif_asking">Claude Code necesita una respuesta</string>
     <string name="chat_retry">Reintentar</string>
     <string name="chat_discard">Descartar</string>
