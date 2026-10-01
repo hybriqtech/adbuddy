@@ -6,7 +6,14 @@
     "id": "u_1",
     "ok": true,
     "result": {
-      "clicked": true
+      "clicked": true,
+      "bounds": [
+        42,
+        610,
+        980,
+        680
+      ],
+      "how": "action"
     }
   }
 }

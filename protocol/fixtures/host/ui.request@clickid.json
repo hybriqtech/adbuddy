@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "ui.request",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "u_4",
+    "op": "click",
+    "args": {
+      "id": "com.android.settings:id/search_action_bar"
+    },
+    "expiresAt": "2026-10-01T10:00:10Z"
+  }
+}

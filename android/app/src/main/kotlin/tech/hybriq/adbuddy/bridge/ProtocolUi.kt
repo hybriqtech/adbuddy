@@ -24,9 +24,12 @@ data class UiRequest(
 @Serializable
 data class UiResponse(val id: String, val ok: Boolean, val result: JsonElement? = null, val error: ErrorReply? = null)
 
-/** How to reach the phone away from home (empty and 0: unknown). */
+/**
+ * How to reach the phone away from home (empty and 0: unknown), and the
+ * protected apps the host's guard refuses to act on (M5 spec §4.3).
+ */
 @Serializable
-data class DeviceInfo(val tailscaleIp: String = "", val wifiAdbPort: Int = 0)
+data class DeviceInfo(val tailscaleIp: String = "", val wifiAdbPort: Int = 0, val protectedApps: List<String> = emptyList())
 
 /** Turns remote mode on (adb tcpip 5555) or off (adb usb). */
 @Serializable

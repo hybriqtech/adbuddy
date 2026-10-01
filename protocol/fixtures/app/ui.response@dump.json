@@ -1,0 +1,81 @@
+{
+  "v": 1,
+  "type": "ui.response",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "u_2",
+    "ok": true,
+    "result": {
+      "locked": false,
+      "package": "com.android.settings",
+      "activity": "com.android.settings.Settings",
+      "width": 1344,
+      "height": 2992,
+      "rotation": 0,
+      "truncated": false,
+      "elements": [
+        {
+          "id": "android:id/title",
+          "text": "Network & internet",
+          "desc": "",
+          "hint": "",
+          "class": "TextView",
+          "bounds": [
+            42,
+            610,
+            980,
+            680
+          ],
+          "click": true,
+          "edit": false,
+          "scroll": false,
+          "focused": false,
+          "enabled": true,
+          "password": false,
+          "window": "app"
+        },
+        {
+          "id": "android:id/switch_widget",
+          "text": "",
+          "desc": "Wi-Fi",
+          "hint": "",
+          "class": "Switch",
+          "bounds": [
+            980,
+            700,
+            1302,
+            780
+          ],
+          "click": true,
+          "edit": false,
+          "scroll": false,
+          "focused": false,
+          "checked": false,
+          "enabled": true,
+          "password": false,
+          "window": "app"
+        },
+        {
+          "id": "com.example.bank:id/pin",
+          "text": "",
+          "desc": "",
+          "hint": "",
+          "class": "EditText",
+          "bounds": [
+            42,
+            900,
+            1302,
+            1000
+          ],
+          "click": true,
+          "edit": true,
+          "scroll": false,
+          "focused": true,
+          "enabled": true,
+          "password": true,
+          "window": "dialog"
+        }
+      ]
+    }
+  }
+}

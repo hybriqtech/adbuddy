@@ -25,10 +25,12 @@ type UIResponse struct {
 	Error  *ErrorReply     `json:"error,omitempty"`
 }
 
-// DeviceInfo is what the app knows of how to reach the phone away from home.
+// DeviceInfo is what the app knows of how to reach the phone away from home,
+// and the protected apps the host's guard refuses to act on (M5 spec §4.3).
 type DeviceInfo struct {
-	TailscaleIP string `json:"tailscaleIp,omitempty"`
-	WifiADBPort int    `json:"wifiAdbPort,omitempty"`
+	TailscaleIP   string   `json:"tailscaleIp,omitempty"`
+	WifiADBPort   int      `json:"wifiAdbPort,omitempty"`
+	ProtectedApps []string `json:"protectedApps,omitempty"`
 }
 
 // RemoteSet turns remote mode on (adb tcpip 5555) or off (adb usb).
