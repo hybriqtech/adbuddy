@@ -58,6 +58,10 @@ jobs:
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
           tail -n 200 /tmp/adbuddy-emulator.log || true
+          env | grep -E "^(ANDROID|XDG|HOME)" | sort || true
+          find / -name "adbuddy-api37*" -not -path "/proc/*" 2>/dev/null | head || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" list avd || true
+          "$ANDROID_HOME/emulator/emulator" -list-avds || true
           "$ADB" devices -l || true
           timeout 20 "$ADB" -s emulator-5580 shell getprop | grep -E "boot|init.svc.(surfaceflinger|zygote|system_server)" || true
           timeout 30 "$ADB" -s emulator-5580 logcat -d -b crash,system | tail -n 150 || true
