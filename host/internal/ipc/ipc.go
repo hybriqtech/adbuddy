@@ -61,6 +61,9 @@ const (
 	// KindRemote turns the remote mode on or off, or reads it (adbuddy remote):
 	// Argv is "on", "off" or "status". Never from the agent's session.
 	KindRemote = "remote"
+	// KindHook carries a Claude Code hook (adbuddy hook <event>, M4): Argv is
+	// the event, stdin its payload, stdout the decision, if any.
+	KindHook = "hook"
 )
 
 // Request is the first frame of every connection.
