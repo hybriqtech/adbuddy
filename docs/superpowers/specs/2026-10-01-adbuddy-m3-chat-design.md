@@ -46,7 +46,9 @@ M3b puede hacerse contra un host falso (los tests usan el protocolo y sus fixtur
 ### 3.1 Quién es dueño de qué
 
 - **`adbuddy serve`** sigue siendo el host en primer plano de su terminal: diario en vivo y preguntas 🔴 cuando la app no está (M2). Además lanza al agente en un **PTY propio** y es el único dueño de la sesión.
-- **PTY:** `github.com/UserExistsError/conpty` v0.1.4 en Windows (validado en S3: Unicode, bracketed paste, redimensionar, Esc, `/exit`) y `github.com/creack/pty` v1.1.24 en Linux y macOS. Las dos son MIT y Go puro (sin cgo: los binarios de M6a salen con `CGO_ENABLED=0`).
+- **PTY:** en Windows, un ConPTY propio sobre `golang.org/x/sys/windows` (`CreatePseudoConsole`, lista de atributos y `CreateProcess`); en Linux y macOS, `github.com/creack/pty` v1.1.24 (MIT). Todo es Go puro (sin cgo: los binarios de M6a salen con `CGO_ENABLED=0`).
+  - S3 validó ConPTY con `UserExistsError/conpty` v0.1.4 (Unicode, bracketed paste, redimensionar, Esc, `/exit`).
+  - La ronda 2 de M3a la quitó: dejaba abiertos en el host los extremos de la consola, y `Read` no terminaba al salir el agente. El ConPTY propio los cierra nada más crear la consola, como los ejemplos de Microsoft.
 - Una sesión por host (v1 §5.1). `epoch` y `conversation` (protocolo §5.1 y §7) son aleatorios y cambian con cada proceso del agente.
 
 ### 3.2 Arranque y ciclo de vida
@@ -101,7 +103,7 @@ El host alimenta un emulador de terminal en memoria con toda la salida del PTY. 
   - el emulador reconstruye bien la pantalla viva de Claude Code (cabecera, prompt, respuesta con Unicode y barra de estado), también tras redimensionar;
   - `Render()` separa las líneas con `
 ` sin ``, así que el host forma el `terminal.snapshot` como borrado (`ESC[2J ESC[H`), `Render()` con `
-` cambiado a `
+` cambiado a `
 ` y el cursor colocado en su posición (`CursorPosition`). Así redibujado en un emulador limpio sale idéntico;
   - Claude Code no hizo ninguna consulta a la terminal (posición del cursor, atributos). Las respuestas que genere el emulador del host se descartan: contestan las terminales de verdad (PC o xterm.js). Si un agente se queda esperando una respuesta sin ninguna terminal enganchada, se apunta como caso límite;
   - en una carpeta temporal nueva, Claude Code no mostró el diálogo de confianza, así que la detección (§3.3) queda como red de seguridad.
