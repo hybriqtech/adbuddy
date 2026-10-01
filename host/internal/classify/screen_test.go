@@ -63,6 +63,13 @@ func TestDumpsysLevels(t *testing.T) {
 		{sh("dumpsys -t 10 notification --reveal"), Red, "notifications.reveal", "", true},
 		{sh("dumpsys --reveal notification"), Red, "notifications.reveal", "", true},
 		{sh("dumpsys notification --reveal --proto"), Red, "notifications.reveal", "", true},
+		// Without a service (or with another one) the options reach every
+		// service, the notification one included.
+		{sh("dumpsys --noredact"), Red, "notifications.reveal", "", true},
+		{sh("dumpsys --reveal"), Red, "notifications.reveal", "", true},
+		{sh("dumpsys --noredact battery"), Red, "notifications.reveal", "", true},
+		{sh("dumpsys -t 10 --reveal"), Red, "notifications.reveal", "", true},
+		{sh("dumpsys meminfo --reveal"), Red, "notifications.reveal", "", true},
 		{sh("dumpsys window windows"), Green, "", "", false},
 		{sh("dumpsys activity top"), Green, "", "", false},
 		{sh("dumpsys -t 10 activity top"), Green, "", "", false},
@@ -81,6 +88,11 @@ func TestNotificationRevealCannotBeLoweredByAUserRule(t *testing.T) {
 		{sh("dumpsys notification --noredact"), Red, "notifications.reveal", "", true},
 		{sh("dumpsys notification --reveal"), Red, "notifications.reveal", "", true},
 		{sh("dumpsys -t 10 notification --reveal"), Red, "notifications.reveal", "", true},
+		{sh("dumpsys --noredact"), Red, "notifications.reveal", "", true},
+		{sh("dumpsys --reveal"), Red, "notifications.reveal", "", true},
+		{sh("dumpsys --noredact battery"), Red, "notifications.reveal", "", true},
+		{sh("dumpsys -t 10 --reveal"), Red, "notifications.reveal", "", true},
+		{sh("dumpsys meminfo --reveal"), Red, "notifications.reveal", "", true},
 		{sh("dumpsys notification"), Green, "", "", false},
 	})
 	r := c.Classify(sh("dumpsys notification --reveal"))

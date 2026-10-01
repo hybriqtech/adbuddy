@@ -74,14 +74,16 @@ func setIdentity(scope string, ws []Word, f *Finding) {
 // revealsNotifications reports whether a dumpsys line asks for the text of the
 // notifications unredacted: --noredact, or --reveal (AOSP's
 // NotificationManagerService DumpFilter.parseFromArguments treats both the
-// same), in any position of a line that names notification.
+// same), in any position. It does not need the notification service named:
+// dumpsys with no service, or with another one, hands its arguments to every
+// service it dumps, the notification one included.
 func revealsNotifications(v []string) bool {
-	notification, reveal := false, false
 	for _, w := range v[1:] {
-		notification = notification || w == "notification"
-		reveal = reveal || strings.HasPrefix(w, "--noredact") || strings.HasPrefix(w, "--reveal")
+		if strings.HasPrefix(w, "--noredact") || strings.HasPrefix(w, "--reveal") {
+			return true
+		}
 	}
-	return notification && reveal
+	return false
 }
 
 func specialReason(scope string, ws []Word, level Level) string {

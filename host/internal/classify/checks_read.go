@@ -238,7 +238,7 @@ func checkDate(ws []Word) checkResult {
 // start with --reset or --clear (procstats --clear, batterystats --reset-all,
 // usagestats --clear…) wipe the service's data.
 //
-// notification --noredact (in any position, after any option of dumpsys)
+// --noredact / --reveal (in any position, with or without a service)
 // prints the text of every app's notifications: 🔴.
 func checkDumpsys(ws []Word) checkResult {
 	if revealsNotifications(values(ws)) {
