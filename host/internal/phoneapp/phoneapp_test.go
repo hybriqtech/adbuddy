@@ -172,7 +172,7 @@ func TestHandshakeSendsTheTokenOnStdinOnly(t *testing.T) {
 		}
 		return "Result: Bundle[{ok=true, port=47123, nonce=" + sentHandshake(t, f).Nonce + "}]\n", true
 	}
-	if err := Handshake(context.Background(), f, testToken, 47123, "My PC; reboot"); err != nil {
+	if err := Handshake(context.Background(), f, verified(f), testToken, 47123, "My PC; reboot"); err != nil {
 		t.Fatal(err, f.calls)
 	}
 	h := sentHandshake(t, f)
@@ -192,7 +192,7 @@ func TestHandshakeSendsTheTokenOnStdinOnly(t *testing.T) {
 	}
 	first := h.Nonce
 	pings = 0
-	if err := Handshake(context.Background(), f, testToken, 47123, "My PC"); err != nil {
+	if err := Handshake(context.Background(), f, verified(f), testToken, 47123, "My PC"); err != nil {
 		t.Fatal(err, f.calls)
 	}
 	if sentHandshake(t, f).Nonce == first {
@@ -217,15 +217,15 @@ func TestHandshakeNeedsTheNonceAndThePort(t *testing.T) {
 	// The right port from an earlier handshake, but not this one's nonce:
 	// the app did not store the new token.
 	nonce = strings.Repeat("0", 32)
-	if err := Handshake(context.Background(), f, testToken, 47123, "My PC"); err == nil {
+	if err := Handshake(context.Background(), f, verified(f), testToken, 47123, "My PC"); err == nil {
 		t.Fatal("a stale handshake was accepted")
 	}
 	nonce, port = "", "1"
-	if err := Handshake(context.Background(), f, testToken, 47123, "My PC"); err == nil {
+	if err := Handshake(context.Background(), f, verified(f), testToken, 47123, "My PC"); err == nil {
 		t.Fatal("a handshake with another port was accepted")
 	}
 	port = "47123"
-	if err := Handshake(context.Background(), f, testToken, 47123, "My PC"); err != nil {
+	if err := Handshake(context.Background(), f, verified(f), testToken, 47123, "My PC"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -246,7 +246,7 @@ func TestHandshakeChecksItsInputs(t *testing.T) {
 	}
 	for _, c := range cases {
 		f := &fakeADB{answers: map[string][]string{writeKey: {""}}}
-		if err := Handshake(context.Background(), f, c.token, c.port, "My PC"); err == nil || len(f.calls) != 0 {
+		if err := Handshake(context.Background(), f, verified(f), c.token, c.port, "My PC"); err == nil || len(f.calls) != 0 {
 			t.Errorf("%q %d: %v %v", c.token, c.port, err, f.calls)
 		}
 	}
@@ -323,7 +323,7 @@ func TestCommandsHaveATimeLimit(t *testing.T) {
 	}
 	f = &fakeADB{hangAll: true}
 	err = within(t, 5*time.Second, func() error {
-		return Handshake(context.Background(), f, testToken, 47123, "My PC")
+		return Handshake(context.Background(), f, verified(f), testToken, 47123, "My PC")
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Handshake: %v", err)
@@ -364,7 +364,7 @@ func TestHandshakeHasATimeLimit(t *testing.T) {
 	// The write goes through, but ping hangs.
 	f := &fakeADB{answers: map[string][]string{writeKey: {""}}, hang: map[string]bool{pingKey: true}}
 	err := within(t, 5*time.Second, func() error {
-		return Handshake(context.Background(), f, testToken, 47123, "My PC")
+		return Handshake(context.Background(), f, verified(f), testToken, 47123, "My PC")
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("hanging ping: %v", err)
@@ -373,7 +373,7 @@ func TestHandshakeHasATimeLimit(t *testing.T) {
 	set(t, &pingEvery, time.Hour)
 	f = &fakeADB{answers: map[string][]string{writeKey: {""}, pingKey: {"Result: Bundle[{ok=true, port=0}]\n"}}}
 	err = within(t, 5*time.Second, func() error {
-		return Handshake(context.Background(), f, testToken, 47123, "My PC")
+		return Handshake(context.Background(), f, verified(f), testToken, 47123, "My PC")
 	})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("slow pings: %v", err)
@@ -517,6 +517,9 @@ func TestGivingNeedsTheCheckedApp(t *testing.T) {
 		}
 		if err := AskConsent(context.Background(), f, v, "My PC", time.Second, time.Millisecond); !errors.Is(err, ErrNoTrustedApp) {
 			t.Errorf("%s: AskConsent: %v", label, err)
+		}
+		if err := Handshake(context.Background(), f, v, testToken, 47123, "My PC"); !errors.Is(err, ErrNoTrustedApp) {
+			t.Errorf("%s: Handshake: %v", label, err)
 		}
 	}
 	check("zero Verified", Verified{})

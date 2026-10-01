@@ -338,8 +338,9 @@ var tokenRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // Each handshake carries a new nonce, and it only counts once ping returns
 // that nonce and the port: after the first setup ping always had the right
 // port, even when the app had not stored the new token. It takes at most
-// handshakeTimeout.
-func Handshake(ctx context.Context, a ADB, token string, port int, hostName string) error {
+// handshakeTimeout. v is the proof that the app is ours (Verifier.Verify): the
+// token goes to no other (spec M6a §6.3).
+func Handshake(ctx context.Context, a ADB, v Verified, token string, port int, hostName string) error {
 	if !tokenRe.MatchString(token) {
 		return errors.New("handshake: the token is not 64 lowercase hex digits")
 	}
@@ -357,6 +358,9 @@ func Handshake(ctx context.Context, a ADB, token string, port int, hostName stri
 	}
 	ctx, cancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer cancel()
+	if err := v.still(ctx, a); err != nil {
+		return err
+	}
 	cmd := shq.Join("content", "write", "--uri", "content://"+Authority+"/handshake")
 	if _, err := runFor(ctx, a, cmdTimeout, bytes.NewReader(body), "shell", cmd); err != nil {
 		return fmt.Errorf("the app refused the handshake: %w", err)

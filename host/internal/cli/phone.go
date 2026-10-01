@@ -36,6 +36,12 @@ type phoneLink struct {
 	log   io.Writer
 	agent string
 
+	// verifier checks the app installed (spec M6a §6.3). recheck is how
+	// Admit asks for a new connect() when an app that is not the verified
+	// one has connected.
+	verifier *phoneapp.Verifier
+	recheck  chan struct{}
+
 	// areas are what each milestone adds (phone_areas.go), and handlers
 	// their message handlers by type; set before the server starts.
 	areas    []area
@@ -105,6 +111,9 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf}
 	l.ui = newUILink(protectedAppsPath(e), app.Stderr)
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
+	if trust := phoneapp.LoadTrust(releaseCert, e.dirs.Data); trust.DevAPK != "" {
+		fmt.Fprintf(app.Stderr, "⚠ ADBuddy trusts a development build of the phone app (SHA-256 %s, from `adbuddy setup --apk`): it gets the token like a release. Delete %s to stop.\n", trust.DevAPK, phoneapp.DevTrustPath(e.dirs.Data))
+	}
 	without := func(why string) (*phoneLink, error) {
 		fmt.Fprintf(app.Stderr, "⚠ %s. 🔴 confirmations happen here, without the phone app.\n", why)
 		return l, nil
@@ -132,6 +141,8 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 		return without("Port " + strconv.Itoa(port) + " for the phone app's channel is in use (" + classify.Printable(err.Error()) + "); change chat_port in " +
 			e.dirs.ConfigFile() + " to a free port between 1024 and 65535 and start adbuddy serve again")
 	}
+	l.verifier = phoneapp.NewVerifier(func() phoneapp.Trust { return phoneapp.LoadTrust(releaseCert, e.dirs.Data) }, phoneapp.MinAppVersionCode)
+	l.recheck = make(chan struct{}, 1)
 	// No token until connect hands one over: nobody gets in before.
 	l.srv = bridge.New(bridge.Options{
 		Session: session, HostVersion: Version,
@@ -141,6 +152,17 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 		Snapshot:  l.snapshot,
 		OnReject: func(h bridge.Hello) {
 			fmt.Fprintf(app.Stderr, "⚠ The ADBuddy app on the phone (%s) is too old for this host: run `adbuddy setup` to update it.\n", classify.Printable(h.AppVersion))
+		},
+		Admit: func(ctx context.Context, _ bridge.Hello) bool {
+			if err := l.verifier.Same(ctx, a); err != nil {
+				fmt.Fprintf(app.Stderr, "⚠ An app with the token connected, but it is not the app ADBuddy checked (%s): refused, checking the app again.\n", classify.Printable(err.Error()))
+				select {
+				case l.recheck <- struct{}{}:
+				default:
+				}
+				return false
+			}
+			return true
 		},
 		OnConnect: func(on bool) {
 			if on {
@@ -178,16 +200,24 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 	// connect hands the channel over again with a new token (spec §5.2): the
 	// server takes only that one and drops an app with the old one before
 	// the tunnel is back, so a token captured meanwhile is worth nothing.
+	// The token only goes to the app checked right before (spec M6a §6.3):
+	// the verifier reads the APK again only after a reinstall or an update.
 	connect := func() error {
+		// A new token first: whatever app held the old one loses it, even
+		// when this check then fails.
 		token, err := newToken()
 		if err != nil {
 			return fmt.Errorf("could not make a token: %w", err)
 		}
 		l.srv.SetToken(token)
+		v, err := l.verifier.Verify(ctx, a)
+		if err != nil {
+			return err
+		}
 		if err := phoneapp.Tunnel(ctx, a, port); err != nil {
 			return err
 		}
-		return phoneapp.Handshake(ctx, a, token, port, host)
+		return phoneapp.Handshake(ctx, a, v, token, port, host)
 	}
 	err = connect()
 	if ctx.Err() != nil {
@@ -211,6 +241,8 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 			case <-ctx.Done():
 				return
 			case <-t.C:
+			case <-l.recheck:
+				connected = false
 			}
 			if connected {
 				if open, err := phoneapp.TunnelOpen(ctx, a, port); err != nil || open {
