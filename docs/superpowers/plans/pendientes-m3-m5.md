@@ -155,3 +155,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 - **Proxy del protocolo del servidor adb.** Herramientas como ARTEMIS (`adbutils`, `uiautomator2`) hablan con el servidor adb por su protocolo, sin el binario `adb`, así que se saltan el shim. Un proxy que atienda ese protocolo y clasifique las peticiones `host:transport` / `shell:` las pondría bajo el clasificador, el diario y las confirmaciones. Es un trabajo grande: evaluarlo cuando haya demanda.
 
 - **Protocolo v2: el host se autentica ante la app** (revisión de la Tarea 9 de M2): hoy una app que ocupe el puerto mientras no hay túnel puede mostrar preguntas falsas (sus respuestas no llegan al host). Un HMAC del token sobre un nonce de la app dentro del `welcome` lo cerraría.
+
+## M4 · Aviso de permiso
+
+- **Canal de importancia alta para el aviso "Claude Code necesita una respuesta":** hoy es silencioso (canal `conversation`, LOW). Decisión de producto pendiente: canal propio de importancia alta con versión pública genérica (spec M4 §7.4).
