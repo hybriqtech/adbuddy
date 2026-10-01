@@ -19,9 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     # On the runner avdmanager writes the AVD under $XDG_CONFIG_HOME/.android
-    # and the emulator looks under $HOME/.android: one folder for both.
+    # whatever ANDROID_AVD_HOME says, and the emulator looks under
+    # ANDROID_AVD_HOME or $HOME/.android: point the emulator where it is.
     env:
-      ANDROID_AVD_HOME: /home/runner/.android/avd
+      ANDROID_AVD_HOME: /home/runner/.config/.android/avd
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
