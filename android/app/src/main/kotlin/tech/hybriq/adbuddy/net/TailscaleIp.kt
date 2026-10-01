@@ -19,7 +19,7 @@ object TailscaleIp {
 /**
  * Decides when the Tailscale IP goes to the host: when it changes and again
  * on each welcome, never empty (an empty one means "no change" to the host).
- * Callbacks of the network and socket threads come in here, hence the lock.
+ * These calls come from the network-callback and socket threads, hence the lock.
  *
  * It follows each network (K is Network in the app) that has a Tailscale IP:
  * losing one only takes out its own entry, and the current IP is the one of
@@ -43,7 +43,7 @@ class IpReporter<K : Any>(private val send: (String) -> Unit) {
 
     /** A network went away: its IP goes with it; what remains (if anything) is announced if it is new. */
     fun onLost(network: K) = synchronized(lock) {
-        if (ips.remove(network) == null) return@synchronized
+        ips.remove(network)
         if (ips.isEmpty()) sent = "" // the next IP (even the same one) is announced again
         else announceIfNew()
     }

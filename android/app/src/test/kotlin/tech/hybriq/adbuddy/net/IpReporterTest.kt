@@ -72,6 +72,13 @@ class IpReporterTest {
         r.onWelcome()
         assertEquals("100.64.0.5", sent.last())
     }
+    @Test fun aVpnThatComesBackWithTheSameIpIsAnnouncedAgain() {
+        r.onAddresses("n1", listOf("100.64.0.5"))
+        r.onAddresses("n1", listOf("198.51.100.4")) // its entry goes, sent stays
+        r.onLost("n1") // no entry, no IPs left: forget what was sent
+        r.onAddresses("n1", listOf("100.64.0.5"))
+        assertEquals(listOf("100.64.0.5", "100.64.0.5"), sent)
+    }
     @Test fun aNetworkThatLosesItsTailscaleAddressIsForgotten() {
         r.onAddresses("a", listOf("100.64.0.5"))
         r.onAddresses("a", listOf("198.51.100.4"))
