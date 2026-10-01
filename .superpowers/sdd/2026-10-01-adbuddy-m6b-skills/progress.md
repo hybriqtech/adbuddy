@@ -100,3 +100,7 @@ Task 9: minor (deferred): el nombre del job de emulator.yml ("oracle against the
 TODAS LAS TAREAS (T1-T9) COMPLETAS. Siguiente: rebase sobre origin/main 0a22518 (supervisor), go test, revisión final opus de la rama, push y PR.
 
 Rebase 2 2026-10-02: m6b rebasada sobre origin/main 0a22518 (M4, PR #13): 28 commits, 2 conflictos en `workspace.go` (la firma `mergeClaudeSettings(path, hookExe)` de M4 frente a mi refactor con `loadSettings`/`saveSettings`; resueltos conservando los hooks de M4 y mis helpers); identidad hybriqtech y trailer exacto en los 28; `go build/vet/test ./...` en verde. Los SHA anteriores son los de antes de este rebase.
+
+Revisión final (opus, 1e60ebc): ⚠️ 1 Important (texto leído del móvil pegado en comandos del PC sin protegerlo) + minors triados; tanda única de arreglos (4dcd8dc) y re-revisión acotada (Sonnet): 10/10 ADDRESSED, sin rotura importante.
+Final: complete. Rulings: ver las líneas `Ruling:` de arriba (guarda con excepción `rm -r` exacta; filtro `wipe`; `input swipe`; `dumpsys package` verde; PR desde m6b tras dos rebases sobre main; la nota §2.5 se descarta en device-profile/debloat/battery).
+Pendiente tras el PR: mirar en la CI los tests de symlink/FIFO (Linux/macOS), el del emulador y el flaky `TestRemoteOnClientGoneWhileAsking`; validaciones manuales del plan (nada se probó en el móvil).
