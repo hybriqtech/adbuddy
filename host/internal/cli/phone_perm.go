@@ -41,7 +41,10 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 		return nil // the person is at the PC
 	}
 	if !claudecode.CardSafe(in.ToolName, in.ToolInput) {
-		return nil // the card could not show what a "yes" would approve: the terminal asks
+		// The card could not show what a "yes" would approve: the terminal
+		// asks, and its dialog must not get the chat's text (spec §6.3).
+		l.raiseAttention()
+		return nil
 	}
 	rule, always := claudecode.AlwaysRule(in.ToolName, in.ToolInput)
 	now := time.Now()
@@ -57,6 +60,7 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	a := &l.adapter
 	a.mu.Lock()
 	if len(a.perms) >= maxPerms || now.Sub(a.lastPerm) < permGap {
+		a.attention = now.Add(attentionTTL) // Claude Code's dialog is on the terminal
 		a.mu.Unlock()
 		return nil
 	}

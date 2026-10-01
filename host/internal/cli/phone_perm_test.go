@@ -430,3 +430,63 @@ func TestPermissionYesDoesNotSkipTheShim(t *testing.T) {
 		}
 	}
 }
+
+// Round 1, N1: a PermissionRequest the host leaves to the terminal (the card
+// cannot show it, too many pending, too fast) still opens Claude Code's dialog
+// there: the chat must be busy, so Enter does not land on it.
+func TestChatSendIsBusyWhenThePermissionIsLeftToTheTerminal(t *testing.T) {
+	typed := func(r *agentRig, id string) {
+		sendApp(t, r.c, bridge.TypeChatSend, id, bridge.ChatSend{ID: "c" + id, Text: "hola"})
+		r.readError(t, id, bridge.CodeBusy)
+		if said := r.pty(0).said(); said != "" {
+			t.Fatalf("something was typed into the dialog: %q", said)
+		}
+	}
+	ask := func(r *agentRig, cmd string) []byte {
+		p := r.payload("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": cmd, "description": "do it"}})
+		return r.l.hookCall(context.Background(), r.ws, "PermissionRequest", p)
+	}
+	t.Run("card cannot show it", func(t *testing.T) {
+		r := newAgentRig(t)
+		if out := ask(r, "echo "+string(rune(0x202e))+"evil"); out != nil {
+			t.Fatalf("decided: %s", out)
+		}
+		typed(r, "r_1")
+	})
+	t.Run("rate", func(t *testing.T) {
+		r := newAgentRig(t)
+		setTiming(t, &permGap, time.Hour)
+		_, out := r.ask(t, "touch a")
+		r.l.resolveAllPerms("test")
+		_ = wait(t, out)
+		r.resolved(t)
+		r.l.adapter.mu.Lock()
+		r.l.adapter.attention = time.Time{}
+		r.l.adapter.mu.Unlock()
+		if out := ask(r, "touch b"); out != nil {
+			t.Fatalf("decided: %s", out)
+		}
+		typed(r, "r_2")
+	})
+	t.Run("limit", func(t *testing.T) {
+		r := newAgentRig(t)
+		var outs []<-chan []byte
+		for i := 0; i < maxPerms; i++ {
+			_, out := r.ask(t, "touch a"+string(rune('a'+i)))
+			outs = append(outs, out)
+		}
+		r.l.adapter.mu.Lock()
+		r.l.adapter.attention = time.Time{}
+		r.l.adapter.mu.Unlock()
+		if out := ask(r, "touch z"); out != nil {
+			t.Fatalf("decided: %s", out)
+		}
+		r.l.resolveAllPerms("test")
+		for _, o := range outs {
+			_ = wait(t, o)
+			r.resolved(t)
+		}
+		// pending ones are gone, attention was raised by the refused one
+		typed(r, "r_3")
+	})
+}
