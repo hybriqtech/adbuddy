@@ -71,10 +71,22 @@ func (f *fakePTY) Kill() error {
 	f.kills++
 	f.mu.Unlock()
 	f.exit(137)
+	f.outW.Close()
 	return nil
 }
 func (f *fakePTY) exit(code int) {
 	f.once.Do(func() { f.code = code; f.outW.Close(); close(f.done) })
+}
+
+// exitHoldingOutput ends the agent while something it started keeps the
+// terminal open: Read goes on until a Kill.
+func (f *fakePTY) exitHoldingOutput(code int) {
+	f.once.Do(func() { f.code = code; close(f.done) })
+}
+func (f *fakePTY) killCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.kills
 }
 func (f *fakePTY) said() string {
 	f.mu.Lock()
@@ -336,5 +348,22 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("timed out")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// When the agent ends but a child of it keeps the terminal open, Read does
+// not end: the session still stops, killing what is left after readGrace.
+func TestStopsWhenTheAgentEndsButNotItsOutput(t *testing.T) {
+	defer func(g time.Duration) { readGrace = g }(readGrace)
+	readGrace = 100 * time.Millisecond
+	r := newRig(t)
+	if err := r.m.Start("claude", false); err != nil {
+		t.Fatal(err)
+	}
+	f := r.fake(0)
+	f.exitHoldingOutput(0)
+	r.waitState(t, StateStopped)
+	if f.killCount() == 0 {
+		t.Fatal("stopped without killing what held the terminal")
 	}
 }

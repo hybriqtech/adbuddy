@@ -5,21 +5,28 @@ package pty
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	cpty "github.com/creack/pty"
 )
 
 type unixPTY struct {
-	f        *os.File
-	cmd      *exec.Cmd
-	done     chan struct{}
-	code     int
-	err      error
-	killOnce sync.Once
+	f    *os.File
+	cmd  *exec.Cmd
+	last atomic.Int64 // when output was last read (UnixNano)
+	done chan struct{}
+	code int
+	err  error
+
+	closeOnce sync.Once
+	closeErr  error
+	killOnce  sync.Once
 }
 
 // Start starts the program in a Unix pty, in its own session so Kill can end
@@ -33,24 +40,48 @@ func Start(o Options) (PTY, error) {
 		return nil, err
 	}
 	p := &unixPTY{f: f, cmd: cmd, done: make(chan struct{})}
-	go func() {
-		err := cmd.Wait()
-		var ee *exec.ExitError
-		switch {
-		case errors.As(err, &ee):
-			p.code = ee.ExitCode()
-			if p.code < 0 {
-				p.code = 1 // killed by a signal
-			}
-		case err != nil:
-			p.err = err
-		}
-		close(p.done)
-	}()
+	go p.watch()
 	return p, nil
 }
 
-func (p *unixPTY) Read(b []byte) (int, error)  { return p.f.Read(b) }
+// watch waits for the process and keeps its exit code; once its last output
+// had time to come out it closes the terminal, so Read ends also when a
+// child of the program still holds it.
+func (p *unixPTY) watch() {
+	err := p.cmd.Wait()
+	var ee *exec.ExitError
+	switch {
+	case errors.As(err, &ee):
+		p.code = ee.ExitCode()
+		if p.code < 0 {
+			p.code = 1 // killed by a signal
+		}
+	case err != nil:
+		p.err = err
+	}
+	close(p.done)
+	drain(&p.last)
+	p.closeTerm()
+}
+
+func (p *unixPTY) closeTerm() error {
+	p.closeOnce.Do(func() { p.closeErr = p.f.Close() })
+	return p.closeErr
+}
+
+// Read ends with io.EOF: the terminal's last holder closed it (EIO) or the
+// terminal was closed here.
+func (p *unixPTY) Read(b []byte) (int, error) {
+	n, err := p.f.Read(b)
+	if n > 0 {
+		p.last.Store(time.Now().UnixNano())
+	}
+	if errors.Is(err, syscall.EIO) || errors.Is(err, os.ErrClosed) {
+		err = io.EOF
+	}
+	return n, err
+}
+
 func (p *unixPTY) Write(b []byte) (int, error) { return p.f.Write(b) }
 func (p *unixPTY) Pid() int                    { return p.cmd.Process.Pid }
 
@@ -67,18 +98,32 @@ func (p *unixPTY) Wait(ctx context.Context) (int, error) {
 	}
 }
 
-// Hangup sends SIGHUP to the process group, as a closing terminal does.
+// Hangup sends SIGHUP to the process group, as a closing terminal does;
+// nothing once the program has ended.
 func (p *unixPTY) Hangup() error {
-	return syscall.Kill(-p.cmd.Process.Pid, syscall.SIGHUP)
+	select {
+	case <-p.done:
+		return nil
+	default:
+	}
+	err := syscall.Kill(-p.cmd.Process.Pid, syscall.SIGHUP)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil // it ended meanwhile
+	}
+	return err
 }
 
 // Kill ends the process group (creack/pty starts the program with Setsid, so
-// its group id is its pid) and closes the terminal.
+// its group id is its pid), also what is left of it once the program ended,
+// and closes the terminal.
 func (p *unixPTY) Kill() error {
 	var err error
 	p.killOnce.Do(func() {
 		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
-		err = p.f.Close()
+		err = p.closeTerm()
+		if errors.Is(err, os.ErrClosed) {
+			err = nil
+		}
 	})
 	return err
 }

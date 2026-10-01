@@ -188,8 +188,28 @@ func (m *Manager) startLocked(agent string, resume bool) error {
 	return nil
 }
 
+// readGrace is how long pump keeps reading after the process ended before it
+// kills what is left: the PTY ends Read by itself (pty.PTY.Read), but on Unix
+// a child of the agent that keeps the terminal open may hold it.
+var readGrace = 5 * time.Second
+
 // pump reads the PTY until the process ends.
 func (m *Manager) pump(pr *proc) {
+	readDone := make(chan struct{})
+	waitCtx, stopWaiting := context.WithCancel(context.Background())
+	defer stopWaiting()
+	go func() {
+		if _, err := pr.p.Wait(waitCtx); err != nil {
+			return // pump is done
+		}
+		t := time.NewTimer(readGrace)
+		defer t.Stop()
+		select {
+		case <-readDone:
+		case <-t.C:
+			pr.p.Kill() // Read returns io.EOF
+		}
+	}()
 	buf := make([]byte, 32<<10)
 	for {
 		n, err := pr.p.Read(buf)
@@ -203,6 +223,7 @@ func (m *Manager) pump(pr *proc) {
 			break
 		}
 	}
+	close(readDone)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	code, _ := pr.p.Wait(ctx)
 	cancel()
