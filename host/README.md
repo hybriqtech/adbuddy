@@ -186,6 +186,16 @@ adbuddy serve --confirm deny     # deny: every 🔴 is refused without asking
 adbuddy journal
 ```
 
+## Skills
+
+Skills are recipes the agent follows for common phone tasks: `device-profile`, `permissions-audit`, `storage-cleanup`, `debloat`, `battery`, `organize-files`, `backup-to-pc`, `home-screen` and `build-utility-apk`. They live in `internal/workspace/skills/<name>/SKILL.md` and are embedded in the binary. `adbuddy env init` copies them to `.claude/skills/` and `.agents/skills/` of the environment (and writes `.gemini/settings.json` so Gemini CLI reads `AGENTS.md`); run `adbuddy env init --force` to refresh them after an update. A skill that starts with `<!-- adbuddy:user -->` is yours: it is never overwritten. `adbuddy setup` rebuilds the environment with Force, so it rewrites every skill that lacks that mark. `env init` prints the skill paths grouped by folder (with `/` also on Windows); `--json` lists them all.
+
+To add a skill: create its folder, add its name to `requiredSkills` in `internal/workspace/skills_test.go`, and write its examples in checked blocks: ```` ```adb ```` (a command without the `adb` prefix, annotated `# green`, `# yellow` or `# red`), ```` ```adbuddy ```` (a subcommand) and, for commands that run on the PC, ```` ```text ```` (not checked). The guard `internal/cli/skills_commands_test.go` enforces:
+
+- the annotation is the level the real classifier gives (at run time the level can rise through the precheck);
+- recipes never clear app data, wipe, reboot, install granting permissions or delete recursively; the one exception is the exact `shell rm -r /sdcard/ADBuddy-papelera` in `storage-cleanup`;
+- scripts go in single quotes, and a line that starts with `adb` or `adbuddy` outside a checked block is an error.
+
 ## Tests
 
 ```sh
@@ -208,3 +218,5 @@ go test ./internal/classify
 ```
 
 The `emulator` workflow records it again on every pull request that touches the classifier and fails if the result differs from the files in the repository.
+
+The read-only examples of the skills (`# green`, `shell ...`) also run on the emulator with `go test -timeout 20m -count=1 -run TestSkillsReadOnlyOnEmulator ./internal/cli`, with the same variables as the recorder; it fails if the phone says a program or an option does not exist, and it refuses any serial that is not `emulator-*`. The `emulator` workflow runs it too.
