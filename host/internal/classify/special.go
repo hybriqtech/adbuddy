@@ -1,7 +1,6 @@
 package classify
 
 import (
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -136,7 +135,7 @@ func specialReason(scope string, ws []Word, level Level) string {
 	if level != Green && resetsEveryApp(name, v) {
 		return "resets the permissions, battery exemptions or app ops of every app, ADBuddy's included"
 	}
-	if level != Green && (name == "pm" || name == "appops" || name == "am") && hasDynamic(ws[1:]) {
+	if level != Green && (name == "pm" || name == "appops" || name == "am" || (name == "dumpsys" && len(v) > 1 && v[1] == "deviceidle")) && hasDynamic(ws[1:]) {
 		return "arguments only known on the phone could name ADBuddy or a critical app"
 	}
 	return ""
@@ -272,38 +271,22 @@ func percentDecode(s string) string {
 	return b.String()
 }
 
-// resetsEveryApp: pm reset-permissions without -p, `deviceidle whitelist
-// reset` and `appops reset` without a package strip ADBuddy's app of
+// resetsEveryApp: pm reset-permissions (it has no -p option: AOSP resets
+// everything and ignores its arguments), `deviceidle whitelist reset` and
+// `appops reset` (with an uninstalled package it resets the modes of every
+// UID: AppOpsService.resetAllModes with reqUid -1) strip ADBuddy's app of
 // WRITE_SECURE_SETTINGS (Cut access), its battery exemption or its app ops
-// without naming it (spec M6a §7).
+// without naming it (spec M6a §7). cmd arrives already rewritten to
+// pm/appops/dumpsys.
 func resetsEveryApp(name string, v []string) bool {
 	has := func(i int, s string) bool { return len(v) > i && v[i] == s }
 	switch {
 	case name == "pm" && has(1, "reset-permissions"):
-		return !slices.Contains(v[2:], "-p")
-	case name == "cmd" && has(1, "package") && has(2, "reset-permissions"):
-		return !slices.Contains(v[3:], "-p")
+		return true
 	case name == "appops" && has(1, "reset"):
-		return noPackage(v[2:])
-	case name == "cmd" && has(1, "appops") && has(2, "reset"):
-		return noPackage(v[3:])
-	case (name == "dumpsys" || name == "cmd") && has(1, "deviceidle") && has(2, "whitelist") && has(3, "reset"):
+		return true
+	case name == "dumpsys" && has(1, "deviceidle") && has(2, "whitelist") && has(3, "reset"):
 		return true
 	}
 	return false
-}
-
-// noPackage reports whether the words are only options, `--user` and its
-// value included: `appops reset --user 0` still resets every app.
-func noPackage(ws []string) bool {
-	for i := 0; i < len(ws); i++ {
-		switch w := ws[i]; {
-		case w == "--user" || w == "-u":
-			i++ // its value
-		case strings.HasPrefix(w, "-"):
-		default:
-			return false // a package: only that one
-		}
-	}
-	return true
 }

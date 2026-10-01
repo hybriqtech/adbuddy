@@ -203,3 +203,12 @@
 {"sh":"cmd appops reset --user 0","level":"red","special":true}
 {"sh":"appops reset","level":"red","special":true}
 {"sh":"appops reset --user 0","level":"red","special":true}
+{"sh":"cmd deviceidle whitelist -$(pm list packages | grep hyb | cut -c9-)","level":"red","special":true}
+{"sh":"dumpsys deviceidle whitelist -$(pm list packages | grep hyb | cut -c9-)","level":"red","special":true}
+{"sh":"pm list packages | grep hyb | sed s/package:/-/ | xargs cmd deviceidle whitelist","level":"red","special":true}
+{"sh":"pm reset-permissions -p com.example","level":"red","special":true}
+{"sh":"cmd package reset-permissions -p com.example","level":"red","special":true}
+{"sh":"pm reset-permissions -p","level":"red","special":true}
+{"sh":"appops reset com.no.existe","level":"red","special":true}
+{"sh":"cmd appops reset --user 0 com.x","level":"red","special":true}
+{"sh":"appops reset ''","level":"red","special":true}
