@@ -12,18 +12,25 @@ object Links {
         val uri = try { URI(url) } catch (e: Exception) { return null }
         val scheme = uri.scheme?.lowercase()
         if (scheme != "http" && scheme != "https") return null
+        // A link with userinfo (https://mibanco.com@evil.example) reads as another site: it is no link.
+        if (uri.rawUserInfo != null) return null
         return uri.host?.lowercase()
     }
 
+    private const val FSI = "⁨"
+    private const val PDI = "⁩"
+
     /**
-     * The text a link is drawn with: its own text and, unless that already is the address or its domain, the real domain in
-     * brackets. The visible text can never pass for another site: `[https://mibanco.com](https://evil.example)` reads
-     * `https://mibanco.com (evil.example)`. Null url domain (not a web link): the text alone.
+     * The text a link is drawn with: its own text without invisible or bidi control characters (category Cf) and, unless
+     * that already is the address or its domain, the real domain in brackets, isolated (FSI..PDI) so it cannot be reordered.
+     * The visible text can never pass for another site: `[https://mibanco.com](https://evil.example)` reads
+     * `https://mibanco.com (evil.example)`. Not a web link: the text alone.
      */
     fun label(text: String, url: String): String {
-        val d = domain(url) ?: return text
-        val t = text.trim()
-        return if (t == url || t.equals(d, ignoreCase = true)) text else "$text ($d)"
+        val clean = text.filter { Character.getType(it) != Character.FORMAT.toInt() }
+        val d = domain(url) ?: return clean
+        val t = clean.trim()
+        return if (t == url || t.equals(d, ignoreCase = true)) clean else "$clean $FSI($d)$PDI"
     }
 
     data class Span(val start: Int, val end: Int, val url: String)
