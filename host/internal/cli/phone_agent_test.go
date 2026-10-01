@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -322,4 +323,24 @@ func TestChatSendIsBusyWhileAPermissionIsPending(t *testing.T) {
 	}
 	r.l.resolveAllPerms("agent")
 	<-done
+}
+
+func TestAdapterUsesRandomIdsWhenTheTranscriptIdIsNotPlain(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	r.append(t, tline("user", "bad id\n‮", map[string]any{"role": "user", "content": "desde el PC"}))
+	m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage))
+	if !regexp.MustCompile(`^t_[0-9a-f]{16}$`).MatchString(m.ID) || m.Text != "desde el PC" {
+		t.Fatalf("%+v", m)
+	}
+}
+
+func TestAdapterStopIgnoresAPromptIDThatIsNotPlain(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	r.hook(t, "Stop", map[string]any{"prompt_id": "bad id\n", "last_assistant_message": "Respuesta final"})
+	m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage))
+	if !regexp.MustCompile(`^last_[0-9a-f]{16}$`).MatchString(m.ID) {
+		t.Fatalf("%+v", m)
+	}
 }

@@ -458,7 +458,7 @@ func (l *phoneLink) afterStop(in claudecode.HookInput) {
 	a.fallbacks[want] = true
 	a.mu.Unlock()
 	id := "last_" + in.PromptID
-	if in.PromptID == "" {
+	if !claudecode.ValidID(in.PromptID) {
 		id = newID("last_")
 	}
 	l.addMessage(bridge.ChatMessage{ID: id, Role: "assistant", Text: in.LastAssistantMessage, Conversation: l.currentConversation()})

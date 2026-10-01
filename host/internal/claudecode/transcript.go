@@ -3,8 +3,21 @@ package claudecode
 import (
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strings"
 )
+
+// Text that comes from the transcript and reaches the phone (the version in
+// a notice, the ids of messages) is checked here: Claude Code does not write
+// it, a file the same user can edit does.
+var (
+	versionRe = regexp.MustCompile(`^[0-9A-Za-z._+-]{1,32}$`)
+	idRe      = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+)
+
+// ValidID reports whether an id from Claude Code (a line's uuid, a
+// message.id, a prompt_id) is a short plain token; any other is ignored.
+func ValidID(id string) bool { return idRe.MatchString(id) }
 
 // The transcript is Claude Code's JSONL log of a session. Its format is not a
 // public API (spec v1 §5.4): everything that reads it is in this file and
@@ -144,8 +157,14 @@ func (p *Parser) Feed(line []byte) []Event {
 		return nil
 	}
 	p.badRun = 0
+	if !ValidID(l.UUID) {
+		l.UUID = "" // not trusted as an id, and no use to tell lines apart
+	}
 	if l.Version != "" {
-		p.version = l.Version
+		p.version = ""
+		if versionRe.MatchString(l.Version) {
+			p.version = l.Version
+		}
 	}
 	if l.IsSidechain || l.IsMeta || (l.Type != "assistant" && l.Type != "user") {
 		return nil
@@ -177,7 +196,7 @@ func (p *Parser) assistant(l rawLine, m rawMessage) []Event {
 		return nil
 	}
 	id := m.ID
-	if id == "" {
+	if !ValidID(id) {
 		id = l.UUID
 	}
 	if id == "" {

@@ -792,3 +792,61 @@ func TestCardSafe(t *testing.T) {
 		t.Error("bidi in the pattern of the title was accepted")
 	}
 }
+
+func TestParserVersionIsKeptOnlyIfItLooksLikeOne(t *testing.T) {
+	long := "2." + strings.Repeat("1", 40)
+	for in, want := range map[string]string{
+		"2.1.286":      "2.1.286",
+		"3.0.0-rc.1+b": "3.0.0-rc.1+b",
+		"":             "",
+		"2.1 286":      "",
+		"2.1\n.286":    "",
+		"2.1.‮1":       "",
+		"<b>2</b>":     "",
+		long:           "",
+	} {
+		p := NewParser()
+		p.Feed(line("assistant", "u1", asst("msg_1", map[string]any{"type": "text", "text": "x"}), map[string]any{"version": in}))
+		if p.Version() != want {
+			t.Errorf("version %q -> %q, want %q", in, p.Version(), want)
+		}
+	}
+	// A later bad version does not leave the earlier one in place.
+	p := NewParser()
+	p.Feed(line("assistant", "u1", asst("msg_1", map[string]any{"type": "text", "text": "x"}), map[string]any{"version": "2.1.286"}))
+	p.Feed(line("assistant", "u2", asst("msg_2", map[string]any{"type": "text", "text": "y"}), map[string]any{"version": "bad version"}))
+	if p.Version() != "" {
+		t.Errorf("version %q", p.Version())
+	}
+}
+
+func TestParserIgnoresIdsThatAreNotPlainTokens(t *testing.T) {
+	bad := []string{"a b", "a\nb", "a/b", "a‮b", strings.Repeat("a", 65), "ñ"}
+	for _, id := range bad {
+		// a user prompt: no id, the adapter makes a random one
+		ev := NewParser().Feed(line("user", id, map[string]any{"role": "user", "content": "hola"}, nil))
+		if len(ev) != 1 || ev[0].MessageID != "" {
+			t.Errorf("user uuid %q: %+v", id, ev)
+		}
+		// an assistant message: its own id is ignored, the line's uuid stands in
+		ev = NewParser().Feed(line("assistant", "u-ok", asst(id, map[string]any{"type": "text", "text": "x"}), nil))
+		if len(ev) != 1 || ev[0].MessageID != "u-ok" {
+			t.Errorf("message.id %q: %+v", id, ev)
+		}
+		// neither is usable: the message is not shown
+		ev = NewParser().Feed(line("assistant", id, asst(id, map[string]any{"type": "text", "text": "x"}), nil))
+		if len(ev) != 0 {
+			t.Errorf("both %q: %+v", id, ev)
+		}
+	}
+	// A bad uuid does not make two lines count as the same one.
+	p := NewParser()
+	a := p.Feed(line("user", "a b", map[string]any{"role": "user", "content": "uno"}, nil))
+	b := p.Feed(line("user", "a b", map[string]any{"role": "user", "content": "dos"}, nil))
+	if len(a) != 1 || len(b) != 1 {
+		t.Errorf("%+v %+v", a, b)
+	}
+	if ev := NewParser().Feed(line("user", strings.Repeat("a", 64), map[string]any{"role": "user", "content": "hola"}, nil)); len(ev) != 1 || len(ev[0].MessageID) != 64 {
+		t.Errorf("a 64-char id is fine: %+v", ev)
+	}
+}
