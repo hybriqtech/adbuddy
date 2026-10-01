@@ -13,6 +13,7 @@
 | 3 | a7878ce | `host/internal/ipc`: `KindAttach`, `KindSession`, `KindSend`, `FrameResize`, `Conn.Resizes()`, `ipc.Attach` |
 | 4 | 20baeea | `host/internal/session`: `Manager` (estado, `--continue` con vuelta atrás, tamaño, `Paste`, `Busy`, `Subscribe`); `agent.TrustFolder` |
 | 5 | feb66ae | `session.ServeAttach`; `adbuddy attach`, `new` y `stop`; `serve` lanza al agente (`--no-agent` para no hacerlo); los tests nunca lanzan un agente real |
+| 1-2 | 87a7f96, 55c828a, 425dd0d | Ronda de arreglos de la revisión de T1-T2: ConPTY propio sobre `x/sys/windows` (`Read` termina al salir el agente, tras su última salida); `session.pump` acaba también cuando vuelve `Wait`; pantalla sin scrollback; `Close` sin carrera; cola sin copias. `Since` puede devolver hasta 512 KiB (`2*TailSize`) |
 | 3-5 | df3ac6d | Ronda de arreglos de la revisión opus: `Start`/`Stop` en serie con generación; el agente no controla su sesión y solo se aceptan nombres de `agent.IsKnown`; aviso en attach cuando el agente sale; modos de terminal en `Screen.Modes()` y `Snapshot()`; `Busy` también con los permisos de Claude Code; `Stop` amable (`PTY.Hangup`, 5 s o 2 s en Windows, después `Kill`) |
 
 Este plan describe las tareas 6-10: requisitos, interfaces y tests. El código lo escribe el implementador con TDD. **Si un requisito no se puede cumplir tal cual, detente y explícalo.**
@@ -86,7 +87,7 @@ Las tareas son secuenciales: todas tocan `internal/cli`.
 **Requisitos** (spec M3 §4.1 y §4.3; spec del protocolo §7):
 1. **`bridge.Server.Backlog() int`:** cuántos mensajes esperan en la cola de la app conectada (0 sin app). Test en `send_test.go`.
 2. **`terminal.watch {epoch, offset}`:** suscribe la conexión que lo pidió y guarda el `Message` para `SendTo`.
-   - Si `screen.Since(epoch, offset)` da bytes, se mandan como `terminal.output` desde ese `offset`.
+   - Si `screen.Since(epoch, offset)` da bytes, se mandan como `terminal.output` desde ese `offset`, en trozos de como mucho 64 KiB (`Since` puede devolver hasta 512 KiB, más que una trama del bridge).
    - Si no, se manda `terminal.snapshot` (`screen.Snapshot()`).
    - Sin agente, nada.
 3. **Salida en vivo:** una sola suscripción (`manager.Subscribe`) para el área. Los `Output` sin datos (inicio de proceso) y los de `End` no generan `terminal.output`. El de inicio provoca el `snapshot` del proceso nuevo. `terminal.snapshot` usa `Screen.Snapshot()`, que ya incluye los modos. La salida se acumula y se manda cada 50 ms en trozos de como mucho 64 KiB.
@@ -189,3 +190,6 @@ En el Pixel del usuario:
 - foto y fichero de ida y vuelta, y captura;
 - `adbuddy send` desde Claude Code;
 - reconexión.
+
+En Linux y macOS (la CI corre los tests de `internal/pty`; esto es lo que no cubre):
+- `/exit` del agente llega a `stopped` aunque un nieto con `setsid` mantenga abierto el esclavo (si cerrar el maestro no despierta `Read`, `pump` no acaba y `Stop` espera sin límite).
