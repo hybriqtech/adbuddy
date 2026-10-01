@@ -259,7 +259,8 @@ func (l *phoneLink) state() bridge.SessionState {
 }
 
 // snapshot is called with the server's lock held: neither it nor the parts
-// each area adds may call Publish, Send or Connected.
+// each area adds may call Publish, PublishRID, PublishSnapshot, Reply, Send,
+// Current or Connected, nor hold a lock while calling them.
 func (l *phoneLink) snapshot() bridge.Snapshot {
 	st := l.state()
 	l.mu.Lock()

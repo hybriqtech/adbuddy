@@ -14,7 +14,10 @@ type area struct {
 	// handlers handle the app's message types; no two areas share one.
 	handlers map[string]func(bridge.Message)
 	// snapshot fills the area's part of a snapshot. It is called with the
-	// server's lock held: no Publish, Send, Reply nor Connected.
+	// server's lock held: it must not call Publish, PublishRID,
+	// PublishSnapshot, Reply, Send, Current nor Connected, and a lock it
+	// takes is never held while calling them (as l.mu is not): an area that
+	// published with its mutex taken would deadlock with the server.
 	snapshot func(*bridge.Snapshot)
 	// attach: an app authenticated, new or replacing another. What the area
 	// keeps per connection (a terminal subscription, uploads) starts over.
@@ -24,7 +27,10 @@ type area struct {
 	attach func()
 	// gone: no app is connected any more.
 	gone func()
-	// frame receives a binary frame from the app (uploads, M3).
+	// frame receives a binary frame from the app (uploads, M3). See
+	// bridge.Options.OnFrame: the frame can come from a connection already
+	// replaced (there is no Current for frames), and data is only valid
+	// during the call: copy what it keeps.
 	frame func(id bridge.FrameID, offset int64, data []byte)
 }
 

@@ -147,9 +147,56 @@ func TestAreasHearOfConnections(t *testing.T) {
 	if err := c1.Write(ctx, websocket.MessageBinary, frame); err != nil {
 		t.Fatal(err)
 	}
+	waitUntil(t, "the frame of the first connection", func() bool { _, _, fr := count(); return fr == 1 })
 	c2 := openApp(t, e.cfg.ChatPort, hello)
 	readApp(t, c2)
-	waitUntil(t, "two attaches and a frame", func() bool { a, _, fr := count(); return a == 2 && fr == 1 })
+	waitUntil(t, "two attaches", func() bool { a, _, _ := count(); return a == 2 })
+	// A replacement is not "the app left".
+	time.Sleep(200 * time.Millisecond)
+	if _, g, _ := count(); g != 0 {
+		t.Fatalf("gone called %d times on a replacement", g)
+	}
 	c2.Close(websocket.StatusNormalClosure, "")
 	waitUntil(t, "gone", func() bool { _, g, _ := count(); return g == 1 })
+}
+
+// What is kept per connection starts over: after reconnecting, a type told by
+// notice is told again.
+func TestNoticesStartOverWithEachConnection(t *testing.T) {
+	e := linkEnv(t)
+	f := &appPhone{}
+	if _, _, err := startLink(t, e, f, &recording{}); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "a handshake", func() bool { return len(f.handedTokens()) >= 1 })
+	hello := bridge.Hello{Protocol: bridge.ProtocolVersion, Token: f.handedTokens()[0], AppVersion: "0.3.0"}
+	c1 := openApp(t, e.cfg.ChatPort, hello)
+	w := readApp(t, c1)
+	var welcome bridge.Welcome
+	if err := json.Unmarshal(w.Payload, &welcome); err != nil {
+		t.Fatal(err)
+	}
+
+	sendApp(t, c1, "again.type", "", bridge.Empty{})
+	first := readApp(t, c1)
+	if first.Type != bridge.TypeNotice || !strings.Contains(string(first.Payload), "again.type") {
+		t.Fatalf("got %s %s", first.Type, first.Payload)
+	}
+	sendApp(t, c1, "again.type", "", bridge.Empty{})
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if _, data, err := c1.Read(ctx); err == nil {
+		t.Fatalf("a second notice for the same type: %s", data)
+	}
+
+	hello.LastSeq, hello.Session = first.Seq, welcome.Session
+	c2 := openApp(t, e.cfg.ChatPort, hello)
+	if m := readApp(t, c2); m.Type != bridge.TypeWelcome {
+		t.Fatalf("first message %q", m.Type)
+	}
+	sendApp(t, c2, "again.type", "", bridge.Empty{})
+	m := readApp(t, c2)
+	if m.Type != bridge.TypeNotice || m.Seq <= first.Seq || !strings.Contains(string(m.Payload), "again.type") {
+		t.Fatalf("got %s seq %d %s, want a new notice after seq %d", m.Type, m.Seq, m.Payload, first.Seq)
+	}
 }
