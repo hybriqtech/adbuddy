@@ -98,4 +98,31 @@ class MarkdownTest {
         assertEquals(Markdown.MAX_INPUT + 1, text.length)
         assertTrue(text.endsWith("…"))
     }
+
+    @Test fun hostileBracketsTakeLinearTime() {
+        val n = 2_000_000 // inlines has no cap of its own: a longer text shows the quadratic cost
+        val inputs = mapOf(
+            "open brackets" to "[".repeat(n),
+            "open links" to "[a](".repeat(n / 4),
+            "brackets and a late close" to "[".repeat(n - 1) + "]",
+            "links and a late close" to "[a](".repeat(n / 4 - 1) + "[a](b)",
+            "links and a closing paren" to "[a](".repeat(n / 4 - 1) + ")",
+            "images" to "![a](".repeat(n / 5),
+        )
+        for ((name, text) in inputs) {
+            val t0 = System.nanoTime()
+            val flat = Markdown.inlines(text)
+            val ms = (System.nanoTime() - t0) / 1_000_000
+            assertTrue("$name took $ms ms", ms < 2_000)
+            assertTrue(name, flat.isNotEmpty())
+        }
+    }
+
+    @Test fun theMemoryOfAFailedSearchDoesNotChangeWhatIsALink() {
+        // a later, valid link after failed attempts is still found
+        val b = Markdown.parse("[x [y](https://example.com) [z](")
+        val flat = (b.single() as Block.Paragraph).inlines
+        assertTrue(flat.toString(), flat.contains(Inline.Link("x [y", "https://example.com")))
+        assertEquals(" [z](", (flat.last() as Inline.Text).text)
+    }
 }

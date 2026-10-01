@@ -89,6 +89,7 @@ object Markdown {
             if (text.isNotEmpty()) out.add(Inline.Text(text.toString()))
             text.setLength(0)
         }
+        val find = Finder(s)
         var i = 0
         while (i < s.length) {
             val c = s[i]
@@ -98,11 +99,11 @@ object Markdown {
                     if (j > i + 1) { flush(); out.add(Inline.Code(s.substring(i + 1, j))); i = j + 1 } else { text.append(c); i++ }
                 }
                 c == '!' && s.startsWith("![", i) -> {
-                    val l = link(s, i + 1)
+                    val l = link(s, i + 1, find)
                     if (l != null) { text.append(l.text); i = l.end } else { text.append(c); i++ } // an image is only its alt text: the URL is never loaded
                 }
                 c == '[' -> {
-                    val l = link(s, i)
+                    val l = link(s, i, find)
                     if (l == null) { text.append(c); i++ } else {
                         if (Links.domain(l.url) != null) { flush(); out.add(Inline.Link(l.text.ifEmpty { l.url }, l.url)) } else text.append(l.text)
                         i = l.end
@@ -128,15 +129,39 @@ object Markdown {
 
     private class Link(val text: String, val url: String, val end: Int)
 
-    /** [text](url) starting at [open] (the '['), or null. The url has no white space, parentheses or angle brackets. */
-    private fun link(s: String, open: Int): Link? {
-        val close = s.indexOf(']', open + 1)
+    /**
+     * indexOf(']') that remembers its last answer, so a text of unclosed '[' does not search to the end again
+     * from each one (O(n²)). The first ']' at or after `from` is the same for every start up to it (or, when
+     * there is none, for every later start). The starts only grow, which is what makes it hold.
+     */
+    private class Finder(private val s: String) {
+        private var from = -1
+        private var at = -1
+
+        fun close(start: Int): Int {
+            if (from in 0..start && (at < 0 || start <= at)) return at
+            from = start
+            at = s.indexOf(']', start)
+            return at
+        }
+    }
+
+    /**
+     * [text](url) starting at [open] (the '['), or null. The url has no white space, parentheses or angle brackets.
+     * The url is read char by char and stops at the first one that cannot be in it, so a text of "[a](" does not
+     * read to its end each time either.
+     */
+    private fun link(s: String, open: Int, find: Finder): Link? {
+        val close = find.close(open + 1)
         if (close < 0 || close + 1 >= s.length || s[close + 1] != '(') return null
-        val end = s.indexOf(')', close + 2)
-        if (end < 0) return null
-        val url = s.substring(close + 2, end)
-        if (url.isEmpty() || url.any { it.isWhitespace() || it == '(' || it == '<' || it == '>' }) return null
-        val label = s.substring(open + 1, close)
-        return Link(label, url, end + 1)
+        val start = close + 2
+        var end = start
+        while (end < s.length && s[end] != ')') {
+            val c = s[end]
+            if (c.isWhitespace() || c == '(' || c == '<' || c == '>') return null
+            end++
+        }
+        if (end >= s.length || end == start) return null
+        return Link(s.substring(open + 1, close), s.substring(start, end), end + 1)
     }
 }
