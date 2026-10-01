@@ -3,6 +3,8 @@ package tech.hybriq.adbuddy
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.net.Uri
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,6 +15,11 @@ import tech.hybriq.adbuddy.bridge.BridgeChannel
 import tech.hybriq.adbuddy.bridge.Channel
 import tech.hybriq.adbuddy.chat.ChatController
 import tech.hybriq.adbuddy.confirm.HostClock
+import tech.hybriq.adbuddy.files.Captures
+import tech.hybriq.adbuddy.files.Drafts
+import tech.hybriq.adbuddy.files.UploadFailed
+import tech.hybriq.adbuddy.files.Uploader
+import tech.hybriq.adbuddy.files.UriSource
 import tech.hybriq.adbuddy.term.TerminalFeed
 
 class AdbuddyApp : Application() {
@@ -30,6 +37,14 @@ class AdbuddyApp : Application() {
     lateinit var chat: ChatController
         private set
 
+    /** Screenshots of this phone, taken by the host. */
+    lateinit var captures: Captures
+        private set
+
+    /** The attachments of the message being written. */
+    lateinit var drafts: Drafts
+        private set
+
     /** The terminal's stream, one per process (the model survives a rotation). */
     lateinit var terminal: TerminalFeed
         private set
@@ -43,11 +58,32 @@ class AdbuddyApp : Application() {
         UiHelpers.install(this)
         channel = BridgeChannel(bridge, scope)
         chat = ChatController(channel)
+        UriSource.clearCache(this)
+        captures = Captures(channel)
+        drafts = Drafts(scope, Uploader(channel), captures)
         terminal = TerminalFeed(channel)
         scope.launch { channel.connected.collect { terminal.onConnectedChanged(it) } }
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL_STATUS, getString(R.string.channel_status), NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CHANNEL_CONFIRM, getString(R.string.channel_confirm), NotificationManager.IMPORTANCE_HIGH))
+    }
+
+    /**
+     * A file or photo picked on the phone: copied, hashed and uploaded as a draft, off the main thread.
+     * onFailed gets the host's text, or "" (the screen then says it in its own words); it runs off the main thread too.
+     */
+    fun attachUri(uri: Uri, onFailed: (String) -> Unit) {
+        scope.launch {
+            try {
+                drafts.add(UriSource.copy(this@AdbuddyApp, uri))
+            } catch (e: UploadFailed) {
+                onFailed(e.text.ifEmpty { e.code })
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) { // a provider that fails (Drive offline, permission revoked) must not end the process
+                onFailed("")
+            }
+        }
     }
 
     companion object {
