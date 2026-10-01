@@ -31,6 +31,8 @@ These helpers read and act on the phone's screen through the ADBuddy app (fast, 
 
 Some apps are protected (banking, payments, passwords, 2FA, and ADBuddy itself): while one is in front, nothing touches or reads the screen and you get `Blocked by ADBuddy: … is a protected app`. Ask the user to do that part. ADBuddy never types into password fields and never shows their text.
 
+Raw adb commands that touch or read the screen (`input`, `screencap`, `screenrecord`, `am start`, `monkey`, `uiautomator`) must go one per call, one key per `input keyevent`, without `;`, `&&`, `|`, `$(…)` or wrappers such as `watch`, `flock` or `sh -c`; otherwise ADBuddy blocks them.
+
 ## Risk levels
 
 - 🟢 Read-only: runs at once.
