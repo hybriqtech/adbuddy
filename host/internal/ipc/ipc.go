@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -56,6 +57,7 @@ const (
 	// KindSend sends a file of the environment to the phone (adbuddy send):
 	// Argv is the path and the caption.
 	KindSend = "send"
+	KindUI = "ui" // an agent's helper: adbuddy screen, tap, type… (M5)
 )
 
 // Request is the first frame of every connection.
@@ -67,6 +69,11 @@ type Request struct {
 	Env     map[string]string `json:"env,omitempty"`
 	Target  string            `json:"target,omitempty"`  // undo: "last", "session" or an entry id
 	Session string            `json:"session,omitempty"` // undo session: empty = the daemon's current one
+	// UIOp and UIArgs are the helper of a KindUI request: a ui.request
+	// operation (bridge.UIOp*) or "screenshot", and its args. Argv is the
+	// command as the agent typed it, for the journal.
+	UIOp   string          `json:"uiOp,omitempty"`
+	UIArgs json.RawMessage `json:"uiArgs,omitempty"`
 }
 
 // Exit is the last frame: the exit code for the client and, for failures
