@@ -90,7 +90,7 @@ adbuddy remote off      # closes it (`adb usb`)
 adbuddy remote status   # on, closing, or off, and when it expires
 ```
 
-You can also use the switch in the ADBuddy app. From the agent's session these commands are refused (`AGENT_SESSION`). Port 5555 stays open on every network the phone joins until it expires or you turn it off, so use it only when you need it.
+You can also use the switch in the ADBuddy app. From the agent's session these commands are refused (`AGENT_SESSION`). Port 5555 stays open on every network the phone joins until it expires or you turn it off, so use it only when you need it. Only a running `adbuddy serve` closes it when it expires: with serve stopped nothing expires, and the port stays open until you run `adbuddy remote off` (it closes the port directly) or start serve again.
 
 `adbuddy serve` also watches the phone: if it disappears (for example after `adb tcpip` or when you leave home), after two failed checks, 10 s apart, it tries the saved address, the phone on the local network, the phone's Tailscale address and, in remote mode, `<tailscale ip>:5555`. In remote mode screenshots default to JPEG at half scale.
 

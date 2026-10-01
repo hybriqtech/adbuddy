@@ -251,13 +251,13 @@ Precisa §3.3 de la v1 sobre el contrato de §8.2 del protocolo.
 ### 7.2 Solo con datos móviles (`adb tcpip 5555`)
 
 - **`remote.set {enabled: true}`** desde la app (con `rid`), y solo con el móvil conectado al host. El host:
-  1. ejecuta `adb tcpip 5555` con su adb, fuera del shim (es el usuario quien lo pide, no el agente);
-  2. guarda `remote_until` = ahora + 12 h en `config.toml`;
+  1. guarda `remote_until` = ahora + 12 h en `config.toml` ANTES de abrir el puerto (ruling de M5b T3): tras `adb tcpip` adbd se reinicia y cae la conexión, así que un `adb usb` para deshacer un guardado fallido fallaría también; si no se puede guardar, no se abre nada;
+  2. ejecuta `adb tcpip 5555` con su adb, fuera del shim (es el usuario quien lo pide, no el agente). Si falla porque no hay móvil conectado (la orden no llegó a adbd), borra `remote_until` y el modo queda apagado; con cualquier otro error (la orden pudo llegar) solo lo borra si `getprop service.adb.tcp.port` confirma que el puerto no está abierto, y si no, el modo sigue activo y se dice;
   3. responde con `remote.state {enabled, address: "<tailscaleIp>:5555", expiresAt}` y lo publica como evento.
 
   Sin `tailscaleIp` conocida, contesta `error` `unavailable` ("Turn on Tailscale on the phone first").
   La respuesta puede perderse: `adb tcpip` reinicia adbd y cae el túnel de la app. La app trata la falta de respuesta como "desconocido" y el host republica `remote.state` en cada `attach`.
-  `adbuddy remote on` por IPC pide confirmación al usuario (plan de M5b, Task 8): el agente no puede abrir el 5555.
+  `adbuddy remote on` por IPC pide confirmación al usuario (plan de M5b, Task 8): el agente no puede abrir el 5555. La pregunta pasa por el daemon como las 🔴 (`Daemon.AskUser`): una sola pregunta a la vez y, mientras está abierta, todo comando del agente se rechaza (un `input tap` podría pulsar Permitir; revisión final de M5b, C1).
 - **`remote.set {enabled: false}`,** al caducar `remote_until` o con `adbuddy remote off`: el host ejecuta `adb usb` y borra `remote_until`.
 - **Invariante** (`invariant.go`): con `remote_until` en el futuro, el puerto abierto es el esperado y `applyInvariant` no ejecuta `adb usb`. Sin `remote_until`, o ya pasado, se comporta como hoy.
 - **Reconexión:** si se pierde el móvil durante la sesión, `serve` prueba, en orden, `cfg.Address` (el primer candidato, la última IP:puerto que funcionó), el serial de siempre (mDNS), `tailscale_ip:tailscale_port` y, con el modo remoto activo, `tailscale_ip:5555`. Ese es el único candidato de red con el 5555: no se prueba la IP de casa con el 5555, sería probar a ciegas en cualquier red. Como el serial con el que adb lista el móvil cambia, el ejecutor del daemon tiene que tomar el serial activo de un sitio que se pueda cambiar, no de `Options.Serial`, fijado al arrancar. Eso toca `serve.go` y `daemon.go`, que son de M3: el plan de M5b se escribe sobre el `serve` de M3 y se acuerda con tern-51.
