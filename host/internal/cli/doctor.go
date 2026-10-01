@@ -233,7 +233,7 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 		phone := runner
 		phone.Serial = active
 		add(checkIdentity(ctx, phone, guid, savedName(e)))
-		add(checkRemotePort(ctx, phone))
+		add(checkRemotePort(ctx, phone, e.cfg.RemoteUntilTime(), running))
 		add(checkApp(ctx, phone, e, running))
 	}
 
@@ -402,7 +402,10 @@ func checkIdentity(ctx context.Context, phone adb.Runner, guid, saved string) ch
 // unlockAndRetry is the guidance when the phone did not answer a read.
 const unlockAndRetry = "Unlock the phone and run adbuddy doctor again."
 
-func checkRemotePort(ctx context.Context, phone adb.Runner) check {
+// checkRemotePort reads whether adbd listens on a TCP port. With the remote
+// mode on (remote_until in config.toml) that is expected, and it says until
+// when; with serve stopped nothing closes it, even after that.
+func checkRemotePort(ctx context.Context, phone adb.Runner, until time.Time, serveRunning bool) check {
 	port, err := callWithin(ctx, func(c context.Context) (string, error) { return device.TCPPort(c, phone) })
 	switch {
 	case err != nil:
@@ -410,8 +413,21 @@ func checkRemotePort(ctx context.Context, phone adb.Runner) check {
 	case port == "" || port == "0":
 		return check{Name: "network port", Status: checkOK, Detail: "closed (no adb tcpip mode)"}
 	}
+	if !until.IsZero() {
+		hm := until.Local().Format("15:04")
+		c := check{Name: "network port", Status: checkWarn, Detail: "adb listens on port " + port + " (tcpip mode): remote mode on until " + hm}
+		if !until.After(remoteNow()) {
+			c.Detail = "adb listens on port " + port + " (tcpip mode): remote mode expired at " + hm + " but the port is still open"
+		}
+		if serveRunning {
+			c.Guidance = "It stays open on any network until serve closes it when the remote mode expires; run `adbuddy remote off` to close it now."
+		} else {
+			c.Guidance = "Nothing closes it while serve is stopped, even after " + hm + ": run `adbuddy remote off` to close it."
+		}
+		return c
+	}
 	return check{Name: "network port", Status: checkWarn, Detail: "adb listens on port " + port + " (tcpip mode): `adbuddy serve` closes it with `adb usb` when it starts",
-		Guidance: "Nothing to do: serve closes it. Remote mode (Tailscale over mobile data) arrives in a later version."}
+		Guidance: "Nothing to do: serve closes it (remote mode is off)."}
 }
 
 // checkApp: the phone app is optional; everything here is a warning at most.

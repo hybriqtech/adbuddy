@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 )
 
@@ -24,6 +25,25 @@ const (
 
 // ErrNoTailscale: the app has not reported a Tailscale address yet.
 var ErrNoTailscale = errors.New("Turn on Tailscale on the phone first")
+
+// NoPhone reports whether adb failed because no phone is connected or it is
+// offline: the order never reached adbd. Matched on adb's own messages; a
+// timeout or a cut connection is not this (the order may have arrived).
+func NoPhone(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, adb.ErrNoDevice) {
+		return true
+	}
+	m := strings.ToLower(err.Error())
+	for _, s := range []string{"no devices/emulators found", "device offline", "no devices", "no phone connected"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
+}
 
 // ADB runs adb against the active phone.
 type ADB interface {
@@ -103,8 +123,9 @@ func (c *Controller) adbCmd(ctx context.Context, args ...string) (string, error)
 // Enable opens port 5555 (`adb tcpip 5555`). The expiry is saved BEFORE the
 // port opens: right after `adb tcpip` adbd restarts and the connection is
 // gone, so an `adb usb` to undo a failed save would fail too. If `tcpip`
-// fails the expiry is cleared again; if that also fails, an expiry with no
-// open port is left, which is the safe side (Reconcile clears it).
+// fails because no phone is connected, or the port is then seen closed, the
+// expiry is cleared again; otherwise (or if clearing fails) the expiry stays,
+// which is the safe side (Reconcile clears it if the port is closed).
 // Already enabled: nothing is run. adbd restarts, so the caller does not
 // wait for the connection.
 func (c *Controller) Enable(ctx context.Context) (State, error) {
@@ -120,11 +141,17 @@ func (c *Controller) Enable(ctx context.Context) (State, error) {
 		return c.State(), err
 	}
 	if _, err := c.adbCmd(ctx, "tcpip", Port); err != nil {
-		// adbd may have got the order and the failure be the cut connection or
-		// the timeout: the expiry is cleared only when the port is seen NOT to
-		// be open. If it cannot be read, the expiry stays (a false "on" is
-		// better than a false "off" with the port open); Reconcile clears it
-		// at the next start if the port turns out closed.
+		// No phone connected (or offline): the order never reached adbd, so
+		// the port did not open and the mode stays off.
+		if NoPhone(err) {
+			_ = c.st.SetUntil(time.Time{})
+			return c.State(), err
+		}
+		// Otherwise adbd may have got the order and the failure be the cut
+		// connection or the timeout: the expiry is cleared only when the port
+		// is seen NOT to be open. If it cannot be read, the expiry stays (a
+		// false "on" is better than a false "off" with the port open);
+		// Reconcile clears it at the next start if the port turns out closed.
 		if port, perr := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); perr == nil && port != Port {
 			_ = c.st.SetUntil(time.Time{})
 		}

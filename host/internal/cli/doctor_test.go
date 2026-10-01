@@ -622,8 +622,42 @@ func TestDoctorTimeLimit(t *testing.T) {
 func TestDoctorNetworkPortOpen(t *testing.T) {
 	doctorEnv(t, doctorRules(testutil.FakeRule{Match: `^shell getprop service\.adb\.tcp\.port$`, Stdout: "5555\n"}))
 	out, _, code := runWithInput(t, "", "doctor", "--json")
-	if c := statusOf(doctorJSON(t, out), "network port"); code != 0 || c.Status != checkWarn || !strings.Contains(c.Detail, "5555") {
+	c := statusOf(doctorJSON(t, out), "network port")
+	if code != 0 || c.Status != checkWarn || !strings.Contains(c.Detail, "5555") {
 		t.Fatalf("exit %d %+v", code, c)
+	}
+	if strings.Contains(c.Guidance, "later version") || strings.Contains(c.Detail, "remote mode") {
+		t.Fatalf("%+v", c)
+	}
+}
+
+// Final review, minor 1: with the remote mode on, doctor says so and until
+// when, and that with serve stopped nothing closes the port; it does not
+// reassure that serve closes it.
+func TestDoctorNetworkPortOpenInRemoteMode(t *testing.T) {
+	cases := map[string]struct {
+		until time.Time
+		want  string
+	}{
+		"on":      {until: time.Now().Add(5 * time.Hour), want: "remote mode on until "},
+		"expired": {until: time.Now().Add(-time.Hour), want: "remote mode expired at "},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			doctorEnvWith(t, doctorRules(testutil.FakeRule{Match: `^shell getprop service\.adb\.tcp\.port$`, Stdout: "5555\n"}),
+				func(cfg *config.Config) {
+					cfg.TailscaleIP, cfg.RemoteUntil = "100.64.0.5", c.until.UTC().Format(time.RFC3339)
+				})
+			out, _, code := runWithInput(t, "", "doctor", "--json")
+			ch := statusOf(doctorJSON(t, out), "network port")
+			if code != 0 || ch.Status != checkWarn || !strings.Contains(ch.Detail, c.want+c.until.Local().Format("15:04")) {
+				t.Fatalf("exit %d %+v", code, ch)
+			}
+			if strings.Contains(ch.Detail+ch.Guidance, "serve closes it") || strings.Contains(ch.Guidance, "later version") ||
+				!strings.Contains(ch.Guidance, "Nothing closes it while serve is stopped") || !strings.Contains(ch.Guidance, "adbuddy remote off") {
+				t.Fatalf("%+v", ch)
+			}
+		})
 	}
 }
 

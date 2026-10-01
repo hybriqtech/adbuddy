@@ -89,6 +89,15 @@ open. Not available to the agent.`,
 				case "on":
 					return notRunning
 				case "off":
+					// Already off in config.toml: nothing to close, and `adb usb`
+					// would restart adbd for nothing.
+					if e.cfg.RemoteUntil == "" {
+						if app.JSON {
+							return WriteData(app.Stdout, remoteInfo{})
+						}
+						fmt.Fprintln(app.Stdout, "serve is not running; remote mode is already off.")
+						return nil
+					}
 					var offErr error
 					if info, offErr = remoteOffWithoutServe(cmd.Context(), app, e); offErr != nil {
 						return offErr
@@ -255,21 +264,6 @@ func (l *phoneLink) withdrawRemoteAsk() {
 	}
 }
 
-// noPhone reports whether adb failed because no phone is connected or it is
-// offline: the spec's REMOTE_UNAVAILABLE. Matched on adb's own messages.
-func noPhone(err error) bool {
-	if errors.Is(err, adb.ErrNoDevice) {
-		return true
-	}
-	m := strings.ToLower(err.Error())
-	for _, s := range []string{"no devices/emulators found", "device offline", "no devices", "no phone connected"} {
-		if strings.Contains(m, s) {
-			return true
-		}
-	}
-	return false
-}
-
 // useRemoteAsk sets the language and the time `adbuddy remote on` asks the
 // user in. Call it before the IPC server starts.
 func (l *phoneLink) useRemoteAsk(lang string, timeout time.Duration) {
@@ -403,12 +397,15 @@ func (l *phoneLink) changeRemote(ctx context.Context, on bool, reply func(remote
 		switch {
 		case errors.Is(res.err, remote.ErrNoTailscale):
 			return remoteExit(1, "REMOTE_UNAVAILABLE", "%s", res.err.Error())
-		case res.err != nil && noPhone(res.err):
-			return remoteExit(1, "REMOTE_UNAVAILABLE", "no phone connected: %s", classify.Printable(res.err.Error()))
 		case res.err != nil:
+			// No phone: `on` cleared its expiry (the order never reached adbd);
+			// whatever stays on is said.
 			msg := classify.Printable(res.err.Error())
 			if s := r.ctl.State(); s.Enabled {
 				msg += " (the remote mode is still on)"
+			}
+			if remote.NoPhone(res.err) {
+				return remoteExit(1, "REMOTE_UNAVAILABLE", "no phone connected: %s", msg)
 			}
 			return remoteExit(1, "REMOTE_FAILED", "%s", msg)
 		}

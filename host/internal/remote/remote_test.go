@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/adb"
 )
 
 const getprop = "shell getprop service.adb.tcp.port"
@@ -20,6 +22,8 @@ type env struct {
 	port      string // answer of getprop
 	portFails bool
 	tcpipFail bool
+	tcpipErr  string // stderr of a failing tcpip (default "error: closed")
+	tcpipGo   error  // error of the adb run itself for tcpip (no exit code)
 	usbFail   bool
 	saveFail  bool
 	ip        string
@@ -42,8 +46,15 @@ func (e *env) Run(_ context.Context, _ string, args []string, _ io.Reader, stdou
 		}
 		io.WriteString(stdout, e.port+"\r\n")
 	case "tcpip 5555":
+		if e.tcpipGo != nil {
+			return 0, e.tcpipGo
+		}
 		if e.tcpipFail {
-			io.WriteString(stderr, "error: closed")
+			msg := e.tcpipErr
+			if msg == "" {
+				msg = "error: closed"
+			}
+			io.WriteString(stderr, msg)
 			return 1, nil
 		}
 	case "usb":
@@ -375,5 +386,44 @@ func TestDisableSaveFailsStaysEnabled(t *testing.T) {
 	s, err := e.controller().Disable(context.Background())
 	if err == nil || !s.Enabled || !e.ran("usb") {
 		t.Fatalf("%+v %v %q", s, err, e.events)
+	}
+}
+
+// Final review, minor 2: `tcpip` that fails because no phone is connected
+// never reached adbd, so the port did not open: the expiry is cleared and the
+// mode stays off, even though the port cannot be read either.
+func TestEnableWithoutPhoneClearsUntil(t *testing.T) {
+	for name, set := range map[string]func(*env){
+		"no devices": func(e *env) { e.tcpipFail, e.tcpipErr = true, "error: no devices/emulators found" },
+		"offline":    func(e *env) { e.tcpipFail, e.tcpipErr = true, "error: device offline" },
+		"no phone":   func(e *env) { e.tcpipGo = adb.ErrNoDevice },
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv()
+			e.portFails = true // no phone: getprop fails too
+			set(e)
+			s, err := e.controller().Enable(context.Background())
+			if err == nil || !NoPhone(err) {
+				t.Fatalf("err %v", err)
+			}
+			if !e.until.IsZero() || s.Enabled {
+				t.Fatalf("until %v state %+v (%q)", e.until, s, e.events)
+			}
+		})
+	}
+}
+
+// Any other failure may come after adbd got the order (a cut connection, a
+// timeout): the expiry stays while the port cannot be read.
+func TestEnableTimeoutKeepsUntil(t *testing.T) {
+	e := newEnv()
+	e.portFails = true
+	e.tcpipGo = context.DeadlineExceeded
+	s, err := e.controller().Enable(context.Background())
+	if err == nil || NoPhone(err) {
+		t.Fatalf("err %v", err)
+	}
+	if !e.until.Equal(t0.Add(Lifetime)) || !s.Enabled {
+		t.Fatalf("until %v state %+v", e.until, s)
 	}
 }

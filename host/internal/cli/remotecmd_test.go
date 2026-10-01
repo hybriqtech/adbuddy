@@ -509,6 +509,27 @@ func TestRemoteOffWithoutServe(t *testing.T) {
 			t.Fatalf("calls %q", loggedCalls(t, e.log))
 		}
 	})
+	// Final review, minor 3: already off, it says so and leaves adb alone
+	// (`adb usb` would restart adbd for nothing).
+	t.Run("already off", func(t *testing.T) {
+		e := newSetupEnv(t, offRules(testutil.FakeRule{Match: "^usb$", Stderr: "error: closed\n", Exit: 1}))
+		saveRemoteCmdConfig(t, e, "", phoneSerial)
+		out, errOut, code := run(t, "remote", "off")
+		if code != 0 || !strings.Contains(out, "remote mode is already off") || strings.Contains(errOut, "stays on") {
+			t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+		}
+		if calls := loggedCalls(t, e.log); len(calls) != 0 {
+			t.Fatalf("adb was used: %q", calls)
+		}
+		out, _, code = run(t, "remote", "off", "--json")
+		var env struct {
+			OK   bool
+			Data remoteInfo
+		}
+		if err := json.Unmarshal([]byte(out), &env); err != nil || code != 0 || !env.OK || env.Data.Enabled || env.Data.Serve {
+			t.Fatalf("json: exit %d %q (%v)", code, out, err)
+		}
+	})
 	t.Run("usb fails", func(t *testing.T) {
 		e := newSetupEnv(t, offRules(testutil.FakeRule{Match: "^usb$", Stderr: "error: closed\n", Exit: 1}))
 		saveRemoteCmdConfig(t, e, until, phoneSerial)
@@ -705,15 +726,44 @@ func TestRemoteOnWithoutPhoneIsUnavailable(t *testing.T) {
 		h.g.phone.stderr = why
 		h.g.phone.mu.Unlock()
 		h.g.phone.setFail("tcpip 5555", true)
+		h.g.phone.setFail("shell getprop service.adb.tcp.port", true) // no phone: nothing answers
 		exit, _ := h.call(t, "on", nil)
 		if exit.Code != 1 || exit.ErrorCode != "REMOTE_UNAVAILABLE" {
 			t.Errorf("%q: %+v", why, exit)
 		}
+		// Final review, minor 2: the order never reached the phone, so the
+		// mode is off, not "on" for 12 hours.
+		if !h.g.store.Until().IsZero() || strings.Contains(exit.Error, "still on") {
+			t.Errorf("%q: until %v, %q", why, h.g.store.Until(), exit.Error)
+		}
+		if _, info := h.call(t, "status", nil); info.Enabled {
+			t.Errorf("%q: status %+v", why, info)
+		}
 	}
-	// Any other failure stays REMOTE_FAILED.
+	// Any other failure stays REMOTE_FAILED; if the port cannot be read the
+	// order may have arrived: the mode stays on, and it says so.
 	h := newRemoteHost(t, withTailscale(), confirm.Allow)
 	h.g.phone.setFail("tcpip 5555", true)
-	if exit, _ := h.call(t, "on", nil); exit.ErrorCode != "REMOTE_FAILED" {
+	h.g.phone.setFail("shell getprop service.adb.tcp.port", true)
+	exit, _ := h.call(t, "on", nil)
+	if exit.ErrorCode != "REMOTE_FAILED" || !strings.Contains(exit.Error, "(the remote mode is still on)") || h.g.store.Until().IsZero() {
+		t.Fatalf("%+v until %v", exit, h.g.store.Until())
+	}
+}
+
+// A no-phone answer while the mode stays on (the expiry could not be
+// cleared) says it is still on.
+func TestRemoteUnavailableSaysStillOn(t *testing.T) {
+	h := newRemoteHost(t, withTailscale(), confirm.Allow)
+	if exit, _ := h.call(t, "on", nil); exit.Code != 0 {
+		t.Fatalf("%+v", exit)
+	}
+	h.g.phone.mu.Lock()
+	h.g.phone.stderr = "error: no devices/emulators found"
+	h.g.phone.mu.Unlock()
+	h.g.phone.setFail("usb", true)
+	exit, _ := h.call(t, "off", nil)
+	if exit.ErrorCode != "REMOTE_UNAVAILABLE" || !strings.Contains(exit.Error, "(the remote mode is still on)") {
 		t.Fatalf("%+v", exit)
 	}
 }
