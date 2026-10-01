@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -147,7 +148,9 @@ func (h *harness) adbIn(dir, stdin string, args ...string) (stdout, stderr strin
 	h.t.Helper()
 	cmd := exec.Command(filepath.Join(workspace.BinDir(h.ws), testutil.Exe("adb")), args...)
 	cmd.Dir = dir
-	cmd.Env = append(h.env, "ADBUDDY_SOURCE=agent")
+	// A copy: tests run the shim from several goroutines, and appending to
+	// h.env itself would write into its shared backing array.
+	cmd.Env = append(slices.Clip(h.env), "ADBUDDY_SOURCE=agent")
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb

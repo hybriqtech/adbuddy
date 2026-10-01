@@ -45,6 +45,18 @@ jobs:
         run: test -n "$ADBUDDY_MKSH_SERIAL" && go test -timeout 60m -count=1 -run TestRecordOracle ./internal/classify
       - name: The recorded oracle is the one in the repository
         run: git diff --exit-code -- host/internal/classify/testdata
+      # Evidence for a failed start or recording: why the emulator did not
+      # boot. The emulator has its own adb server (scripts/emulator.sh).
+      - name: Emulator diagnostics
+        if: failure()
+        env:
+          ANDROID_ADB_SERVER_PORT: "5039"
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          tail -n 200 /tmp/adbuddy-emulator.log || true
+          "$ADB" devices -l || true
+          timeout 20 "$ADB" -s emulator-5580 shell getprop | grep -E "boot|init.svc.(surfaceflinger|zygote|system_server)" || true
+          timeout 30 "$ADB" -s emulator-5580 logcat -d -b crash,system | tail -n 150 || true
       - name: Stop the emulator
         if: always()
         run: scripts/emulator.sh stop

@@ -51,8 +51,11 @@ start() {
     nohup "$SDK/emulator/emulator$EXE" -avd "$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim \
       -no-snapshot -gpu swiftshader_indirect >"${TMPDIR:-/tmp}/adbuddy-emulator.log" 2>&1 &
   fi
-  MSYS_NO_PATHCONV=1 timeout 600 "$ADB" -s "$SERIAL" wait-for-device shell \
-    'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done' </dev/null
+  if ! MSYS_NO_PATHCONV=1 timeout 600 "$ADB" -s "$SERIAL" wait-for-device shell \
+    'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done' </dev/null; then
+    echo "the emulator did not finish booting in 10 minutes; its log: ${TMPDIR:-/tmp}/adbuddy-emulator.log" >&2
+    exit 124
+  fi
   print_env
 }
 
