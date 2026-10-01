@@ -38,7 +38,8 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - el envío que espera hueco y la consulta de presión de la cola en `server.go` (§6.4 y §7);
   - el test de que se descartan las tramas de ids no aceptados (§12);
   - todo manejador de una petición con `rid` responde por todos sus caminos (§3), también en M4 y M5;
-  - los manejadores que guardan estado por conexión comprueban `Server.Current(m)` (§10).
+  - los manejadores que guardan estado por conexión comprueban `Server.Current(m)` (§10);
+  - el área de tramas (subidas) protege su estado con su propio mutex y tolera una trama de la conexión anterior tras un reemplazo: `OnFrame` no dice de qué conexión viene (pasarle la conexión es un cambio de API interna que M3 puede hacer).
 
 - **Lista de variables de entorno permitidas** para lanzar el agente (§5.1). En M1a, `host/internal/agent.Env` solo quita variables (`CLAUDECODE*`, `CLAUDE_CODE_*`, `CLAUDE_EFFORT`, `CLAUDE_PID`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT`, `ADBUDDY_SOURCE`). M3 debe pasar a una lista de permitidas: las de sistema, autenticación y proxy del usuario (`PATH`, `HOME`/`USERPROFILE`, `APPDATA`, `ANTHROPIC_*`, `HTTP(S)_PROXY`/`NO_PROXY`, `CLAUDE_CONFIG_DIR`…), verificando la lista en Windows, macOS y Linux.
 - **Confianza previa de la carpeta del entorno** en Claude Code (§5.1, S3): averiguar dónde y con qué clave guarda Claude Code la confianza de una carpeta y preconfiar el entorno antes de lanzar el agente en el PTY; si no es posible, detectar el diálogo y elegir "Yes" de forma explícita (un Enter a ciegas elige "No, exit").

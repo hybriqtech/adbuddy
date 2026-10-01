@@ -39,12 +39,16 @@ type Options struct {
 	Session     string
 	HostVersion string
 	// OnMessage receives the app's messages after a valid hello, one at a
-	// time. Its payload comes from the app: validate before use. Its TS is
-	// what the app sent, or zero when that was not a valid time.
+	// time and in order within a connection. After a replacement, a call
+	// still running for the previous connection can overlap OnAttach and the
+	// new connection's calls: a handler that keeps state locks it itself and
+	// checks Current(m). Its payload comes from the app: validate before use.
+	// Its TS is what the app sent, or zero when that was not a valid time.
 	OnMessage func(Message)
 	// Snapshot describes the current state when the app missed too much, and
 	// for PublishSnapshot. It is called with the server's lock held: it must
-	// not call Publish, PublishSnapshot or Connected.
+	// not call Publish, PublishRID, PublishSnapshot, Reply, Send, Current or
+	// Connected.
 	Snapshot func() Snapshot
 	// OnConnect is called with true when an app authenticates and none was
 	// connected, and with false when the app is gone and no other took its
@@ -54,13 +58,19 @@ type Options struct {
 	// OnReject is called when an authenticated app is too old to talk to.
 	OnReject func(Hello)
 	// OnFrame receives the app's binary frames that DecodeFrame accepts, one
-	// at a time and in order with OnMessage. Its data comes from the app and
-	// is only valid during the call: copy what it keeps.
+	// at a time and in order with OnMessage within a connection. After a
+	// replacement, a frame can still come from the previous connection (it
+	// carries none, there is no Current for it) and its call can overlap
+	// OnAttach and the new connection's calls: a handler that keeps state
+	// locks it itself. Its data comes from the app and is only valid during
+	// the call: copy what it keeps.
 	OnFrame func(id FrameID, offset int64, data []byte)
 	// OnAttach is called each time an app authenticates, also when it
 	// replaces another one (which OnConnect does not report), before any of
-	// its messages: state kept per connection starts over. It comes after
-	// OnConnect(true), in order with it, and may call Publish and Send.
+	// its messages: state kept per connection starts over here. A call of
+	// the previous connection's handlers can still be running (see OnMessage
+	// and OnFrame). It comes after OnConnect(true), in order with it, and may
+	// call Publish and Send.
 	OnAttach func()
 	Now      func() time.Time
 }
