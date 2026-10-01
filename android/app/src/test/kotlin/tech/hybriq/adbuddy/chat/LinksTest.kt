@@ -35,8 +35,8 @@ class LinksTest {
         assertNull(Links.domain("mailto:a@b.c"))
     }
 
-    private val fsi = "⁨"
-    private val pdi = "⁩"
+    private val fsi = String(Character.toChars(0x2068))
+    private val pdi = String(Character.toChars(0x2069))
 
     @Test fun aLinkTextNeverPassesForAnotherDomain() {
         assertEquals("https://mibanco.com $fsi(evil.example)$pdi", Links.label("https://mibanco.com", "https://evil.example"))
