@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "rid": "r_7",
+  "type": "remote.set",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "enabled": true
+  }
+}

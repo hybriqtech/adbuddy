@@ -1,0 +1,97 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "snapshot",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "state": {
+      "agent": "claude",
+      "state": "working",
+      "activity": "Running: adb shell pm list packages",
+      "paused": false,
+      "conversation": "c_2",
+      "view": "terminal",
+      "pcAttached": true
+    },
+    "pending": [
+      {
+        "id": "j_1",
+        "level": "red",
+        "title": "Restart the phone",
+        "detail": "may restart",
+        "rawCommand": "adb shell reboot",
+        "expiresAt": "2026-10-01T10:02:00Z",
+        "special": true,
+        "allowSession": false
+      }
+    ],
+    "journal": [
+      {
+        "id": "j_1",
+        "ts": "2026-10-01T10:00:00Z",
+        "session": "s_1",
+        "serial": "emulator-5580",
+        "source": "agent",
+        "argv": [
+          "shell",
+          "pm",
+          "disable-user",
+          "com.example"
+        ],
+        "level": "yellow",
+        "rule": "pm.disable",
+        "description": "Disable com.example",
+        "status": "ok",
+        "exitCode": 0,
+        "inverse": {
+          "argv": [
+            "shell",
+            "pm",
+            "enable",
+            "com.example"
+          ]
+        },
+        "backups": [
+          "backups/j_1.bin"
+        ],
+        "undoneBy": "j_2",
+        "undoes": "j_0",
+        "reason": "allowed on the phone",
+        "mac": "c0ffee"
+      }
+    ],
+    "chat": [
+      {
+        "id": "m_1",
+        "role": "assistant",
+        "text": "Done: **3** apps disabled.",
+        "attachments": [
+          {
+            "id": "00112233445566778899aabbccddeeff",
+            "name": "photo.jpg",
+            "mime": "image/jpeg",
+            "size": 2048,
+            "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+            "thumb": "/9j/4AAQSkZJRg=="
+          }
+        ],
+        "conversation": "c_2"
+      }
+    ],
+    "permissions": [
+      {
+        "id": "p_1",
+        "tool": "Bash",
+        "summary": "Run npm test",
+        "detail": "npm test --silent",
+        "expiresAt": "2026-10-01T10:10:00Z",
+        "allowAlways": true
+      }
+    ],
+    "remote": {
+      "enabled": true,
+      "address": "192.0.2.7:5555",
+      "expiresAt": "2026-10-01T22:00:00Z"
+    }
+  }
+}

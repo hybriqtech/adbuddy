@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "permission.request",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "p_1",
+    "tool": "Bash",
+    "summary": "Run npm test",
+    "detail": "npm test --silent",
+    "expiresAt": "2026-10-01T10:10:00Z",
+    "allowAlways": true
+  }
+}

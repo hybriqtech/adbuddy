@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "notice",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "level": "info",
+    "text": "That question was already answered or moved to the PC terminal."
+  }
+}

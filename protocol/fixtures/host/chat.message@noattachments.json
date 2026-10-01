@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "chat.message",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "m_3",
+    "role": "assistant",
+    "text": "ok",
+    "attachments": null,
+    "conversation": "c_2"
+  }
+}

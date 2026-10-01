@@ -20,3 +20,6 @@ android/**/*.properties text eol=lf
 android/**/*.pro text eol=lf
 android/**/*.md text eol=lf
 android/.gitignore text eol=lf
+
+# protocol/: the shared fixtures, read byte for byte by Go and Kotlin
+protocol/** text eol=lf

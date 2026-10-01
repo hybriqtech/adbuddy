@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "type": "terminal.snapshot",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "epoch": "e_1",
+    "offset": 4096,
+    "cols": 120,
+    "rows": 40,
+    "data": "G1tIG1sySmhlbGxv"
+  }
+}

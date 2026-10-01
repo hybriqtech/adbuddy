@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "rid": "r_7",
+  "type": "error",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "code": "unsupported",
+    "text": "This version of the ADBuddy host does not handle chat.send yet."
+  }
+}

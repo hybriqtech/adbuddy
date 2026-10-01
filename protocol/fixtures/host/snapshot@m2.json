@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "snapshot",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "state": {
+      "agent": "claude",
+      "state": "idle",
+      "paused": false
+    },
+    "pending": [],
+    "journal": []
+  }
+}

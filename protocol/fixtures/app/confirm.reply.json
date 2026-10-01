@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "confirm.reply",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "j_1",
+    "decision": "allow_session"
+  }
+}

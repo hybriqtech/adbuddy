@@ -1,0 +1,44 @@
+{
+  "valid": [
+    {
+      "id": "00112233445566778899aabbccddeeff",
+      "offset": 0,
+      "data": "aGVsbG8=",
+      "frame": "00112233445566778899aabbccddeeff000000000000000068656c6c6f"
+    },
+    {
+      "id": "ffffffffffffffffffffffffffffffff",
+      "offset": 262144,
+      "data": "AA==",
+      "frame": "ffffffffffffffffffffffffffffffff000000000004000000"
+    }
+  ],
+  "invalid": [
+    {
+      "why": "no data",
+      "frame": "00112233445566778899aabbccddeeff0000000000000000"
+    },
+    {
+      "why": "no offset",
+      "frame": "00112233445566778899aabbccddeeff"
+    },
+    {
+      "why": "a negative offset",
+      "frame": "00112233445566778899aabbccddeeff800000000000000061"
+    },
+    {
+      "why": "shorter than an id",
+      "frame": "0011"
+    },
+    {
+      "why": "empty",
+      "frame": ""
+    }
+  ],
+  "badIds": [
+    "00112233445566778899AABBCCDDEEFF",
+    "0011",
+    "00112233445566778899aabbccddeeffaa",
+    "g0112233445566778899aabbccddeeff"
+  ]
+}

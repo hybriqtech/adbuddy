@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "seq": 7,
+  "rid": "r_7",
+  "type": "chat.message",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "m_2",
+    "role": "user",
+    "text": "Free up some space",
+    "attachments": [],
+    "conversation": "c_2"
+  }
+}

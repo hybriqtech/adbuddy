@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "tool.activity",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "t_1",
+    "messageId": "m_1",
+    "summary": "Bash: adb shell pm list packages",
+    "status": "running"
+  }
+}

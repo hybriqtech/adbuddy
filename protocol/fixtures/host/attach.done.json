@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "rid": "r_7",
+  "type": "attach.done",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "attachment": {
+      "id": "00112233445566778899aabbccddeeff",
+      "name": "photo.jpg",
+      "mime": "image/jpeg",
+      "size": 2048,
+      "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+      "thumb": "/9j/4AAQSkZJRg=="
+    }
+  }
+}

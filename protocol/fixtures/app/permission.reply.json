@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "permission.reply",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "p_1",
+    "decision": "allow"
+  }
+}

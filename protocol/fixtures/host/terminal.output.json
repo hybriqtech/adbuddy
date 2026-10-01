@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "terminal.output",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "epoch": "e_1",
+    "offset": 4096,
+    "data": "aGVsbG8NCg=="
+  }
+}

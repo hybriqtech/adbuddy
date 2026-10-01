@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "hello",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "protocol": 1,
+    "token": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "lastSeq": 7,
+    "session": "s_1",
+    "appVersion": "0.3.0",
+    "deviceSerial": "emulator-5580"
+  }
+}

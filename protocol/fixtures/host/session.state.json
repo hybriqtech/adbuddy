@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "session.state",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "agent": "claude",
+    "state": "working",
+    "activity": "Running: adb shell pm list packages",
+    "paused": false,
+    "conversation": "c_2",
+    "view": "terminal",
+    "pcAttached": true
+  }
+}

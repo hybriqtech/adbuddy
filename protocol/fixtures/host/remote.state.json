@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "remote.state",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "enabled": true,
+    "address": "192.0.2.7:5555",
+    "expiresAt": "2026-10-01T22:00:00Z"
+  }
+}

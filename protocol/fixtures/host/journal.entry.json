@@ -1,0 +1,39 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "journal.entry",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "j_1",
+    "ts": "2026-10-01T10:00:00Z",
+    "session": "s_1",
+    "serial": "emulator-5580",
+    "source": "agent",
+    "argv": [
+      "shell",
+      "pm",
+      "disable-user",
+      "com.example"
+    ],
+    "level": "yellow",
+    "rule": "pm.disable",
+    "description": "Disable com.example",
+    "status": "ok",
+    "exitCode": 0,
+    "inverse": {
+      "argv": [
+        "shell",
+        "pm",
+        "enable",
+        "com.example"
+      ]
+    },
+    "backups": [
+      "backups/j_1.bin"
+    ],
+    "undoneBy": "j_2",
+    "undoes": "j_0",
+    "reason": "allowed on the phone",
+    "mac": "c0ffee"
+  }
+}

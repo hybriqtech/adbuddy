@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "type": "welcome",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "protocol": 1,
+    "session": "s_1",
+    "fromSeq": 8,
+    "hostVersion": "0.3.0"
+  }
+}

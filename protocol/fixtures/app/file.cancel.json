@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "type": "file.cancel",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "00112233445566778899aabbccddeeff"
+  }
+}

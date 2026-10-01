@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "permission.resolved",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "p_1",
+    "decision": "allow_always",
+    "by": "terminal"
+  }
+}

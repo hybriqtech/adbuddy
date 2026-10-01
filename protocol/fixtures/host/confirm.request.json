@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "seq": 7,
+  "type": "confirm.request",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "j_1",
+    "level": "red",
+    "title": "Restart the phone",
+    "detail": "may restart",
+    "rawCommand": "adb shell reboot",
+    "expiresAt": "2026-10-01T10:02:00Z",
+    "special": true,
+    "allowSession": false
+  }
+}

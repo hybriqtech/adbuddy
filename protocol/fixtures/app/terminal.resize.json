@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "type": "terminal.resize",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "cols": 60,
+    "rows": 30
+  }
+}
