@@ -21,8 +21,8 @@ var (
 // it, adbd restarts: this waits for the old connection to drop (at most
 // usbDropWait; the adb server may keep listing it for a moment), then for
 // the phone to come back (at most wait), and checks that the port is really
-// closed, except keep (remote mode's port, "" when it is off). command is what the user runs again after a failure. When ctx
-// ends, the error is whatever the step returned: callers turn it into
+// closed, except keep (remote mode's port, "" when it is off). command is
+// what the user runs again after a failure. When ctx ends, the error is whatever the step returned: callers turn it into
 // Interrupted.
 func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) error {
 	restarted, err := device.EnsureNoTCPPort(ctx, runner, keep)

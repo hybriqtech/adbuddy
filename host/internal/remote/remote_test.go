@@ -149,6 +149,9 @@ func TestEnableTcpipFailsPortClosedClearsUntil(t *testing.T) {
 		if !e.until.IsZero() || s.Enabled {
 			t.Fatalf("port %q: until %v state %+v", port, e.until, s)
 		}
+		if !e.ran(getprop) {
+			t.Fatalf("port %q: the port was not read: %q", port, e.events)
+		}
 	}
 }
 
@@ -303,11 +306,74 @@ func TestReconcilePortUnreadableChangesNothing(t *testing.T) {
 	}
 }
 
-func TestUntilIsCappedAtLifetime(t *testing.T) {
+// A remote_until too far ahead to come from Enable counts as expired: it must
+// not slide with the clock.
+func TestUntilBeyondLifetimeCountsAsExpired(t *testing.T) {
 	e := newEnv()
 	e.until = t0.Add(30 * 24 * time.Hour)
-	s := e.controller().State()
-	if !s.Enabled || !s.ExpiresAt.Equal(t0.Add(Lifetime)) {
+	c := e.controller()
+	if s := c.State(); !s.Enabled || !s.Closing {
 		t.Fatalf("%+v", s)
+	}
+	e.now = t0.Add(6 * time.Hour) // the clock moving does not push it away
+	if s := c.State(); !s.Closing {
+		t.Fatalf("slid with the clock: %+v", s)
+	}
+	st, changed, err := c.Expire(context.Background())
+	if err != nil || !changed || st != (State{}) {
+		t.Fatalf("%+v %v %v", st, changed, err)
+	}
+	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
+		t.Fatalf("events %q", got)
+	}
+}
+
+func TestUntilBeyondLifetimeReconcileCloses(t *testing.T) {
+	e := newEnv()
+	e.until = t0.Add(30 * 24 * time.Hour)
+	e.port = "5555"
+	s, err := e.controller().Reconcile(context.Background())
+	if err != nil || s != (State{}) || !e.until.IsZero() || !e.ran("usb") {
+		t.Fatalf("%+v %v until %v %q", s, err, e.until, e.events)
+	}
+}
+
+func TestUntilWithinLifetimeIsKept(t *testing.T) {
+	e := newEnv()
+	e.until = t0.Add(Lifetime + 30*time.Second)
+	s := e.controller().State()
+	if !s.Enabled || s.Closing || !s.ExpiresAt.Equal(e.until) {
+		t.Fatalf("%+v", s)
+	}
+}
+
+func TestReconcileWithoutUntilRunsNoAdb(t *testing.T) {
+	e := newEnv()
+	s, err := e.controller().Reconcile(context.Background())
+	if err != nil || s != (State{}) {
+		t.Fatalf("%+v %v", s, err)
+	}
+	e.noAdb(t)
+}
+
+func TestEnableWhileClosingSavesAgainAndRunsTcpip(t *testing.T) {
+	e := newEnv()
+	e.until = t0.Add(-time.Minute)
+	s, err := e.controller().Enable(context.Background())
+	if err != nil || !s.Enabled || s.Closing || !s.ExpiresAt.Equal(t0.Add(Lifetime)) {
+		t.Fatalf("%+v %v", s, err)
+	}
+	if got := strings.Join(e.events, "|"); got != "save 12h0m0s|adb tcpip 5555" {
+		t.Fatalf("events %q", got)
+	}
+}
+
+func TestDisableSaveFailsStaysEnabled(t *testing.T) {
+	e := newEnv()
+	e.until = t0.Add(time.Hour)
+	e.saveFail = true
+	s, err := e.controller().Disable(context.Background())
+	if err == nil || !s.Enabled || !e.ran("usb") {
+		t.Fatalf("%+v %v %q", s, err, e.events)
 	}
 }

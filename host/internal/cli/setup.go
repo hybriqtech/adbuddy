@@ -332,7 +332,12 @@ connection address with --connect (or type it when asked).`,
 				}
 				if cfg.RemoteUntil != "" {
 					// applyInvariant closed port 5555 above: setup always ends remote mode.
-					fmt.Fprintln(app.Stderr, "Remote mode was on: closing it.")
+					if samePhone {
+						fmt.Fprintln(app.Stderr, "Remote mode was on: closing it.")
+					} else {
+						// The `adb usb` went to another phone.
+						fmt.Fprintln(app.Stderr, "Remote mode was on for the phone you had set up before: its adb port 5555 may stay open until that phone restarts. Turn remote mode off from its app or restart it.")
+					}
 					cfg.RemoteUntil = ""
 				}
 				if err := config.Save(e.dirs.ConfigFile(), cfg); err != nil {

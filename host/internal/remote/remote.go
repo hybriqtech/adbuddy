@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
 )
 
 const (
@@ -28,7 +30,8 @@ type ADB interface {
 	Run(ctx context.Context, dir string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error)
 }
 
-// Store is where the mode's persistent facts live (config.toml).
+// Store is where the mode's persistent facts live (config.toml). It must be
+// safe for concurrent use: the controller and the snapshot read it at once.
 type Store interface {
 	TailscaleIP() string
 	Until() time.Time
@@ -60,12 +63,15 @@ func New(a ADB, s Store, now func() time.Time) *Controller {
 	return &Controller{adb: a, st: s, now: now}
 }
 
-// until is the saved expiry, never more than Lifetime ahead (a config.toml
-// edited by hand cannot keep the port open longer).
+// until is the saved expiry. One more than Lifetime (plus a minute of slack
+// for clock jitter) ahead cannot come from Enable: it is a config.toml edited
+// by hand, and it counts as already expired (now), so Expire and Reconcile
+// close the port. It is not clamped to now+Lifetime: that would slide with
+// the clock and never expire.
 func (c *Controller) until() time.Time {
 	u := c.st.Until()
-	if max := c.now().Add(Lifetime); u.After(max) {
-		return max
+	if u.After(c.now().Add(Lifetime + time.Minute)) {
+		return c.now()
 	}
 	return u
 }
@@ -89,7 +95,7 @@ func (c *Controller) adbCmd(ctx context.Context, args ...string) (string, error)
 		return "", err
 	}
 	if code != 0 {
-		return "", fmt.Errorf("adb %s: %s", args[0], strings.TrimSpace(errb.String()+" "+out.String()))
+		return "", fmt.Errorf("adb %s: %s", args[0], classify.Printable(strings.TrimSpace(errb.String()+" "+out.String())))
 	}
 	return strings.TrimSpace(strings.ReplaceAll(out.String(), "\r", "")), nil
 }

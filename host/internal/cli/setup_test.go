@@ -653,3 +653,60 @@ func TestSetupADBNotInPath(t *testing.T) {
 		t.Fatal("config saved")
 	}
 }
+
+// remoteSetupRules: the phone has port 5555 open (once), then closed by usb.
+func remoteSetupRules() []testutil.FakeRule {
+	return append([]testutil.FakeRule{
+		{Match: tcpPortRule, Stdout: "5555\n", Times: 1},
+		{Match: "^usb$", Stdout: "restarting in USB mode\n"},
+	}, phoneRules()...)
+}
+
+func saveRemoteConfig(t *testing.T, e setupEnv, serial string) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.Serial = serial
+	cfg.RemoteUntil = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	if err := config.Save(filepath.Join(e.cfgDir, "config.toml"), cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setup closes remote mode as always, says so, and forgets remote_until.
+func TestSetupClosesRemoteModeOfTheSamePhone(t *testing.T) {
+	setVar(t, &usbDropWait, 100*time.Millisecond)
+	e := newSetupEnv(t, remoteSetupRules())
+	saveRemoteConfig(t, e, "adb-AAAA1111-bbb._adb-tls-connect._tcp")
+	_, errOut, code := runWithInput(t, "", "setup", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != 0 || !strings.Contains(errOut, "Remote mode was on: closing it.") {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	ran := false
+	for _, c := range loggedCalls(t, e.log) {
+		ran = ran || c == "usb"
+	}
+	if !ran {
+		t.Fatal("adb usb did not run")
+	}
+	if cfg := loadSetupConfig(t, e); cfg.RemoteUntil != "" {
+		t.Fatalf("remote_until %q", cfg.RemoteUntil)
+	}
+}
+
+// The `adb usb` went to another phone: setup does not claim to have closed
+// the old one, and still forgets remote_until.
+func TestSetupWarnsWhenRemoteModeWasOnForAnotherPhone(t *testing.T) {
+	setVar(t, &usbDropWait, 100*time.Millisecond)
+	e := newSetupEnv(t, remoteSetupRules())
+	saveRemoteConfig(t, e, "adb-OTHER999-zzz._adb-tls-connect._tcp")
+	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != 0 {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	if strings.Contains(errOut, "closing it") || !strings.Contains(errOut, "Remote mode was on for the phone you had set up before") {
+		t.Fatalf("stderr %q", errOut)
+	}
+	if cfg := loadSetupConfig(t, e); cfg.RemoteUntil != "" {
+		t.Fatalf("remote_until %q", cfg.RemoteUntil)
+	}
+}
