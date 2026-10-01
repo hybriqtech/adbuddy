@@ -65,3 +65,8 @@ Plan: `docs/superpowers/plans/2026-10-01-adbuddy-m6a-releases.md` · Spec: `docs
     - "sustitúyelo en la 10" → 11;
     - `appRulesFor`, con la lista completa de reglas.
 12. Opcional: en el EOCD, exigir que el número de entradas del disco sea igual al total.
+
+## Re-revisión opus de Tasks 1-5 (2026-10-01, tras el rebase sobre M3a)
+
+- **Sin hallazgos de seguridad; lista para ejecutar.** Opcionales, a decidir en la Task 3/2 al ejecutar: (a) vaciar `ok` en `Same` tras un fallo definitivo de `Verify` (plan ~1503); (b) `fi.Mode().IsRegular()` en la rama `--apk` de setup, porque un FIFO sin escritor bloquea `os.Open` (plan ~2283).
+- **PAUSA hasta las 16:50 por orden del supervisor (91 % de la ventana).** Siguiente: Task 1 con `adbuddy-implementer` (Sonnet), un subagente a la vez, opus solo en revisiones de seguridad y la final.
