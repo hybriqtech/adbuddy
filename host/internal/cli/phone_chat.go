@@ -262,6 +262,11 @@ func (l *phoneLink) onChatSend(m bridge.Message) {
 		}
 		text = b.String()
 	}
+	if why := l.agentBusy(); why != "" {
+		release()
+		l.fail(m, bridge.CodeBusy, why)
+		return
+	}
 	if why := mgr.Busy(); why != "" {
 		release()
 		l.fail(m, bridge.CodeBusy, why)
@@ -278,6 +283,7 @@ func (l *phoneLink) onChatSend(m bridge.Message) {
 	}
 	// From the Manager, not from l.state(), which follows it late.
 	conv := mgr.Info().Conversation
+	l.noteSent(cs.Text)
 	msg := bridge.ChatMessage{ID: cs.ID, Role: "user", Text: cs.Text, Attachments: atts, Conversation: conv}
 	l.chat.mu.Lock()
 	l.chat.upsertLocked(msg)

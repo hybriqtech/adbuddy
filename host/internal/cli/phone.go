@@ -65,6 +65,7 @@ type phoneLink struct {
 	chat     chatState        // phone_chat.go
 	term     termState        // phone_term.go
 	files    filesState       // phone_files.go
+	adapter  adapter          // phone_agent.go
 	adb      phoneapp.ADB     // the phone's adb, for screenshots
 	ws       string           // the environment (useWorkspace)
 	// askLang and askTimeout are how `adbuddy remote on` asks the user
@@ -352,11 +353,18 @@ func (l *phoneLink) noteActivity(j journal.Entry) {
 }
 
 func (l *phoneLink) state() bridge.SessionState {
+	view, hooked := l.adapterState() // before l.mu: the adapter's lock is never taken under it
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	st := bridge.SessionState{Agent: l.agent, State: session.StateStopped, Activity: l.activity, Paused: l.paused, View: "terminal"}
 	if i := l.sess; i.Agent != "" {
 		st.Agent, st.State, st.Conversation, st.PCAttached = i.Agent, i.State, i.Conversation, i.PCAttached
+	}
+	if view != "" && st.State != session.StateStopped {
+		st.View = view
+		if hooked != "" {
+			st.State = hooked
+		}
 	}
 	if st.State == session.StateStopped {
 		st.Activity = ""
@@ -374,6 +382,7 @@ func (l *phoneLink) sessionInfo(i session.Info) {
 	l.sess = i
 	l.mu.Unlock()
 	l.chat.conversation(i.Conversation)
+	l.adapterConversation(i.Conversation, i.State == session.StateStopped)
 	if l.srv != nil {
 		_ = l.srv.Publish(bridge.TypeSessionState, l.state())
 	}
