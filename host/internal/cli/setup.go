@@ -264,7 +264,7 @@ connection address with --connect (or type it when asked).`,
 				runner.Serial = serial
 
 				// Host invariant: no open adb network port unless remote mode is on.
-				if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy setup"); err != nil {
+				if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy setup", ""); err != nil {
 					return err // Ctrl+C becomes INTERRUPTED below
 				}
 
@@ -329,6 +329,11 @@ connection address with --connect (or type it when asked).`,
 				}
 				if adbArg != "" {
 					cfg.ADBPath = adbArg
+				}
+				if cfg.RemoteUntil != "" {
+					// applyInvariant closed port 5555 above: setup always ends remote mode.
+					fmt.Fprintln(app.Stderr, "Remote mode was on: closing it.")
+					cfg.RemoteUntil = ""
 				}
 				if err := config.Save(e.dirs.ConfigFile(), cfg); err != nil {
 					return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")

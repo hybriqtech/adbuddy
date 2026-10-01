@@ -90,11 +90,21 @@ func TestApplyInvariant(t *testing.T) {
 	t.Run("closed", func(t *testing.T) {
 		r, log := invariantRunner(t, testutil.FakeRule{Match: tcpPortRule, Stdout: "\n"})
 		var errb strings.Builder
-		if err := applyInvariant(context.Background(), r, time.Second, &errb, "adbuddy serve"); err != nil {
+		if err := applyInvariant(context.Background(), r, time.Second, &errb, "adbuddy serve", ""); err != nil {
 			t.Fatal(err)
 		}
 		if got := loggedCalls(t, log); strings.Join(got, "|") != getprop || errb.Len() != 0 {
 			t.Fatalf("calls %q, stderr %q", got, errb.String())
+		}
+	})
+
+	t.Run("keeps the remote port", func(t *testing.T) {
+		r, log := invariantRunner(t, testutil.FakeRule{Match: tcpPortRule, Stdout: "5555\n"})
+		if err := applyInvariant(context.Background(), r, time.Second, &strings.Builder{}, "adbuddy serve", "5555"); err != nil {
+			t.Fatal(err)
+		}
+		if got := loggedCalls(t, log); strings.Join(got, "|") != getprop {
+			t.Fatalf("calls %q: `adb usb` must not run", got)
 		}
 	})
 
@@ -109,7 +119,7 @@ func TestApplyInvariant(t *testing.T) {
 			testutil.FakeRule{Match: "^devices$", Stdout: phoneOnline},
 		)
 		var errb strings.Builder
-		if err := applyInvariant(context.Background(), r, time.Second, &errb, "adbuddy serve"); err != nil {
+		if err := applyInvariant(context.Background(), r, time.Second, &errb, "adbuddy serve", ""); err != nil {
 			t.Fatal(err)
 		}
 		want := []string{getprop, "usb", "devices", "devices", "devices", getprop}
@@ -128,7 +138,7 @@ func TestApplyInvariant(t *testing.T) {
 			testutil.FakeRule{Match: "^devices$", Stdout: phoneOnline},
 		)
 		start := time.Now()
-		if err := applyInvariant(context.Background(), r, time.Second, &strings.Builder{}, "adbuddy serve"); err != nil {
+		if err := applyInvariant(context.Background(), r, time.Second, &strings.Builder{}, "adbuddy serve", ""); err != nil {
 			t.Fatal(err)
 		}
 		if d := time.Since(start); d < usbDropWait {
@@ -142,7 +152,7 @@ func TestApplyInvariant(t *testing.T) {
 			testutil.FakeRule{Match: "^devices$", Stdout: phoneGone, Times: 1},
 			testutil.FakeRule{Match: "^devices$", Stdout: phoneOnline},
 		)
-		err := applyInvariant(context.Background(), r, time.Second, &strings.Builder{}, "adbuddy serve")
+		err := applyInvariant(context.Background(), r, time.Second, &strings.Builder{}, "adbuddy serve", "")
 		if errorCode(err) != "DEVICE_PORT_OPEN" || !strings.Contains(AsError(err).Fix, "adbuddy serve") {
 			t.Fatalf("%v", err)
 		}
@@ -168,7 +178,7 @@ func TestApplyInvariant(t *testing.T) {
 			testutil.FakeRule{Match: "^devices$", Stdout: phoneOnline},
 		)
 		start := time.Now()
-		if err := applyInvariant(context.Background(), r, time.Second, &strings.Builder{}, "adbuddy serve"); err != nil {
+		if err := applyInvariant(context.Background(), r, time.Second, &strings.Builder{}, "adbuddy serve", ""); err != nil {
 			t.Fatal(err)
 		}
 		if d := time.Since(start); d > 10*time.Second {
@@ -181,7 +191,7 @@ func TestApplyInvariant(t *testing.T) {
 			testutil.FakeRule{Match: tcpPortRule, Stdout: "5555\n", Times: 1},
 			testutil.FakeRule{Match: "^devices$", Stdout: phoneGone},
 		)
-		err := applyInvariant(context.Background(), r, 100*time.Millisecond, &strings.Builder{}, "adbuddy setup")
+		err := applyInvariant(context.Background(), r, 100*time.Millisecond, &strings.Builder{}, "adbuddy setup", "")
 		if errorCode(err) != "DEVICE_NOT_FOUND" || ExitCode(err) != ExitTransient {
 			t.Fatalf("%v", err)
 		}

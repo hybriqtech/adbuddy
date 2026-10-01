@@ -115,7 +115,7 @@ func TestWriteJSON(t *testing.T) {
 func TestEnsureNoTCPPort(t *testing.T) {
 	for port, wantUSB := range map[string]bool{"": false, "0": false, "5555": true} {
 		f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": port + "\n", "usb": "restarting in USB mode\n"}}
-		ran, err := EnsureNoTCPPort(context.Background(), f)
+		ran, err := EnsureNoTCPPort(context.Background(), f, "")
 		if err != nil || ran != wantUSB {
 			t.Errorf("port %q: ran %v err %v", port, ran, err)
 		}
@@ -127,7 +127,7 @@ func TestEnsureNoTCPPort(t *testing.T) {
 			t.Errorf("port %q: adb usb called = %v (calls %q)", port, usb, f.calls)
 		}
 	}
-	if _, err := EnsureNoTCPPort(context.Background(), &fakeADB{}); err == nil {
+	if _, err := EnsureNoTCPPort(context.Background(), &fakeADB{}, ""); err == nil {
 		t.Fatal("an unreadable property must be an error")
 	}
 }
@@ -236,20 +236,20 @@ func TestWriteJSONIsAtomicAndPrivate(t *testing.T) {
 func TestEnsureNoTCPPortEdgeCases(t *testing.T) {
 	for port, wantUSB := range map[string]bool{"0\r\n": false, " 0 ": false, "\r\n": false, "5555\r\n": true, "abc": true} {
 		f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": port, "usb": "restarting in USB mode\n"}}
-		ran, err := EnsureNoTCPPort(context.Background(), f)
+		ran, err := EnsureNoTCPPort(context.Background(), f, "")
 		if err != nil || ran != wantUSB {
 			t.Errorf("port %q: ran %v err %v", port, ran, err)
 		}
 	}
 	// adb usb fails: an error, and nothing restarted.
 	f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": "5555\n"}, stderr: map[string]string{"usb": "error: closed\x1b[2J"}}
-	ran, err := EnsureNoTCPPort(context.Background(), f)
+	ran, err := EnsureNoTCPPort(context.Background(), f, "")
 	if err == nil || ran || strings.ContainsRune(err.Error(), 0x1b) {
 		t.Fatalf("failed usb: ran %v err %q", ran, err)
 	}
 	// The property cannot be read: an error, and no adb usb.
 	f = &fakeADB{stderr: map[string]string{"shell getprop service.adb.tcp.port": "error: device offline\x1b]0;x\x07"}}
-	ran, err = EnsureNoTCPPort(context.Background(), f)
+	ran, err = EnsureNoTCPPort(context.Background(), f, "")
 	if err == nil || ran || strings.ContainsAny(err.Error(), "\x1b\x07") {
 		t.Fatalf("unreadable: ran %v err %q", ran, err)
 	}
@@ -274,5 +274,28 @@ func TestTCPPort(t *testing.T) {
 	}
 	if _, err := TCPPort(context.Background(), &fakeADB{}); err == nil {
 		t.Fatal("an unreadable property must be an error")
+	}
+}
+
+// keep is a port that stays open (remote mode's 5555); any other is closed.
+func TestEnsureNoTCPPortKeep(t *testing.T) {
+	for _, c := range []struct {
+		port, keep string
+		wantUSB    bool
+	}{
+		{"5555", "5555", false},
+		{"37123", "5555", true},
+		{"5555", "", true},
+		{"", "5555", false},
+	} {
+		f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": c.port + "\n", "usb": "restarting in USB mode\n"}}
+		ran, err := EnsureNoTCPPort(context.Background(), f, c.keep)
+		usb := false
+		for _, call := range f.calls {
+			usb = usb || call == "usb"
+		}
+		if err != nil || ran != c.wantUSB || usb != c.wantUSB {
+			t.Errorf("port %q keep %q: ran %v usb %v err %v", c.port, c.keep, ran, usb, err)
+		}
 	}
 }

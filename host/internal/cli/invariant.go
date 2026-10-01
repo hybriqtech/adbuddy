@@ -21,11 +21,11 @@ var (
 // it, adbd restarts: this waits for the old connection to drop (at most
 // usbDropWait; the adb server may keep listing it for a moment), then for
 // the phone to come back (at most wait), and checks that the port is really
-// closed. command is what the user runs again after a failure. When ctx
+// closed, except keep (remote mode's port, "" when it is off). command is what the user runs again after a failure. When ctx
 // ends, the error is whatever the step returned: callers turn it into
 // Interrupted.
-func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command string) error {
-	restarted, err := device.EnsureNoTCPPort(ctx, runner)
+func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) error {
+	restarted, err := device.EnsureNoTCPPort(ctx, runner, keep)
 	if err != nil {
 		return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
 	}
@@ -51,7 +51,7 @@ func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, 
 		}
 		return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
 	}
-	if port != "" {
+	if port != "" && port != keep {
 		return NewError("DEVICE_PORT_OPEN", "adb's network port on the phone is still open after `adb usb`",
 			"Restart the phone (that closes a port opened with `adb tcpip`), turn wireless debugging on again and run `"+command+"` again.")
 	}

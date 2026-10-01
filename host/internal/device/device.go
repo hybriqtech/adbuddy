@@ -227,11 +227,11 @@ func TCPPort(ctx context.Context, a ADB) (string, error) {
 // EnsureNoTCPPort applies the host invariant (spec §3.3): if adbd listens on
 // a TCP port (service.adb.tcp.port neither empty nor 0) and remote mode is
 // not on, `adb usb` closes it. adbd restarts, so the caller must wait for
-// the phone again when this returns true. ADBuddy has no remote mode yet,
-// so the port is always closed.
-func EnsureNoTCPPort(ctx context.Context, a ADB) (bool, error) {
+// the phone again when this returns true. keep is a port that must stay open
+// (remote mode's 5555); another open port is still closed.
+func EnsureNoTCPPort(ctx context.Context, a ADB, keep string) (bool, error) {
 	port, err := TCPPort(ctx, a)
-	if err != nil || port == "" {
+	if err != nil || port == "" || keep != "" && port == keep {
 		return false, err
 	}
 	var out, errb bytes.Buffer

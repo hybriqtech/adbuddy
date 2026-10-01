@@ -132,7 +132,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			}
 			runner.Serial = active
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
-			if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy serve"); err != nil {
+			if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy serve", ""); err != nil {
 				if ctx.Err() != nil {
 					return Interrupted()
 				}
