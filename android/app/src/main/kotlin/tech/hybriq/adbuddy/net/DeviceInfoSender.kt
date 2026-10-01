@@ -18,7 +18,7 @@ import tech.hybriq.adbuddy.bridge.Protocol
  */
 class DeviceInfoSender(private val app: AdbuddyApp) {
     private val work = Executors.newSingleThreadExecutor { Thread(it, "adbuddy-deviceinfo") }
-    private val reporter = IpReporter { ip -> work.execute { sendIp(ip) } }
+    private val reporter = IpReporter<Network> { ip -> work.execute { sendIp(ip) } }
     private var callback: ConnectivityManager.NetworkCallback? = null
     private var unlisten: (() -> Unit)? = null
 
@@ -37,8 +37,8 @@ class DeviceInfoSender(private val app: AdbuddyApp) {
         try {
             val cm = app.getSystemService(ConnectivityManager::class.java) ?: return
             val cb = object : ConnectivityManager.NetworkCallback() {
-                override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) = report(linkProperties)
-                override fun onLost(network: Network) = reporter.onLost()
+                override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) = report(network, linkProperties)
+                override fun onLost(network: Network) = reporter.onLost(network)
             }
             // The builder adds NOT_VPN by default; without removing it nothing matches a VPN.
             val request = NetworkRequest.Builder()
@@ -68,8 +68,8 @@ class DeviceInfoSender(private val app: AdbuddyApp) {
         }
     }
 
-    private fun report(lp: LinkProperties) {
-        reporter.onAddresses(lp.linkAddresses.mapNotNull { it.address.hostAddress })
+    private fun report(network: Network, lp: LinkProperties) {
+        reporter.onAddresses(network, lp.linkAddresses.mapNotNull { it.address.hostAddress })
     }
 
     private companion object {

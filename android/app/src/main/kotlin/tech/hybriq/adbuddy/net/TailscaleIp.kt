@@ -8,7 +8,8 @@ object TailscaleIp {
         val parts = s.split('.')
         if (parts.size != 4) return false
         val n = parts.map { p ->
-            if (p.isEmpty() || !p.all { it in '0'..'9' }) return false
+            // Plain decimal only: no sign, no spaces, no leading zeros ("0100", "064").
+            if (p.isEmpty() || !p.all { it in '0'..'9' } || p.length > 1 && p[0] == '0') return false
             p.toIntOrNull()?.takeIf { it in 0..255 } ?: return false
         }
         return n[0] == 100 && n[1] in 64..127
@@ -18,27 +19,48 @@ object TailscaleIp {
 /**
  * Decides when the Tailscale IP goes to the host: when it changes and again
  * on each welcome, never empty (an empty one means "no change" to the host).
- * Callbacks of the network come on binder threads, hence the lock.
+ * Callbacks of the network and socket threads come in here, hence the lock.
+ *
+ * It follows each network (K is Network in the app) that has a Tailscale IP:
+ * losing one only takes out its own entry, and the current IP is the one of
+ * the networks that remain (the most recently updated). send runs inside the
+ * lock so two sends cannot be queued in the opposite order of their decisions;
+ * it must be quick and not call back into the reporter (it only queues).
  */
-class IpReporter(private val send: (String) -> Unit) {
+class IpReporter<K : Any>(private val send: (String) -> Unit) {
     private val lock = Any()
-    private var current = ""
+    private val ips = LinkedHashMap<K, String>() // in order of last update
     private var sent = ""
 
-    fun onAddresses(addresses: List<String>) {
+    private fun current() = ips.values.lastOrNull().orEmpty()
+
+    fun onAddresses(network: K, addresses: List<String>) = synchronized(lock) {
         val ip = TailscaleIp.pick(addresses)
-        val toSend = synchronized(lock) {
-            current = ip
-            if (ip.isNotEmpty() && ip != sent) { sent = ip; ip } else null
-        }
-        toSend?.let(send)
+        ips.remove(network)
+        if (ip.isNotEmpty()) ips[network] = ip
+        announceIfNew()
     }
 
-    /** The VPN went away: the next IP (even the same one) is announced again. */
-    fun onLost() = synchronized(lock) { current = ""; sent = "" }
+    /** A network went away: its IP goes with it; what remains (if anything) is announced if it is new. */
+    fun onLost(network: K) = synchronized(lock) {
+        if (ips.remove(network) == null) return@synchronized
+        if (ips.isEmpty()) sent = "" // the next IP (even the same one) is announced again
+        else announceIfNew()
+    }
 
-    fun onWelcome() {
-        val ip = synchronized(lock) { current.also { if (it.isNotEmpty()) sent = it } }
-        if (ip.isNotEmpty()) send(ip)
+    fun onWelcome() = synchronized(lock) {
+        val ip = current()
+        if (ip.isNotEmpty()) {
+            sent = ip
+            send(ip)
+        }
+    }
+
+    private fun announceIfNew() {
+        val ip = current()
+        if (ip.isNotEmpty() && ip != sent) {
+            sent = ip
+            send(ip)
+        }
     }
 }
