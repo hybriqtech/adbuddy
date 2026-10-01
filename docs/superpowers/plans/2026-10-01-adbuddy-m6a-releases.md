@@ -16,7 +16,7 @@
 ## Global Constraints
 
 - **Rama y commits:**
-  - Rama `m6a`, worktree `C:\Users\Jose\orca\workspaces\adbuddy\skimmer`, identidad git local hybriqtech.
+  - Rama `m6a`, identidad git local hybriqtech.
   - Cada commit acaba con el trailer exacto `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
   - Nada de push, PR ni merge: los autoriza el supervisor (`adbuddy-e5`) al final.
 - **Rutas permitidas.** Solo estas (acordadas con el supervisor):
