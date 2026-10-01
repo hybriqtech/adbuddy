@@ -53,7 +53,7 @@ agente ──► adbuddy tap --text OK          (CLI, en la sesión del agente)
             └─ si la app no está o responde unavailable: respaldo por adb (§5)
 ```
 
-- **CLI** (`host/internal/cli/helpers*.go`, nuevos): cada ayuda es un subcomando. Manda un `ipc.Request{Kind: "ui", Argv: [op, …]}` al daemon y escribe la respuesta: texto compacto o `--json` con el sobre habitual de la CLI. Sin `adbuddy serve` en marcha, sale con `DAEMON_NOT_RUNNING`: las ayudas, como el shim, solo existen con el host.
+- **CLI** (`host/internal/cli/helpers*.go`, nuevos): cada ayuda es un subcomando. Manda un `ipc.Request{Kind: "ui", UIOp, UIArgs, Argv}` al daemon (`Argv` es la orden tal como la escribió el agente, para el diario) y escribe la respuesta: texto compacto o `--json` con el sobre habitual de la CLI. Sin `adbuddy serve` en marcha, sale con `DAEMON_NOT_RUNNING` (salida 1, como `undo`): las ayudas, como el shim, solo existen con el host.
 - **Daemon** (`host/internal/daemon/ui.go` y `guard.go`, nuevos): el kind `ui` pasa por las mismas puertas que una orden del shim (§4.1). Después ejecuta con `Options.UI` y, si hace falta, con el respaldo. Cada ayuda deja su entrada en el diario.
 - **Enlace con la app** (`host/internal/cli/phone_ui.go`): `uiArea` envía `ui.request` con `Server.Send`, o con el envío atado a la conexión que traiga M3 (`SendTo`). Espera el `ui.response` de su `id` hasta `expiresAt` y descarta las respuestas de ids que no espera. Un `ui.response` solo vale de la conexión a la que se envió la petición (`Server.Current(m)`, §10 del protocolo).
 - **App** (`android/.../a11y/`): `AgentAccessibilityService` guarda una referencia a sí mismo mientras está vinculado. `UiExecutor` escucha `ui.request` con `Bridge.listen` y ejecuta las operaciones de una en una, en un hilo propio, nunca en el principal. Responde con `Bridge.send(ui.response)`.
@@ -83,26 +83,27 @@ M3.0 dejó `args` y `result` como JSON libre (`json.RawMessage` y `JsonElement`)
     {"id": "android:id/title", "text": "Network & internet", "desc": "", "hint": "",
      "class": "TextView", "bounds": [42, 610, 980, 680],
      "click": true, "edit": false, "scroll": false, "focused": false,
-     "checked": null, "enabled": true, "password": false, "window": "app"}
+     "enabled": true, "password": false, "window": "app"}
   ]
 }
 ```
 
 - **Qué ventanas:** todas las interactivas (`flagRetrieveInteractiveWindows`), ordenadas por capa de mayor a menor: la app, sus diálogos, el teclado y la interfaz del sistema. Es la idea de `HierarchyDumper` de ARTEMIS (Apache-2.0; la atribución va en `NOTICE` y en la cabecera del fichero si se copia código). Las ventanas de `tech.hybriq.adbuddy`, incluida la superposición, no salen nunca.
 - **Qué nodos:** los visibles para el usuario, con los límites recortados a la pantalla, a su ventana y a sus antepasados desplazables (paridad con UIAutomator). Entre ellos, solo los informativos (texto, descripción o pista) o los que se pueden usar (pulsar, editar, desplazar o marcar). Las capas sin nada de eso desaparecen. `--all` (`args: {"all": true}`) incluye todos los nodos visibles.
-- **Topes:** 2000 elementos, profundidad 75. Más que eso pone `truncated: true`. Si todo junto pasa de 512 KiB, se recortan los textos largos y, si aún no cabe, los últimos elementos.
+- **Topes:** 2000 elementos, profundidad 75. Más que eso pone `truncated: true`. Si el JSON del resultado pasa de 512 KiB (bytes UTF-8 ya codificados, `MaxUIResult`), se recortan los textos largos a 200 caracteres y, si aún no cabe, los últimos elementos.
 - **Contraseñas:** de un nodo con `isPassword` sale `password: true`, y `text` y `hint` salen vacíos.
 - **Bloqueado:** con el móvil bloqueado (`KeyguardManager.isKeyguardLocked`), `locked: true` y `elements` vacío. El agente no debe intentar desbloquear (la regla 14 de `AGENTS.md`).
 - **App protegida en primer plano:** `error` `protected` (§4.3).
-- **`id`:** el `viewIdResourceName` tal cual (`paquete:id/nombre`). La CLI lo muestra sin el paquete si es el de la app en primer plano.
+- **`id`:** el `viewIdResourceName` tal cual (`paquete:id/nombre`), también en la salida de texto: `tap --id` lo compara entero.
+- **`checked`:** ausente si el elemento no se puede marcar (Go `omitempty`, Kotlin `null` con `explicitNulls=false`).
 - **`window`:** `app`, `dialog`, `ime`, `system` o `split`.
 
 **Salida de texto de `adbuddy screen`** (una línea por elemento, pensada para el agente):
 
 ```
-Settings (com.android.settings) · 1344×2992
-[title] "Network & internet" TextView (42,610)-(980,680) click
-[search_action_bar] desc="Search settings" (42,180)-(1302,300) click
+com.android.settings · 1344×2992
+[android:id/title] "Network & internet" TextView (42,610)-(980,680) click
+[com.android.settings:id/search_action_bar] desc="Search settings" Toolbar (42,180)-(1302,300) click
 - "Wi-Fi" Switch (980,700)-(1302,780) click checked=false
 ```
 
@@ -162,7 +163,7 @@ Una ayuda recorre en el daemon el mismo camino que `exec`:
 |---|---|---|
 | Nivel | 🟢 | 🟡 sin inverso, como `input` |
 | En pausa | Bloqueada (`Blocked by ADBuddy: paused …`) | Bloqueada |
-| Con una pregunta 🔴 pendiente | Pasa (es 🟢, no inyecta nada) | Bloqueada: un toque podría pulsar Permitir |
+| Con una pregunta 🔴 pendiente | Bloqueada, como toda orden de adb (`admit` del daemon) | Bloqueada: un toque podría pulsar Permitir |
 | Admisión en vuelo | No cuenta | Cuenta: retrasa la pregunta siguiente, como un `input` en marcha |
 | Guarda de §4.3 | Sí | Sí |
 | Diario | Una entrada con `argv` `["adbuddy", "<op>", …]`, `source` del agente y la descripción de la regla | Igual |
@@ -195,7 +196,7 @@ Con eso:
 1. Pide el primer plano, a la app (`foreground`) o, sin app, por adb: `dumpsys activity activities`, de donde lee `topResumedActivity` o `mResumedActivity`.
 2. Si el paquete en primer plano está en la lista o es ADBuddy, bloquea: `Blocked by ADBuddy: <app> is a protected app; ask the user to do this part`. El código de salida es 126.
 3. Con `am start -n <paquete>/…`, `am start -p <paquete>` o `monkey -p <paquete>` sobre un paquete protegido, bloquea igual. Un intent implícito (`am start -a VIEW -d https://…`) puede abrir una app protegida: entonces se bloquea lo siguiente que intente leer o tocar.
-4. **Si no puede saber el primer plano** (la app no responde y `dumpsys` falla), bloquea: falla cerrada, tanto para tocar como para leer la pantalla (ruling del supervisor).
+4. **Si no puede saber el primer plano** (la app no responde y `dumpsys` falla o no se puede leer), bloquea: falla cerrada, tanto para tocar como para leer la pantalla (ruling del supervisor). Un `dumpsys` legible sin actividad reanudada (la pantalla apagada) quiere decir que no hay nada delante: no bloquea, y así el agente puede encender la pantalla (`input keyevent 224`).
 5. **Sin lista** (el host nunca ha recibido una), solo protege a ADBuddy. Lo dice una vez por sesión en la terminal de `serve`.
 
 **Coste.** Cada orden guardada añade una consulta de primer plano: unos 120-165 ms con la app (el transporte medido en S1) y unos 300 ms por `dumpsys`. Solo la pagan las órdenes de interfaz y de captura.
@@ -254,13 +255,16 @@ Precisa §3.3 de la v1 sobre el contrato de §8.2 del protocolo.
 - **Invariante** (`invariant.go`): con `remote_until` en el futuro, el puerto abierto es el esperado y `applyInvariant` no ejecuta `adb usb`. Sin `remote_until`, o ya pasado, se comporta como hoy.
 - **Reconexión:** si se pierde el móvil durante la sesión, `serve` prueba, en orden, el serial de siempre (mDNS), `tailscale_ip:tailscale_port` y, con el modo remoto activo, `tailscale_ip:5555`. Como el serial con el que adb lista el móvil cambia, el ejecutor del daemon tiene que tomar el serial activo de un sitio que se pueda cambiar, no de `Options.Serial`, fijado al arrancar. Eso toca `serve.go` y `daemon.go`, que son de M3: el plan de M5b se escribe sobre el `serve` de M3 y se acuerda con tern-51.
 - **App:** interruptor en Ajustes con el aviso de §3.3 de la v1 (el puerto 5555 queda abierto en redes públicas) y la caducidad visible. Lo pinta `RemoteReducer`, que pasa a guardar `remote.state` en `BridgeState`.
+- **Estado de tres valores (ruling de adbuddy-e5):** activo, apagado o desconocido. Tras un reset del estado de la app (`Reducer.reset` con una sesión nueva o un snapshot ilegible, de `m3-bridge`), el modo remoto es "desconocido", nunca `enabled=false`. Un falso "apagado" engañaría al usuario mientras el puerto 5555 sigue abierto. La app muestra "desconocido" como aviso, y el host vuelve a publicar `remote.state` al reconectar.
+- **Concesiones solo a una app verificada (M6a):** toda concesión de M5 (accesibilidad, superposición, acceso a notificaciones, modo remoto) pasa por `phoneapp.Verified`, que solo da `phoneapp.VerifyInstalled` tras comprobar el certificado de la app instalada. No hay caminos alternativos.
 - **`adbuddy remote [on|off|status]`** en el PC, para el usuario: desde la sesión del agente se rechaza (`AGENT_SESSION`, como `serve`).
 
 ## 8. Errores de la CLI
 
 | Código | Salida | Cuándo |
 |---|---|---|
-| `DAEMON_NOT_RUNNING` | 75 | `adbuddy serve` no está en marcha |
+| `DAEMON_NOT_RUNNING` | 1 | `adbuddy serve` no está en marcha (el mismo error que `undo`) |
+| `USAGE` | 2 | Argumentos no válidos, en la CLI o en el daemon (`UI_INVALID`) |
 | `UI_BLOCKED` | 126 | Pausa, pregunta pendiente o guarda. El mensaje empieza por `Blocked by ADBuddy:`, como en el shim |
 | `UI_NOT_FOUND` | 1 | `not_found` |
 | `UI_AMBIGUOUS` | 1 | `ambiguous`, con las coincidencias |
@@ -330,10 +334,14 @@ Sin `canTakeScreenshot`: la captura la hace el host (§3.6). La descripción del
 
 Todos aditivos (§11 del protocolo: sigue siendo `v1`):
 
+**Integrado en `main` (9524c49, PR #5),** con los arreglos de su revisión:
+
 1. **`device.info.protectedApps`:** lista de paquetes, opcional.
-   - Go: `ProtectedApps []string \`json:"protectedApps,omitempty"\``.
-   - Kotlin: `val protectedApps: List<String> = emptyList()`.
-   - Fixtures: se amplía `app/device.info.json`.
+   - Si falta (`null`), quiere decir "sin cambios": el host conserva la lista anterior. Si viene, aunque sea vacía, es la lista entera.
+   - Go: `ProtectedApps []string \`json:"protectedApps,omitempty"\``. El host solo la decodifica: nil frente a vacía.
+   - Kotlin: `val protectedApps: List<String>? = null`.
+   - Fixtures: se amplía `app/device.info.json` y se añade `@protectednone`.
+   - Una lista con más de `MaxProtectedApps` (1000) paquetes, o con uno que no cumpla `ValidPackage`, se rechaza entera.
 2. **El código de error `ambiguous`,** para `ui.response`.
    - Go: `CodeAmbiguous`; Kotlin: la constante equivalente.
    - Fixture: `app/ui.response@ambiguous.json`.
@@ -342,6 +350,11 @@ Todos aditivos (§11 del protocolo: sigue siendo `v1`):
    - `app/ui.response@dump.json`, `@foreground.json`, `@settext.json` y `@notifications.json`.
 
    Con sus tests a los dos lados: las estructuras de `args` y `result` de §3 se decodifican en modo estricto.
+4. **`protocol/fixtures/ui.json`,** que leen los dos lados:
+   - las operaciones (registro `UIOps` / `UiOp.ALL`) y qué operación responde cada fixture;
+   - los límites: `MaxUIResult` 512 KiB, `MaxNotifications` 50, `MaxNotificationText` 1024, `MaxSetText` 4096 code points, `MaxProtectedApps` 1000 y `MaxPackage` 255;
+   - los casos de `ValidPackage`.
+   - `notifications` gana `truncated`.
 
 Van en un solo commit (Go, Kotlin y fixtures), como pide §10 del protocolo, y se avisa a tern-51 y a skimmer-32 al integrar.
 
