@@ -27,9 +27,11 @@ data class UiResponse(val id: String, val ok: Boolean, val result: JsonElement? 
 /**
  * How to reach the phone away from home (empty and 0: unknown), and the
  * protected apps the host's guard refuses to act on (M5 spec §4.3).
+ * protectedApps null (absent) means "no change": the host keeps the last
+ * list; present, even empty, it is the whole list.
  */
 @Serializable
-data class DeviceInfo(val tailscaleIp: String = "", val wifiAdbPort: Int = 0, val protectedApps: List<String> = emptyList())
+data class DeviceInfo(val tailscaleIp: String = "", val wifiAdbPort: Int = 0, val protectedApps: List<String>? = null)
 
 /** Turns remote mode on (adb tcpip 5555) or off (adb usb). */
 @Serializable

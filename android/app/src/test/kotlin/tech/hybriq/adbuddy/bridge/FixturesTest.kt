@@ -3,10 +3,7 @@ package tech.hybriq.adbuddy.bridge
 import java.io.File
 import java.util.Base64
 import kotlinx.serialization.KSerializer
-import kotlinx.serialization.descriptors.SerialDescriptor
-import kotlinx.serialization.descriptors.StructureKind
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -70,27 +67,6 @@ class FixturesTest {
         assertTrue(failures.joinToString("\n\n"), failures.isEmpty())
     }
 
-    /** The JSON paths of a descriptor's fields ("attachment.thumb"): lists are transparent; JsonElement is a leaf. */
-    internal fun descriptorPaths(d: SerialDescriptor, prefix: String, out: MutableSet<String>) {
-        if (d.kind != StructureKind.CLASS) return
-        for (i in 0 until d.elementsCount) {
-            val path = prefix + d.getElementName(i)
-            out += path
-            var child = d.getElementDescriptor(i)
-            while (child.kind == StructureKind.LIST) child = child.getElementDescriptor(0)
-            descriptorPaths(child, "$path.", out)
-        }
-    }
-
-    /** The paths of the keys in a JSON value. */
-    internal fun jsonPaths(e: JsonElement, prefix: String, out: MutableSet<String>) {
-        when (e) {
-            is JsonObject -> e.forEach { (k, v) -> out += prefix + k; jsonPaths(v, "$prefix$k.", out) }
-            is JsonArray -> e.forEach { jsonPaths(it, prefix, out) }
-            else -> {}
-        }
-    }
-
     /**
      * Every field of every payload appears in at least one fixture of its type:
      * a field added to one side only would otherwise go unseen, since an absent
@@ -102,10 +78,10 @@ class FixturesTest {
             val present = mutableMapOf<String, MutableSet<String>>()
             for ((name, file) in files(direction)) {
                 val m = Protocol.decode(file.readText()) ?: continue
-                jsonPaths(m.payload, "", present.getOrPut(name.substringBefore("@")) { mutableSetOf() })
+                FixturePaths.jsonPaths(m.payload, "", present.getOrPut(name.substringBefore("@")) { mutableSetOf() })
             }
             for ((type, serializer) in payloads) {
-                val want = mutableSetOf<String>().also { descriptorPaths(serializer.descriptor, "", it) }
+                val want = mutableSetOf<String>().also { FixturePaths.descriptorPaths(serializer.descriptor, "", it) }
                 val missing = want - present[type].orEmpty()
                 if (missing.isNotEmpty()) failures += "$direction/$type: no fixture has ${missing.sorted()}"
             }

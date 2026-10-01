@@ -217,7 +217,7 @@ type Notice struct {
 // ErrorReply answers a request (by its rid) that failed (protocol spec §4.1).
 type ErrorReply struct {
 	Code string `json:"code"` // one of the Code* constants
-	Text string `json:"text"` // for the person, in English; written by the host, never by the agent
+	Text string `json:"text"` // for the person, in English; written by the host (by the app in ui.response, maybe quoting the screen: escape it), never by the agent
 }
 
 // Error codes (protocol spec §4.1 and §8.1).

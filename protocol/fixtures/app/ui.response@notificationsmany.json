@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "ui.response",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "u_8",
+    "ok": true,
+    "result": {
+      "notifications": [],
+      "truncated": true
+    }
+  }
+}
