@@ -5,7 +5,27 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import tech.hybriq.adbuddy.bridge.Inverse
+import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
+import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,118 +69,68 @@ import tech.hybriq.adbuddy.confirm.ConfirmUi
 import tech.hybriq.adbuddy.confirm.HostClock
 import tech.hybriq.adbuddy.control.CutAccess
 
-/** Consent for the PC to finish the setup (spec §3.1 step 6.1). */
+/** Consent for the PC to finish the setup (spec §3.1 step 6.1). Header, content, actions at the foot. */
 @Composable
 fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.consent_title, host), style = MaterialTheme.typography.headlineSmall)
-        Text(stringResource(R.string.consent_intro, host))
-        for (item in listOf(R.string.consent_grant, R.string.consent_battery, R.string.consent_a11y)) {
-            Text("• " + stringResource(item))
-        }
-        Text(stringResource(R.string.consent_note), style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { onAnswer(false) }) { Text(stringResource(R.string.consent_decline)) }
-            Button(onClick = { onAnswer(true) }) { Text(stringResource(R.string.consent_accept)) }
-        }
-    }
-}
-
-/** Connection, Pause, Cut access and the activity panel (spec §6). */
-@Composable
-fun HomeScreen(
-    state: BridgeState,
-    bridge: Bridge,
-    clock: HostClock,
-    focusConfirm: String?,
-    closed: Set<String>,
-    onClose: (String) -> Unit,
-) {
-    val context = LocalContext.current
-    var message by remember { mutableStateOf<String?>(null) }
-    var failed by remember { mutableStateOf(false) }
-    var filter by remember { mutableStateOf<String?>(null) }
-    // Follows both settings, whoever changes them (this screen, the Settings app, adb).
-    val cut by remember(context) { CutAccess.observe(context) }
-        .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context.contentResolver))
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.home_title), style = MaterialTheme.typography.headlineSmall)
-        val status = LinkStatus.of(state, cut)
-        Text(if (status == LinkStatus.CONNECTED) stringResource(status.text, state.hostName) else stringResource(status.text))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // What the host says (session.state), not whether the request was queued.
-            PauseButton.of(state)?.let { button ->
-                Button(onClick = { bridge.pause(button == PauseButton.PAUSE) }) { Text(stringResource(button.text)) }
-            }
-            val cutFailed = stringResource(R.string.cut_failed)
-            val restoreFailed = stringResource(R.string.restore_failed)
-            val cutRestored = stringResource(R.string.cut_restored)
-            val cutDone = stringResource(R.string.cut_done)
-            OutlinedButton(onClick = {
-                val ok = if (cut) CutAccess.restore(context) else CutAccess.cut(context)
-                failed = !ok
-                message = when {
-                    !ok && cut -> restoreFailed
-                    !ok -> cutFailed
-                    cut -> cutRestored
-                    else -> cutDone
+    Scaffold(
+        bottomBar = {
+            Surface(tonalElevation = 3.dp) {
+                Row(
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                ) {
+                    OutlinedButton(
+                        onClick = { onAnswer(false) },
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    ) { Text(stringResource(R.string.consent_decline), color = MaterialTheme.colorScheme.onSurface) }
+                    Button(onClick = { onAnswer(true) }) { Text(stringResource(R.string.consent_accept)) }
                 }
-            }) { Text(stringResource(if (cut) R.string.action_restore else R.string.action_cut)) }
-        }
-        message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        // Without the permission (or if the change did not stick), the person does it by hand.
-        if (failed) {
-            TextButton(onClick = { openDeveloperOptions(context) }) { Text(stringResource(R.string.action_developer_options)) }
-        }
-
-        Text(stringResource(R.string.home_activity), style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = filter == null, onClick = { filter = null }, label = { Text(stringResource(R.string.filter_all)) })
-            for (level in listOf("green", "yellow", "red")) {
-                FilterChip(selected = filter == level, onClick = { filter = level }, label = { Text(levelIcon(level)) })
             }
-        }
-        // distinctBy: LazyColumn keys must be unique, whatever the host sends.
-        val entries = state.journal.asReversed().distinctBy { it.id }.filter { filter == null || it.level == filter }
-        if (entries.isEmpty()) Text(stringResource(R.string.home_empty))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(entries, key = { it.id }) { EntryRow(it) }
-        }
-    }
-    // The clock the questions are judged by (the host's): it moves on at each
-    // expiry, so a question left open on screen loses its buttons when it expires.
-    var now by remember { mutableLongStateOf(clock.now()) }
-    LaunchedEffect(state.pending) {
-        while (true) {
-            now = clock.now()
-            delay(ConfirmUi.nextExpiry(state.pending, now) ?: break)
-        }
-    }
-    val question = ConfirmUi.question(state, focusConfirm, now, closed)
-    if (question != null) {
-        ConfirmDialog(question, ConfirmUi.status(question, state, now), clock, onClose = { onClose(question.id) }) { decision ->
-            // The same rule as the notification buttons (ConfirmReceiver), with the
-            // current state and time, not those of this composition: a second quick
-            // tap sees the first answer (answering), and the delay stops while the
-            // phone sleeps. Allowing needs the phone unlocked here too.
-            val t = clock.now()
-            val locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-            if (ConfirmUi.canSend(bridge.state.value, question.id, decision, t, locked)) {
-                bridge.reply(question.id, decision)
-            } else {
-                now = t
+        },
+    ) { inner ->
+        Column(
+            Modifier.fillMaxSize().padding(inner).verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Box(
+                Modifier.size(56.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+            Text(stringResource(R.string.consent_title, host), style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.consent_intro, host), style = MaterialTheme.typography.bodyLarge)
+            for ((icon, item) in listOf(
+                Icons.Default.Lock to R.string.consent_grant,
+                Icons.Default.Notifications to R.string.consent_battery,
+                Icons.Default.Settings to R.string.consent_a11y,
+            )) {
+                ConsentRow(icon, stringResource(item))
+            }
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
+                Text(
+                    stringResource(R.string.consent_note),
+                    Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
 }
 
-private fun openDeveloperOptions(context: Context) {
-    val intent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    try {
-        context.startActivity(intent)
-    } catch (e: ActivityNotFoundException) {
-        context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+@Composable
+private fun ConsentRow(icon: ImageVector, text: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Text(text, style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+@AdbuddyPreviews
+@Composable
+private fun ConsentScreenPreview() {
+    AdbuddyTheme(dynamic = false) { ConsentScreen(host = "my-pc", onAnswer = {}) }
 }
 
 /**
@@ -218,21 +188,3 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
 
 /** The dialog scrolls, so it shows much more of the command than the notification. */
 private const val DIALOG_MAX_COMMAND = 4_000
-
-@Composable
-private fun EntryRow(e: JournalEntry) {
-    Column(Modifier.fillMaxWidth()) {
-        Text("${levelIcon(e.level)} ${e.description}")
-        Text("${e.status} · adb ${e.argv.joinToString(" ")}", style = MaterialTheme.typography.bodySmall)
-        e.inverse?.takeIf { e.undoneBy == null }?.let {
-            Text("↩ adb ${it.argv.joinToString(" ")}", style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-private fun levelIcon(level: String) = when (level) {
-    "green" -> "🟢"
-    "yellow" -> "🟡"
-    "red" -> "🔴"
-    else -> "·"
-}

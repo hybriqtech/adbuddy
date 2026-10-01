@@ -8,15 +8,15 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
+import androidx.activity.enableEdgeToEdge
+import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tech.hybriq.adbuddy.bridge.BridgePrefs
 import tech.hybriq.adbuddy.bridge.BridgeService
 import tech.hybriq.adbuddy.ui.ConsentScreen
-import tech.hybriq.adbuddy.ui.HomeScreen
+import tech.hybriq.adbuddy.ui.ChatRoot
 
 class MainActivity : ComponentActivity() {
     private var showConsent by mutableStateOf(false)
@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val prefs = BridgePrefs(this)
         if (savedInstanceState == null) {
             handle(intent)
@@ -47,8 +48,7 @@ class MainActivity : ComponentActivity() {
         // Bridge.start ignores the same link, so the connection is kept.
         if (prefs.link != null) BridgeService.start(this)
         setContent {
-            MaterialTheme {
-                val state by app.bridge.state.collectAsStateWithLifecycle()
+            AdbuddyTheme {
                 if (showConsent) {
                     ConsentScreen(
                         host = prefs.consentHost,
@@ -59,10 +59,7 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 } else {
-                    HomeScreen(
-                        state = state, bridge = app.bridge, clock = app.clock, focusConfirm = focusConfirm,
-                        closed = closed, onClose = { closed = closed + it },
-                    )
+                    ChatRoot(app, focusConfirm, closed) { closed = closed + it }
                 }
             }
         }

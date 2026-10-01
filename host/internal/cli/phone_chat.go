@@ -160,6 +160,9 @@ func (l *phoneLink) stateOf(info session.Info) bridge.SessionState {
 	if info.Agent != "" {
 		st.Agent, st.State, st.Conversation, st.PCAttached = info.Agent, info.State, info.Conversation, info.PCAttached
 	}
+	if st.State == session.StateStopped {
+		st.Activity = ""
+	}
 	return st
 }
 

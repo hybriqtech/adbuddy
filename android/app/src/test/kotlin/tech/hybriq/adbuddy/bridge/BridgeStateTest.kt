@@ -216,7 +216,7 @@ class BridgeStateTest {
     /** Events of milestones still to come only move lastSeq. */
     @Test fun eventsNotYetHandledMoveLastSeq() {
         val s = BridgeState().apply(welcome("s_1"))
-        val next = s.apply(msg(1, Protocol.CHAT_MESSAGE, """{"id":"m_1","role":"user","text":"hi"}"""))
+        val next = s.apply(msg(1, Protocol.TOOL_ACTIVITY, """{"id":"t_1","name":"adb"}"""))
         assertEquals(s.copy(lastSeq = 1), next)
     }
 

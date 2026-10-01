@@ -1,0 +1,167 @@
+package tech.hybriq.adbuddy.ui
+
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import tech.hybriq.adbuddy.R
+import tech.hybriq.adbuddy.bridge.Attachment
+import tech.hybriq.adbuddy.bridge.BridgeState
+import tech.hybriq.adbuddy.bridge.ChatMessage
+import tech.hybriq.adbuddy.bridge.ChatState
+import tech.hybriq.adbuddy.chat.Links
+import tech.hybriq.adbuddy.chat.Outgoing
+import tech.hybriq.adbuddy.chat.Timeline
+import tech.hybriq.adbuddy.files.DownloadState
+import tech.hybriq.adbuddy.files.Draft
+import tech.hybriq.adbuddy.term.TerminalFeed
+import tech.hybriq.adbuddy.term.TerminalView
+import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
+import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
+
+/** What the screen can do; ChatRoot fills it from the app's controllers, a preview with empty lambdas. */
+class ChatActions(
+    val send: (String) -> Unit,
+    val retry: (String) -> Unit,
+    val discard: (String) -> Unit,
+    val pickPhotos: () -> Unit,
+    val pickFile: () -> Unit,
+    val capture: () -> Unit,
+    val removeDraft: (String) -> Unit,
+    val retryDraft: (String) -> Unit,
+    val attachment: (Attachment) -> Unit,
+    val pause: (Boolean) -> Unit,
+    val toggleCut: () -> Unit,
+    val openActivity: () -> Unit,
+    val newConversation: () -> Unit,
+) {
+    companion object {
+        val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+    }
+}
+
+/** The conversation, the agent's terminal folded above it, and the input (spec M3 section 7.2). */
+@Composable
+fun ChatScreen(
+    state: BridgeState,
+    outgoing: List<Outgoing>,
+    drafts: List<Draft>,
+    downloads: Map<String, DownloadState>,
+    cut: Boolean,
+    terminal: TerminalFeed?,
+    snackbar: SnackbarHostState,
+    actions: ChatActions,
+) {
+    val context = LocalContext.current
+    var terminalShown by rememberSaveable { mutableStateOf(true) }
+    var text by rememberSaveable { mutableStateOf("") }
+    var link by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var askNew by rememberSaveable { mutableStateOf(false) }
+    val items = Timeline.of(state.chat, state.sessionState.conversation, outgoing)
+    val listState = rememberLazyListState()
+    LaunchedEffect(items.size) { if (items.isNotEmpty()) listState.animateScrollToItem(items.size - 1) }
+    val terminalOn = terminalShown && terminal != null
+
+    Scaffold(
+        topBar = {
+            ChatHeader(
+                state, cut, terminalShown, onToggleTerminal = { terminalShown = !terminalShown }, onPause = actions.pause,
+                onToggleCut = actions.toggleCut, onActivity = actions.openActivity, onNewConversation = { askNew = true },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { inner ->
+        Column(Modifier.padding(inner).consumeWindowInsets(inner).imePadding().fillMaxSize()) {
+            if (terminalOn) {
+                TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.weight(0.45f).fillMaxSize())
+            }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(if (terminalOn) 0.55f else 1f).fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(items, key = { it.key }) { item ->
+                    MessageRow(
+                        item, downloads,
+                        onLink = { u -> Links.domain(u)?.let { link = u to it } },
+                        onAttachment = actions.attachment, onRetry = actions.retry, onDiscard = actions.discard,
+                    )
+                }
+            }
+            if (terminalOn) QuickKeysRow { terminal!!.input(it.bytes) }
+            DraftChips(drafts, actions.removeDraft, actions.retryDraft)
+            InputBar(
+                text, { text = it }, drafts, actions.pickPhotos, actions.pickFile, actions.capture,
+                onSend = { actions.send(text); text = "" },
+            )
+        }
+    }
+
+    link?.let { (url, domain) ->
+        LinkDialog(
+            url, domain,
+            onOpen = {
+                link = null
+                val i = Intent(Intent.ACTION_VIEW, url.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try { context.startActivity(i) } catch (e: ActivityNotFoundException) { /* no browser: nothing to open it with */ }
+            },
+            onDismiss = { link = null },
+        )
+    }
+    if (askNew) {
+        AlertDialog(
+            onDismissRequest = { askNew = false },
+            title = { Text(stringResource(R.string.new_conversation_title)) },
+            text = { Text(stringResource(R.string.new_conversation_body)) },
+            confirmButton = { TextButton(onClick = { askNew = false; actions.newConversation() }) { Text(stringResource(R.string.new_conversation_confirm)) } },
+            dismissButton = { TextButton(onClick = { askNew = false }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
+}
+
+@AdbuddyPreviews
+@Composable
+private fun ChatScreenPreview() {
+    AdbuddyTheme(dynamic = false) {
+        ChatScreen(
+            state = BridgeState(
+                connection = BridgeState.Connection.CONNECTED,
+                hostName = "my-pc",
+                chat = ChatState(
+                    messages = listOf(
+                        ChatMessage("1", "user", "Turn the volume down"),
+                        ChatMessage("2", "assistant", "Done. The media volume is now at 20%."),
+                    ),
+                ),
+            ),
+            outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
+            snackbar = remember { SnackbarHostState() }, actions = ChatActions.None,
+        )
+    }
+}
