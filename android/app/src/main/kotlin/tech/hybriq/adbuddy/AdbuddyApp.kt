@@ -28,6 +28,7 @@ import tech.hybriq.adbuddy.files.FileCache
 import tech.hybriq.adbuddy.files.UploadFailed
 import tech.hybriq.adbuddy.files.Uploader
 import tech.hybriq.adbuddy.files.UriSource
+import tech.hybriq.adbuddy.net.DeviceInfoSender
 import tech.hybriq.adbuddy.term.TerminalFeed
 
 class AdbuddyApp : Application() {
@@ -69,10 +70,13 @@ class AdbuddyApp : Application() {
     /** The host's clock, which the questions' expiry is written in. */
     val clock = HostClock()
 
+    private var deviceInfo: DeviceInfoSender? = null
+
     override fun onCreate() {
         super.onCreate()
         bridge = Bridge(scope, BuildConfigInfo.versionName(this)) { m, _ -> clock.observe(m) }
         UiHelpers.install(this)
+        deviceInfo = DeviceInfoSender(this).also { it.start() }
         channel = BridgeChannel(bridge, scope)
         channel.listen(Protocol.NOTICE) { m -> Protocol.payload<Notice>(m)?.text?.takeIf { it.isNotEmpty() }?.let(_notices::tryEmit) }
         chat = ChatController(channel)
@@ -87,6 +91,11 @@ class AdbuddyApp : Application() {
         nm.createNotificationChannel(NotificationChannel(CHANNEL_CONVERSATION, getString(R.string.channel_conversation), NotificationManager.IMPORTANCE_LOW).apply { setAllowBubbles(true) })
         nm.createNotificationChannel(NotificationChannel(CHANNEL_DONE, getString(R.string.channel_done), NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(CHANNEL_CONFIRM, getString(R.string.channel_confirm), NotificationManager.IMPORTANCE_HIGH))
+    }
+
+    override fun onTerminate() {
+        deviceInfo?.stop()
+        super.onTerminate()
     }
 
     /**
