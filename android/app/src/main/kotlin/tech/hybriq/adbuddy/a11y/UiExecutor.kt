@@ -132,6 +132,8 @@ class UiExecutor(
         if (!locked && guarded(pkg)) return protectedApp(r, pkg)
         s.acting(null)
         val d = Dumper.dump(s.windows(), s.screen(), s.rotation(), pkg.takeUnless { it == Packages.ADBUDDY }.orEmpty(), activity, locked, a.all == true, ::guarded)
+        // A heads-up may have appeared while the tree was read: drop what was read.
+        if (notificationOnScreen()) return notificationBlocked(r)
         return ok(r, d, tech.hybriq.adbuddy.bridge.UiDump.serializer())
     }
 
@@ -146,7 +148,7 @@ class UiExecutor(
         val windows = s.windows()
         if (a.x != null && a.y != null) {
             pointBlocked(r, windows, a.x, a.y)?.let { return it }
-            if (paused()) return pausedNow(r)
+            lateBlock(r)?.let { return it }
             s.acting(Box(a.x, a.y, a.x + 1, a.y + 1))
             if (!s.tap(a.x, a.y)) return fail(r, ErrorCode.FAILED, "The tap did not happen.")
             return ok(r, UiClicked(true, listOf(a.x, a.y, a.x + 1, a.y + 1), "gesture"), UiClicked.serializer())
@@ -162,7 +164,7 @@ class UiExecutor(
                 guarded(m.target.pkg) -> protectedApp(r, m.target.pkg)
                 m.target.pkg == Packages.SYSTEM_UI && questionWaiting() -> fail(r, ErrorCode.PROTECTED, "A question of ADBuddy is waiting on the phone: the system UI cannot be touched now.")
                 else -> {
-                    if (paused()) return pausedNow(r)
+                    lateBlock(r)?.let { return it }
                     s.acting(m.bounds)
                     if (s.click(m.target)) {
                         ok(r, UiClicked(true, m.bounds.list(), "action"), UiClicked.serializer())
@@ -170,7 +172,7 @@ class UiExecutor(
                         // Not every clickable view takes ACTION_CLICK: tap its middle, but
                         // only after checking again what is on top of that point now.
                         pointBlocked(r, s.windows(), m.bounds.centerX, m.bounds.centerY)?.let { return it }
-                        if (paused()) return pausedNow(r)
+                        lateBlock(r)?.let { return it }
                         if (!s.tap(m.bounds.centerX, m.bounds.centerY)) return fail(r, ErrorCode.FAILED, "The tap did not happen.")
                         ok(r, UiClicked(true, m.bounds.list(), "gesture"), UiClicked.serializer())
                     }
@@ -201,7 +203,7 @@ class UiExecutor(
         val field = s.focusedInput() ?: return fail(r, ErrorCode.NOT_FOUND, "No text field has the focus: tap one first.")
         if (guarded(field.pkg)) return protectedApp(r, field.pkg)
         if (field.password) return fail(r, ErrorCode.PROTECTED, "ADBuddy does not type into password fields: ask the user to type it.")
-        if (paused()) return pausedNow(r)
+        lateBlock(r)?.let { return it }
         s.acting(field.bounds)
         if (!s.setText(field, a.text)) return fail(r, ErrorCode.FAILED, "The field did not take the text.")
         return ok(r, UiTextSet(true), UiTextSet.serializer())
@@ -213,6 +215,13 @@ class UiExecutor(
         val (pkg, activity) = s.foreground()
         val protected = notificationOnScreen() || (pkg.isNotEmpty() && (guarded(pkg) || guardedOnScreen(s.windows())))
         return ok(r, UiForeground(pkg, activity, protected), UiForeground.serializer())
+    }
+
+    /** Checked again just before acting: the agent was paused, or a notification appeared, since the first check. */
+    private fun lateBlock(r: UiRequest): UiResponse? = when {
+        paused() -> pausedNow(r)
+        notificationOnScreen() -> notificationBlocked(r)
+        else -> null
     }
 
     private fun notificationBlocked(r: UiRequest) = fail(r, ErrorCode.PROTECTED, "A notification is on screen: ask the user to do this part.")

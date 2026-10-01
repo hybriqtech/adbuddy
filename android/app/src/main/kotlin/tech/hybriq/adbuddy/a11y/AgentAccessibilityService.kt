@@ -3,7 +3,6 @@ package tech.hybriq.adbuddy.a11y
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
-import android.app.Notification
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
@@ -48,7 +47,7 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
-            notifications.accept(event.className, event.packageName?.toString().orEmpty(), event.parcelableData is Notification)
+            notifications.accept(event.className, event.packageName?.toString().orEmpty())
             return
         }
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return

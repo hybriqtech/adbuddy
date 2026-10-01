@@ -4,22 +4,24 @@ package tech.hybriq.adbuddy.a11y
 class NotificationWindow(private val clock: () -> Long, private val windowMs: Long = 8_000) {
     @Volatile private var until = 0L
 
-    fun onNotification(pkg: String) {
-        if (pkg.isEmpty() || pkg == ADBUDDY) return
+    /** True when the notification opened (or restarted) the window. */
+    fun onNotification(pkg: String): Boolean {
+        if (pkg.isEmpty() || pkg == ADBUDDY) return false
         until = clock() + windowMs
+        return true
     }
 
     fun active(): Boolean = clock() < until
 
     /**
-     * The logic of the service's TYPE_NOTIFICATION_STATE_CHANGED handling: toasts
-     * fire the same event, and so does anything without a Notification in its
-     * parcelableData; neither opens the window. True when the event counted.
+     * The logic of the service's TYPE_NOTIFICATION_STATE_CHANGED handling: a toast
+     * fires the same event and does not open the window. Nothing else is
+     * required of the event (a real notification may come without its
+     * parcelableData, e.g. redacted). True when the event counted.
      */
-    fun accept(className: CharSequence?, pkg: String, isNotification: Boolean): Boolean {
-        if (!isNotification || className?.contains("Toast") == true) return false
-        onNotification(pkg)
-        return pkg.isNotEmpty() && pkg != ADBUDDY
+    fun accept(className: CharSequence?, pkg: String): Boolean {
+        if (className?.contains("Toast") == true) return false
+        return onNotification(pkg)
     }
 
     private companion object { const val ADBUDDY = "tech.hybriq.adbuddy" }

@@ -35,18 +35,27 @@ class NotificationWindowTest {
         assertFalse(w.active())
     }
 
-    @Test fun acceptIgnoresToastsAndEventsWithoutANotification() {
-        assertFalse(w.accept("android.widget.Toast\$TN", "com.example.chat", true))
-        assertFalse(w.accept("android.widget.Toast", "com.example.chat", true))
-        assertFalse(w.accept(null, "com.example.chat", false))
-        assertFalse(w.accept("android.app.Notification", "com.example.chat", false))
+    @Test fun acceptIgnoresOnlyToasts() {
+        assertFalse(w.accept("android.widget.Toast\$TN", "com.example.chat"))
+        assertFalse(w.accept("android.widget.Toast", "com.example.chat"))
         assertFalse(w.active())
-        assertTrue(w.accept("android.app.Notification", "com.example.chat", true))
+        // A real notification counts even when its parcelableData is absent (redacted).
+        assertTrue(w.accept("android.app.Notification", "com.example.chat"))
         assertTrue(w.active())
     }
 
-    @Test fun acceptWithoutClassNameStillCountsANotification() {
-        assertTrue(w.accept(null, "com.example.chat", true))
+    @Test fun acceptWithoutOrEmptyClassNameCountsWithAValidPackage() {
+        assertTrue(w.accept(null, "com.example.chat"))
         assertTrue(w.active())
+        t += 8_000
+        assertFalse(w.active())
+        assertTrue(w.accept("", "com.example.chat"))
+        assertTrue(w.active())
+    }
+
+    @Test fun acceptIgnoresADBuddyAndEmptyPackages() {
+        assertFalse(w.accept("android.app.Notification", ""))
+        assertFalse(w.accept("android.app.Notification", "tech.hybriq.adbuddy"))
+        assertFalse(w.active())
     }
 }

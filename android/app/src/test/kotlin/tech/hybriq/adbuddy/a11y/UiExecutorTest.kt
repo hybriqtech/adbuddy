@@ -48,8 +48,10 @@ class UiExecutorTest {
     private var question = false
     private var paused = false
     private var notification = false
+    private var notificationAfter = Int.MAX_VALUE // checks that pass before a heads-up appears
+    private var checks = 0
     private val protected = mutableSetOf("com.example.bank")
-    private val x = UiExecutor({ screen }, { sent += it }, { now }, { it in protected }, { question }, { paused }, { notification }, { it.run() })
+    private val x = UiExecutor({ screen }, { sent += it }, { now }, { it in protected }, { question }, { paused }, { notification || ++checks > notificationAfter }, { it.run() })
 
     private fun req(op: String, args: JsonElement = JsonObject(emptyMap()), id: String = "u_1", expires: String = "2026-10-01T10:00:10Z") =
         UiRequest(id, op, args, expires)
@@ -172,6 +174,29 @@ class UiExecutorTest {
         assertTrue(x.run(req(UiOp.DUMP)).ok)
         assertTrue(x.run(req(UiOp.CLICK, obj("x" to 540, "y" to 1200))).ok)
         assertTrue(x.run(req(UiOp.SET_TEXT, obj("text" to "hi"))).ok)
+    }
+
+    @Test fun aNotificationThatAppearsMidRequestStopsIt() {
+        val field = UiNode(pkg = "com.android.settings", cls = "android.widget.EditText", bounds = Box(0, 0, 10, 10), editable = true, focused = true)
+        fun acts() = screen!!.did.filter { it.startsWith("tap") || it.startsWith("click") || it.startsWith("setText") || (it.startsWith("acting") && it != "acting null") }
+        // dump: the first check passes, the one after reading the tree does not.
+        notificationAfter = 1
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.DUMP))))
+        // click at a point and set text: the late check just before acting.
+        for (op in listOf(req(UiOp.CLICK, obj("x" to 540, "y" to 1200)), req(UiOp.SET_TEXT, obj("text" to "hi")), req(UiOp.CLICK, obj("text" to "Network & internet")))) {
+            checks = 0
+            screen!!.focused = field
+            assertEquals(op.op, ErrorCode.PROTECTED, error(x.run(op)))
+        }
+        // the fallback tap after a failed ACTION_CLICK: the third check.
+        screen!!.clickWorks = false
+        notificationAfter = 2
+        checks = 0
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.CLICK, obj("text" to "Network & internet")))))
+        assertTrue(acts().toString(), acts().none { it.startsWith("tap") || it.startsWith("setText") })
+        // without a notification everything runs.
+        notificationAfter = Int.MAX_VALUE
+        assertTrue(x.run(req(UiOp.DUMP)).ok)
     }
 
     @Test fun pausedNoTapsNorTyping() {
