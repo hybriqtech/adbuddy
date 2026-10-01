@@ -35,11 +35,21 @@ type phoneLink struct {
 	log   io.Writer
 	agent string
 
+	// areas are what each milestone adds (phone_areas.go), and handlers
+	// their message handlers by type; set before the server starts.
+	areas    []area
+	handlers map[string]func(bridge.Message)
+
 	mu      sync.Mutex
 	paused  bool
 	onPause func() // withdraws the question waiting for an answer (daemon.CancelConfirmations)
 	entries []json.RawMessage
+	noticed map[string]bool // types told unsupported by notice on this connection
 }
+
+// maxNotices is how many unsupported types a connection is told of by notice:
+// each notice is an event, kept in the buffer of the ones to resend.
+const maxNotices = 16
 
 // chatPort returns the configured port of the app channel, choosing and
 // saving one on first use (spec §5.2: fixed, so the reverse never changes).
@@ -109,6 +119,8 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 	l.srv = bridge.New(bridge.Options{
 		Session: session, HostVersion: Version,
 		OnMessage: l.onMessage,
+		OnFrame:   l.onFrame,
+		OnAttach:  l.onAttach,
 		Snapshot:  l.snapshot,
 		OnReject: func(h bridge.Hello) {
 			fmt.Fprintf(app.Stderr, "⚠ The ADBuddy app on the phone (%s) is too old for this host: run `adbuddy setup` to update it.\n", classify.Printable(h.AppVersion))
@@ -125,9 +137,11 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 			// A question already on the phone would wait there for
 			// nobody: it moves here too.
 			l.conf.AppGone()
+			l.onGone()
 		},
 	})
 	l.conf = bridge.NewConfirmer(l.srv, fallback)
+	l.setAreas(l.confirmArea(), l.chatArea(), l.agentArea(), l.uiArea())
 	l.conf.Notify = func(title string, moved bool) {
 		if moved {
 			fmt.Fprintf(app.Stderr, "📱 The phone app disconnected before you answered “%s”: it no longer waits for the phone.\n", classify.Printable(title))
@@ -244,39 +258,77 @@ func (l *phoneLink) state() bridge.SessionState {
 	return bridge.SessionState{Agent: l.agent, State: "idle", Paused: l.paused}
 }
 
+// snapshot is called with the server's lock held: neither it nor the parts
+// each area adds may call Publish, Send or Connected.
 func (l *phoneLink) snapshot() bridge.Snapshot {
 	st := l.state()
 	l.mu.Lock()
 	entries := append([]json.RawMessage{}, l.entries...)
 	l.mu.Unlock()
-	return bridge.Snapshot{State: st, Pending: l.conf.Pending(), Journal: entries}
+	s := bridge.Snapshot{State: st, Pending: l.conf.Pending(), Journal: entries}
+	for _, a := range l.areas {
+		if a.snapshot != nil {
+			a.snapshot(&s)
+		}
+	}
+	return s
 }
 
 // onMessage handles what the app sends. Everything it carries comes from the
 // phone: only known types with checked payloads do anything.
 func (l *phoneLink) onMessage(m bridge.Message) {
-	switch m.Type {
-	case bridge.TypeConfirmReply:
-		l.conf.Reply(m.Payload)
-	case bridge.TypePause, bridge.TypeResume:
-		pause := m.Type == bridge.TypePause
-		l.mu.Lock()
-		l.paused = pause
-		withdraw := l.onPause
-		l.mu.Unlock()
-		if pause {
-			fmt.Fprintln(l.log, "⏸ Paused from the phone: every adb command of the agent is refused until you resume.")
-			// After Paused reports true: the command whose question is
-			// withdrawn then ends blocked as paused.
-			if withdraw != nil {
-				withdraw()
-			}
-		} else {
-			fmt.Fprintln(l.log, "▶ Resumed from the phone.")
-		}
-		_ = l.srv.Publish(bridge.TypeSessionState, l.state())
-	default:
-		_ = l.srv.Publish(bridge.TypeNotice, bridge.Notice{Level: "info",
-			Text: "This version of the ADBuddy host does not handle " + classify.Printable(m.Type) + " yet."})
+	if h, ok := l.handlers[m.Type]; ok {
+		h(m)
+		return
 	}
+	l.unsupported(m)
+}
+
+// unsupported answers a type this host does not handle (protocol spec §3):
+// an error to a request with a rid, and otherwise a notice, which an M2 app
+// understands. A notice is an event, kept to resend: only one per type and
+// at most maxNotices per connection, so an app sending unknown types does not
+// push real events out.
+func (l *phoneLink) unsupported(m bridge.Message) {
+	typ := m.Type
+	if r := []rune(typ); len(r) > 64 {
+		typ = string(r[:64]) + "…"
+	}
+	text := "This version of the ADBuddy host does not handle " + classify.Printable(typ) + " yet."
+	if m.RID != "" {
+		_ = l.srv.Reply(m, bridge.TypeError, bridge.ErrorReply{Code: bridge.CodeUnsupported, Text: text})
+		return
+	}
+	l.mu.Lock()
+	told := l.noticed[typ] || len(l.noticed) >= maxNotices
+	if l.noticed == nil {
+		l.noticed = map[string]bool{}
+	}
+	if !told {
+		l.noticed[typ] = true
+	}
+	l.mu.Unlock()
+	if !told {
+		_ = l.srv.Publish(bridge.TypeNotice, bridge.Notice{Level: "info", Text: text})
+	}
+}
+
+// onPauseMessage handles pause and resume from the phone.
+func (l *phoneLink) onPauseMessage(m bridge.Message) {
+	pause := m.Type == bridge.TypePause
+	l.mu.Lock()
+	l.paused = pause
+	withdraw := l.onPause
+	l.mu.Unlock()
+	if pause {
+		fmt.Fprintln(l.log, "⏸ Paused from the phone: every adb command of the agent is refused until you resume.")
+		// After Paused reports true: the command whose question is
+		// withdrawn then ends blocked as paused.
+		if withdraw != nil {
+			withdraw()
+		}
+	} else {
+		fmt.Fprintln(l.log, "▶ Resumed from the phone.")
+	}
+	_ = l.srv.Publish(bridge.TypeSessionState, l.state())
 }

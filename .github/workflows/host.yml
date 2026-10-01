@@ -2,10 +2,10 @@ name: host
 
 on:
   pull_request:
-    paths: ["host/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "protocol/**", ".github/workflows/host.yml"]
   push:
     branches: [main]
-    paths: ["host/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "protocol/**", ".github/workflows/host.yml"]
 
 permissions:
   contents: read
