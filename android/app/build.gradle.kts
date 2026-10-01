@@ -36,6 +36,13 @@ android {
     }
 }
 
+// The protocol's shared fixtures (protocol/fixtures/, protocol spec §12): FixturesTest reads them.
+val protocolFixtures = rootProject.file("../protocol/fixtures")
+tasks.withType<Test>().configureEach {
+    inputs.dir(protocolFixtures).withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("adbuddy.protocolFixtures", protocolFixtures.absolutePath)
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
