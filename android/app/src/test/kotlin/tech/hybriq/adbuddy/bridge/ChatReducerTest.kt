@@ -118,6 +118,9 @@ class ChatReducerM4Test {
         assertEquals(setOf("a", "b"), s.chat.permissions.map { it.id }.toSet())
         assertEquals(2, s.chat.permissions.size)
         assertTrue(s.chat.permissions.none { it.id == "old" })
+        // a repeated id: the last wins, at the place of its last appearance (like the messages)
+        assertEquals(listOf("b", "a"), s.chat.permissions.map { it.id })
+        assertEquals("newer", s.chat.permissions.last().summary)
         // a snapshot with none empties them (all were answered)
         s = s.apply(msg(8, Protocol.SNAPSHOT, """{"state":{},"permissions":[]}"""))
         assertTrue(s.chat.permissions.isEmpty())
@@ -130,5 +133,22 @@ class ChatReducerM4Test {
         assertEquals(1, s.disconnected().chat.permissions.size)
         val n = s.apply(msg(0, Protocol.WELCOME, """{"session":"s_2","fromSeq":1,"protocol":1}"""))
         assertTrue(n.chat.permissions.isEmpty() && n.chat.tools.isEmpty())
+    }
+
+    @Test fun aFinishedToolNeverGoesBackToRunning() {
+        var s = BridgeState().apply(msg(1, Protocol.TOOL_ACTIVITY, tool("t1", "running")))
+        s = s.apply(msg(2, Protocol.TOOL_ACTIVITY, tool("t1", "done")))
+        s = s.apply(msg(3, Protocol.TOOL_ACTIVITY, tool("t1", "running", "late")))
+        assertEquals("done", s.chat.tools.single().status)
+        assertEquals("Run ls", s.chat.tools.single().summary)
+        s = s.apply(msg(4, Protocol.TOOL_ACTIVITY, tool("t2", "running")))
+            .apply(msg(5, Protocol.TOOL_ACTIVITY, tool("t2", "error")))
+            .apply(msg(6, Protocol.TOOL_ACTIVITY, tool("t2", "running")))
+        assertEquals("error", s.chat.tools.single { it.id == "t2" }.status)
+        assertEquals(6L, s.lastSeq)
+        // running to running, and running to a final one, still update
+        s = s.apply(msg(7, Protocol.TOOL_ACTIVITY, tool("t3", "running")))
+            .apply(msg(8, Protocol.TOOL_ACTIVITY, tool("t3", "running", "again")))
+        assertEquals("again", s.chat.tools.single { it.id == "t3" }.summary)
     }
 }
