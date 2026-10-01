@@ -98,3 +98,5 @@ Task 9: review (Sonnet, 69f0eeb): Approved con 1 Importante (el test del emulado
 Task 9: complete (commits d0f071b..504b46f, 1 ronda de arreglos)
 Task 9: minor (deferred): el nombre del job de emulator.yml ("oracle against the emulator's mksh") ya no describe todo (renombrarlo rompería un check requerido); el test del emulador no se ha ejecutado en emulador real (solo en la CI).
 TODAS LAS TAREAS (T1-T9) COMPLETAS. Siguiente: rebase sobre origin/main 0a22518 (supervisor), go test, revisión final opus de la rama, push y PR.
+
+Rebase 2 2026-10-02: m6b rebasada sobre origin/main 0a22518 (M4, PR #13): 28 commits, 2 conflictos en `workspace.go` (la firma `mergeClaudeSettings(path, hookExe)` de M4 frente a mi refactor con `loadSettings`/`saveSettings`; resueltos conservando los hooks de M4 y mis helpers); identidad hybriqtech y trailer exacto en los 28; `go build/vet/test ./...` en verde. Los SHA anteriores son los de antes de este rebase.
