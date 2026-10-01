@@ -284,6 +284,11 @@ M3.0 deja el contrato completo y estos puntos, para que cada hito añada **solo 
   - `send`;
   - `request(tipo, payload, onResult)`, que registra la petición antes de enviarla y la resuelve con la primera respuesta de su `rid`, o con `null` si cae la conexión;
   - `sendFrame` y `queuedBytes`.
+
+  Además:
+  - `Reducer.reset(s, why: Reset)`, sin implementación por defecto: cada reductor decide qué olvida con cada motivo (`NEW_SESSION`, `UNREADABLE_SNAPSHOT`, `DISCONNECTED`, `INCOMPATIBLE`), y `BridgeState` lo llama en esos cuatro caminos (m3-bridge);
+  - los oyentes, `onResult` y `onMessage` de `Bridge` van aislados: una excepción suya no corta el canal;
+  - un reductor nunca debe lanzar una excepción.
 - **Tipos y fixtures:** todos los de §4-§8 quedan escritos en M3.0. Si un hito necesita un campo nuevo, lo añade al tipo, a las dos implementaciones y a la fixture en el mismo commit. Es el único cambio permitido en `protocol.go` y `Protocol.kt`, y la línea que lo haga se lo dice a la otra al integrar.
 
 | Hito | Tipos de los que implementa el comportamiento |

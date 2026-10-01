@@ -192,8 +192,10 @@ class Bridge internal constructor(
             val (next, answered) = synchronized(lock) {
                 if (webSocket !== socket) return
                 // Only a request sent on this socket: one of an older socket already failed or is failing.
+                // The reducer runs first: if it throws, the request is still in pending for failPending.
+                val next = _state.updateAndGet { it.apply(m) }
                 val waiting = m.rid?.let { rid -> pending[rid]?.takeIf { it.socket === webSocket }?.let { pending.remove(rid) } }
-                _state.updateAndGet { it.apply(m) } to waiting
+                next to waiting
             }
             if (next.connection == BridgeState.Connection.INCOMPATIBLE) {
                 webSocket.close(1000, "host too old")

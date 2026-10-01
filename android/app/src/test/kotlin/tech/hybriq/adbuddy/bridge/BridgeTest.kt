@@ -387,6 +387,7 @@ class BridgeTest {
     @Test fun binaryFrames() {
         val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
         val frames = LinkedBlockingQueue<Chunk>()
+        bridge.listenFrames { throw IllegalStateException("a bug in a frame listener") }
         bridge.listenFrames { frames.add(it) }
         bridge.start(link())
         connect(bridge, hosts[0])
@@ -410,7 +411,7 @@ class BridgeTest {
 
     /** A listener or an onResult that throws does not cut the channel nor keep the others from being called. */
     @Test fun aThrowingCallbackDoesNotCutTheChannel() {
-        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
+        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> throw IllegalStateException("a bug in the constructor callback") }
         val others = LinkedBlockingQueue<Message>()
         bridge.listen(Protocol.ERROR) { throw IllegalStateException("a bug in a listener") }
         bridge.listen(Protocol.ERROR) { others.add(it) }

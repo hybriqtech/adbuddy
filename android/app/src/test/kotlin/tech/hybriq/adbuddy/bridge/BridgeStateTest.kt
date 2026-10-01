@@ -235,11 +235,15 @@ class BridgeStateTest {
 
     /** An unreadable snapshot drops what it should have replaced, but keeps the session's state (as in M2). */
     @Test fun anUnreadableSnapshotResetsEveryArea() {
-        val s = BridgeState(session = "s_1", remote = RemoteState(enabled = true))
+        val s = BridgeState(
+            session = "s_1", remote = RemoteState(enabled = true),
+            chat = ChatState(messages = listOf(ChatMessage(id = "m_1", role = "user"))),
+        )
             .apply(msg(1, Protocol.SESSION_STATE, """{"state":"working","paused":true}"""))
             .apply(msg(2, Protocol.CONFIRM_REQUEST, question))
             .apply(msg(3, Protocol.SNAPSHOT, """{"pending":"nope"}"""))
         assertTrue(s.pending.isEmpty())
+        assertEquals(ChatState(), s.chat)
         assertEquals(RemoteState(), s.remote)
         assertEquals(SessionState(state = "working", paused = true), s.sessionState)
         assertEquals(3L, s.lastSeq)
@@ -259,8 +263,18 @@ class BridgeStateTest {
     /** Every reducer has its own reset: the same session keeps its state. */
     @Test fun theSameSessionKeepsEveryArea() {
         val chat = ChatState(messages = listOf(ChatMessage(id = "m_1", role = "user")))
-        val s = BridgeState(session = "s_1", lastSeq = 4, chat = chat).apply(welcome("s_1"))
+        val s = BridgeState(session = "s_1", lastSeq = 4, chat = chat, remote = RemoteState(enabled = true)).apply(welcome("s_1"))
         assertEquals(chat, s.chat)
+        assertEquals(RemoteState(enabled = true), s.remote)
         assertEquals(4L, s.lastSeq)
+    }
+
+    /** An incompatible app drops what it was sending, but keeps the chat and the remote mode. */
+    @Test fun anIncompatibleAppKeepsTheAreas() {
+        val chat = ChatState(messages = listOf(ChatMessage(id = "m_1", role = "user")))
+        val s = BridgeState(session = "s_1", chat = chat, remote = RemoteState(enabled = true)).appOutdated()
+        assertEquals(chat, s.chat)
+        assertEquals(RemoteState(enabled = true), s.remote)
+        assertEquals(BridgeState.Connection.INCOMPATIBLE, s.connection)
     }
 }

@@ -47,8 +47,8 @@ type Options struct {
 	OnMessage func(Message)
 	// Snapshot describes the current state when the app missed too much, and
 	// for PublishSnapshot. It is called with the server's lock held: it must
-	// not call Publish, PublishRID, PublishSnapshot, Reply, Send, Current or
-	// Connected.
+	// not call Publish, PublishRID, PublishSnapshot, Reply, Send, SendTo,
+	// Current or Connected.
 	Snapshot func() Snapshot
 	// OnConnect is called with true when an app authenticates and none was
 	// connected, and with false when the app is gone and no other took its
