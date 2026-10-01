@@ -91,7 +91,9 @@ func startChat(t *testing.T, port string) *harness {
 	t.Cleanup(func() {
 		// The agent lives in serve's PTY: killing serve alone would leave it
 		// running, and Windows cannot delete the folder of a running program.
-		stop := exec.Command(adbuddyBin, "stop")
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		stop := exec.CommandContext(ctx, adbuddyBin, "stop")
 		stop.Env = h.env
 		stop.Run()
 		cmd.Process.Kill()
@@ -107,6 +109,24 @@ func startChat(t *testing.T, port string) *harness {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// adbuddyWithin runs adbuddy with a limit of 20 s (harness.adbuddy has none).
+func (h *harness) adbuddyWithin(args ...string) (stdout, stderr string, code int) {
+	h.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, adbuddyBin, args...)
+	cmd.Env = h.env
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	err := cmd.Run()
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	} else if err != nil {
+		h.t.Fatal(err)
+	}
+	return out.String(), errb.String(), code
 }
 
 // sendRID sends a request that carries a rid (phone.send does not).
@@ -273,6 +293,10 @@ func TestChatEndToEndWithAFakeAgent(t *testing.T) {
 		t.Fatal("attach did not end")
 	}
 
+	// A multi-line paste comes back whole, the new line shown as \n.
+	p.sendRID(bridge.TypeChatSend, "r-ml", bridge.ChatSend{ID: "m-ml", Text: "linea1\nlinea2", Attachments: []string{}})
+	v.onScreen(`got:linea1\nlinea2`)
+
 	// The agent hands a file to the phone with `adbuddy send`.
 	note := filepath.Join(h.ws, "nota.txt")
 	content := []byte("contenido del agente\n")
@@ -292,15 +316,23 @@ func TestChatEndToEndWithAFakeAgent(t *testing.T) {
 	v.onScreen("sent:ok")
 
 	// adbuddy stop and adbuddy new change the state the app sees.
-	if out, errOut, code := h.adbuddy("stop"); code != 0 {
+	if out, errOut, code := h.adbuddyWithin("stop"); code != 0 {
 		t.Fatalf("adbuddy stop: %d %q %q", code, out, errOut)
 	}
 	v.state("stopped", func(s bridge.SessionState) bool { return s.State == "stopped" })
-	if out, errOut, code := h.adbuddy("new"); code != 0 {
+	if out, errOut, code := h.adbuddyWithin("new"); code != 0 {
 		t.Fatalf("adbuddy new: %d %q %q", code, out, errOut)
 	}
 	st := v.state("a new session", func(s bridge.SessionState) bool { return s.State != "stopped" })
 	if st.Agent != "codex" || st.Conversation == "" || st.Conversation == cm.Conversation {
 		t.Fatalf("after new: %+v (first conversation %q)", st, cm.Conversation)
+	}
+
+	// Privacy (spec M3 section 10): neither the chat text nor the pasted
+	// text reached the host's own output.
+	for _, secret := range []string{"hola desde el movil", "linea1", "linea2"} {
+		if strings.Contains(h.serveErr.String(), secret) || strings.Contains(h.serveOut.String(), secret) {
+			t.Fatalf("%q reached serve's output: stderr %q stdout %q", secret, h.serveErr.String(), h.serveOut.String())
+		}
 	}
 }

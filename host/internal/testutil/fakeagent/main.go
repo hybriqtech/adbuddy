@@ -20,9 +20,12 @@ const (
 )
 
 func main() {
-	if st, err := term.MakeRaw(int(os.Stdin.Fd())); err == nil {
-		defer term.Restore(int(os.Stdin.Fd()), st)
+	st, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fakeagent: raw mode:", err)
+		os.Exit(1)
 	}
+	defer term.Restore(int(os.Stdin.Fd()), st)
 	enableVTInput()
 	fmt.Print("\x1b[?2004hready\r\n")
 
@@ -61,5 +64,5 @@ func handle(text string) {
 		fmt.Print("sent:ok\r\n")
 		return
 	}
-	fmt.Printf("got:%s\r\n", strings.ReplaceAll(text, "\n", "\n"))
+	fmt.Printf("got:%s\r\n", strings.ReplaceAll(text, "\n", `\n`))
 }
