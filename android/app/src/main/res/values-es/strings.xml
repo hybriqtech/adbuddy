@@ -78,6 +78,18 @@
     <string name="chat_capture">Captura de pantalla</string>
     <string name="chat_terminal_show">Mostrar la terminal</string>
     <string name="chat_terminal_hide">Ocultar la terminal</string>
+    <string name="perm_title">Claude Code pregunta</string>
+    <string name="perm_allow">Sí</string>
+    <string name="perm_always">Sí, siempre</string>
+    <string name="perm_deny">No</string>
+    <string name="perm_offline">Sin conexión: respóndelo en el PC</string>
+    <string name="perm_expired">Se acabó el tiempo: respóndelo en el PC</string>
+    <string name="perm_left">Quedan %1$d s</string>
+    <plurals name="perm_more">
+        <item quantity="one">%1$d más esperando</item>
+        <item quantity="other">%1$d más esperando</item>
+    </plurals>
+    <string name="notif_asking">Claude Code necesita una respuesta</string>
     <string name="chat_retry">Reintentar</string>
     <string name="chat_discard">Descartar</string>
     <string name="chat_not_sent">No enviado</string>

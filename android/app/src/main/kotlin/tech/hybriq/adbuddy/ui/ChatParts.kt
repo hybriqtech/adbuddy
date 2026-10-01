@@ -171,7 +171,7 @@ fun MessageRow(
     onDiscard: (String) -> Unit,
 ) {
     when (item) {
-        is TimelineItem.Host -> Bubble(item.msg.role == "user", item.msg.text, item.msg.attachments, downloads, onLink, onAttachment)
+        is TimelineItem.Host -> Bubble(item.msg.role == "user", item.msg.text, item.msg.attachments, downloads, onLink, onAttachment, markdown = item.msg.role == "assistant")
         is TimelineItem.Mine -> {
             val o = item.out
             val failed = o.status == SendStatus.FAILED
@@ -204,6 +204,7 @@ private fun Bubble(
     onAttachment: (Attachment) -> Unit,
     modifier: Modifier = Modifier,
     failed: Boolean = false,
+    markdown: Boolean = false,
 ) {
     val container = when {
         failed -> MaterialTheme.colorScheme.errorContainer
@@ -218,7 +219,7 @@ private fun Bubble(
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Surface(color = container, contentColor = content, shape = MaterialTheme.shapes.large, modifier = modifier.widthIn(max = 340.dp)) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (text.isNotEmpty()) LinkedText(text, onLink)
+                if (text.isNotEmpty()) if (markdown) MarkdownText(text, onLink) else LinkedText(text, onLink)
                 for (a in attachments) AttachmentCard(a, downloads[a.id]) { onAttachment(a) }
             }
         }

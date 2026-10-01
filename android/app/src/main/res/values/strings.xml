@@ -80,6 +80,18 @@
     <string name="chat_capture">Screenshot</string>
     <string name="chat_terminal_show">Show the terminal</string>
     <string name="chat_terminal_hide">Hide the terminal</string>
+    <string name="perm_title">Claude Code asks</string>
+    <string name="perm_allow">Yes</string>
+    <string name="perm_always">Yes, always</string>
+    <string name="perm_deny">No</string>
+    <string name="perm_offline">Not connected: answer from the PC</string>
+    <string name="perm_expired">Time is up: answer from the PC</string>
+    <string name="perm_left">%1$d s left</string>
+    <plurals name="perm_more">
+        <item quantity="one">%1$d more waiting</item>
+        <item quantity="other">%1$d more waiting</item>
+    </plurals>
+    <string name="notif_asking">Claude Code needs an answer</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_discard">Discard</string>
     <string name="chat_not_sent">Not sent</string>
