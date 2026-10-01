@@ -700,13 +700,19 @@ func TestTailerRefusesADirectory(t *testing.T) {
 
 func TestValidTranscript(t *testing.T) {
 	cfg := t.TempDir()
+	// ValidTranscript returns the resolved path: compare with the resolved root
+	// (/var -> /private/var on macOS, 8.3 short names on Windows).
+	realCfg, err := filepath.EvalSymlinks(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	proj := filepath.Join(cfg, "projects", "p1")
 	if err := os.MkdirAll(proj, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	good := filepath.Join(proj, "s.jsonl")
 	write(t, good, os.O_TRUNC, "")
-	if p, err := ValidTranscript(good, cfg); err != nil || !Inside(filepath.Join(cfg, "projects"), p) {
+	if p, err := ValidTranscript(good, cfg); err != nil || !Inside(filepath.Join(realCfg, "projects"), p) {
 		t.Errorf("existing: %q %v", p, err)
 	}
 	if _, err := ValidTranscript(filepath.Join(proj, "later.jsonl"), cfg); err != nil {
