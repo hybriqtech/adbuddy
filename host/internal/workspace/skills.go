@@ -96,7 +96,7 @@ func ensureRealDirs(base, rel string) error {
 			}
 		case err != nil:
 			return err
-		case st.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0: // a link, or a Windows junction
+		case st.Mode()&fs.ModeSymlink != 0 || (st.Mode()&fs.ModeIrregular != 0 && !st.IsDir()): // a link, or a Windows junction (a folder with a reparse point that is not a link stays ModeDir)
 			return fmt.Errorf("%s is a link; delete it or move it away so ADBuddy can install its skills there", cur)
 		case !st.IsDir():
 			return fmt.Errorf("%s is not a folder; delete it or move it away so ADBuddy can install its skills there", cur)

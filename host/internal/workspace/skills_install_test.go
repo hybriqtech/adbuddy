@@ -154,11 +154,109 @@ func TestInitRefusesALinkOrAFileWhereASkillGoes(t *testing.T) {
 		if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, elsewhere).CombinedOutput(); err != nil {
 			t.Skipf("no junction: %v: %s", err, out)
 		}
-		if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err == nil {
-			t.Fatal("a junction where a skill folder goes must be an error")
+		if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err == nil || !strings.Contains(err.Error(), "link") {
+			t.Fatalf("a junction where a skill folder goes: error %v, want one that mentions the link", err)
 		}
 		if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
 			t.Fatalf("Init wrote through the junction: %v", entries)
 		}
 	})
+}
+
+func TestInitRefusesLinksAndFilesAtEveryLevel(t *testing.T) {
+	name := SkillNames()[0]
+	levels := [][]string{{".claude"}, {".agents"}, {".claude", "skills"}, {".agents", "skills"}, {".claude", "skills", name}}
+	for _, lv := range levels {
+		rel := filepath.Join(lv...)
+		t.Run("file/"+rel, func(t *testing.T) {
+			dir := t.TempDir()
+			if len(lv) > 1 {
+				os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o700)
+			}
+			os.WriteFile(filepath.Join(dir, rel), []byte("x"), 0o600)
+			if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err == nil {
+				t.Fatal("want an error")
+			}
+			if read(t, filepath.Join(dir, rel)) != "x" {
+				t.Fatal("the file was changed")
+			}
+		})
+		t.Run("symlink/"+rel, func(t *testing.T) {
+			dir, elsewhere := t.TempDir(), t.TempDir()
+			if len(lv) > 1 {
+				os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o700)
+			}
+			if err := os.Symlink(elsewhere, filepath.Join(dir, rel)); err != nil {
+				t.Skipf("no symlinks here: %v", err)
+			}
+			if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err == nil {
+				t.Fatal("want an error")
+			}
+			if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
+				t.Fatalf("Init wrote through the link: %v", entries)
+			}
+		})
+	}
+}
+
+func TestForceReplacesASkillFileThatIsALink(t *testing.T) {
+	dir, elsewhere := t.TempDir(), t.TempDir()
+	exe := fakeExe(t, "v1")
+	if _, err := Init(Options{Dir: dir, Exe: exe}); err != nil {
+		t.Fatal(err)
+	}
+	first := filepath.FromSlash(skillFiles(t)[0])
+	target := filepath.Join(dir, ".claude", "skills", first)
+	outside := filepath.Join(elsewhere, "outside")
+	os.WriteFile(outside, []byte("outside"), 0o600)
+	os.Remove(target)
+	if err := os.Symlink(outside, target); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	if _, err := Init(Options{Dir: dir, Exe: exe, Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Lstat(target); err != nil || !st.Mode().IsRegular() {
+		t.Fatalf("the link was not replaced by a file: %v %v", st, err)
+	}
+	if read(t, outside) != "outside" {
+		t.Fatal("the link's target changed")
+	}
+}
+
+func TestForceRewritesAFileOfAnotherSize(t *testing.T) {
+	dir := t.TempDir()
+	exe := fakeExe(t, "v1")
+	if _, err := Init(Options{Dir: dir, Exe: exe}); err != nil {
+		t.Fatal(err)
+	}
+	first := filepath.FromSlash(skillFiles(t)[0])
+	target := filepath.Join(dir, ".agents", "skills", first)
+	os.WriteFile(target, []byte("short"), 0o600)
+	if _, err := Init(Options{Dir: dir, Exe: exe, Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := fs.ReadFile(Skills(), filepath.ToSlash(first))
+	if read(t, target) != string(want) {
+		t.Fatal("a file of another size must be rewritten with Force")
+	}
+}
+
+func TestInitLeavesNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	exe := fakeExe(t, "v1")
+	for _, force := range []bool{false, true} {
+		if _, err := Init(Options{Dir: dir, Exe: exe, Force: force}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && (strings.HasPrefix(d.Name(), ".write-") || strings.HasPrefix(d.Name(), ".settings-")) {
+			t.Errorf("temp file left behind: %s", p)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }

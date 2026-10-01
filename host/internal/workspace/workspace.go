@@ -131,8 +131,10 @@ func writeFile(path string, data []byte, overwrite bool) (changed, created bool,
 	if !overwrite {
 		return false, false, nil
 	}
-	if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
-		if st, err := os.Lstat(path); err == nil && st.Mode().IsRegular() {
+	// Read the old content only if it is a regular file of the same size: a
+	// FIFO, or a link to /dev/zero, must be replaced, never read.
+	if st, err := os.Lstat(path); err == nil && st.Mode().IsRegular() && st.Size() == int64(len(data)) {
+		if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
 			return false, false, nil
 		}
 	}
