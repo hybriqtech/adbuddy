@@ -6,7 +6,7 @@
 
 **Arquitectura:** el código nuevo se parte en piezas puras sin Android (modelos, máquinas de estado, controladores sobre una interfaz `Channel`) que se prueban con tests JVM contra un `FakeChannel`, y una capa fina de Compose, WebView y notificaciones encima. El protocolo no cambia: la app usa los tipos de `bridge/Protocol*.kt` tal cual. Cada reductor y cada controlador va en su propio fichero.
 
-**Tecnologías:** Kotlin 2.4, Jetpack Compose (BOM 2026.09) con Material 3, OkHttp (ya está), kotlinx.serialization, `androidx.webkit` (`WebViewAssetLoader`), xterm.js 5.5.0 + addon-fit 0.10.0 (MIT, incluidos en los assets). Host: Go.
+**Tecnologías:** Kotlin 2.4, Jetpack Compose (BOM 2026.09) con Material 3, OkHttp (ya está), kotlinx.serialization, `androidx.webkit` (`WebViewAssetLoader`), xterm.js 5.5.0 + addon-fit 0.10.0 + addon-web-links 0.11.0 (MIT, incluidos en los assets). Host: Go.
 
 **Spec:** `docs/superpowers/specs/2026-10-01-adbuddy-m3-chat-design.md` (§3.5, §5, §6.4, §7, §9-§11). Protocolo: `docs/superpowers/specs/2026-10-01-adbuddy-protocolo-m3-m5-design.md` (§3-§7, §9). Contrato real del host (M3a): `.superpowers/sdd/2026-10-01-adbuddy-m3a/handoff-m3b.md`.
 
@@ -32,7 +32,7 @@
 - **Ruling: la conversación se filtra en `Timeline`**, no en el reductor: se muestran los mensajes cuya `conversation` es la de `session.state` (o vacía) — el host no publica nada que vacíe el chat al hacer `session.new` — si me equivoco, un mensaje viejo se vería un instante.
 - **Ruling: el tamaño de la terminal lo manda el host.** xterm.js se redimensiona solo con `termResize` (de `terminal.snapshot` y `terminal.size`); el addon-fit solo propone dimensiones, que van como `terminal.resize` (el host las ignora con `pcAttached`). La vista hace scroll horizontal si el tamaño del host no cabe — si me equivoco, la TUI se ve más pequeña de lo que cabría.
 - **Ruling: la etiqueta de "red local o Tailscale" de la cabecera queda para M5b** (necesita `RemoteState`); M3b muestra la línea de `LinkStatus` — si me equivoco, una línea en la cabecera.
-- **Ruling: el límite de descarga automática en modo remoto (5 MiB) se cablea a `state.remote` cuando M5 lo rellene;** hoy `Downloads.autoLimit` recibe `remote = false` — si me equivoco, el límite es de 10 MiB también en remoto hasta M5b.
+- **Ruling: el límite de descarga automática en modo remoto (5 MiB) usa `state.remote.enabled`;** hoy `Downloads.autoLimit` recibe `state.remote.enabled`, que ya existe en `RemoteState` — si me equivoco, el límite de 5 MiB se aplica o no según lo que M5 ponga en `enabled`.
 - **Ruling: sin dependencia de iconos ampliados** (`material-icons-extended` pesa mucho): solo iconos de `material-icons-core` o `ImageVector` propios.
 - **Riesgo anotado:** Android puede no abrir como burbuja una notificación de servicio en primer plano (`ongoing`). Se implementa como pide la spec (§7.4) y se valida en el Pixel; si no abre, la burbuja sale de una notificación de conversación aparte (id 4) que el servicio publica con cada mensaje nuevo. Va en "Validaciones manuales".
 
@@ -45,9 +45,9 @@ Host (T1):
 Android, bajo `android/app/src/main/kotlin/tech/hybriq/adbuddy/` (`T` = tarea):
 - `bridge/ChatReducer.kt` (modifica, T2): `chat.message` y `snapshot`.
 - `bridge/Channel.kt` (nuevo, T3): `Channel` y `BridgeChannel`.
-- `chat/ChatController.kt`, `chat/Timeline.kt`, `chat/Composer.kt`, `chat/Links.kt` (nuevos, T3 y T9).
+- `chat/ChatController.kt`, `chat/Timeline.kt` (T3); `chat/Links.kt` (T4, `find` en T9); `chat/Composer.kt`, `chat/SessionLabel.kt` (T9).
 - `term/TerminalModel.kt`, `term/TerminalFeed.kt`, `term/QuickKeys.kt`, `term/TermBridge.kt` (nuevos, T4); `term/TerminalView.kt` + `assets/term/*` (T8).
-- `files/Uploader.kt`, `files/Drafts.kt`, `files/FileNames.kt`, `files/UriSource.kt` (T5); `files/FileCache.kt`, `files/Downloads.kt`, `files/FileIntents.kt` (T6).
+- `files/Uploader.kt`, `files/Captures.kt`, `files/Drafts.kt`, `files/FileNames.kt`, `files/UriSource.kt` (T5); `files/FileCache.kt`, `files/Downloads.kt`, `files/FileIntents.kt` (T6).
 - `ui/theme/{Palette,Theme}.kt`, `res/values/themes.xml`, `ui/Screens.kt` (modifica) (T7).
 - `ui/ChatScreen.kt`, `ui/ActivityScreen.kt`, `ui/ChatParts.kt`, `ChatBubbleActivity.kt`, `MainActivity.kt` (modifica) (T9, T10).
 - `notify/{DoneDetector,ConversationView,ConversationNotifier}.kt`, `bridge/BridgeService.kt` (modifica) (T10).
@@ -94,13 +94,14 @@ func nextState(t *testing.T, r *chatRig) bridge.SessionState {
 func TestSessionStateCarriesTheAgentsLastCommand(t *testing.T) {
 	r := newChatRig(t)
 	r.start(t, "claude")
-	// A command of the person is not the agent's activity.
+	// A command of the person is not the agent's activity, nor one that did not run.
 	r.l.Entry(journal.Entry{Source: journal.SourceUser, Description: "Reboot the phone"})
+	r.l.Entry(journal.Entry{Source: journal.SourceAgent, Description: "Wipe the phone", Status: journal.StatusDenied})
 	r.l.Entry(journal.Entry{Source: journal.SourceAgent, Description: "Open the Wi-Fi settings"})
 	if st := nextState(t, r); st.Activity != "Open the Wi-Fi settings" {
 		t.Fatalf("activity %q", st.Activity)
 	}
-	// The same description (the command's final record) publishes nothing:
+	// The same description again publishes nothing:
 	// the next state is the new command's.
 	r.l.Entry(journal.Entry{Source: journal.SourceAgent, Description: "Open the Wi-Fi settings", Status: "ok"})
 	r.l.Entry(journal.Entry{Source: journal.SourceAgent, Description: strings.Repeat("é", 300)})
@@ -151,10 +152,14 @@ Constante y método (cerca de `Entry`; `strings` ya está importado en el paquet
 const maxActivity = 120
 
 // noteActivity records what the agent last did on the phone and publishes the
-// state when it changes. A command's running and final records describe it
-// the same way: the second one publishes nothing.
-func (l *phoneLink) noteActivity(desc string) {
-	desc = strings.TrimSpace(desc)
+// state when it changes: a repeated description publishes nothing. Commands
+// that did not run (denied, blocked, timed out) are not what the agent is doing.
+func (l *phoneLink) noteActivity(j journal.Entry) {
+	switch j.Status {
+	case journal.StatusDenied, journal.StatusBlocked, journal.StatusTimeout:
+		return
+	}
+	desc := strings.TrimSpace(j.Description)
 	if desc == "" {
 		return
 	}
@@ -175,11 +180,11 @@ En `Entry`, antes del `if l.srv != nil` final (y fuera del lock):
 
 ```go
 	if j.Source == journal.SourceAgent {
-		l.noteActivity(j.Description)
+		l.noteActivity(j)
 	}
 ```
 
-En `state()`, el literal pasa a `bridge.SessionState{Agent: l.agent, State: session.StateStopped, Activity: l.activity, Paused: l.paused, View: "terminal"}`.
+En `state()`, el literal pasa a `bridge.SessionState{Agent: l.agent, State: session.StateStopped, Activity: l.activity, Paused: l.paused, View: "terminal"}` y, justo antes del `return st`, `if st.State == session.StateStopped { st.Activity = "" }` (una entrada del agente con la sesión parada no la rellena). Lo mismo en `stateOf`, tras copiar el estado de `info`.
 
 En `sessionInfo`, dentro del lock y antes de `l.sess = i`:
 
@@ -331,7 +336,6 @@ object ChatReducer : Reducer {
 }
 ```
 
-Limpia el test: la línea `assertEquals(listOf("b", "a"), s.chat.messages.map { it.id })` queda `assertEquals(listOf("b", "a"), s.chat.messages.map { it.id })`.
 
 - [ ] **Paso 4: pasan los tests del reductor y todos los demás**
 
@@ -359,8 +363,8 @@ git commit -m "feat(app): ChatReducer guarda los chat.message y los del snapshot
 - Produce (las usan T4-T10):
   - `interface Channel { fun request(type: String, payload: JsonElement, onResult: (Message?) -> Unit): String?; fun send(type: String, payload: JsonElement): Boolean; fun sendFrame(id: String, offset: Long, data: ByteArray): Boolean; fun queuedBytes(): Long; fun listen(type: String, listener: (Message) -> Unit): () -> Unit; fun listenFrames(listener: (Chunk) -> Unit): () -> Unit; val connected: StateFlow<Boolean> }`
   - `class BridgeChannel(bridge: Bridge, scope: CoroutineScope) : Channel`
-  - `enum class SendStatus { SENDING, FAILED, SENT }`, `data class Outgoing(val id: String, val text: String, val attachments: List<Attachment>, val status: SendStatus)`
-  - `class ChatController(channel: Channel, newId: () -> String = …)`: `outgoing: StateFlow<List<Outgoing>>`, `errors: SharedFlow<String>`, `fun send(text: String, attachments: List<Attachment> = emptyList()): String?`, `fun retry(id: String)`, `fun discard(id: String)`, `fun prune(hostIds: Set<String>)`.
+  - `enum class SendStatus { SENDING, FAILED }`, `data class Outgoing(val id: String, val text: String, val attachments: List<Attachment>, val status: SendStatus)`
+  - `class ChatController(channel: Channel, newId: () -> String = …)`: `outgoing: StateFlow<List<Outgoing>>`, `errors: SharedFlow<String>`, `fun send(text: String, attachments: List<Attachment> = emptyList()): String?`, `fun retry(id: String)`, `fun discard(id: String)`, `fun newConversation()` (T9).
   - `sealed interface TimelineItem { val key: String }` con `Host(msg: ChatMessage)` y `Mine(out: Outgoing)`; `object Timeline { fun of(chat: ChatState, conversation: String, outgoing: List<Outgoing>): List<TimelineItem> }`.
   - `FakeChannel` (test): ver abajo.
 
@@ -446,6 +450,7 @@ package tech.hybriq.adbuddy.chat
 
 import org.junit.Assert.assertEquals
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertNull
@@ -471,25 +476,16 @@ class ChatControllerTest {
         assertEquals(SendStatus.SENDING, chat.outgoing.value.single().status)
     }
 
-    @Test fun theConfirmingMessageMarksItSentAndPruneDropsIt() {
+    @Test fun theConfirmingMessageDropsIt() {
         ch.handler = { _, cb -> cb(FakeChannel.reply(Protocol.CHAT_MESSAGE, """{"id":"c1","role":"user"}""", "r1")); true }
         chat.send("hello")
-        assertEquals(SendStatus.SENT, chat.outgoing.value.single().status)
-        chat.prune(setOf("c1"))
         assertEquals(emptyList<Outgoing>(), chat.outgoing.value)
-    }
-
-    @Test fun aSendingMessageSurvivesPrune() {
-        ch.handler = { _, _ -> true }
-        chat.send("hello")
-        chat.prune(setOf("c1"))
-        assertEquals(1, chat.outgoing.value.size)
     }
 
     @Test fun anErrorFailsItAndShowsTheHostsText() = runBlocking {
         ch.handler = { _, cb -> cb(FakeChannel.reply(Protocol.ERROR, """{"code":"busy","text":"Answer the question in the agent's terminal first"}""", "r1")); true }
         val seen = mutableListOf<String>()
-        val job = launch(start = CoroutineStart.UNDISPATCHED) { chat.errors.collect { seen += it } }
+        val job = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) { chat.errors.collect { seen += it } }
         chat.send("hello")
         job.cancel()
         assertEquals(SendStatus.FAILED, chat.outgoing.value.single().status)
@@ -551,7 +547,7 @@ class TimelineTest {
 
     @Test fun myMessagesGoAfterAndDisappearWhenTheHostHasThem() {
         val chat = ChatState(messages = listOf(m("a", "c_1")))
-        val items = Timeline.of(chat, "c_1", listOf(out("a", SendStatus.SENT), out("x", SendStatus.FAILED)))
+        val items = Timeline.of(chat, "c_1", listOf(out("a", SendStatus.SENDING), out("x", SendStatus.FAILED)))
         assertEquals(listOf("ha", "mx"), items.map { it.key })
     }
 }
@@ -626,8 +622,8 @@ import tech.hybriq.adbuddy.bridge.ErrorReply
 import tech.hybriq.adbuddy.bridge.Message
 import tech.hybriq.adbuddy.bridge.Protocol
 
-/** SENT: the host confirmed it; it stays until the host's own chat.message is in the state (prune). */
-enum class SendStatus { SENDING, FAILED, SENT }
+/** A confirmed message is not here any more: Bridge applies the host's chat.message to the state before it calls onResult. */
+enum class SendStatus { SENDING, FAILED }
 
 /** A message written on this phone that the chat shows until the host's copy arrives (spec M3 §7.2). */
 data class Outgoing(val id: String, val text: String, val attachments: List<Attachment>, val status: SendStatus)
@@ -666,9 +662,6 @@ class ChatController(
 
     fun discard(id: String) = _outgoing.update { l -> l.filterNot { it.id == id } }
 
-    /** Drops the confirmed messages the host already shows. */
-    fun prune(hostIds: Set<String>) = _outgoing.update { l -> l.filterNot { it.status == SendStatus.SENT && it.id in hostIds } }
-
     private fun post(o: Outgoing) {
         val payload = Protocol.json.encodeToJsonElement(ChatSend.serializer(), ChatSend(o.id, o.text, o.attachments.map { it.id }))
         val rid = channel.request(Protocol.CHAT_SEND, payload) { m -> done(o.id, m) }
@@ -682,7 +675,7 @@ class ChatController(
                 set(id, SendStatus.FAILED)
                 Protocol.payload<ErrorReply>(m)?.let { _errors.tryEmit(it.text.ifEmpty { it.code }) }
             }
-            else -> set(id, SendStatus.SENT)
+            else -> discard(id) // the host's own chat.message is already in the state
         }
     }
 
@@ -761,7 +754,7 @@ git commit -m "feat(app): Channel, ChatController y Timeline del chat"
 - Produce:
   - `sealed interface TermEffect { class Reset(val cols: Int, val rows: Int, val bytes: ByteArray); class Write(val bytes: ByteArray); class Resize(val cols: Int, val rows: Int); object Resync }`
   - `class TerminalModel`: `fun watch(): TerminalWatch`, `fun onSnapshot(s: TerminalSnapshot): List<TermEffect>`, `fun onOutput(o: TerminalOutput): List<TermEffect>`, `fun onSize(s: TerminalSize): List<TermEffect>`, `fun replay(): List<TermEffect>` (para un WebView nuevo), `fun forget()`.
-  - `fun interface TermSink { fun apply(e: TermEffect) }`; `class TerminalFeed(channel: Channel)`: `fun attach(sink: TermSink)` (suscribe: `terminal.watch`, reproduce lo guardado), `fun detach()` (`terminal.unwatch`), `fun input(bytes: ByteArray)`, `fun resize(cols: Int, rows: Int)`.
+  - `fun interface TermSink { fun apply(e: TermEffect) }`; `class TerminalFeed(channel: Channel)`: `fun attach(sink: TermSink)` (suscribe: `terminal.watch`, reproduce lo guardado), `fun detach(sink: TermSink)` (`terminal.unwatch`, solo si ese `sink` es el enganchado), `fun input(bytes: ByteArray)`, `fun resize(cols: Int, rows: Int)`.
   - `enum class QuickKey(val label: String, val bytes: ByteArray)`; `object Keys { fun chunks(bytes: ByteArray): List<ByteArray> }`.
   - `class TermBridge(onInput: (ByteArray) -> Unit, onSize: (Int, Int) -> Unit, onLink: (url: String, domain: String) -> Unit)` con `data(s: String)`, `size(cols: Int, rows: Int)`, `link(url: String)`.
 
@@ -810,7 +803,7 @@ class TerminalModelTest {
     @Test fun overlappingOutputWritesOnlyWhatIsNew() {
         val m = TerminalModel(); m.onSnapshot(snap(offset = 10))
         m.onOutput(out(10, "abc"))
-        assertEquals("cd", text(m.onOutput(out(12, "cd")).single()))
+        assertEquals("only what is new: d", "d", text(m.onOutput(out(12, "cd")).single()))
         assertTrue("fully seen", m.onOutput(out(10, "abc")).isEmpty())
         assertEquals(14L, m.watch().offset)
     }
@@ -834,6 +827,20 @@ class TerminalModelTest {
         assertTrue("the resize sits between the two writes", fx[1] is TermEffect.Resize)
     }
 
+    @Test fun twoSizesInsideOneChunkApplyAtTheirBytesAndTheLoopEnds() {
+        val m = TerminalModel(); m.onSnapshot(snap(offset = 10))
+        m.onSize(TerminalSize("e1", 12, 100, 30)); m.onSize(TerminalSize("e1", 14, 120, 40))
+        val fx = m.onOutput(out(10, "abcdef"))
+        assertEquals(listOf("Write", "Resize", "Write", "Resize", "Write"), fx.map { it::class.simpleName })
+        assertEquals(listOf("ab", "cd", "ef"), fx.filterIsInstance<TermEffect.Write>().map { String(it.bytes) })
+        assertEquals(16L, m.watch().offset)
+    }
+
+    @Test fun anAbsurdOffsetAsksForTheScreenAgain() {
+        val m = TerminalModel(); m.onSnapshot(snap(offset = 10))
+        assertEquals(listOf(TermEffect.Resync), m.onOutput(out(-5, "x")))
+    }
+
     @Test fun aSizeAlreadyDueAppliesAtOnce() {
         val m = TerminalModel(); m.onSnapshot(snap(offset = 10))
         val r = m.onSize(TerminalSize("e1", 10, 120, 40)).single() as TermEffect.Resize
@@ -845,6 +852,7 @@ class TerminalModelTest {
         m.onOutput(out(10, "ab")); m.onOutput(out(12, "cd"))
         val fx = m.replay()
         assertEquals("S", String((fx[0] as TermEffect.Reset).bytes))
+        assertTrue("replayed output is marked", (fx[0] as TermEffect.Reset).replay && fx.drop(1).all { (it as TermEffect.Write).replay })
         assertEquals("abcd", fx.drop(1).joinToString("") { text(it) })
         assertTrue("nothing to replay before the first snapshot", TerminalModel().replay().isEmpty())
     }
@@ -894,17 +902,19 @@ class TerminalFeedTest {
     }
 
     @Test fun detachUnwatchesAndStopsTheSink() {
-        feed.attach { got += it }
-        feed.detach()
+        val sink = TermSink { got += it }
+        feed.attach(sink)
+        feed.detach(sink)
         assertEquals(listOf(Protocol.TERMINAL_WATCH, Protocol.TERMINAL_UNWATCH), types())
         ch.emit(Protocol.TERMINAL_OUTPUT, """{"epoch":"e1","offset":0,"data":"${b64("x")}"}""")
         assertTrue(got.isEmpty())
     }
 
     @Test fun theSecondWatchResumesFromWhatTheModelHas() {
-        feed.attach { }
+        val first = TermSink { }
+        feed.attach(first)
         ch.emit(Protocol.TERMINAL_SNAPSHOT, """{"epoch":"e1","offset":5,"cols":80,"rows":24,"data":"${b64("S")}"}""")
-        feed.detach()
+        feed.detach(first)
         feed.attach { got += it }
         val w = Protocol.json.decodeFromJsonElement(tech.hybriq.adbuddy.bridge.TerminalWatch.serializer(), ch.sent.last().payload)
         assertEquals("e1", w.epoch); assertEquals(5L, w.offset)
@@ -915,6 +925,22 @@ class TerminalFeedTest {
         feed.attach { got += it }
         ch.emit(Protocol.TERMINAL_OUTPUT, """{"epoch":"e1","offset":5,"data":"${b64("x")}"}""") // no screen yet
         assertEquals(listOf(Protocol.TERMINAL_WATCH, Protocol.TERMINAL_WATCH), types())
+    }
+
+    @Test fun anOldViewCannotDetachTheNewOne() {
+        val old = TermSink { }
+        feed.attach(old)
+        feed.attach { got += it } // a bubble opened over the activity
+        feed.detach(old)
+        assertEquals("no unwatch: the new view still watches", 0, types().count { it == Protocol.TERMINAL_UNWATCH })
+        ch.emit(Protocol.TERMINAL_SNAPSHOT, """{"epoch":"e1","offset":5,"cols":80,"rows":24,"data":"${b64("S")}"}""")
+        assertEquals(1, got.size)
+    }
+
+    @Test fun manyResyncsAskOnceUntilTheSnapshotComes() {
+        feed.attach { got += it }
+        repeat(3) { ch.emit(Protocol.TERMINAL_OUTPUT, """{"epoch":"e1","offset":5,"data":"${b64("x")}"}""") }
+        assertEquals(2, types().count { it == Protocol.TERMINAL_WATCH }) // the attach and one resync
     }
 
     @Test fun aReconnectWatchesAgain() {
@@ -1134,8 +1160,10 @@ import tech.hybriq.adbuddy.bridge.TerminalWatch
 /** What the terminal view must do, in order. */
 sealed interface TermEffect {
     /** Clean the terminal, size it cols×rows and write bytes: the screen at a snapshot. */
-    class Reset(val cols: Int, val rows: Int, val bytes: ByteArray) : TermEffect
-    class Write(val bytes: ByteArray) : TermEffect
+    class Reset(val cols: Int, val rows: Int, val bytes: ByteArray, val replay: Boolean = false) : TermEffect
+
+    /** replay: old output drawn again in a new view; the page must not forward what xterm.js answers to its queries (DSR, DA) as keystrokes. */
+    class Write(val bytes: ByteArray, val replay: Boolean = false) : TermEffect
     class Resize(val cols: Int, val rows: Int) : TermEffect
 
     /** The model lost the thread: watch again from what it has (the host answers with a snapshot). */
@@ -1179,11 +1207,11 @@ class TerminalModel {
     }
 
     fun onOutput(o: TerminalOutput): List<TermEffect> {
-        if (!haveScreen || o.epoch != epoch || o.offset > offset) return listOf(TermEffect.Resync)
+        if (!haveScreen || o.epoch != epoch || o.offset < 0 || o.offset > offset) return listOf(TermEffect.Resync)
         val all = decode(o.data) ?: return listOf(TermEffect.Resync)
-        val skip = (offset - o.offset).toInt()
+        val skip = offset - o.offset
         if (skip >= all.size) return emptyList() // everything was seen already
-        return write(all.copyOfRange(skip, all.size))
+        return write(all.copyOfRange(skip.toInt(), all.size))
     }
 
     fun onSize(s: TerminalSize): List<TermEffect> {
@@ -1199,7 +1227,8 @@ class TerminalModel {
     fun replay(): List<TermEffect> {
         val b = base
         if (!haveScreen || !replayable || b == null) return emptyList()
-        return listOf<TermEffect>(b) + tail
+        val first = TermEffect.Reset(b.cols, b.rows, b.bytes, replay = true)
+        return listOf<TermEffect>(first) + tail.map { if (it is TermEffect.Write) TermEffect.Write(it.bytes, replay = true) else it }
     }
 
     private fun resize(s: TerminalSize): TermEffect {
@@ -1214,7 +1243,8 @@ class TerminalModel {
         var from = 0
         while (from < data.size) {
             val next = sizes.firstOrNull()
-            val cut = if (next == null) data.size else (next.offset - offset).toInt().coerceIn(0, data.size)
+            // next.offset is a position in the stream; data[from] is at `offset`: the cut is relative to from, never below it.
+            val cut = if (next == null) data.size else (from + (next.offset - offset).coerceIn(0L, (data.size - from).toLong())).toInt()
             if (cut > from) {
                 val w = TermEffect.Write(data.copyOfRange(from, cut))
                 fx += w
@@ -1278,37 +1308,52 @@ class TerminalFeed(private val channel: Channel) {
     private val lock = Any()
     private val model = TerminalModel()
     private var sink: TermSink? = null
+    private var resyncing = false
 
     init {
-        channel.listen(Protocol.TERMINAL_SNAPSHOT) { m -> Protocol.payload<TerminalSnapshot>(m)?.let { s -> feed { model.onSnapshot(s) } } }
+        channel.listen(Protocol.TERMINAL_SNAPSHOT) { m -> Protocol.payload<TerminalSnapshot>(m)?.let { s -> feed { resyncing = false; model.onSnapshot(s) } } }
         channel.listen(Protocol.TERMINAL_OUTPUT) { m -> Protocol.payload<TerminalOutput>(m)?.let { o -> feed { model.onOutput(o) } } }
         channel.listen(Protocol.TERMINAL_SIZE) { m -> Protocol.payload<TerminalSize>(m)?.let { s -> feed { model.onSize(s) } } }
     }
 
-    /** Runs a model step and passes its effects on to the view; a Resync becomes a new watch. */
+    /**
+     * Runs a model step and hands its effects to the view, under the lock: attach() replays under it too, so a
+     * Write can never overtake the Reset it belongs after (the sink only posts to the main thread, so it is cheap).
+     * A Resync becomes a new watch, once until the snapshot it asks for arrives.
+     */
     private fun feed(step: () -> List<TermEffect>) {
-        val (fx, target, watch) = synchronized(lock) {
+        val watch = synchronized(lock) {
             val fx = step()
-            Triple(fx.filter { it !is TermEffect.Resync }, sink, if (fx.any { it is TermEffect.Resync }) model.watch() else null)
+            val target = sink
+            if (target != null) fx.forEach { if (it !is TermEffect.Resync) target.apply(it) }
+            if (target != null && !resyncing && fx.any { it is TermEffect.Resync }) {
+                resyncing = true
+                model.watch()
+            } else {
+                null
+            }
         }
-        target?.let { s -> fx.forEach { s.apply(it) } }
-        if (watch != null && target != null) sendWatch(watch)
+        watch?.let(::sendWatch)
     }
 
     /** The view appeared: redraw from memory and watch. */
     fun attach(sink: TermSink) {
-        val (replay, watch) = synchronized(lock) {
+        val watch = synchronized(lock) {
             this.sink = sink
-            model.replay() to model.watch()
+            resyncing = false
+            model.replay().forEach { sink.apply(it) }
+            model.watch()
         }
-        replay.forEach { sink.apply(it) }
         sendWatch(watch)
     }
 
-    /** The view left: stop the stream. */
-    fun detach() {
-        val was = synchronized(lock) { val s = sink; sink = null; s }
-        if (was != null) channel.send(Protocol.TERMINAL_UNWATCH, Protocol.json.encodeToJsonElement(Empty.serializer(), Empty))
+    /**
+     * The view left: stop the stream. Only the view that is attached can: with a bubble over the activity the new
+     * view attaches before the old one detaches, and the old one must not take the new one's stream away.
+     */
+    fun detach(sink: TermSink) {
+        val was = synchronized(lock) { if (this.sink === sink) { this.sink = null; true } else false }
+        if (was) channel.send(Protocol.TERMINAL_UNWATCH, Protocol.json.encodeToJsonElement(Empty.serializer(), Empty))
     }
 
     /** The channel is back (or gone): a view on screen watches again, from what it has. */
@@ -1583,7 +1628,7 @@ class DraftsTest {
     @Test fun aFailedUploadShowsTheHostsTextAndRetryTriesAgain() = runBlocking {
         ch.handler = { s, cb -> if (s.type == Protocol.ATTACH_BEGIN) cb(FakeChannel.reply(Protocol.ERROR, """{"code":"too_large","text":"Too big"}""", "r")); true }
         val seen = mutableListOf<String>()
-        val job = launch(start = CoroutineStart.UNDISPATCHED) { drafts.errors.collect { seen += it } }
+        val job = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) { drafts.errors.collect { seen += it } }
         val key = drafts.add(BytesSource(byteArrayOf(1, 2, 3)))
         assertEquals(DraftStatus.FAILED, drafts.items.value.single().status)
         assertEquals("Too big", drafts.items.value.single().error)
@@ -1716,7 +1761,7 @@ class UploadFailed(val code: String, val text: String) : Exception("$code: $text
 class Uploader(
     private val channel: Channel,
     private val pause: suspend (ms: Long) -> Unit = { delay(it) },
-    private val newId: () -> String = { Frame.idString(ByteArray(Frame.ID_LEN).also { SecureRandom().nextBytes(it) }) },
+    val newId: () -> String = { Frame.idString(ByteArray(Frame.ID_LEN).also { SecureRandom().nextBytes(it) }) },
 ) {
     private sealed interface Round {
         class Done(val attachment: Attachment) : Round
@@ -1847,7 +1892,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import tech.hybriq.adbuddy.bridge.Attachment
-import java.io.IOException
 
 enum class DraftStatus { UPLOADING, DONE, FAILED }
 
@@ -1887,6 +1931,7 @@ class Drafts(
     private val lock = Any()
     private val jobs = HashMap<String, Job>()
     private val sources = HashMap<String, UploadSource>()
+    private val ids = HashMap<String, String>() // a retry goes on from the host's offset: same id
 
     fun add(src: UploadSource): String {
         val key = newKey()
@@ -1915,7 +1960,7 @@ class Drafts(
     }
 
     fun remove(key: String) {
-        val (job, src) = synchronized(lock) { jobs.remove(key) to sources.remove(key) }
+        val (job, src) = synchronized(lock) { ids.remove(key); jobs.remove(key) to sources.remove(key) }
         job?.cancel()
         src?.close()
         _items.update { l -> l.filterNot { it.key == key } }
@@ -1930,13 +1975,14 @@ class Drafts(
         val job = scope.launch {
             gate.withPermit {
                 try {
-                    val a = uploader.upload(src, onProgress = { p -> update(key) { it.copy(progress = p) } })
+                    val id = synchronized(lock) { ids.getOrPut(key) { uploader.newId() } }
+                    val a = uploader.upload(src, id, onProgress = { p -> update(key) { it.copy(progress = p) } })
                     update(key) { it.copy(progress = src.size, status = DraftStatus.DONE, attachment = a) }
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: UploadFailed) {
                     fail(key, e.text)
-                } catch (e: IOException) {
+                } catch (e: Exception) { // the scope has no handler: an uncaught one would end the process
                     fail(key, "")
                 }
             }
@@ -2051,7 +2097,7 @@ class UriSource private constructor(
     lateinit var drafts: Drafts
         private set
 ```
-y en `onCreate` (después de `chat`): `UriSource.clearCache(this); captures = Captures(channel); drafts = Drafts(scope, Uploader(channel), captures)`, más (imports `android.net.Uri`, `java.io.IOException`, `kotlinx.coroutines.launch`):
+y en `onCreate` (después de `chat`): `UriSource.clearCache(this); captures = Captures(channel); drafts = Drafts(scope, Uploader(channel), captures)`, más (imports `android.net.Uri`, `kotlinx.coroutines.CancellationException`, `kotlinx.coroutines.launch`):
 
 ```kotlin
     /**
@@ -2064,7 +2110,9 @@ y en `onCreate` (después de `chat`): `UriSource.clearCache(this); captures = Ca
                 drafts.add(UriSource.copy(this@AdbuddyApp, uri))
             } catch (e: UploadFailed) {
                 onFailed(e.text.ifEmpty { e.code })
-            } catch (e: IOException) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) { // a provider that fails (Drive offline, permission revoked) must not end the process
                 onFailed("")
             }
         }
@@ -2146,6 +2194,13 @@ class FileCacheTest {
         val new = put("new", 6, 3)
         c.trim()
         assertFalse(old.exists()); assertFalse(mid.exists()); assertTrue(new.exists())
+    }
+
+    @Test fun trimNeverTouchesPartialDownloads() {
+        val c = FileCache(tmp.root, maxBytes = 1)
+        val part = File(tmp.root, "x.part").apply { writeBytes(ByteArray(10)) }
+        c.trim()
+        assertTrue(part.exists())
     }
 
     @Test fun trimLeavesAnUnderLimitCacheAlone() {
@@ -2286,6 +2341,14 @@ class DownloadsTest {
         assertTrue(dl.states.value[id] is DownloadState.Done)
     }
 
+    @Test fun anIdThatIsNotHexIsRefusedAndTouchesNoFile() {
+        make(); serve()
+        dl.get(att.copy(id = "../../x"))
+        assertEquals(0, ch.sent.size)
+        assertTrue(dl.states.value["../../x"] is DownloadState.Failed)
+        assertEquals(0, tmp.root.listFiles()!!.size)
+    }
+
     @Test fun autoLimitIsTenMiBOfImagesAndFiveInRemoteMode() {
         val mib = 1024L * 1024
         fun a(mime: String, size: Long) = Attachment(id, "x", mime, size, "x")
@@ -2330,7 +2393,8 @@ class FileCache(private val dir: File, private val maxBytes: Long = 500L * 1024 
     fun touch(f: File) { f.setLastModified(System.currentTimeMillis()) }
 
     fun trim() {
-        val files = dir.listFiles()?.filter { it.isFile } ?: return
+        // A .part is a download in progress (or one to resume): never trimmed from under it.
+        val files = dir.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") } ?: return
         var total = files.sumOf { it.length() }
         for (f in files.sortedBy { it.lastModified() }) {
             if (total <= maxBytes) break
@@ -2362,6 +2426,7 @@ import tech.hybriq.adbuddy.bridge.Channel
 import tech.hybriq.adbuddy.bridge.Chunk
 import tech.hybriq.adbuddy.bridge.ErrorReply
 import tech.hybriq.adbuddy.bridge.FileCancel
+import tech.hybriq.adbuddy.bridge.Frame
 import tech.hybriq.adbuddy.bridge.FileGet
 import tech.hybriq.adbuddy.bridge.Message
 import tech.hybriq.adbuddy.bridge.Protocol
@@ -2398,6 +2463,11 @@ class Downloads(
     init { channel.listenFrames { onChunk(it) } }
 
     fun get(a: Attachment) = synchronized(lock) {
+        // The id comes from the host and names files: 32 lower-case hex digits or nothing (never a path).
+        if (Frame.parseId(a.id) == null) {
+            set(a.id, DownloadState.Failed(""))
+            return@synchronized
+        }
         if (active.containsKey(a.id)) return@synchronized
         if (cache.has(a)) {
             cache.touch(cache.finalFile(a))
@@ -2577,7 +2647,7 @@ git commit -m "feat(app): descargas con reanudación y verificación, caché y F
 
 **Ficheros:**
 - Crea: `ui/theme/Palette.kt`, `ui/theme/Theme.kt`, `res/values/themes.xml`, `res/values-night/themes.xml`
-- Modifica: `ui/Screens.kt` (`ConsentScreen`, `HomeScreen`, `EntryRow`), `MainActivity.kt`, `AndroidManifest.xml` (solo `android:theme` de `<application>`: **apúntalo en `COORDINACION.md`**), `res/values/strings.xml` y `values-es/strings.xml`
+- Modifica: `android/gradle/libs.versions.toml` y `android/app/build.gradle.kts` (solo el bloque de dependencias: `androidx.compose.material:material-icons-core`, con la versión de la BOM; material3 ya no la trae y hoy la app no usa iconos), `ui/Screens.kt` (`ConsentScreen`, `HomeScreen`, `EntryRow`), `MainActivity.kt`, `AndroidManifest.xml` (solo `android:theme` de `<application>`: **apúntalo en `COORDINACION.md`**), `res/values/strings.xml` y `values-es/strings.xml`
 - Test: `test/.../ui/theme/PaletteContrastTest.kt`
 
 **Interfaces:**
@@ -2972,8 +3042,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; }
     if (d && d.cols > 0 && d.rows > 0) host.size(d.cols, d.rows);
   }
 
-  window.termReset = function (cols, rows, b64) { term.reset(); term.resize(cols, rows); term.write(bytes(b64)); };
-  window.termWrite = function (b64) { term.write(bytes(b64)); };
+  // Replayed output may hold queries (DSR, DA) that xterm.js answers through onData: those answers are not the person's keys.
+  var quiet = 0;
+  function put(b64, isReplay) {
+    if (isReplay) { quiet++; term.write(bytes(b64), function () { quiet--; }); } else { term.write(bytes(b64)); }
+  }
+  window.termReset = function (cols, rows, b64, isReplay) { term.reset(); term.resize(cols, rows); put(b64, isReplay); };
+  window.termWrite = function (b64, isReplay) { put(b64, isReplay); };
   window.termResize = function (cols, rows) { term.resize(cols, rows); };
   window.termTheme = function (bg, fg, cursor) {
     term.options.theme = { background: bg, foreground: fg, cursor: cursor };
@@ -2981,7 +3056,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; }
   };
   window.termFocus = function () { term.focus(); };
 
-  term.onData(function (d) { host.data(d); });
+  term.onData(function (d) { if (quiet === 0) host.data(d); });
   new ResizeObserver(propose).observe(document.getElementById('t'));
   propose();
 })();
@@ -3003,7 +3078,11 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
@@ -3019,31 +3098,34 @@ private class JsHost(private val bridge: TermBridge) {
     @JavascriptInterface fun link(url: String) = bridge.link(url)
 }
 
-/** Draws the effects of the model in the page; those that come before the page has loaded wait. */
+/**
+ * Draws the effects of the model in the page. What comes before the page has loaded waits, and so does the theme
+ * (the first one is set before the page exists). After the renderer died it draws nothing: a new view replaces it.
+ */
 private class WebSink(private val web: WebView) : TermSink {
     private var ready = false
+    private var dead = false
+    private var theme = ""
     private val queue = ArrayList<TermEffect>()
 
-    fun loaded() = web.post {
-        ready = true
-        queue.forEach(::draw)
-        queue.clear()
-    }
+    fun loaded() { web.post { if (dead) return@post; ready = true; draw(theme); queue.forEach(::draw); queue.clear() } }
+    fun setTheme(js: String) { web.post { theme = js; if (ready && !dead) draw(js) } }
+    fun die() { web.post { dead = true; queue.clear() } }
 
     override fun apply(e: TermEffect) {
-        web.post { if (ready) draw(e) else queue += e }
+        web.post { if (!dead) { if (ready) draw(e) else queue += e } }
     }
+
+    private fun draw(js: String) { if (js.isNotEmpty()) web.evaluateJavascript(js, null) }
 
     private fun b64(b: ByteArray) = Base64.getEncoder().encodeToString(b)
 
     // Base64 has no quote nor backslash, so it is safe inside a JS string.
-    private fun draw(e: TermEffect) {
-        when (e) {
-            is TermEffect.Reset -> web.evaluateJavascript("termReset(${e.cols},${e.rows},'${b64(e.bytes)}')", null)
-            is TermEffect.Write -> web.evaluateJavascript("termWrite('${b64(e.bytes)}')", null)
-            is TermEffect.Resize -> web.evaluateJavascript("termResize(${e.cols},${e.rows})", null)
-            TermEffect.Resync -> Unit // TerminalFeed handles it
-        }
+    private fun draw(e: TermEffect) = when (e) {
+        is TermEffect.Reset -> draw("termReset(${e.cols},${e.rows},'${b64(e.bytes)}',${e.replay})")
+        is TermEffect.Write -> draw("termWrite('${b64(e.bytes)}',${e.replay})")
+        is TermEffect.Resize -> draw("termResize(${e.cols},${e.rows})")
+        TermEffect.Resync -> Unit // TerminalFeed handles it
     }
 }
 
@@ -3058,64 +3140,75 @@ private fun hex(argb: Int) = "#%06X".format(argb and 0xFFFFFF)
 @Composable
 fun TerminalView(feed: TerminalFeed, onLink: (url: String, domain: String) -> Unit, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
-    val bg = hex(colors.surface.toArgb())
-    val fg = hex(colors.onSurface.toArgb())
-    val cursor = hex(colors.primary.toArgb())
-    val holder = remember { arrayOfNulls<WebSink>(1) }
+    val themeJs = "termTheme('${hex(colors.surface.toArgb())}','${hex(colors.onSurface.toArgb())}','${hex(colors.primary.toArgb())}')"
+    // A crash of the renderer leaves the WebView unusable (onRenderProcessGone): a new key makes a new view.
+    var generation by remember { mutableIntStateOf(0) }
 
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context)).build()
-            val onMain = android.os.Handler(android.os.Looper.getMainLooper())
-            WebView(context).apply {
-                setBackgroundColor(AColor.TRANSPARENT)
-                settings.apply {
-                    javaScriptEnabled = true
-                    allowFileAccess = false
-                    allowContentAccess = false
-                    domStorageEnabled = false
-                    blockNetworkLoads = true
-                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                    setSupportMultipleWindows(false)
-                    setGeolocationEnabled(false)
-                }
-                val bridge = TermBridge(
-                    onInput = feed::input,
-                    onSize = feed::resize,
-                    onLink = { url, domain -> onMain.post { onLink(url, domain) } },
-                )
-                addJavascriptInterface(JsHost(bridge), "adbuddy")
-                val sink = WebSink(this)
-                holder[0] = sink
-                webViewClient = object : WebViewClient() {
-                    override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                        val url = request.url.toString()
-                        return (if (TermWebPolicy.allowed(url)) loader.shouldInterceptRequest(request.url) else null) ?: blocked()
+    key(generation) {
+        val holder = remember { arrayOfNulls<WebSink>(1) }
+        AndroidView(
+            modifier = modifier,
+            factory = { context ->
+                val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context)).build()
+                val onMain = android.os.Handler(android.os.Looper.getMainLooper())
+                WebView(context).apply {
+                    setBackgroundColor(AColor.TRANSPARENT)
+                    settings.apply {
+                        javaScriptEnabled = true
+                        allowFileAccess = false
+                        allowContentAccess = false
+                        domStorageEnabled = false
+                        blockNetworkLoads = true
+                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        setSupportMultipleWindows(false)
+                        setGeolocationEnabled(false)
                     }
+                    val bridge = TermBridge(
+                        onInput = feed::input,
+                        onSize = feed::resize,
+                        onLink = { url, domain -> onMain.post { onLink(url, domain) } },
+                    )
+                    addJavascriptInterface(JsHost(bridge), "adbuddy")
+                    val sink = WebSink(this)
+                    holder[0] = sink
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                            val url = request.url.toString()
+                            return (if (TermWebPolicy.allowed(url)) loader.shouldInterceptRequest(request.url) else null) ?: blocked()
+                        }
 
-                    // The page never navigates: every attempt is consumed here.
-                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
-                    override fun onPageFinished(view: WebView, url: String) = sink.loaded()
-                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail) = true
+                        // The page never navigates: every attempt is consumed here.
+                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
+                        override fun onPageFinished(view: WebView, url: String) = sink.loaded()
+
+                        // Returning true keeps the app alive; this view cannot be used again, so a new one takes its place.
+                        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                            sink.die()
+                            feed.detach(sink)
+                            view.post { generation++ }
+                            return true
+                        }
+                    }
+                    loadUrl(TermWebPolicy.PAGE)
                 }
-                loadUrl(TermWebPolicy.PAGE)
-            }
-        },
-        update = { web -> web.evaluateJavascript("termTheme('$bg','$fg','$cursor')", null) },
-    )
+            },
+            update = { holder[0]?.setTheme(themeJs) },
+            onRelease = { it.destroy() },
+        )
 
-    // The stream runs only while the view is on screen (protocol spec §7).
-    LifecycleStartEffect(feed) {
-        holder[0]?.let { feed.attach(it) }
-        onStopOrDispose { feed.detach() }
+        // The stream runs only while the view is on screen (protocol spec §7).
+        LifecycleStartEffect(feed, generation) {
+            val sink = holder[0]
+            if (sink != null) feed.attach(sink)
+            onStopOrDispose { if (sink != null) feed.detach(sink) }
+        }
     }
 }
 
 private fun blocked() = WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
 ```
 
-`onRenderProcessGone` devuelve `true` para que un fallo del proceso de renderizado no mate la app; la vista queda en blanco hasta recomponer: aceptable en M3, se anota en el ledger. `update` repinta el tema cada vez que cambian los colores.
+`onRenderProcessGone` devuelve `true` para que un fallo del proceso de renderizado no mate la app; la vista muerta se sustituye por otra nueva (`generation`) y `onRelease` destruye la vieja.
 
 - [ ] **Paso 5: pasan los tests y compila**
 
@@ -3179,6 +3272,11 @@ class LinksTest {
         val t = "go to https://a.com/x now"
         val s = Links.find(t).single()
         assertEquals("https://a.com/x", t.substring(s.start, s.end))
+    }
+
+    @Test fun aNonAsciiHostIsNeverShownAsAnAsciiOne() {
+        // java.net.URI reads no host out of a non-ASCII name: the link is dropped, so a look-alike never gets a dialog.
+        assertNull(Links.domain("https://ex\u0430mple.com/"))
     }
 
     @Test fun domainIsLowerCaseAndNullWithoutAHost() {
@@ -3258,7 +3356,7 @@ Caso nuevo en `ChatControllerTest.kt`:
     @Test fun aNewConversationAsksTheHostAndShowsItsRefusal() = runBlocking {
         ch.handler = { _, cb -> cb(FakeChannel.reply(Protocol.ERROR, """{"code":"failed","text":"Could not start the agent"}""", "r1")); true }
         val seen = mutableListOf<String>()
-        val job = launch(start = CoroutineStart.UNDISPATCHED) { chat.errors.collect { seen += it } }
+        val job = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) { chat.errors.collect { seen += it } }
         chat.newConversation()
         job.cancel()
         assertEquals(Protocol.SESSION_NEW, ch.sent.single().type)
@@ -3457,8 +3555,7 @@ Lo que hace `ChatRoot` (cada punto es un comportamiento que el revisor comprueba
 - **Avisos:** un `LaunchedEffect(Unit)` que une `app.notices`, `app.chat.errors` y `app.drafts.errors` (`merge`) y muestra cada texto en el `snackbar`; el de "no se pudo añadir el fichero" (texto vacío de `attachUri`) usa `R.string.attach_failed`.
 - **Pickers sin permisos:** `rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(Composer.MAX_ATTACHMENTS))` para fotos y `OpenDocument()` (`arrayOf("*/*")`) para ficheros; cada `Uri` → `app.attachUri(uri) { text -> scope.launch { snackbar.showSnackbar(text.ifEmpty { attachFailed }) } }`.
 - **Enviar:** `app.chat.send(text, drafts.mapNotNull { it.attachment })` y, después, `app.drafts.clear()`.
-- **Poda:** `LaunchedEffect(state.chat.messages) { app.chat.prune(state.chat.messages.mapTo(HashSet()) { it.id }) }`.
-- **Descarga automática:** `LaunchedEffect(state.chat.messages)`: por cada adjunto de un mensaje del agente con `Downloads.autoLimit(a, remote = false)` (se cablea a `state.remote` en M5b), `app.downloads.get(a)`. Pulsar un adjunto: sin descarga, `app.downloads.get(a)`; en curso, `app.downloads.cancel(a.id)`; hecha, `FileIntents.view(...)` y, si ninguna app lo abre, `FileIntents.share(...)`.
+- **Descarga automática:** `LaunchedEffect(state.chat.messages)`: por cada adjunto de un mensaje del agente con `Downloads.autoLimit(a, remote = state.remote.enabled)`, `app.downloads.get(a)`. Pulsar un adjunto: sin descarga, `app.downloads.get(a)`; en curso, `app.downloads.cancel(a.id)`; hecha, `FileIntents.view(...)` y, si ninguna app lo abre, `FileIntents.share(...)`.
 - **Cortar acceso:** como estaba en `HomeScreen` (`CutAccess.cut`/`restore`, los mismos mensajes `cut_done`, `cut_failed`…), pero con los avisos por el `snackbar` y la salida a `openDeveloperOptions` como acción del snackbar.
 - **Navegación:** `showActivity` alterna `ChatScreen` y `ActivityScreen`; `BackHandler(showActivity) { showActivity = false }`.
 - **Preguntas 🔴:** `ConfirmHost(state, app.bridge, app.clock, focusConfirm, closed, onClose)` después de las dos pantallas, así que salen estés donde estés.
@@ -3764,8 +3861,10 @@ y en `onCreate`:
   - **Responder:** `RemoteInput` (`KEY_REPLY = "reply"`), `PendingIntent` con `FLAG_MUTABLE` (el sistema rellena la respuesta), `setSemanticAction(SEMANTIC_ACTION_REPLY)`, `setAllowGeneratedReplies(false)` y **`setAuthenticationRequired(true)`**: desde la pantalla de bloqueo no se inyecta nada al agente sin desbloquear.
   - **Enviar captura:** `ACTION_CAPTURE`, también con `setAuthenticationRequired(true)`.
   - **Pausar/Reanudar:** como en M2 (`PauseButton`).
+  - **Android 11 (API 30):** `setAuthenticationRequired` solo existe desde la 31. `BridgeService` ignora `ACTION_REPLY` y `ACTION_CAPTURE` si `KeyguardManager.isDeviceLocked`, en todas las versiones: es la defensa real.
   - **Cortar acceso:** `ACTION_CUT`, **sin** exigir desbloqueo (recorta lo que el agente puede hacer, así que es siempre seguro y urgente).
-- `done(ctx, line)`: canal `CHANNEL_DONE`, título `notif_done_title`, texto `line ?: notif_done_default`, `setAutoCancel(true)`, abre `MainActivity`; solo si `NotificationManagerCompat.areNotificationsEnabled()`.
+- `done(ctx, line)`: canal `CHANNEL_DONE`, título `notif_done_title`, texto `line ?: notif_done_default`, `setAutoCancel(true)`, abre `MainActivity`; se publica con `NotificationManager.notify` (no con `NotificationManagerCompat.notify`: `lintDebug` da `MissingPermission`) y solo si `NotificationManagerCompat.from(ctx).areNotificationsEnabled()`.
+- El acceso directo se publica una sola vez por nombre de agente (`@Volatile private var pushedFor`), no en cada notificación.
 
 `ChatBubbleActivity.kt`:
 
@@ -3808,7 +3907,7 @@ class ChatBubbleActivity : ComponentActivity() {
 - El `combine(app.bridge.state, CutAccess.observe(this))` pasa a `ConversationView.of(s, cut)`; se vuelve a notificar solo si `v != shown`.
 - **Aviso "Listo":** otro `launch` que recoge `app.bridge.state` con un `DoneDetector`: con `connection != CONNECTED` llama a `reset()`; si no, `if (detector.onState(s.sessionState, SystemClock.elapsedRealtime())) ConversationNotifier.done(this, Notify.doneLine(s.chat, s.sessionState.conversation))`.
 - `onStartCommand`, casos nuevos:
-  - `ACTION_REPLY`: `RemoteInput.getResultsFromIntent(intent)?.getCharSequence(ConversationNotifier.KEY_REPLY)?.toString()` → `app.chat.send(text)`, y **vuelve a publicar la notificación al momento** (si no, la rueda de "enviando" de la respuesta directa no se quita hasta el siguiente cambio de estado).
+  - `ACTION_REPLY` (y `ACTION_CAPTURE`) se ignoran con el móvil bloqueado. `ACTION_REPLY`: `RemoteInput.getResultsFromIntent(intent)?.getCharSequence(ConversationNotifier.KEY_REPLY)?.toString()` → `app.chat.send(text)`, y **vuelve a publicar la notificación al momento** (si no, la rueda de "enviando" de la respuesta directa no se quita hasta el siguiente cambio de estado).
   - `ACTION_CAPTURE`: `app.captures.take { a, text -> if (a != null) app.chat.send("", listOf(a)) else toast(text) }`.
   - `ACTION_CUT`: `if (!CutAccess.cut(this)) toast(R.string.notif_cut_failed)`.
   - (`toast` publica en el hilo principal con un `Handler`.)
@@ -3832,7 +3931,7 @@ git commit -m "feat(app): notificación de conversación con respuesta directa, 
 **Ficheros:**
 - Modifica: `android/README.md`, `docs/superpowers/plans/pendientes-m3-m5.md` (solo la sección M3), este plan (la lista de validaciones, abajo, ya está al final)
 
-- [ ] **Paso 1: `android/README.md`**: sustituye la frase "The chat arrives in M3." por lo que hay (chat con terminal, adjuntos, descargas, captura, notificación de conversación, burbuja, aviso "Listo"), y añade una sección **"Chat and terminal"** con: de dónde salen xterm.js y sus versiones (`assets/term/VENDOR.md`), que el WebView no sale a la red y qué métodos tiene el puente, el límite de 200 MiB, la caché de 500 MiB, y que el chat y la terminal no escriben nada en ningún log.
+- [ ] **Paso 1: `android/README.md`**: sustituye la frase "The chat arrives in M3." por lo que hay (chat con terminal, adjuntos, descargas, captura, notificación de conversación, burbuja, aviso "Listo"), y añade una sección **"Chat and terminal"** con: de dónde salen xterm.js y sus versiones (`assets/term/VENDOR.md`), que el WebView no sale a la red y qué métodos tiene el puente, el límite de 200 MiB, la caché de 500 MiB, que el chat y la terminal no escriben nada en ningún log, y que la respuesta directa de la notificación es un `RemoteInput`: lo pueden disparar los servicios de escucha de notificaciones y los relojes que el usuario haya autorizado (se anota también en la spec §10).
 - [ ] **Paso 2: `pendientes-m3-m5.md`** (solo M3): marca como hecho **"La app muestra los `notice` del host"**, **"Diseño de la app"** (con su skill) y **`session.state.activity`** (T1); y apunta lo aplazado de M3b:
   - la etiqueta "red local o Tailscale" de la cabecera y el límite de 5 MiB en modo remoto (M5b, con `RemoteState`);
   - las preguntas 🔴 como tarjetas en el chat (M4, con los permisos del agente);
