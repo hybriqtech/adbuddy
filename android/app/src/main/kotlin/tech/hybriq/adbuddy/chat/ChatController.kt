@@ -13,6 +13,7 @@ import tech.hybriq.adbuddy.bridge.Channel
 import tech.hybriq.adbuddy.bridge.ChatSend
 import tech.hybriq.adbuddy.bridge.ErrorReply
 import tech.hybriq.adbuddy.bridge.Message
+import tech.hybriq.adbuddy.bridge.PermissionReply
 import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.bridge.SessionNew
 
@@ -60,6 +61,15 @@ class ChatController(
         channel.request(Protocol.SESSION_NEW, payload) { m ->
             if (m != null && m.type == Protocol.ERROR) Protocol.payload<ErrorReply>(m)?.let { _errors.tryEmit(it.text.ifEmpty { it.code }) }
         }
+    }
+
+    /**
+     * Answers a question of the agent (permission.reply, M4). It has no rid and no reply: the card goes when the
+     * host's permission.resolved arrives. false when it could not be sent (the card stays; the buttons are off then).
+     */
+    fun answerPermission(id: String, decision: String): Boolean {
+        val payload = Protocol.json.encodeToJsonElement(PermissionReply.serializer(), PermissionReply(id, decision))
+        return channel.send(Protocol.PERMISSION_REPLY, payload)
     }
 
     fun discard(id: String) = _outgoing.update { l -> l.filterNot { it.id == id } }

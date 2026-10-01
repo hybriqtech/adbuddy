@@ -10,6 +10,7 @@ import org.junit.Test
 import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.ChatSend
 import tech.hybriq.adbuddy.bridge.FakeChannel
+import tech.hybriq.adbuddy.bridge.PermissionReply
 import tech.hybriq.adbuddy.bridge.Protocol
 
 class ChatControllerTest {
@@ -83,5 +84,14 @@ class ChatControllerTest {
         job.cancel()
         assertEquals(Protocol.SESSION_NEW, ch.sent.single().type)
         assertEquals(listOf("Could not start the agent"), seen)
+    }
+
+    @Test fun aPermissionAnswerIsAStreamMessageWithNoRid() {
+        assertEquals(true, chat.answerPermission("p_1", "allow_always"))
+        val sent = ch.sent.single()
+        assertEquals(Protocol.PERMISSION_REPLY, sent.type)
+        assertNull("it asks for no reply: the card goes with permission.resolved", sent.rid)
+        assertEquals(PermissionReply("p_1", "allow_always"), Protocol.json.decodeFromJsonElement(PermissionReply.serializer(), sent.payload))
+        assertEquals("a permission answer is not a message of the chat", emptyList<Outgoing>(), chat.outgoing.value)
     }
 }
