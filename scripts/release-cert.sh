@@ -34,8 +34,7 @@ main() {
 	# one of the two is enough; either way every signer line is the same one.
 	grep -Eq '^Verified using v[23] scheme \(APK Signature Scheme v[23]\): true' "$out" || fail "$1 has no v2 or v3 signature"
 	theirs=$(grep -E '^(Signer #[0-9]+ certificate|V3\.[0-9] Signer: certificate) SHA-256 digest: ' "$out" | sed 's/.*digest: //' | sort -u)
-	[ "$(printf '%s
-' "$theirs" | grep -c .)" -eq 1 ] || fail "$1 has not exactly 1 signing certificate"
+	[ "$(printf '%s\n' "$theirs" | grep -c .)" -eq 1 ] || fail "$1 has not exactly 1 signing certificate"
 	ours=$(cd "$root/host" && go run ./cmd/apkcert "$apk") || die "the host refuses $1"
 	[ "$ours" = "$theirs" ] || die "apksigner says $theirs, the host says $ours"
 	if [ "${2:-}" = --pinned ]; then
