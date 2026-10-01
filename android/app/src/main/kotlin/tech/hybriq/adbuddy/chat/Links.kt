@@ -17,8 +17,8 @@ object Links {
         return uri.host?.lowercase()
     }
 
-    private const val FSI = "⁨"
-    private const val PDI = "⁩"
+    private const val FSI = "\u2068"
+    private const val PDI = "\u2069"
 
     /**
      * The text a link is drawn with: its own text without invisible or bidi control characters (category Cf) and, unless
