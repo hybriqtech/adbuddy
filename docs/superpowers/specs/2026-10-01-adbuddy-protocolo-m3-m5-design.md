@@ -70,7 +70,7 @@ Hay tres clases de mensaje del host a la app:
 - **Envío en el host.** Cada clase tiene su método, y cada método rechaza los tipos de otra clase (`bridge.HostClasses`):
   - `Publish`, y `PublishRID` para un evento que confirma una petición;
   - `Reply(req, …)`, que solo entrega en la conexión por la que llegó `req`;
-  - `Send`, para flujos.
+  - `Send`, para flujos a la conexión actual, y `SendTo(req, …)` (m3-bridge) para los que pidió una conexión concreta, como la terminal (§7).
 
   Así, un `ui.request` publicado por error como evento falla en vez de repetirse tras reconectar.
 - **Lo que no se entiende.** La app ignora los tipos desconocidos, como en M2. El host responde a un tipo desconocido o no manejado con `error {code: "unsupported"}` si lleva `rid`, y con el `notice` de M2 si no lo lleva (así sigue funcionando una app de M2). El `notice` es un evento y ocupa sitio en el búfer: va una sola vez por tipo, como mucho 16 por conexión, con el tipo cortado a 64 caracteres.
@@ -208,7 +208,7 @@ La salida del PTY es un flujo con posición propia, fuera del búfer de eventos:
 
 - **`epoch`** identifica un proceso del PTY. Cambia con `session.new` y con cada relanzamiento, y es aleatorio para que no se repita entre reinicios del host. **`offset`** cuenta los bytes de salida desde el inicio de ese `epoch`.
 - **`terminal.input`** solo llega al PTY del agente, nunca a una pregunta de ADBuddy en la terminal del PC.
-- **Suscripción.** El host solo envía la terminal a una app que la mira (`terminal.watch`), y deja de hacerlo con `terminal.unwatch` o al cortarse la conexión. La app se suscribe mientras la vista de terminal está en pantalla. Así no gasta batería ni datos en segundo plano: en modo remoto, a 84 KB/s, una TUI repintando saturaría el enlace.
+- **Suscripción.** El host solo envía la terminal a la conexión que la mira (`terminal.watch`), con `SendTo`, y deja de hacerlo con `terminal.unwatch` o al cortarse la conexión. La app se suscribe mientras la vista de terminal está en pantalla. Así no gasta batería ni datos en segundo plano: en modo remoto, a 84 KB/s, una TUI repintando saturaría el enlace.
 - **Reanudación.** Al recibir `terminal.watch`, el host envía lo que falta desde el `offset` de la app si su `epoch` es el actual y los bytes siguen en su cola (al menos 256 KiB). Si no, envía `terminal.snapshot`. Cómo genera el host la pantalla (emulador VT sin interfaz o cola acotada) lo decide M3.
 - **Presión.** El host agrupa la salida (por ejemplo, cada 50 ms). Si la cola de envío de la app pasa de la mitad, deja de mandar `terminal.output` y, cuando se vacía, manda un `terminal.snapshot`. La terminal nunca provoca que se corte la conexión de la app: hasta que M3 añada el envío que espera hueco (§6.4), `Send` expulsa a una app lenta como `Publish`.
 - **Tamaño.** El del PC manda: `terminal.resize` solo se aplica si `pcAttached` es falso; si no, se ignora. Sin terminal del PC ni petición de la app, 120×40 (§5.1 de la v1).
