@@ -69,12 +69,25 @@ func TestPullInsideTheEnvironmentRunsAtOnce(t *testing.T) {
 	}{
 		{e.ws, []string{"pull", "/sdcard/DCIM/a.jpg"}},
 		{e.ws, []string{"pull", "/sdcard/DCIM/a.jpg", "photos"}},
-		{e.ws, []string{"bugreport", "photos/bug.zip"}},
 		{photos, []string{"pull", "/sdcard/notes.txt"}},
-		{photos, []string{"bugreport"}},
 	} {
 		if d := deniedPC(t, e, c.cwd, c.argv...); d != "" {
 			t.Errorf("%q from %s: asked (%q)", c.argv, c.cwd, d)
+		}
+	}
+}
+
+// Task 10b: adb bugreport is red whatever it writes (its report has what is on
+// screen), so even inside the environment it asks, with no PC-write reason.
+func TestBugreportAlwaysAsksEvenInsideTheEnvironment(t *testing.T) {
+	e := newEnv(t)
+	if err := os.MkdirAll(filepath.Join(e.ws, "photos"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, argv := range [][]string{{"bugreport", "photos/bug.zip"}, {"bugreport"}} {
+		d := deniedPC(t, e, e.ws, argv...)
+		if d == "" || strings.Contains(d, "writes outside") {
+			t.Errorf("%q: detail %q", argv, d)
 		}
 	}
 }

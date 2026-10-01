@@ -105,7 +105,51 @@ func screenAction(f classify.Finding) (acts, reads bool) {
 	if f.UI || cmd == "cmd" && len(f.Words) > 1 && f.Words[1] == "input" {
 		return true, false
 	}
+	if cmd == "dumpsys" {
+		return false, dumpsysReadsScreen(f.Words[1:])
+	}
 	return false, screenReads[cmd]
+}
+
+// dumpsysValueOptions are dumpsys's own options that take a value; the
+// others it has (--proto, --pid) take none.
+var dumpsysValueOptions = map[string]bool{"-t": true, "--timeout": true, "--pri": true, "--priority": true, "--skip": true}
+
+// dumpsysFlagOptions take no value.
+var dumpsysFlagOptions = map[string]bool{"--proto": true, "--pid": true}
+
+// dumpsysSafeActivity are the `dumpsys activity` arguments known not to print
+// the view tree or the texts on screen. It is an allowlist: `top` and any
+// argument a future Android adds read the screen.
+var dumpsysSafeActivity = map[string]bool{
+	"activities": true, "a": true, "services": true, "providers": true, "broadcasts": true, "processes": true,
+}
+
+// dumpsysReadsScreen reports whether `dumpsys args…` may print what is on
+// screen: a dump of everything (no service, only options) includes
+// `activity top`, and so does `activity` with any argument not in
+// dumpsysSafeActivity. -l and --help only list or explain. An option it does
+// not know fails closed. (args are the words after dumpsys.)
+func dumpsysReadsScreen(args []string) bool {
+	i := 0
+	for ; i < len(args) && strings.HasPrefix(args[i], "-"); i++ {
+		switch o := args[i]; {
+		case o == "-l" || o == "--help":
+			return false
+		case dumpsysValueOptions[o]:
+			i++
+		case dumpsysFlagOptions[o]:
+		default:
+			return true
+		}
+	}
+	if i >= len(args) {
+		return true // no service: everything is dumped
+	}
+	if args[i] != "activity" {
+		return false
+	}
+	return i+1 >= len(args) || !dumpsysSafeActivity[args[i+1]]
 }
 
 // manyKeys reports whether an input command presses more than one key:

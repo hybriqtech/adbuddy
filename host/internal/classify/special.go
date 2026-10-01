@@ -40,12 +40,25 @@ func applySpecial(scope string, ws []Word, f *Finding) {
 		f.Level = Red
 		f.Special = true
 		f.Op = nil
+		if id, title, ok := specialIdentity(scope, ws[0].Value); ok {
+			f.Rule = id
+			f.Title = render(title, baseVars(ws))
+		}
 		if f.Reason == "" {
 			f.Reason = reason
 		} else {
 			f.Reason = reason + "; " + f.Reason
 		}
 	}
+}
+
+// specialIdentity names the commands that have no rule of their own because
+// the protection is the rule: no rules file can lower it.
+func specialIdentity(scope, name string) (string, Text, bool) {
+	if scope != "adb" && name == "screenrecord" {
+		return "screen.record", Text{EN: "Record the screen", ES: "Grabar la pantalla"}, true
+	}
+	return "", Text{}, false
 }
 
 func specialReason(scope string, ws []Word, level Level) string {
@@ -60,6 +73,10 @@ func specialReason(scope string, ws []Word, level Level) string {
 			return "restarts the phone"
 		case name == "remount":
 			return "may restart the phone"
+		case name == "bugreport":
+			// The report includes dumpsys activity (view tree and texts of
+			// what is on screen) and notification.
+			return "the bug report includes what is on screen and the notifications"
 		case name == "reverse" && !(len(v) == 2 && v[1] == "--list"):
 			return "may change ADBuddy's chat tunnel"
 		case level != Green && mentionsADBuddy(v):
@@ -118,6 +135,8 @@ func specialReason(scope string, ws []Word, level Level) string {
 		if len(v) > 1 && (v[1] == "wifi" || v[1] == "connectivity") && level != Green {
 			return "may cut the Wi-Fi connection"
 		}
+	case "screenrecord":
+		return "records what is on screen"
 	case "reboot", "stop", "start":
 		return "may restart the phone or adbd"
 	case "setprop":

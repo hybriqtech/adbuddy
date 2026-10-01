@@ -91,7 +91,7 @@ func TestPullStaysInsideTheEnvironment(t *testing.T) {
 	c := mustNew(t, "")
 	for _, argv := range [][]string{
 		{"pull", "/sdcard/DCIM/a.jpg"}, {"pull", "/sdcard/DCIM/a.jpg", "."}, {"pull", "/sdcard/DCIM/a.jpg", "photos/a.jpg"},
-		{"pull", "-a", "/sdcard/Download/"}, {"bugreport"}, {"bugreport", "reports/bug.zip"},
+		{"pull", "-a", "/sdcard/Download/"},
 	} {
 		if r := c.Classify(argv); r.Level != Green {
 			t.Errorf("%q: %v (%s)", argv, r.Level, r.Primary.Reason)
@@ -103,6 +103,8 @@ func TestPullStaysInsideTheEnvironment(t *testing.T) {
 		{"pull", "/sdcard/AGENTS.md"}, {"pull", "/sdcard/x", "CLAUDE.md"}, {"pull", "/sdcard/journal", "."},
 		{"pull", "/sdcard/.adbuddy", "backup"}, {"pull", "/sdcard/x", `..\x`}, {"pull", "a", "b", "c"},
 		{"bugreport", "/tmp/x.zip"}, {"pull", "--sync", "/sdcard/x"},
+		// Task 10b: the report includes what is on screen, so it is always red.
+		{"bugreport"}, {"bugreport", "reports/bug.zip"},
 	} {
 		if r := c.Classify(argv); r.Level != Red {
 			t.Errorf("%q: %v, want red", argv, r.Level)
