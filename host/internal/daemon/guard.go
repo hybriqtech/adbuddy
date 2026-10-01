@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -112,8 +113,10 @@ func screenAction(f classify.Finding) (acts, reads bool) {
 }
 
 // dumpsysValueOptions are dumpsys's own options that take a value; the
-// others it has (--proto, --pid) take none.
-var dumpsysValueOptions = map[string]bool{"-t": true, "--timeout": true, "--pri": true, "--priority": true, "--skip": true}
+// others it has (--proto, --pid) take none. --skip is not one: in dumpsys.cpp
+// it is a switch and every word after it is a service to skip (the rest is
+// dumped), so dumpsysReadsScreen guards it wherever it is.
+var dumpsysValueOptions = map[string]bool{"-t": true, "-T": true, "--pri": true, "--priority": true}
 
 // dumpsysFlagOptions take no value.
 var dumpsysFlagOptions = map[string]bool{"--proto": true, "--pid": true}
@@ -131,6 +134,9 @@ var dumpsysSafeActivity = map[string]bool{
 // dumpsysSafeActivity. -l and --help only list or explain. An option it does
 // not know fails closed. (args are the words after dumpsys.)
 func dumpsysReadsScreen(args []string) bool {
+	if slices.Contains(args, "--skip") {
+		return true
+	}
 	i := 0
 	for ; i < len(args) && strings.HasPrefix(args[i], "-"); i++ {
 		switch o := args[i]; {

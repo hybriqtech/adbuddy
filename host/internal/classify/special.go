@@ -40,10 +40,7 @@ func applySpecial(scope string, ws []Word, f *Finding) {
 		f.Level = Red
 		f.Special = true
 		f.Op = nil
-		if id, title, ok := specialIdentity(scope, ws[0].Value); ok {
-			f.Rule = id
-			f.Title = render(title, baseVars(ws))
-		}
+		setIdentity(scope, ws, f)
 		if f.Reason == "" {
 			f.Reason = reason
 		} else {
@@ -54,11 +51,37 @@ func applySpecial(scope string, ws []Word, f *Finding) {
 
 // specialIdentity names the commands that have no rule of their own because
 // the protection is the rule: no rules file can lower it.
-func specialIdentity(scope, name string) (string, Text, bool) {
-	if scope != "adb" && name == "screenrecord" {
+func specialIdentity(scope string, v []string) (string, Text, bool) {
+	switch {
+	case scope == "adb":
+	case v[0] == "screenrecord":
 		return "screen.record", Text{EN: "Record the screen", ES: "Grabar la pantalla"}, true
+	case v[0] == "dumpsys" && revealsNotifications(v):
+		return "notifications.reveal", Text{EN: "Read the text of every app's notifications", ES: "Leer el texto de las notificaciones de todas las apps"}, true
 	}
 	return "", Text{}, false
+}
+
+// setIdentity gives f the name and title of its fixed protection, if it has
+// one.
+func setIdentity(scope string, ws []Word, f *Finding) {
+	if id, title, ok := specialIdentity(scope, values(ws)); ok {
+		f.Rule = id
+		f.Title = render(title, baseVars(ws))
+	}
+}
+
+// revealsNotifications reports whether a dumpsys line asks for the text of the
+// notifications unredacted: --noredact, or --reveal (AOSP's
+// NotificationManagerService DumpFilter.parseFromArguments treats both the
+// same), in any position of a line that names notification.
+func revealsNotifications(v []string) bool {
+	notification, reveal := false, false
+	for _, w := range v[1:] {
+		notification = notification || w == "notification"
+		reveal = reveal || strings.HasPrefix(w, "--noredact") || strings.HasPrefix(w, "--reveal")
+	}
+	return notification && reveal
 }
 
 func specialReason(scope string, ws []Word, level Level) string {
@@ -137,6 +160,10 @@ func specialReason(scope string, ws []Word, level Level) string {
 		}
 	case "screenrecord":
 		return "records what is on screen"
+	case "dumpsys":
+		if revealsNotifications(v) {
+			return "prints the text of every app's notifications, codes included"
+		}
 	case "reboot", "stop", "start":
 		return "may restart the phone or adbd"
 	case "setprop":

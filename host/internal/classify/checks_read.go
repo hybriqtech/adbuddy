@@ -241,12 +241,7 @@ func checkDate(ws []Word) checkResult {
 // notification --noredact (in any position, after any option of dumpsys)
 // prints the text of every app's notifications: 🔴.
 func checkDumpsys(ws []Word) checkResult {
-	notification, noredact := false, false
-	for _, w := range ws[1:] {
-		notification = notification || w.Value == "notification"
-		noredact = noredact || strings.HasPrefix(w.Value, "--noredact")
-	}
-	if notification && noredact {
+	if revealsNotifications(values(ws)) {
 		return red("dumpsys notification text of every app")
 	}
 	if len(ws) < 3 {

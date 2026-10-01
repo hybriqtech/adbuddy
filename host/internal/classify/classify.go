@@ -385,6 +385,7 @@ func (c *Classifier) evalRule(scope string, ws []Word) Finding {
 	switch {
 	case b.Special:
 		f.Level, f.Special, f.Op, f.Reason = Red, true, nil, joinReason(b.Reason, f.Reason)
+		setIdentity(scope, ws, &f)
 	case f.Level < Red && b.Level != Green && hasDynamic(ws):
 		f.Level, f.Special, f.Op = Red, true, nil
 		f.Reason = joinReason("arguments only known on the phone could name ADBuddy or a critical app", f.Reason)

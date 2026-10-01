@@ -25,6 +25,11 @@ var dumpsysReading = [][]string{
 	{"shell", "dumpsys", "--future-option", "battery"},
 	{"shell", "dumpsys"},
 	{"shell", "dumpsys", "--skip", "meminfo"},
+	{"shell", "dumpsys", "--skip", "meminfo", "battery"},
+	{"shell", "dumpsys", "--skip", "activity", "top"},
+	{"shell", "dumpsys", "battery", "--skip", "activity"},
+	{"shell", "dumpsys", "--timeout", "10", "battery"}, // not a dumpsys option: fails closed
+	{"shell", "dumpsys", "-T", "100", "activity", "top"},
 	{"shell", "dumpsys", "-t", "10"},
 	{"shell", "dumpsys", "--proto"},
 }
@@ -42,7 +47,7 @@ var dumpsysAlways = [][]string{
 	{"shell", "dumpsys", "battery"},
 	{"shell", "dumpsys", "-l"},
 	{"shell", "dumpsys", "--help"},
-	{"shell", "dumpsys", "--skip", "meminfo", "battery"},
+	{"shell", "dumpsys", "-T", "100", "battery"},
 	{"shell", "dumpsys", "notification"},
 }
 
@@ -126,7 +131,7 @@ func TestDumpsysThatReadsTheScreenMustRunAloneAndUnwrapped(t *testing.T) {
 		{"shell", "busybox dumpsys activity top"},
 		{"shell", "dumpsys activity top &"},
 	} {
-		if s, exit := e.exec(t, argv...); exit.Code != 126 {
+		if s, exit := e.exec(t, argv...); exit.Code != 126 || !strings.Contains(s.errOut.String(), "must run alone") {
 			t.Errorf("%q: %+v %q", argv, exit, s.errOut.String())
 		}
 	}
