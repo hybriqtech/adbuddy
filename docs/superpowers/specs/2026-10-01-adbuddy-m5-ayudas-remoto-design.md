@@ -252,7 +252,7 @@ Precisa §3.3 de la v1 sobre el contrato de §8.2 del protocolo.
 
 - **`remote.set {enabled: true}`** desde la app (con `rid`), y solo con el móvil conectado al host. El host:
   1. guarda `remote_until` = ahora + 12 h en `config.toml` ANTES de abrir el puerto (ruling de M5b T3): tras `adb tcpip` adbd se reinicia y cae la conexión, así que un `adb usb` para deshacer un guardado fallido fallaría también; si no se puede guardar, no se abre nada;
-  2. ejecuta `adb tcpip 5555` con su adb, fuera del shim (es el usuario quien lo pide, no el agente). Si falla porque no hay móvil conectado (la orden no llegó a adbd), borra `remote_until` y el modo queda apagado; con cualquier otro error (la orden pudo llegar) solo lo borra si `getprop service.adb.tcp.port` confirma que el puerto no está abierto, y si no, el modo sigue activo y se dice;
+  2. ejecuta `adb tcpip 5555` con su adb, fuera del shim (es el usuario quien lo pide, no el agente). Si falla porque no hay móvil conectado (la orden no llegó a adbd), restaura el `remote_until` anterior: el modo queda como estaba (apagado si estaba apagado; "cerrando" si ya había caducado sin poder cerrar el puerto, nunca un falso apagado con el 5555 quizá abierto); con cualquier otro error (la orden pudo llegar) solo lo borra si `getprop service.adb.tcp.port` confirma que el puerto no está abierto, y si no, el modo sigue activo y se dice;
   3. responde con `remote.state {enabled, address: "<tailscaleIp>:5555", expiresAt}` y lo publica como evento.
 
   Sin `tailscaleIp` conocida, contesta `error` `unavailable` ("Turn on Tailscale on the phone first").

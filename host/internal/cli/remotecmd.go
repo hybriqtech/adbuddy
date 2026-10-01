@@ -398,8 +398,8 @@ func (l *phoneLink) changeRemote(ctx context.Context, on bool, reply func(remote
 		case errors.Is(res.err, remote.ErrNoTailscale):
 			return remoteExit(1, "REMOTE_UNAVAILABLE", "%s", res.err.Error())
 		case res.err != nil:
-			// No phone: `on` cleared its expiry (the order never reached adbd);
-			// whatever stays on is said.
+			// No phone: `on` put back the previous expiry (the order never
+			// reached adbd); whatever stays on (Closing included) is said.
 			msg := classify.Printable(res.err.Error())
 			if s := r.ctl.State(); s.Enabled {
 				msg += " (the remote mode is still on)"

@@ -123,9 +123,10 @@ func (c *Controller) adbCmd(ctx context.Context, args ...string) (string, error)
 // Enable opens port 5555 (`adb tcpip 5555`). The expiry is saved BEFORE the
 // port opens: right after `adb tcpip` adbd restarts and the connection is
 // gone, so an `adb usb` to undo a failed save would fail too. If `tcpip`
-// fails because no phone is connected, or the port is then seen closed, the
-// expiry is cleared again; otherwise (or if clearing fails) the expiry stays,
-// which is the safe side (Reconcile clears it if the port is closed).
+// fails because no phone is connected, the previous expiry is put back (off
+// or Closing, as it was); if the port is then seen closed, the expiry is
+// cleared; otherwise (or if that fails) the new expiry stays, which is the
+// safe side (Reconcile clears it if the port is closed).
 // Already enabled: nothing is run. adbd restarts, so the caller does not
 // wait for the connection.
 func (c *Controller) Enable(ctx context.Context) (State, error) {
@@ -137,14 +138,17 @@ func (c *Controller) Enable(ctx context.Context) (State, error) {
 	if s := c.State(); s.Enabled && !s.Closing {
 		return s, nil
 	}
+	prev := c.st.Until() // zero when off; passed when Closing
 	if err := c.st.SetUntil(c.now().Add(Lifetime)); err != nil {
 		return c.State(), err
 	}
 	if _, err := c.adbCmd(ctx, "tcpip", Port); err != nil {
 		// No phone connected (or offline): the order never reached adbd, so
-		// the port did not open and the mode stays off.
+		// nothing changed on the phone and the previous expiry is put back:
+		// off stays off, and Closing stays Closing (the port may still be
+		// open from before: never a false "off").
 		if NoPhone(err) {
-			_ = c.st.SetUntil(time.Time{})
+			_ = c.st.SetUntil(prev)
 			return c.State(), err
 		}
 		// Otherwise adbd may have got the order and the failure be the cut

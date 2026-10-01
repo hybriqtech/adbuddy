@@ -427,3 +427,28 @@ func TestEnableTimeoutKeepsUntil(t *testing.T) {
 		t.Fatalf("until %v state %+v", e.until, s)
 	}
 }
+
+// Re-review I1: `on` while Closing (the expiry passed and `adb usb` could not
+// close the port, usually because the phone cannot be reached) that fails for
+// no phone puts the old expiry back: still Closing, never a false "off" with
+// the port maybe open, and Expire keeps trying.
+func TestEnableWithoutPhoneWhileClosingKeepsTheOldUntil(t *testing.T) {
+	e := newEnv()
+	old := t0.Add(-time.Hour)
+	e.until = old
+	e.portFails = true
+	e.tcpipFail, e.tcpipErr = true, "error: no devices/emulators found"
+	c := e.controller()
+	s, err := c.Enable(context.Background())
+	if err == nil || !NoPhone(err) {
+		t.Fatalf("err %v", err)
+	}
+	if !e.until.Equal(old) || !s.Enabled || !s.Closing {
+		t.Fatalf("until %v state %+v (%q)", e.until, s, e.events)
+	}
+	e.usbFail = true
+	e.events = nil
+	if _, changed, err := c.Expire(context.Background()); changed || err == nil || !e.ran("usb") {
+		t.Fatalf("Expire: changed %v err %v (%q)", changed, err, e.events)
+	}
+}
