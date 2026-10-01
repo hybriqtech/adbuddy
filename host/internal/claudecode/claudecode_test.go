@@ -131,7 +131,7 @@ func bash(cmd string) json.RawMessage {
 }
 
 func TestAlwaysRule(t *testing.T) {
-	ok := []string{"touch uno.txt", "npm test", "git status", "go test ./..."}
+	ok := []string{"touch uno.txt", "npm test", "git status", "go test ./...", "make build", "ls -la src/main.go", "echo a,b=c:d+e", "pytest tests/ -k suite", "cat results.txt"}
 	for _, c := range ok {
 		if r, yes := AlwaysRule("Bash", bash(c)); !yes || r != c {
 			t.Errorf("%q: %q %v", c, r, yes)
@@ -144,6 +144,13 @@ func TestAlwaysRule(t *testing.T) {
 		"", "adb shell ls", "ADB devices", "/usr/bin/adb.exe push a b", "adbuddy send x", "ANDROID_SERIAL=x ls", "echo .adbuddy",
 		"npm *", "npm test:*", "rm -rf (x)", `echo "x"`, "echo 'x'", "a; b", "a && b", "a | b", "echo $HOME", "echo `x`", "cat < f", "echo x > f",
 		"line1\nline2", "a\tb", `a\b`, strings.Repeat("a", maxRule+1),
+		// review I1: globs and expansions of bash that hide a word
+		"a?b shell rm -rf /sdcard/DCIM", "a[d]b shell ls", ".a?buddy/bin/a?b shell ls", "a{d,e}b devices", "~/x", "echo !x", "echo #x", "ls {a,b}",
+		// bidi, zero width, no-break and other non-ASCII spaces, controls
+		"echo ‮evil", "echo a⁦b", "echo a​b", "echo a b", "echo a　b", "echo a\x00b", "echo a\x1bb", "echo a\x7fb", "café",
+		// what touches the phone without saying adb
+		"fastboot erase userdata", "FASTBOOT reboot", "/opt/sdk/fastboot flash", "scrcpy", "./gradlew installDebug", "gradlew.bat installDebug", "gradle installDebug",
+		"sudo ls", "su root", "/usr/bin/su -c x", "~/platform-tools/x", "echo adbd",
 	}
 	for _, c := range refused {
 		if r, yes := AlwaysRule("Bash", bash(c)); yes {

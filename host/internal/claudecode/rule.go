@@ -113,29 +113,69 @@ func ToolDetail(tool string, raw json.RawMessage) string {
 	return cut(d, maxDetail)
 }
 
+// ruleRune is the whitelist of what a "yes, always" rule may be made of:
+// ASCII letters and digits, the space and a few signs that mean nothing to a
+// shell or to the syntax of a Claude Code rule. Anything else (wildcards,
+// quotes, expansions, controls, bidi, any non-ASCII) and the rule is not
+// offered: when in doubt, the question stays on the terminal.
+func ruleRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	}
+	return strings.ContainsRune(" ._/=:@+,-", r)
+}
+
+// phoneWords are names of tools that reach the phone (or root) by a way the
+// shim does not see: a rule that mentions one is never offered. They are
+// searched as a substring, in any case, so a path or a suffix does not hide
+// them; su and sudo are too short for that and are searched as words.
+var (
+	phoneSubstrings = []string{"adb", "adbuddy", "fastboot", "scrcpy", "gradle", "platform-tools", "android_serial"}
+	phoneWords      = []string{"su", "sudo"}
+)
+
+func mentionsPhone(cmd string) bool {
+	low := strings.ToLower(cmd)
+	for _, w := range phoneSubstrings {
+		if strings.Contains(low, w) {
+			return true
+		}
+	}
+	words := strings.FieldsFunc(low, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') })
+	for _, w := range words {
+		for _, p := range phoneWords {
+			if w == p {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // AlwaysRule returns the rule "yes, always" would add, and whether it may be
 // offered at all (spec M4 §5.3). It is the exact command of a Bash and nothing
-// broader: no wildcard is ever built from it. It is refused (false) for any
-// other tool; for a command that is long, spans lines, has a character that
-// changes the syntax of a Claude Code rule or chains commands; and for any
-// command that could touch adb, the shim or the phone, whose every call the
-// shim classifies and Claude Code must not wave through for good.
+// broader: no wildcard is ever built from it. It is offered only for a Bash
+// command that is short, on one line and made only of the ruleRune whitelist
+// (so no wildcard of bash can hide a word from the check below), and that does
+// not mention a tool that reaches the phone or root (mentionsPhone), whose
+// every call the shim classifies and Claude Code must not wave through for
+// good.
 func AlwaysRule(tool string, raw json.RawMessage) (string, bool) {
 	if tool != "Bash" {
 		return "", false
 	}
-	cmd := strings.TrimSpace(str(input(raw), "command"))
-	if cmd == "" || len(cmd) > maxRule || !utf8.ValidString(cmd) {
+	cmd := strings.Trim(str(input(raw), "command"), " \t\r\n")
+	if cmd == "" || len(cmd) > maxRule {
 		return "", false
 	}
-	if strings.ContainsAny(cmd, "\r\n\t()*\\\"';&|$`<>") || strings.Contains(cmd, ":*") {
-		return "", false
-	}
-	low := strings.ToLower(cmd)
-	for _, w := range []string{"adb", "android_serial", "adbuddy"} {
-		if strings.Contains(low, w) {
+	for _, r := range cmd {
+		if !ruleRune(r) {
 			return "", false
 		}
+	}
+	if strings.Contains(cmd, ":*") || mentionsPhone(cmd) {
+		return "", false
 	}
 	return cmd, true
 }
