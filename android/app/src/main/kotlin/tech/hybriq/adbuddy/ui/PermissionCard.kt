@@ -56,32 +56,21 @@ fun PermissionCards(
     if (permissions.isEmpty()) return
     val answeringIds by chat.answering.collectAsStateWithLifecycle()
     val first = permissions.first()
+    // The controller says when the guard restarts (a new first card, a reconnection), after it has done it: no race to wait out.
+    val epoch by chat.guardEpoch.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(hostNow()) }
-    var guardLeft by remember { mutableLongStateOf(chat.guardLeftMs(first.id)) }
-    var canAnswer by remember { mutableStateOf(chat.canAnswer(first.id)) }
-    // Keyed also by the connection and the answers: a reconnection re-arms the guard, and that is not a change of the list.
-    LaunchedEffect(permissions, connected, answeringIds) {
-        var recheck = true
+    var guardLeft by remember(first.id, epoch) { mutableLongStateOf(chat.guardLeftMs(first.id)) }
+    var canAnswer by remember(first.id, epoch) { mutableStateOf(chat.canAnswer(first.id)) }
+    LaunchedEffect(permissions, connected, answeringIds, epoch) {
         while (true) {
             now = hostNow()
             guardLeft = chat.guardLeftMs(first.id)
             canAnswer = chat.canAnswer(first.id)
-            val tick = PermissionUi.nextTickMs(permissions, now, guardLeft)
-            if (tick != null) {
-                delay(tick)
-            } else if (recheck) {
-                // The controller re-arms the guard in its own coroutine, maybe just after this one first read it.
-                recheck = false
-                delay(RECHECK_MS)
-            } else {
-                break
-            }
+            delay(PermissionUi.nextTickMs(permissions, now, guardLeft) ?: break)
         }
     }
     PermissionCard(first, permissions.size - 1, connected, now, first.id in answeringIds, guardLeft, canAnswer, modifier) { p, d -> chat.answerPermission(p.id, d) }
 }
-
-private const val RECHECK_MS = 100L
 
 /** The detail may be this tall on screen; taller, and the person must scroll to its end before any button works. */
 private val DETAIL_MAX_HEIGHT = 120.dp
@@ -107,8 +96,9 @@ fun PermissionCard(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(stringResource(R.string.perm_title), style = MaterialTheme.typography.labelMedium)
-            Text(p.summary.ifEmpty { p.tool }, style = MaterialTheme.typography.titleMedium)
+            // Whose question it is outweighs what it says: the label is bold and larger, the agent's own words are marked as such.
+            Text(stringResource(R.string.perm_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary)
+            Text(stringResource(R.string.perm_summary, p.summary.ifEmpty { p.tool }), style = MaterialTheme.typography.bodyMedium)
             // The scroll state starts "can scroll forward" until the text is measured: the buttons stay off until it is known there is no more to read.
             val scroll = key(p.id, p.detail) { rememberScrollState() }
             val hasDetail = p.detail.isNotEmpty() && p.detail != p.summary
@@ -136,7 +126,10 @@ fun PermissionCard(
             if (status != null) Text(status, style = MaterialTheme.typography.labelSmall)
             if (others > 0) Text(pluralStringResource(R.plurals.perm_more, others, others), style = MaterialTheme.typography.labelSmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val can = { d: String -> controllerCanAnswer && !unread && PermissionUi.canAnswer(p, d, connected, hostNow, answering, guardLeftMs) }
+                // Only the grants wait for the whole text; No is always the safe answer, and keeps the guard and the controller's say.
+                val can = { d: String ->
+                    controllerCanAnswer && (d == PermissionUi.DENY || !unread) && PermissionUi.canAnswer(p, d, connected, hostNow, answering, guardLeftMs)
+                }
                 Button(onClick = { onAnswer(p, PermissionUi.ALLOW) }, enabled = can(PermissionUi.ALLOW)) { Text(stringResource(R.string.perm_allow)) }
                 if (p.allowAlways) {
                     OutlinedButton(onClick = { onAnswer(p, PermissionUi.ALLOW_ALWAYS) }, enabled = can(PermissionUi.ALLOW_ALWAYS)) {

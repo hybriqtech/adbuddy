@@ -48,10 +48,15 @@ class ChatController(
     /** The permission cards answered here whose permission.resolved has not come: their buttons stay off. */
     val answering: StateFlow<Set<String>> = _answering.asStateFlow()
 
+    private val _guardEpoch = MutableStateFlow(0)
+
+    /** Changes each time the promote guard is (re)started (a new first card, a reconnection): the screen re-reads [guardLeftMs] and [canAnswer] then. */
+    val guardEpoch: StateFlow<Int> = _guardEpoch.asStateFlow()
+
     init {
         channel.listen(Protocol.PERMISSION_RESOLVED) { m -> Protocol.payload<PermissionResolved>(m)?.let { r -> _answering.update { it - r.id } } }
         // An answer sent on a socket that dropped may never have reached the host: the card can be answered again.
-        scope?.launch { channel.connected.collect { if (!it) _answering.value = emptySet() else guard.rearm() } }
+        scope?.launch { channel.connected.collect { if (!it) _answering.value = emptySet() else { guard.rearm(); _guardEpoch.update { it + 1 } } } }
         // The cards come from the bridge's state: the screen does not have to tell the controller.
         scope?.launch { channel.permissions.collect { onPermissions(it) } }
     }
@@ -87,6 +92,7 @@ class ChatController(
     /** The cards, oldest first (the bridge's list, each time it changes; with a scope the constructor follows it by itself): starts the promote guard and forgets the answered ones that went. */
     fun onPermissions(permissions: List<PermissionRequest>) {
         guard.observe(permissions.map { it.id })
+        _guardEpoch.update { it + 1 }
         val ids = permissions.map { it.id }.toSet()
         _answering.update { a -> a.filter { it in ids }.toSet() }
     }

@@ -199,6 +199,22 @@ class ChatControllerTest {
         coroutineContext.cancelChildren()
     }
 
+    @Test fun theGuardEpochChangesWhenTheGuardRestarts() = runBlocking {
+        val c = ChatController(ch, scope = this, clock = { now }) { "c" }
+        val e0 = c.guardEpoch.value
+        ch.setPermissions(listOf(req("p_1")))
+        kotlinx.coroutines.yield()
+        val e1 = c.guardEpoch.value
+        assertEquals("a new card", true, e1 != e0)
+        ch.setConnected(false)
+        kotlinx.coroutines.yield()
+        ch.setConnected(true)
+        kotlinx.coroutines.yield()
+        assertEquals("a reconnection, after the guard was rearmed", true, c.guardEpoch.value != e1)
+        assertEquals(PermissionUi.PROMOTE_GUARD_MS, c.guardLeftMs("p_1"))
+        coroutineContext.cancelChildren()
+    }
+
     @Test fun nothingObservedMeansNothingCanBeAnswered() {
         now += 10_000
         assertEquals(false, chat.canAnswer("p_1"))
