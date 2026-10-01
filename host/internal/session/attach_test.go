@@ -252,8 +252,20 @@ func TestAttachLaggingGetsTheWholeScreen(t *testing.T) {
 	want := r.m.Screen().Text()
 	waitUntil(t, "the terminal to show the screen", func() bool {
 		em := vt.NewEmulator(80, 24)
-		defer em.Close()
-		go io.Copy(io.Discard, em)
+		// Emulator.Close sets a flag that Read checks without a lock: the
+		// goroutine that drops the emulator's answers ends first.
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			io.Copy(io.Discard, em)
+		}()
+		defer func() {
+			if c, ok := em.InputPipe().(io.Closer); ok {
+				c.Close()
+				<-done
+			}
+			em.Close()
+		}()
 		em.Write([]byte(g.buf.String()))
 		return em.String() == want
 	})

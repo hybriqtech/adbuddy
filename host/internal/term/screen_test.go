@@ -77,11 +77,33 @@ var tui = []byte("\x1b[2J\x1b[H\x1b[1;38;2;200;100;0mClaude\x1b[0m banner\r\n" +
 	"\x1b[10;1H────────────\x1b[11;1H❯ \x1b[11;3Hdraft\x1b[2D")
 
 // redraw writes data to a clean emulator of the size.
-func redraw(data []byte, cols, rows int) *vt.Emulator {
+//
+// The emulator answers queries on its read side, so a goroutine drops them.
+// Emulator.Close sets a flag that Read checks without a lock (as Screen.Close
+// explains): the caller ends the goroutine first with the returned close,
+// which stops it and waits for it, and then closes the emulator.
+func redraw(data []byte, cols, rows int) (*vt.Emulator, func()) {
 	em := vt.NewEmulator(cols, rows)
-	go io.Copy(io.Discard, em)
+	return em, drainAnswers(em, data)
+}
+
+// drainAnswers starts the goroutine that drops the emulator's answers,
+// writes data and returns the function that ends the goroutine and closes
+// the emulator.
+func drainAnswers(em *vt.Emulator, data []byte) (closeEm func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		io.Copy(io.Discard, em)
+	}()
 	em.Write(data)
-	return em
+	return func() {
+		if c, ok := em.InputPipe().(io.Closer); ok {
+			c.Close()
+			<-done
+		}
+		em.Close()
+	}
 }
 
 // sameScreen checks that the redrawn emulator shows the screen of s: text,
@@ -111,8 +133,8 @@ func TestSnapshotRedrawsTheScreen(t *testing.T) {
 	if off != int64(len(tui)) || cols != 60 || rows != 14 {
 		t.Fatalf("offset %d size %dx%d", off, cols, rows)
 	}
-	em := redraw(data, cols, rows)
-	defer em.Close()
+	em, closeEm := redraw(data, cols, rows)
+	defer closeEm()
 	sameScreen(t, s, em)
 	if !strings.Contains(s.Text(), "● ÑANDÚ42") {
 		t.Fatalf("screen %q", s.Text())
@@ -130,8 +152,8 @@ func TestSnapshotAfterResize(t *testing.T) {
 	if cols != 40 || rows != 12 {
 		t.Fatalf("size %dx%d", cols, rows)
 	}
-	em := redraw(data, cols, rows)
-	defer em.Close()
+	em, closeEm := redraw(data, cols, rows)
+	defer closeEm()
 	sameScreen(t, s, em)
 }
 
@@ -213,8 +235,8 @@ func TestSnapshotCarriesTheModes(t *testing.T) {
 	if !strings.HasSuffix(snap, "\x1b[?25l\x1b[?2004h") {
 		t.Fatalf("the snapshot does not end with the modes: %q", snap)
 	}
-	em := redraw(data, cols, rows)
-	defer em.Close()
+	em, closeEm := redraw(data, cols, rows)
+	defer closeEm()
 	if !em.IsAltScreen() {
 		t.Fatal("redrawn out of the alternate screen")
 	}
