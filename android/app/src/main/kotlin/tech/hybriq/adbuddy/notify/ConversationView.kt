@@ -22,9 +22,12 @@ data class ConversationView(
     val state: String,
     val activity: String,
     val last: LastMessage?,
+    /** The agent has a permission question pending: a generic notice, never its tool, command or detail. */
+    val asking: Boolean = false,
 ) {
     fun headline(): Headline = when {
         status.status != LinkStatus.CONNECTED -> Headline(status.status.text)
+        asking -> Headline(R.string.notif_asking)
         state == "working" && activity.isNotEmpty() -> Headline(R.string.notif_working_on, activity)
         state == "working" -> Headline(R.string.notif_working)
         state == "waiting" -> Headline(R.string.notif_waiting)
@@ -50,7 +53,8 @@ data class ConversationView(
             val text = m?.let { it.text.ifEmpty { it.attachments.joinToString { a -> a.name } } }
             val last = if (m == null || text.isNullOrEmpty()) null else LastMessage(m.id, m.role == "user", cutText(text))
             val working = s.sessionState.state == "working"
-            return ConversationView(StatusView.of(s, cut), s.sessionState.agent, s.sessionState.state, if (working) s.sessionState.activity else "", last)
+            return ConversationView(StatusView.of(s, cut), s.sessionState.agent, s.sessionState.state, if (working) s.sessionState.activity else "", last,
+                asking = s.chat.permissions.isNotEmpty())
         }
 
         private fun cutText(t: String) = if (t.length <= MAX_TEXT) t else t.take(MAX_TEXT - 1) + "…"
@@ -58,14 +62,27 @@ data class ConversationView(
 }
 
 object Notify {
-    private const val MAX_LINE = 120
+    private const val MAX_LETTERS = 100
+    private val FENCE = Regex("```[^\\n]*")
+    private val LINK = Regex("\\[([^\\]]*)]\\([^)]*\\)")
+    private val LINE_MARKS = Regex("(?m)^\\s*(?:#{1,6}\\s+|>+\\s*|[-*+]\\s+)")
+    private val INLINE_MARKS = Regex("[*_`~]+")
+    private val SPACES = Regex("\\s+")
 
-    /** The first line of the agent's last answer in this conversation, for "Done"; null when it said nothing. */
+    /** The start of the agent's last answer in this conversation, for "Done"; null when it said nothing. */
     fun doneLine(chat: ChatState, conversation: String): String? {
         val m = chat.messages.lastOrNull {
             it.role == "assistant" && (conversation.isEmpty() || it.conversation.isEmpty() || it.conversation == conversation)
         } ?: return null
-        val line = m.text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: return null
-        return if (line.length <= MAX_LINE) line else line.take(MAX_LINE)
+        val plain = m.text.replace(FENCE, " ").replace(LINK, "$1").replace(LINE_MARKS, "")
+            .replace(INLINE_MARKS, "").replace(SPACES, " ").trim()
+        if (plain.isEmpty()) return null
+        if (plain.length <= MAX_LETTERS) return plain
+        // Never between the two halves of a surrogate pair; at a word boundary when one is near.
+        var end = MAX_LETTERS
+        if (plain[end - 1].isHighSurrogate()) end--
+        val space = plain.lastIndexOf(' ', end)
+        if (space >= MAX_LETTERS / 2) end = space
+        return plain.substring(0, end).trimEnd() + "…"
     }
 }

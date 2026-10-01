@@ -69,7 +69,8 @@ class BridgeService : LifecycleService() {
             app.bridge.state.collect { s ->
                 if (s.connection != BridgeState.Connection.CONNECTED) {
                     detector.reset()
-                } else if (detector.onState(s.sessionState, SystemClock.elapsedRealtime())) {
+                } else if (detector.onState(s.sessionState, SystemClock.elapsedRealtime()) && s.chat.permissions.isEmpty()) {
+                    // A pending question outranks "Done": the generic "needs an answer" notice already says it.
                     ConversationNotifier.done(this@BridgeService, Notify.doneLine(s.chat, s.sessionState.conversation))
                 }
             }

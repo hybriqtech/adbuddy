@@ -9,6 +9,7 @@ import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.ChatMessage
 import tech.hybriq.adbuddy.bridge.ChatState
+import tech.hybriq.adbuddy.bridge.PermissionRequest
 import tech.hybriq.adbuddy.bridge.SessionState
 
 class ConversationViewTest {
@@ -61,11 +62,61 @@ class ConversationViewTest {
         assertEquals(ConversationView.of(state(), cut = false), ConversationView.of(state(), cut = false))
     }
 
-    @Test fun doneLineIsTheFirstLineOfTheLastAnswer() {
+    @Test fun doneLineIsTheStartOfTheLastAnswer() {
         val chat = ChatState(messages = listOf(msg("a", "assistant", "\n\n  Fixed the Wi-Fi toggle.\nMore detail"), msg("b", "user", "thanks")))
-        assertEquals("Fixed the Wi-Fi toggle.", Notify.doneLine(chat, "c_1"))
+        assertEquals("Fixed the Wi-Fi toggle. More detail", Notify.doneLine(chat, "c_1"))
         assertNull(Notify.doneLine(ChatState(messages = listOf(msg("b", "user", "thanks"))), "c_1"))
         assertNull(Notify.doneLine(chat, "c_2"))
-        assertEquals(120, Notify.doneLine(ChatState(messages = listOf(msg("a", "assistant", "y".repeat(500)))), "")!!.length)
+    }
+
+    private fun done(text: String) = Notify.doneLine(ChatState(messages = listOf(msg("a", "assistant", text))), "c_1")
+
+    @Test fun doneLineIsCutAtAWordBoundaryWithinAHundredLetters() {
+        val d = done("word ".repeat(40))!!
+        assertTrue(d.length <= 101)
+        assertTrue(d.endsWith("…"))
+        assertEquals("no half word", "word word", d.removeSuffix("…").takeLast(9))
+        assertEquals(100, done("y".repeat(500))!!.removeSuffix("…").length)
+        assertEquals("short stays whole", "short", done("short"))
+        assertNull(done("   \n  "))
+        assertNull(done(""))
+    }
+
+    @Test fun doneLineHasNoLineBreaksNorRawMarkdown() {
+        assertEquals("Fixed it now and tested", done("**Fixed** it\n\n- now and\r\n`tested`"))
+        assertEquals("See docs for more", done("# See [docs](https://x.y/z) for more"))
+        assertEquals("code", done("```kotlin\ncode\n```"))
+    }
+
+    @Test fun doneLineNeverSplitsASurrogatePair() {
+        val emoji = "😀"
+        // The hundredth char would fall between the two halves of the emoji.
+        val cut = done("a".repeat(99) + emoji + "b".repeat(20))!!.removeSuffix("…")
+        assertTrue(cut.isEmpty() || !cut.last().isHighSurrogate())
+        assertTrue(cut.all { !it.isSurrogate() })
+        val whole = done("a".repeat(98) + emoji + "b".repeat(20))!!
+        assertTrue(whole.contains(emoji))
+    }
+
+    private fun perm(id: String = "p1") = PermissionRequest(id, "Bash", "SECRET-SUMMARY rm -rf /", "SECRET-DETAIL", "2026-10-01T10:00:00Z")
+
+    @Test fun aPendingPermissionIsAskingAndTheNoticeIsGenericWithoutItsData() {
+        val s = state(msgs = listOf(msg("a", "assistant", "hello")))
+        val v = ConversationView.of(s.copy(chat = s.chat.copy(permissions = listOf(perm()))), cut = false)
+        assertTrue(v.asking)
+        assertEquals(Headline(R.string.notif_asking), v.headline())
+        assertEquals(Headline(R.string.notif_asking), v.publicHeadline())
+        assertTrue(!v.toString().contains("SECRET"))
+        assertTrue(!ConversationView.of(state(), cut = false).asking)
+    }
+
+    @Test fun askingBeatsWorkingWaitingAndStoppedButNotALostConnection() {
+        for (st in listOf("working", "waiting", "idle", "stopped")) {
+            val s = state(st)
+            val v = ConversationView.of(s.copy(chat = s.chat.copy(permissions = listOf(perm()))), cut = false)
+            assertEquals(st, Headline(R.string.notif_asking), v.headline())
+        }
+        val lost = state(conn = BridgeState.Connection.WAITING)
+        assertEquals(Headline(R.string.status_waiting), ConversationView.of(lost.copy(chat = lost.chat.copy(permissions = listOf(perm()))), cut = false).headline())
     }
 }

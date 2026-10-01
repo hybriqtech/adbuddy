@@ -73,23 +73,26 @@ object ConversationNotifier {
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
 
-        // Reply: the system fills the result in, hence MUTABLE. Locked: setAuthenticationRequired (API 31+) and,
-        // on every version, BridgeService ignores the action while the device is locked.
-        b.addAction(NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_reply),
-            service(ctx, 3, BridgeService.ACTION_REPLY, mutable = true))
-            .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel(ctx.getString(R.string.notif_reply_hint)).build())
-            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
-            .setAllowGeneratedReplies(false)
-            .setAuthenticationRequired(true)
-            .build())
-        b.addAction(NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_capture),
-            service(ctx, 4, BridgeService.ACTION_CAPTURE, mutable = false))
-            .setAuthenticationRequired(true)
-            .build())
-        v.status.button?.let { button ->
-            val resume = button == PauseButton.RESUME
-            b.addAction(0, ctx.getString(button.text),
-                service(ctx, if (resume) 2 else 1, if (resume) BridgeService.ACTION_RESUME else BridgeService.ACTION_PAUSE, mutable = false))
+        // Asking: a generic notice that opens the chat, with no buttons but the safe cut (the answer is given inside the app).
+        if (!v.asking) {
+            // Reply: the system fills the result in, hence MUTABLE. Locked: setAuthenticationRequired (API 31+) and,
+            // on every version, BridgeService ignores the action while the device is locked.
+            b.addAction(NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_reply),
+                service(ctx, 3, BridgeService.ACTION_REPLY, mutable = true))
+                .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel(ctx.getString(R.string.notif_reply_hint)).build())
+                .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+                .setAllowGeneratedReplies(false)
+                .setAuthenticationRequired(true)
+                .build())
+            b.addAction(NotificationCompat.Action.Builder(0, ctx.getString(R.string.notif_capture),
+                service(ctx, 4, BridgeService.ACTION_CAPTURE, mutable = false))
+                .setAuthenticationRequired(true)
+                .build())
+            v.status.button?.let { button ->
+                val resume = button == PauseButton.RESUME
+                b.addAction(0, ctx.getString(button.text),
+                    service(ctx, if (resume) 2 else 1, if (resume) BridgeService.ACTION_RESUME else BridgeService.ACTION_PAUSE, mutable = false))
+            }
         }
         // Cut access: no unlock needed. It only narrows what the agent can do, so it is always safe and urgent.
         b.addAction(0, ctx.getString(R.string.action_cut), service(ctx, 6, BridgeService.ACTION_CUT, mutable = false))
