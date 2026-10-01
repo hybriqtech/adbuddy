@@ -317,4 +317,31 @@ class BridgeStateTest {
         assertNull(s.remote)
         assertEquals(1L, s.lastSeq)
     }
+
+    @Test fun aRemoteStateWithoutAClearEnabledIsUnknownNeverOff() {
+        for (payload in listOf("{}", """{"enabled":null}""", """{"address":"x"}""", """{"enabled":"true"}""", "[]", "5")) {
+            val s = BridgeState(session = "s_1", remote = activeState).apply(msg(1, Protocol.REMOTE_STATE, payload))
+            assertNull(payload, s.remote)
+        }
+        val noPayload = Protocol.decode("""{"v":1,"seq":1,"type":"${Protocol.REMOTE_STATE}","ts":"x"}""")!!
+        assertNull(BridgeState(session = "s_1", remote = activeState).apply(noPayload).remote)
+    }
+
+    @Test fun aSnapshotWithAnEmptyRemoteIsUnknown() {
+        val s = BridgeState(session = "s_1", remote = activeState).apply(msg(1, Protocol.SNAPSHOT, """{"remote":{}}"""))
+        assertNull(s.remote)
+    }
+
+    @Test fun aClearEnabledIsKept() {
+        val off = BridgeState(session = "s_1", remote = activeState).apply(msg(1, Protocol.REMOTE_STATE, """{"enabled":false}"""))
+        assertEquals(RemoteState(enabled = false), off.remote)
+        val on = off.apply(msg(2, Protocol.REMOTE_STATE, active))
+        assertEquals(activeState, on.remote)
+    }
+
+    @Test fun anUnknownRemoteStaysUnknownWhenDisconnectedOrIncompatible() {
+        val s = BridgeState(session = "s_1")
+        assertNull(s.disconnected().remote)
+        assertNull(s.appOutdated().remote)
+    }
 }
