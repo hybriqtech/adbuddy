@@ -97,11 +97,52 @@ type Server struct {
 }
 
 type client struct {
-	send   chan Message
+	send   chan outItem
 	cancel context.CancelFunc
-	token  string // the token it authenticated with
+	done   <-chan struct{} // the connection's context: closed when it is gone
+	token  string          // the token it authenticated with
 	conn   *websocket.Conn
 	gen    uint64 // set by swap; Message.conn of what it sends
+
+	// roomMu guards waiters and room, which tell a SendFrameTo that waits
+	// for room in the queue that the writer took something out of it.
+	roomMu  sync.Mutex
+	waiters int
+	room    chan struct{}
+}
+
+// outItem is what the writer of a connection sends, in order: a text message
+// or, when frame is not nil, a binary frame.
+type outItem struct {
+	m     Message
+	frame []byte
+}
+
+// signalRoom wakes the SendFrameTo calls waiting for room in the queue.
+func (cl *client) signalRoom() {
+	cl.roomMu.Lock()
+	if cl.waiters > 0 && cl.room != nil {
+		close(cl.room)
+		cl.room = nil
+	}
+	cl.roomMu.Unlock()
+}
+
+// roomChan returns the channel the next signalRoom closes.
+func (cl *client) roomChan() <-chan struct{} {
+	cl.roomMu.Lock()
+	defer cl.roomMu.Unlock()
+	if cl.room == nil {
+		cl.room = make(chan struct{})
+	}
+	cl.waiters++
+	return cl.room
+}
+
+func (cl *client) stopWaiting() {
+	cl.roomMu.Lock()
+	cl.waiters--
+	cl.roomMu.Unlock()
 }
 
 // New returns a Server.
@@ -295,6 +336,60 @@ func (s *Server) Backlog() int {
 	return len(s.client.send)
 }
 
+// frameBacklog is how many queued items a binary frame waits behind (4 frames
+// are about 1 MiB): a download does not get ahead of the events.
+const frameBacklog = 4
+
+// SendFrameTo queues a binary frame (EncodeFrame) for the connection req came
+// on, like SendTo. It waits while the queue holds more than frameBacklog
+// items, so that a confirm.request published meanwhile is not left behind
+// megabytes of file: it never takes the path that drops a slow app. The wait
+// ends with ctx, with the connection, or with ErrNoApp when req's connection
+// is no longer the current one. Frames and messages leave in the order they
+// were queued. Never call it with a lock the OnMessage handlers need.
+func (s *Server) SendFrameTo(ctx context.Context, req Message, frame []byte) error {
+	if req.conn == 0 {
+		return ErrNoApp
+	}
+	if len(frame) == 0 {
+		return ErrFrame
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		cl := s.client
+		if cl == nil || cl.gen != req.conn {
+			s.mu.Unlock()
+			return ErrNoApp
+		}
+		// Registered before looking at the queue: a writer that takes
+		// something out in between still wakes this call.
+		room := cl.roomChan()
+		if len(cl.send) <= frameBacklog {
+			select {
+			case cl.send <- outItem{frame: frame}:
+				s.mu.Unlock()
+				cl.stopWaiting()
+				return nil
+			default: // full of events: wait like for any other lack of room
+			}
+		}
+		s.mu.Unlock()
+		select {
+		case <-room:
+		case <-ctx.Done():
+			cl.stopWaiting()
+			return ctx.Err()
+		case <-cl.done:
+			cl.stopWaiting()
+			return ErrNoApp
+		}
+		cl.stopWaiting()
+	}
+}
+
 // sendVolatile queues a message that is not kept: for the connection gen, or
 // for the current one when gen is 0.
 func (s *Server) sendVolatile(gen uint64, typ, rid string, payload any) error {
@@ -337,7 +432,7 @@ func (s *Server) keepLocked(typ, rid string, raw json.RawMessage) Message {
 func (s *Server) sendLocked(m Message) {
 	if s.client != nil {
 		select {
-		case s.client.send <- m:
+		case s.client.send <- outItem{m: m}:
 		default: // too slow: drop it; it reconnects and resumes from lastSeq
 			s.client.cancel()
 			s.client = nil
@@ -395,7 +490,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cl := &client{send: make(chan Message, sendQueue), cancel: cancel, token: hello.Token, conn: c}
+	cl := &client{send: make(chan outItem, sendQueue), cancel: cancel, done: ctx.Done(), token: hello.Token, conn: c}
 	backlog, first, ok := s.attach(cl, hello)
 	if !ok { // the token changed since it was checked
 		c.Close(websocket.StatusPolicyViolation, "unauthorized")
@@ -458,8 +553,10 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			c.Close(websocket.StatusGoingAway, "bye")
 			return
-		case m := <-cl.send:
-			if err := write(ctx, c, m); err != nil {
+		case it := <-cl.send:
+			err := writeItem(ctx, c, it)
+			cl.signalRoom()
+			if err != nil {
 				return
 			}
 		case <-tick.C:
@@ -593,6 +690,15 @@ func decode(data []byte) (Message, error) {
 	m := Message{V: in.V, Type: in.Type, RID: in.RID, Payload: in.Payload}
 	_ = json.Unmarshal(in.TS, &m.TS)
 	return m, nil
+}
+
+func writeItem(ctx context.Context, c *websocket.Conn, it outItem) error {
+	if it.frame == nil {
+		return write(ctx, c, it.m)
+	}
+	wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return c.Write(wctx, websocket.MessageBinary, it.frame)
 }
 
 func write(ctx context.Context, c *websocket.Conn, m Message) error {

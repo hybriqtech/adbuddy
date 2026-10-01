@@ -171,7 +171,7 @@ func (l *phoneLink) fail(m bridge.Message, code, text string) {
 // chatArea is the chat (M3, protocol spec §5-§7): session, chat.send,
 // attachments, files, captures and the terminal.
 func (l *phoneLink) chatArea() area {
-	return area{
+	a := area{
 		handlers: map[string]func(bridge.Message){
 			bridge.TypeChatSend:    l.onChatSend,
 			bridge.TypeSessionNew:  l.onSessionNew,
@@ -184,9 +184,14 @@ func (l *phoneLink) chatArea() area {
 			bridge.TypeTerminalResize:  l.onTermResize,
 		},
 		snapshot: l.chatSnapshot,
-		attach:   l.stopTerm,
-		gone:     l.stopTerm,
+		attach:   func() { l.stopTerm(); l.resetFiles() },
+		gone:     func() { l.stopTerm(); l.resetFiles() },
+		frame:    l.onUploadFrame,
 	}
+	for typ, h := range l.filesHandlers() {
+		a.handlers[typ] = h
+	}
+	return a
 }
 
 // onChatSend types a message of the person into the agent (spec M3 §5.1).

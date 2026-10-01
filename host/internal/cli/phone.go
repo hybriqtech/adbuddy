@@ -50,6 +50,9 @@ type phoneLink struct {
 	manager *session.Manager // nil until serve starts the session
 	chat    chatState        // phone_chat.go
 	term    termState        // phone_term.go
+	files   filesState       // phone_files.go
+	adb     phoneapp.ADB     // the phone's adb, for screenshots
+	ws      string           // the environment (useWorkspace)
 }
 
 // maxNotices is how many unsupported types a connection is told of by notice:
@@ -91,7 +94,7 @@ var newToken = bridge.NewToken
 // confirms with fallback and never pauses, and says why: no failure of the
 // app's channel stops serve. Its only error is Interrupted (ctx ended).
 func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
-	l := &phoneLink{log: app.Stderr, agent: agentName}
+	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a}
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
 	without := func(why string) (*phoneLink, error) {
 		fmt.Fprintf(app.Stderr, "⚠ %s. 🔴 confirmations happen here, without the phone app.\n", why)

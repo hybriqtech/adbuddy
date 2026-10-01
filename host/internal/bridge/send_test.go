@@ -318,7 +318,7 @@ func TestBacklogCountsTheQueue(t *testing.T) {
 	if n := s.Backlog(); n != 0 {
 		t.Fatalf("without an app: %d", n)
 	}
-	s.client = &client{send: make(chan Message, sendQueue), cancel: func() {}, gen: 1}
+	s.client = &client{send: make(chan outItem, sendQueue), cancel: func() {}, gen: 1}
 	if n := s.Backlog(); n != 0 {
 		t.Fatalf("empty queue: %d", n)
 	}
@@ -334,4 +334,159 @@ func TestBacklogCountsTheQueue(t *testing.T) {
 	if n := s.Backlog(); n != 4 {
 		t.Fatalf("got %d, want 4", n)
 	}
+}
+
+// readAny reads the next thing the app gets, text or binary.
+func readAny(t *testing.T, c *websocket.Conn) (websocket.MessageType, []byte) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	typ, data, err := c.Read(ctx)
+	if err != nil {
+		t.Fatalf("nothing for the app: %v", err)
+	}
+	return typ, data
+}
+
+// Frames and messages leave in the order they were queued: the frames of a
+// download, an event published between them and the file.end that follows.
+func TestSendFrameToKeepsTheOrder(t *testing.T) {
+	h := start(t, Options{})
+	c := h.dial(token, 0)
+	recv(t, c)
+	sendRID(t, c, TypeFileGet, "r_1", FileGet{})
+	req := wantMsg(t, h, TypeFileGet)
+	id, _ := ParseFrameID("00112233445566778899aabbccddeeff")
+	ctx := context.Background()
+	for i := range 3 {
+		f, _ := EncodeFrame(id, int64(i), []byte{byte('a' + i)})
+		if err := h.srv.SendFrameTo(ctx, req, f); err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			if err := h.srv.Publish(TypeNotice, Notice{Text: "between"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := h.srv.Reply(req, TypeFileEnd, FileEnd{ID: id.String(), Size: 3}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"frame0", "frame1", TypeNotice, "frame2", TypeFileEnd}
+	for _, w := range want {
+		typ, data := readAny(t, c)
+		var got string
+		if typ == websocket.MessageBinary {
+			_, off, d, err := DecodeFrame(data)
+			if err != nil || string(d) != string(rune('a'+off)) {
+				t.Fatalf("frame %v %q %v", off, d, err)
+			}
+			got = "frame" + string(rune('0'+off))
+		} else {
+			var m Message
+			_ = json.Unmarshal(data, &m)
+			got = m.Type
+		}
+		if got != w {
+			t.Fatalf("got %s, want %s", got, w)
+		}
+	}
+	if err := h.srv.SendFrameTo(ctx, Message{}, []byte("x")); !errors.Is(err, ErrNoApp) {
+		t.Fatalf("a built request: %v, want ErrNoApp", err)
+	}
+}
+
+// With more than 4 items waiting, SendFrameTo waits: it queues nothing, never
+// drops the app, and ends when there is room, with its context, when the
+// connection goes or when another one replaced it.
+func TestSendFrameToWaitsForRoom(t *testing.T) {
+	var gone chan struct{}
+	setup := func() (*Server, *client, Message) {
+		s := New(Options{})
+		gone = make(chan struct{})
+		cl := &client{send: make(chan outItem, sendQueue), cancel: func() { t.Error("the app was dropped") }, done: gone, gen: 1}
+		s.client = cl
+		for range 5 {
+			if err := s.Send(TypeTerminalOutput, TerminalOutput{Epoch: "e_1"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return s, cl, Message{conn: 1}
+	}
+	run := func(s *Server, ctx context.Context, req Message) chan error {
+		out := make(chan error, 1)
+		go func() { out <- s.SendFrameTo(ctx, req, []byte("frame")) }()
+		return out
+	}
+	stays := func(t *testing.T, out chan error, cl *client) {
+		t.Helper()
+		select {
+		case err := <-out:
+			t.Fatalf("it did not wait: %v", err)
+		case <-time.After(150 * time.Millisecond):
+		}
+		if len(cl.send) != 5 {
+			t.Fatalf("queue of %d, want 5: a frame went in", len(cl.send))
+		}
+	}
+	finish := func(t *testing.T, out chan error) error {
+		t.Helper()
+		select {
+		case err := <-out:
+			return err
+		case <-time.After(3 * time.Second):
+			t.Fatal("it did not end")
+		}
+		return nil
+	}
+
+	t.Run("room", func(t *testing.T) {
+		s, cl, req := setup()
+		out := run(s, context.Background(), req)
+		stays(t, out, cl)
+		<-cl.send // 4 left: room, but the writer has not said so
+		stays4 := len(cl.send)
+		cl.signalRoom()
+		if err := finish(t, out); err != nil {
+			t.Fatal(err)
+		}
+		if stays4 != 4 || len(cl.send) != 5 {
+			t.Fatalf("queue %d then %d, want 4 then 5", stays4, len(cl.send))
+		}
+	})
+	t.Run("context", func(t *testing.T) {
+		s, cl, req := setup()
+		ctx, cancel := context.WithCancel(context.Background())
+		out := run(s, ctx, req)
+		stays(t, out, cl)
+		cancel()
+		if err := finish(t, out); !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v", err)
+		}
+		if len(cl.send) != 5 {
+			t.Fatal("a frame went in")
+		}
+	})
+	t.Run("connection gone", func(t *testing.T) {
+		s, cl, req := setup()
+		out := run(s, context.Background(), req)
+		stays(t, out, cl)
+		close(gone)
+		if err := finish(t, out); !errors.Is(err, ErrNoApp) {
+			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("replaced", func(t *testing.T) {
+		s, cl, req := setup()
+		out := run(s, context.Background(), req)
+		stays(t, out, cl)
+		s.mu.Lock()
+		s.client = &client{send: make(chan outItem, sendQueue), cancel: func() {}, gen: 2}
+		s.mu.Unlock()
+		<-cl.send
+		cl.signalRoom()
+		if err := finish(t, out); !errors.Is(err, ErrNoApp) {
+			t.Fatalf("got %v", err)
+		}
+	})
 }

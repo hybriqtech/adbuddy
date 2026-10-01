@@ -375,7 +375,7 @@ func TestReplacingAConnectionKeepsTheAppConnected(t *testing.T) {
 func TestSlowClientIsDropped(t *testing.T) {
 	s := New(Options{})
 	cancelled := false
-	s.client = &client{send: make(chan Message), cancel: func() { cancelled = true }}
+	s.client = &client{send: make(chan outItem), cancel: func() { cancelled = true }}
 	s.Publish(TypeNotice, Notice{Text: "x"})
 	if !cancelled || s.Connected() {
 		t.Fatalf("cancelled %v, connected %v; want cancelled and not connected", cancelled, s.Connected())
