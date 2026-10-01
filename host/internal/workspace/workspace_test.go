@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
 )
 
 func fakeExe(t *testing.T, content string) string {
@@ -324,5 +326,143 @@ func TestAgentsSaysWhichBlocksAreTemporary(t *testing.T) {
 	}
 	if strings.Contains(a, "adbuddy setup") {
 		t.Error("must not mention setup")
+	}
+}
+
+// --- hooks of Claude Code (spec M4 §3.2) ---
+
+func hooksOf(t *testing.T, settings string) map[string][]struct {
+	Matcher string `json:"matcher"`
+	Hooks   []struct {
+		Type    string `json:"type"`
+		Command string `json:"command"`
+		Timeout int    `json:"timeout"`
+	} `json:"hooks"`
+} {
+	t.Helper()
+	var s struct {
+		Hooks map[string][]struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string `json:"type"`
+				Command string `json:"command"`
+				Timeout int    `json:"timeout"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal([]byte(settings), &s); err != nil {
+		t.Fatal(err)
+	}
+	return s.Hooks
+}
+
+func TestInitInstallsTheHooks(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "env")
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err != nil {
+		t.Fatal(err)
+	}
+	hooks := hooksOf(t, read(t, filepath.Join(dir, ".claude", "settings.json")))
+	if len(hooks) != len(claudecode.Events) {
+		t.Fatalf("%d events hooked: %v", len(hooks), hooks)
+	}
+	for _, ev := range claudecode.Events {
+		l := hooks[ev]
+		if len(l) != 1 || len(l[0].Hooks) != 1 {
+			t.Fatalf("%s: %+v", ev, l)
+		}
+		h := l[0].Hooks[0]
+		want := `"` + filepath.ToSlash(filepath.Join(BinDir(dir), exe("adbuddy"))) + `" hook ` + ev
+		if h.Type != "command" || h.Command != want || h.Timeout != HookTimeout(ev) {
+			t.Errorf("%s: %+v, want command %s", ev, h, want)
+		}
+	}
+	if HookTimeout(claudecode.EventPermissionRequest) < 610 || HookTimeout(claudecode.EventStop) > 30 {
+		t.Error("timeouts: a permission waits for the phone, the others must not hold the agent")
+	}
+}
+
+func TestHooksAreIdempotentAndKeepTheUsers(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "env")
+	exeFile := fakeExe(t, "v1")
+	if _, err := Init(Options{Dir: dir, Exe: exeFile}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".claude", "settings.json")
+	var s map[string]any
+	if err := json.Unmarshal([]byte(read(t, path)), &s); err != nil {
+		t.Fatal(err)
+	}
+	hooks := s["hooks"].(map[string]any)
+	hooks["Stop"] = append(hooks["Stop"].([]any), map[string]any{"matcher": "x", "hooks": []any{map[string]any{"type": "command", "command": "echo mine"}}})
+	hooks["PreToolUse"] = []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "echo pre"}}}}
+	s["model"] = "opus"
+	b, _ := json.Marshal(s)
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Init(Options{Dir: dir, Exe: exeFile})
+	if err != nil || len(res.Updated)+len(res.Created) != 0 {
+		t.Fatalf("a second Init changed %+v (%v)", res, err)
+	}
+	got := read(t, path)
+	for _, want := range []string{`"echo mine"`, `"echo pre"`, `"model":"opus"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lost %s:\n%s", want, got)
+		}
+	}
+	if n := len(hooksOf(t, got)["Stop"]); n != 2 {
+		t.Errorf("%d Stop entries", n)
+	}
+}
+
+func TestHooksOfAnotherPathAreUpdatedNotDuplicated(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "env")
+	path := filepath.Join(dir, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\"/old/place/.adbuddy/bin/adbuddy\" hook Stop"}]}]}}`
+	if err := os.WriteFile(path, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err != nil {
+		t.Fatal(err)
+	}
+	stop := hooksOf(t, read(t, path))["Stop"]
+	if len(stop) != 1 || strings.Contains(stop[0].Hooks[0].Command, "/old/place") || !strings.Contains(stop[0].Hooks[0].Command, filepath.ToSlash(dir)) {
+		t.Fatalf("%+v", stop)
+	}
+}
+
+func TestBadHooksSettingsAreNotClobbered(t *testing.T) {
+	for name, body := range map[string]string{
+		"hooks not an object": `{"hooks":[]}`,
+		"event not a list":    `{"hooks":{"Stop":{"a":1}}}`,
+	} {
+		dir := filepath.Join(t.TempDir(), "env")
+		path := filepath.Join(dir, ".claude", "settings.json")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+		if read(t, path) != body {
+			t.Errorf("%s: the file was rewritten", name)
+		}
+	}
+}
+
+func TestHookCommandRefusesAPathThatQuotingCannotMakeSafe(t *testing.T) {
+	for _, p := range []string{`/a"b/adbuddy`, "/a$HOME/adbuddy", "/a`x`/adbuddy", "/a\nb/adbuddy"} {
+		if _, err := HookCommand(p, "Stop"); err == nil {
+			t.Errorf("%q accepted", p)
+		}
+	}
+	if c, err := HookCommand(`C:\Users\me\ADBuddy env\.adbuddy\bin\adbuddy.exe`, "Stop"); err != nil || c != `"C:/Users/me/ADBuddy env/.adbuddy/bin/adbuddy.exe" hook Stop` {
+		t.Errorf("%q %v", c, err)
 	}
 }

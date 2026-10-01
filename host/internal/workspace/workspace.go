@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
 )
 
 //go:embed templates/AGENTS.md templates/CLAUDE.md templates/NOTES.md
@@ -89,7 +91,7 @@ func Init(o Options) (Result, error) {
 		res.note(f.name, changed, created)
 	}
 
-	changed, created, err := mergeClaudeSettings(filepath.Join(o.Dir, ".claude", "settings.json"))
+	changed, created, err := mergeClaudeSettings(filepath.Join(o.Dir, ".claude", "settings.json"), filepath.Join(BinDir(o.Dir), exe("adbuddy")))
 	if err != nil {
 		return res, err
 	}
@@ -160,9 +162,85 @@ var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 // AllowRules are the permissions ADBuddy pre-approves in Claude Code (spec §4.6).
 var AllowRules = []string{"Bash(adb:*)", "Bash(adbuddy:*)"}
 
-// mergeClaudeSettings adds AllowRules to permissions.allow, keeping every
-// other setting the user has.
-func mergeClaudeSettings(path string) (changed, created bool, err error) {
+// HookTimeout is the seconds Claude Code gives the hook of an event: a
+// PermissionRequest waits for the phone up to 600 s (spec M4 §3.2); the others
+// only talk to the daemon, and a stuck one must not hold the agent for long.
+func HookTimeout(event string) int {
+	if event == claudecode.EventPermissionRequest {
+		return 610
+	}
+	return 10
+}
+
+// HookCommand is the command Claude Code runs for an event's hook: the
+// environment's own adbuddy by absolute path, with forward slashes (Claude
+// Code runs hooks in bash, on Windows too), quoted. A path that no quoting
+// here makes safe is an error.
+func HookCommand(exePath, event string) (string, error) {
+	p := filepath.ToSlash(exePath)
+	if strings.ContainsAny(p, "\"$`\r\n") {
+		return "", fmt.Errorf("the environment path %q has characters that cannot go in a hook command", exePath)
+	}
+	return `"` + p + `" hook ` + event, nil
+}
+
+// ourHook reports whether a hook command is the one ADBuddy installs for the
+// event, from any environment path.
+func ourHook(cmd, event string) bool {
+	return strings.HasSuffix(cmd, `" hook `+event) && strings.Contains(strings.ToLower(cmd), "adbuddy")
+}
+
+// mergeHooks makes settings["hooks"] hold ADBuddy's hook for each event,
+// keeping the user's. It reports whether it changed anything.
+func mergeHooks(settings map[string]any, path, exePath string) (bool, error) {
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		if _, exists := settings["hooks"]; exists {
+			return false, fmt.Errorf("%s: \"hooks\" is not an object", path)
+		}
+		hooks = map[string]any{}
+	}
+	changed := false
+	for _, ev := range claudecode.Events {
+		cmd, err := HookCommand(exePath, ev)
+		if err != nil {
+			return false, err
+		}
+		list, _ := hooks[ev].([]any)
+		if list == nil {
+			if _, exists := hooks[ev]; exists {
+				return false, fmt.Errorf("%s: \"hooks.%s\" is not a list", path, ev)
+			}
+		}
+		found := false
+		for _, entry := range list {
+			e, _ := entry.(map[string]any)
+			inner, _ := e["hooks"].([]any)
+			for _, h := range inner {
+				hm, _ := h.(map[string]any)
+				if c, _ := hm["command"].(string); hm != nil && ourHook(c, ev) {
+					found = true
+					if c != cmd || hm["type"] != "command" || hm["timeout"] != float64(HookTimeout(ev)) {
+						hm["type"], hm["command"], hm["timeout"] = "command", cmd, float64(HookTimeout(ev))
+						changed = true
+					}
+				}
+			}
+		}
+		if !found {
+			list = append(list, map[string]any{"hooks": []any{map[string]any{"type": "command", "command": cmd, "timeout": float64(HookTimeout(ev))}}})
+			changed = true
+		}
+		hooks[ev] = list
+	}
+	settings["hooks"] = hooks
+	return changed, nil
+}
+
+// mergeClaudeSettings adds AllowRules to permissions.allow and ADBuddy's hooks
+// (spec M4 §3.2, when hookExe is not empty), keeping every other setting the
+// user has.
+func mergeClaudeSettings(path, hookExe string) (changed, created bool, err error) {
 	settings := map[string]any{}
 	data, err := os.ReadFile(path)
 	switch {
@@ -202,6 +280,13 @@ func mergeClaudeSettings(path string) (changed, created bool, err error) {
 			allow = append(allow, rule)
 			changed = true
 		}
+	}
+	if hookExe != "" {
+		hc, err := mergeHooks(settings, path, hookExe)
+		if err != nil {
+			return false, false, err
+		}
+		changed = changed || hc
 	}
 	if !changed && !created {
 		return false, false, nil
