@@ -354,7 +354,7 @@ connection address with --connect (or type it when asked).`,
 	cmd.Flags().BoolVar(&useCode, "code", false, "pair with IP:port and the 6-digit code instead of a QR code")
 	cmd.Flags().StringVar(&connectFlag, "connect", "", "connect by this IP:port when mDNS does not find the phone (Tailscale or another network), as its Wireless debugging screen shows it")
 	cmd.Flags().BoolVar(&yes, "yes", false, "accept the recommended choices without asking")
-	cmd.Flags().StringVar(&apkFlag, "apk", "", "install this ADBuddy app APK instead of the latest release")
+	cmd.Flags().StringVar(&apkFlag, "apk", "", "install this ADBuddy app APK instead of the latest release (a file you choose: if hybriqtech's release certificate did not sign it, exactly this APK becomes the trusted development build)")
 	cmd.Flags().BoolVar(&noApp, "no-app", false, "do not install or set up the phone app")
 	return cmd
 }

@@ -1,6 +1,7 @@
 package phoneapp
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,10 +14,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/phoneapp/apktest"
 )
 
 type fakeADB struct {
@@ -338,7 +341,7 @@ func TestCommandsHaveATimeLimit(t *testing.T) {
 func TestEachCommandHasItsOwnDeadline(t *testing.T) {
 	f := &fakeADB{answers: map[string][]string{
 		"shell pm grant tech.hybriq.adbuddy android.permission.WRITE_SECURE_SETTINGS": {""},
-		"install -r /tmp/a.apk": {"Success\n"},
+		"install -r --no-incremental /tmp/a.apk":                                      {"Success\n"},
 	}}
 	if err := Grant(context.Background(), f); err != nil {
 		t.Fatal(err)
@@ -499,47 +502,88 @@ func TestTunnel(t *testing.T) {
 }
 
 func TestInstall(t *testing.T) {
-	f := &fakeADB{answers: map[string][]string{"install -r /tmp/a.apk": {"Performing Streamed Install\nSuccess\n"}}}
+	key := "install -r --no-incremental /tmp/a.apk"
+	f := &fakeADB{answers: map[string][]string{key: {"Performing Streamed Install\nSuccess\n"}}}
 	if err := Install(context.Background(), f, "/tmp/a.apk"); err != nil {
 		t.Fatal(err)
 	}
-	f.answers["install -r /tmp/a.apk"] = []string{"Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]\n"}
-	if err := Install(context.Background(), f, "/tmp/a.apk"); err == nil {
-		t.Fatal("failure accepted")
+	f.answers[key] = []string{"Failure [INSTALL_FAILED_OLDER_SDK]\n"}
+	if err := Install(context.Background(), f, "/tmp/a.apk"); err == nil || errors.Is(err, ErrOtherSigner) {
+		t.Fatalf("older sdk: %v", err)
+	}
+	f.answers[key] = []string{"Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package tech.hybriq.adbuddy signatures do not match newer version; ignoring!]\n"}
+	if err := Install(context.Background(), f, "/tmp/a.apk"); !errors.Is(err, ErrOtherSigner) || !strings.Contains(err.Error(), "signatures do not match") {
+		t.Fatalf("other signer: %v", err)
 	}
 }
 
-func TestDownloadChecksTheSHA256(t *testing.T) {
-	apk := []byte("PK fake apk")
-	sum := sha256.Sum256(apk)
-	good := hex.EncodeToString(sum[:])
-	var sidecar string
+// releaseServer serves apk and a .sha256 sidecar (sidecar() decides its
+// text), and counts the requests.
+func releaseServer(t *testing.T, apk []byte, sidecar func() string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
 		switch r.URL.Path {
 		case "/adbuddy.apk":
 			w.Write(apk)
 		case "/adbuddy.apk.sha256":
-			io.WriteString(w, sidecar)
+			io.WriteString(w, sidecar())
 		default:
 			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+func sumOf(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
+func TestDownloadChecksTheSHA256(t *testing.T) {
+	apk := signedBy(ours)
+	sidecar := sumOf(apk) + "  adbuddy.apk\n"
+	srv, _ := releaseServer(t, apk, func() string { return sidecar })
 	dir := t.TempDir()
-	sidecar = good + "  adbuddy.apk\n"
-	p, err := Download(context.Background(), srv.Client(), srv.URL+"/", dir)
+	p, err := Download(context.Background(), srv.Client(), srv.URL+"/", dir, apktest.SHA256(ours))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, _ := os.ReadFile(p); string(b) != string(apk) || p != filepath.Join(dir, "adbuddy.apk") {
-		t.Fatalf("%s %q", p, b)
+	if b, _ := os.ReadFile(p); !bytes.Equal(b, apk) || p != filepath.Join(dir, "adbuddy.apk") {
+		t.Fatalf("%s %d bytes", p, len(b))
 	}
 	sidecar = strings.Repeat("0", 64)
-	if _, err := Download(context.Background(), srv.Client(), srv.URL+"/", t.TempDir()); !errors.Is(err, ErrChecksum) {
+	if _, err := Download(context.Background(), srv.Client(), srv.URL+"/", t.TempDir(), apktest.SHA256(ours)); !errors.Is(err, ErrChecksum) {
 		t.Fatalf("bad sum: %v", err)
 	}
-	if _, err := Download(context.Background(), srv.Client(), srv.URL+"/none/", t.TempDir()); !errors.Is(err, ErrNoRelease) {
+	if _, err := Download(context.Background(), srv.Client(), srv.URL+"/none/", t.TempDir(), apktest.SHA256(ours)); !errors.Is(err, ErrNoRelease) {
 		t.Fatalf("no release: %v", err)
+	}
+}
+
+// An APK whose checksum matches but that someone else signed is not saved.
+func TestDownloadChecksTheSigner(t *testing.T) {
+	apk := signedBy(other)
+	srv, _ := releaseServer(t, apk, func() string { return sumOf(apk) + "  adbuddy.apk\n" })
+	dir := t.TempDir()
+	if _, err := Download(context.Background(), srv.Client(), srv.URL+"/", dir, apktest.SHA256(ours)); !errors.Is(err, ErrSigner) {
+		t.Fatalf("got %v, want ErrSigner", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "adbuddy.apk")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the APK was saved: %v", err)
+	}
+}
+
+// Without a pinned certificate nothing is downloaded at all.
+func TestDownloadNeedsAPinnedCertificate(t *testing.T) {
+	srv, hits := releaseServer(t, []byte("x"), func() string { return "" })
+	if _, err := Download(context.Background(), srv.Client(), srv.URL+"/", t.TempDir(), ""); !errors.Is(err, ErrUnpinned) {
+		t.Fatalf("got %v, want ErrUnpinned", err)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("%d requests without a pin", n)
 	}
 }
 
@@ -556,7 +600,7 @@ func TestDownloadHasATimeLimit(t *testing.T) {
 	defer close(release)
 	for _, client := range []*http.Client{nil, srv.Client()} {
 		err := within(t, 5*time.Second, func() error {
-			_, err := Download(context.Background(), client, srv.URL+"/", t.TempDir())
+			_, err := Download(context.Background(), client, srv.URL+"/", t.TempDir(), strings.Repeat("a", 64))
 			return err
 		})
 		if err == nil {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
+	"github.com/hybriqtech/adbuddy/host/internal/phoneapp/apktest"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
 
@@ -53,10 +54,32 @@ func notInstalled(times int) testutil.FakeRule {
 	return testutil.FakeRule{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n", Times: times}
 }
 
-// release serves a published APK; a bad one answers a checksum of another file.
+// Test certificates: tests that reach the app pin testCert (pinTestCert).
+var (
+	testCert  = apktest.Cert("hybriqtech")
+	otherCert = apktest.Cert("someone else")
+)
+
+// testAPK is an APK signed (v2 and v3) with cert.
+func testAPK(cert []byte) []byte {
+	return apktest.APK(apktest.Block{ID: apktest.V2, Signers: []apktest.Signer{{Cert: cert}}}, apktest.Block{ID: apktest.V3, Signers: []apktest.Signer{{Cert: cert}}})
+}
+
+// pinTestCert makes setup trust testCert as the release certificate.
+func pinTestCert(t *testing.T) { setVar(t, &releaseCert, apktest.SHA256(testCert)) }
+
+// release serves an APK signed with testCert and pins testCert.
 func release(t *testing.T, status int, badSum bool) string {
 	t.Helper()
-	apk := []byte("not really an apk")
+	return releaseSignedBy(t, status, badSum, testCert)
+}
+
+// releaseSignedBy serves an APK signed with cert (status != 200: an error;
+// badSum: a .sha256 that does not match) and pins testCert.
+func releaseSignedBy(t *testing.T, status int, badSum bool, cert []byte) string {
+	t.Helper()
+	pinTestCert(t)
+	apk := testAPK(cert)
 	sum := sha256.Sum256(apk)
 	if badSum {
 		sum = sha256.Sum256([]byte("another file"))
@@ -76,10 +99,13 @@ func release(t *testing.T, status int, badSum bool) string {
 	return srv.URL + "/"
 }
 
-func writeAPK(t *testing.T) string {
+// writeAPK writes an APK signed with testCert, as --apk takes it.
+func writeAPK(t *testing.T) string { return writeAPKSignedBy(t, testCert) }
+
+func writeAPKSignedBy(t *testing.T, cert []byte) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "app.apk")
-	if err := os.WriteFile(p, []byte("apk"), 0o600); err != nil {
+	if err := os.WriteFile(p, testAPK(cert), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return p
@@ -179,6 +205,35 @@ func TestSetupAppBranches(t *testing.T) {
 			args:   func(t *testing.T) []string { t.Setenv("ADBUDDY_RELEASE_URL", release(t, 200, true)); return nil },
 			want:   want{consent: "skipped"},
 			stderr: []string{"does not match its checksum", "nothing was installed", "--apk <file>"}, noChange: true},
+		{name: "other signer", consent: "granted", over: []testutil.FakeRule{notInstalled(0)},
+			args: func(t *testing.T) []string {
+				t.Setenv("ADBUDDY_RELEASE_URL", releaseSignedBy(t, 200, false, otherCert))
+				return nil
+			},
+			want:   want{consent: "skipped"},
+			stderr: []string{"not signed by hybriqtech", "nothing was installed", "--apk <file>"}, noChange: true},
+		{name: "unpinned", consent: "granted", over: []testutil.FakeRule{notInstalled(0)},
+			args: func(t *testing.T) []string {
+				t.Setenv("ADBUDDY_RELEASE_URL", release(t, 200, false))
+				setVar(t, &releaseCert, "")
+				return nil
+			},
+			want:   want{consent: "skipped"},
+			stderr: []string{"no pinned signing certificate", "--apk <file>"}, noStderr: []string{"⚠", "Getting the ADBuddy app"}, noChange: true},
+		{name: "release url not allowed", consent: "granted", over: []testutil.FakeRule{notInstalled(0)},
+			args: func(t *testing.T) []string {
+				pinTestCert(t)
+				t.Setenv("ADBUDDY_RELEASE_URL", "http://example.com/")
+				return nil
+			},
+			want:   want{consent: "skipped"},
+			stderr: []string{"ADBUDDY_RELEASE_URL must be https://"}, noChange: true},
+		{name: "development build on the phone", consent: "granted",
+			over: []testutil.FakeRule{notInstalled(0), {Match: `^install -r `, Exit: 1,
+				Stderr: "adb: failed to install app.apk: Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Existing package tech.hybriq.adbuddy signatures do not match newer version; ignoring!]\n"}},
+			args:   func(t *testing.T) []string { return []string{"--apk", writeAPK(t)} },
+			want:   want{consent: "skipped"},
+			stderr: []string{"signed with another key", "Uninstall it on the phone", "adbuddy setup"}, noStderr: []string{"Could not install the app"}, noChange: true},
 		{name: "install fails", consent: "granted",
 			over:   []testutil.FakeRule{notInstalled(0), {Match: `^install -r `, Stdout: "Failure [INSTALL_FAILED_OLDER_SDK]\n"}},
 			args:   func(t *testing.T) []string { return []string{"--apk", writeAPK(t)} },
@@ -287,20 +342,40 @@ func TestSetupApkWithNoAppIsAUsageError(t *testing.T) {
 	}
 }
 
-func TestReleaseURLEndsWithASlash(t *testing.T) {
-	for in, want := range map[string]string{
-		"":                      phoneapp.ReleaseURL,
-		"http://127.0.0.1:9/x":  "http://127.0.0.1:9/x/",
-		"http://127.0.0.1:9/x/": "http://127.0.0.1:9/x/",
-	} {
-		app := &App{Getenv: func(k string) string {
+func TestReleaseURL(t *testing.T) {
+	get := func(in string) (string, error) {
+		return releaseURL(&App{Getenv: func(k string) string {
 			if k == "ADBUDDY_RELEASE_URL" {
 				return in
 			}
 			return ""
-		}}
-		if got := releaseURL(app); got != want {
-			t.Errorf("%q: %q, want %q", in, got, want)
+		}})
+	}
+	for in, want := range map[string]string{
+		"":                        phoneapp.ReleaseURL,
+		"http://127.0.0.1:9/x":    "http://127.0.0.1:9/x/",
+		"http://127.0.0.1:9/x/":   "http://127.0.0.1:9/x/",
+		"http://[::1]:9/x":        "http://[::1]:9/x/",
+		"http://localhost:9/x":    "http://localhost:9/x/",
+		"https://example.com/dl":  "https://example.com/dl/",
+		"https://example.com/dl/": "https://example.com/dl/",
+	} {
+		if got, err := get(in); err != nil || got != want {
+			t.Errorf("%q: %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{
+		"example.com",                // no scheme
+		"http://example.com/",        // plain http to another host
+		"file:///tmp/x",              // not a web URL
+		"ftp://127.0.0.1/",           // loopback, but not http
+		"http://127.0.0.1.evil.com/", // starts like loopback
+		"http://127.0.0.1@evil.com/", // the host is evil.com
+		"https://",                   // no host
+		"https:///x",                 // no host
+	} {
+		if got, err := get(in); err == nil {
+			t.Errorf("%q accepted as %q", in, got)
 		}
 	}
 }

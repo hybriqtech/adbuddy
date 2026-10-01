@@ -101,16 +101,32 @@ func InstalledVersion(ctx context.Context, a ADB) (string, error) {
 	return version, nil
 }
 
-// Install installs (or updates, keeping data) the APK at path.
+// ErrOtherSigner means the app on the phone was signed with another key (a
+// development build, say), so Android refuses to update it.
+var ErrOtherSigner = errors.New("the app on the phone was signed with another key")
+
+// Install installs (or updates, keeping data) the APK at path. Never
+// incrementally: adb would keep reading the file on the PC after the host
+// checked it.
 func Install(ctx context.Context, a ADB, path string) error {
-	out, err := runFor(ctx, a, installTimeout, nil, "install", "-r", path)
+	out, err := runFor(ctx, a, installTimeout, nil, "install", "-r", "--no-incremental", path)
+	if err == nil && strings.Contains(out, "Success") {
+		return nil
+	}
+	msg := strings.TrimSpace(out)
+	if err != nil {
+		msg = err.Error()
+	}
+	if strings.Contains(msg, "INSTALL_FAILED_UPDATE_INCOMPATIBLE") {
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrOtherSigner, err)
+		}
+		return fmt.Errorf("%w: %s", ErrOtherSigner, msg)
+	}
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(out, "Success") {
-		return fmt.Errorf("adb install: %s", strings.TrimSpace(out))
-	}
-	return nil
+	return fmt.Errorf("adb install: %s", msg)
 }
 
 // bundleRe reads `content call` output: "Result: Bundle[{a=1, b=x}]".

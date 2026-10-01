@@ -28,10 +28,28 @@ var ErrNoRelease = errors.New("no published release of the app")
 // ErrChecksum means the downloaded APK does not match its published SHA-256.
 var ErrChecksum = errors.New("the APK does not match its SHA-256")
 
+// SigningCertSHA256 is the SHA-256 (lowercase hex) of the certificate that
+// signs the app's releases (spec M6a §6.1). It is empty until the release
+// key exists (docs/releasing.md); then Download refuses every APK.
+const SigningCertSHA256 = ""
+
+// ErrUnpinned means this build pins no signing certificate, so it downloads
+// no APK.
+var ErrUnpinned = errors.New("this build of adbuddy has no pinned signing certificate for the app")
+
+// MaxAPK bounds every APK the host reads: downloaded, installed or --apk.
+const MaxAPK = maxAPK
+
 // Download fetches the latest APK into dir, checks it against the published
-// SHA-256 and returns its path. base is ReleaseURL (or a test server).
-// Without a client or a deadline in ctx it takes at most downloadTimeout.
-func Download(ctx context.Context, client *http.Client, base, dir string) (string, error) {
+// SHA-256 and checks that every signer has the certificate whose SHA-256 is
+// cert (the release one: never the development one), then returns its
+// path. base is ReleaseURL (or a test server). Without cert it downloads
+// nothing (ErrUnpinned). Without a client or a deadline in ctx it takes at
+// most downloadTimeout.
+func Download(ctx context.Context, client *http.Client, base, dir, cert string) (string, error) {
+	if cert == "" {
+		return "", ErrUnpinned
+	}
 	if client == nil {
 		client = &http.Client{Timeout: downloadTimeout}
 	}
@@ -56,6 +74,9 @@ func Download(ctx context.Context, client *http.Client, base, dir string) (strin
 	got := sha256.Sum256(data)
 	if hex.EncodeToString(got[:]) != want {
 		return "", ErrChecksum
+	}
+	if err := CheckSigner(data, cert); err != nil {
+		return "", err
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err

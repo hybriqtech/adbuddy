@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,15 +37,29 @@ func (r *appResult) note(s string) {
 	r.Note += s
 }
 
-func releaseURL(app *App) string {
+// releaseCert is the signing certificate a downloaded APK must have, and
+// the release one the installed app may have (a variable so that tests can
+// pin theirs).
+var releaseCert = phoneapp.SigningCertSHA256
+
+// releaseURL is where setup downloads the app: ReleaseURL, or
+// ADBUDDY_RELEASE_URL for the e2e tests, which must be https:// or a
+// loopback http://. Even another origin can only serve APKs signed with
+// releaseCert and not older than MinAppVersionCode (spec M6a §6.4).
+func releaseURL(app *App) (string, error) {
 	u := app.Getenv("ADBUDDY_RELEASE_URL")
 	if u == "" {
-		return phoneapp.ReleaseURL
+		return phoneapp.ReleaseURL, nil
+	}
+	p, err := url.Parse(u)
+	loopback := err == nil && (p.Hostname() == "127.0.0.1" || p.Hostname() == "::1" || p.Hostname() == "localhost")
+	if err != nil || !(p.Scheme == "https" && p.Host != "" || p.Scheme == "http" && loopback) {
+		return "", fmt.Errorf("ADBUDDY_RELEASE_URL must be https:// or http:// to 127.0.0.1, ::1 or localhost, not %q", u)
 	}
 	if !strings.HasSuffix(u, "/") {
 		u += "/"
 	}
-	return u
+	return u, nil
 }
 
 const again = "Run `adbuddy setup` again to retry."
@@ -71,15 +86,27 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 	}
 	if version == "" || apk != "" {
 		if apk == "" {
-			say("Getting the ADBuddy app…\n")
-			apk, err = phoneapp.Download(ctx, nil, releaseURL(app), filepath.Join(e.dirs.Data, "app"))
+			base, err := releaseURL(app)
+			if err != nil {
+				res.note(err.Error())
+				warn("⚠ %v. Setup goes on without the app; 🔴 confirmations will happen in the terminal.\n", err)
+				return res
+			}
+			if releaseCert != "" {
+				say("Getting the ADBuddy app…\n")
+			}
+			apk, err = phoneapp.Download(ctx, nil, base, filepath.Join(e.dirs.Data, "app"), releaseCert)
 			if err != nil {
 				res.note(err.Error())
 				switch {
+				case errors.Is(err, phoneapp.ErrUnpinned):
+					warn("This build of adbuddy has no pinned signing certificate for the app, so it does not download it: skipping it (pass --apk <file> to install one). 🔴 confirmations will happen in the terminal.\n")
 				case errors.Is(err, phoneapp.ErrNoRelease):
 					warn("There is no published version of the ADBuddy app yet: skipping it (pass --apk <file> to install one). 🔴 confirmations will happen in the terminal.\n")
 				case errors.Is(err, phoneapp.ErrChecksum):
 					warn("⚠ The downloaded ADBuddy app does not match its checksum, so nothing was installed. Try again later, or pass --apk <file>. 🔴 confirmations will happen in the terminal.\n")
+				case errors.Is(err, phoneapp.ErrSigner):
+					warn("⚠ The downloaded ADBuddy app is not signed by hybriqtech, so nothing was installed. Please report it at https://github.com/hybriqtech/adbuddy/issues, or pass --apk <file>. 🔴 confirmations will happen in the terminal.\n")
 				default:
 					warn("⚠ Could not get the ADBuddy app (%v): setup goes on without it; 🔴 confirmations will happen in the terminal. Try again later, or pass --apk <file>.\n", err)
 				}
@@ -93,7 +120,11 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 		say("Installing the ADBuddy app on the phone…\n")
 		if err := phoneapp.Install(ctx, a, apk); err != nil {
 			res.note(err.Error())
-			warn("⚠ Could not install the app: %v. Setup goes on without it; try again later or with --apk <file>.\n", err)
+			if errors.Is(err, phoneapp.ErrOtherSigner) {
+				warn("⚠ The ADBuddy app on the phone was signed with another key (a development build?), so Android will not update it. Uninstall it on the phone (Settings › Apps › ADBuddy › Uninstall; it forgets its pairing with this PC) and run `adbuddy setup` again. Setup goes on without it.\n")
+			} else {
+				warn("⚠ Could not install the app: %v. Setup goes on without it; try again later or with --apk <file>.\n", err)
+			}
 			return res
 		}
 		if version, err = phoneapp.InstalledVersion(ctx, a); err != nil || version == "" {
