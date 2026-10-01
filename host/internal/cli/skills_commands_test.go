@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
@@ -24,21 +25,66 @@ type skillExample struct {
 
 var annotationRe = regexp.MustCompile(`^(.*\S)\s+#\s+(green|yellow|red)\s*$`)
 
-// forbiddenRecipeRe is what no recipe does, however well it is annotated
-// (spec §2.3): clear an app's data, delete recursively, wipe, reboot, or
-// install granting every permission.
-var forbiddenRecipeRe = regexp.MustCompile(`\bpm clear\b|\brm -rf\b|\bwipe\b|\breboot\b|\binstall\b.*\s-g\b`)
+// uncheckedCmdRe is a line that looks like an adb or adbuddy command outside a
+// checked block (prose, an indented block, a block of another language):
+// spec §1.1 wants every example annotated and checked.
+var uncheckedCmdRe = regexp.MustCompile(`(?i)^(\$|>|PS>)?\s*(\S*[/\\])?adb(uddy)?(\.exe)?(\s|$)`)
 
-// skillExamples extracts the examples from every Markdown file of every skill.
-func skillExamples(t *testing.T) []skillExample {
-	t.Helper()
-	skills := workspace.Skills()
+// adbProgramRe is the first word of an example that names the adb program.
+var adbProgramRe = regexp.MustCompile(`(?i)^(.*[/\\])?adb(\.exe)?$`)
+
+// installGroupRe is a group of short options of install that includes -g.
+var installGroupRe = regexp.MustCompile(`^-[a-z]*g[a-z]*$`)
+
+// skillAdbuddySubcommands are the subcommands a skill may use.
+var skillAdbuddySubcommands = map[string]bool{
+	"screen": true, "tap": true, "type": true, "foreground": true,
+	"screenshot": true, "send": true, "journal": true, "undo": true,
+}
+
+// forbiddenRecipe says whether a command does what no recipe does, however
+// well it is annotated (spec §2.3): clear an app's data, delete recursively,
+// wipe, reboot, or install granting every permission.
+func forbiddenRecipe(fields []string) bool {
+	var toks []string
+	for _, f := range fields {
+		toks = append(toks, strings.Fields(strings.ToLower(f))...)
+	}
+	joined := strings.Join(toks, " ")
+	if strings.Contains(joined, "wipe") || strings.Contains(joined, "reboot") ||
+		strings.Contains(joined, "pm clear") || strings.Contains(joined, "package clear") {
+		return true
+	}
+	for i, tk := range toks {
+		switch {
+		case tk == "rm" || strings.HasSuffix(tk, "/rm"):
+			for _, o := range toks[i+1:] {
+				if o == "--recursive" || (strings.HasPrefix(o, "-") && !strings.HasPrefix(o, "--") && strings.Contains(o, "r")) {
+					return true
+				}
+			}
+		case strings.HasPrefix(tk, "install"):
+			for _, o := range toks[i+1:] {
+				if installGroupRe.MatchString(o) || strings.HasPrefix(o, "--grant") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// skillExamplesIn extracts the examples from every Markdown file of fsys and
+// returns the problems found in how the blocks are written.
+func skillExamplesIn(fsys fs.FS) ([]skillExample, []string) {
 	var out []skillExample
-	err := fs.WalkDir(skills, ".", func(p string, d fs.DirEntry, err error) error {
+	var errs []string
+	bad := func(format string, a ...any) { errs = append(errs, fmt.Sprintf(format, a...)) }
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
 			return err
 		}
-		data, err := fs.ReadFile(skills, p)
+		data, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}
@@ -46,16 +92,24 @@ func skillExamples(t *testing.T) []skillExample {
 		other := false // inside a block of another language (sh, text…)
 		for i, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
 			trim := strings.TrimSpace(line)
+			ticks := len(trim) - len(strings.TrimLeft(trim, "`"))
 			switch {
-			case kind == "" && !other && (trim == "```adb" || trim == "```adbuddy"):
-				kind = strings.TrimPrefix(trim, "```")
-			case kind == "" && !other && strings.HasPrefix(trim, "```"):
-				other = true
+			case kind == "" && !other && strings.HasPrefix(trim, "~~~"):
+				bad("%s:%d: use ``` fences, never ~~~: the blocks of ```adb are checked", p, i+1)
+			case kind == "" && !other && ticks >= 3:
+				info := strings.TrimLeft(trim, "`")
+				word := strings.ToLower(strings.Fields(info + " x")[0])
+				switch {
+				case ticks == 3 && (info == "adb" || info == "adbuddy"):
+					kind = info
+				case word == "adb" || word == "adbuddy":
+					bad("%s:%d: the fence must be exactly ```adb or ```adbuddy (lower case, three backticks, nothing else): %q", p, i+1, trim)
+					other = true
+				default:
+					other = true
+				}
 			case other && trim == "```":
 				other = false
-			case other && (strings.HasPrefix(trim, "adb ") || strings.HasPrefix(trim, "adbuddy ")):
-				// An unchecked command: spec §1.1 wants every example annotated.
-				t.Errorf("%s:%d: a command that starts with adb or adbuddy goes in a ```adb or ```adbuddy block, where it is checked: %q", p, i+1, trim)
 			case kind != "" && trim == "```":
 				kind = ""
 			case kind != "" && trim != "":
@@ -66,23 +120,41 @@ func skillExamples(t *testing.T) []skillExample {
 					}
 				}
 				out = append(out, ex)
+			case kind == "" && uncheckedCmdRe.MatchString(trim):
+				// prose, an indented block or a block of another language
+				bad("%s:%d: a command that starts with adb or adbuddy goes in a ```adb or ```adbuddy block, where it is checked: %q", p, i+1, trim)
 			}
 		}
 		if kind != "" || other {
-			t.Errorf("%s: a code block is not closed", p)
+			bad("%s: a code block is not closed", p)
 		}
 		return nil
 	})
 	if err != nil {
-		t.Fatal(err)
+		bad("walking the skills: %v", err)
+	}
+	return out, errs
+}
+
+// skillExamples extracts the examples from every skill, failing t on a block
+// that is badly written. Reused by the task that checks the skills' text.
+func skillExamples(t *testing.T) []skillExample {
+	t.Helper()
+	out, errs := skillExamplesIn(workspace.Skills())
+	for _, e := range errs {
+		t.Error(e)
 	}
 	return out
 }
 
 // splitExample splits a command into arguments the way a shell does for
-// quotes, without expanding anything. Examples use single quotes for scripts:
-// a $ or a backtick inside double quotes would expand on the PC.
+// quotes, without expanding anything. Outside quotes only plain characters are
+// accepted, and inside double quotes nothing the shell would expand: in Git
+// Bash $(…), a backtick, a pipe or a redirection run on the PC before adb
+// starts (spec §2.5). Scripts go in single quotes.
 func splitExample(s string) ([]string, error) {
+	const plain = "_./:=,+@%-"
+	errQuote := errors.New("quote the script in single quotes (spec §2.5)")
 	var out []string
 	var cur strings.Builder
 	inWord := false
@@ -92,8 +164,8 @@ func splitExample(s string) ([]string, error) {
 		case quote != 0:
 			if r == quote {
 				quote = 0
-			} else if quote == '"' && (r == '$' || r == '`') {
-				return nil, errors.New("use single quotes for a script with $ or a backtick")
+			} else if quote == '"' && strings.ContainsRune("$`\\!", r) {
+				return nil, errQuote
 			} else {
 				cur.WriteRune(r)
 			}
@@ -105,9 +177,11 @@ func splitExample(s string) ([]string, error) {
 				cur.Reset()
 				inWord = false
 			}
-		default:
+		case r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(plain, r):
 			cur.WriteRune(r)
 			inWord = true
+		default:
+			return nil, errQuote
 		}
 	}
 	if quote != 0 {
@@ -122,66 +196,193 @@ func splitExample(s string) ([]string, error) {
 	return out, nil
 }
 
+// checkSkillExamples checks every example and returns the problems.
+func checkSkillExamples(cl *classify.Classifier, examples []skillExample) []string {
+	var errs []string
+	for _, ex := range examples {
+		where := fmt.Sprintf("%s:%d", ex.file, ex.line)
+		for _, e := range checkSkillExample(cl, ex) {
+			errs = append(errs, where+": "+e)
+		}
+	}
+	return errs
+}
+
+func checkSkillExample(cl *classify.Classifier, ex skillExample) (errs []string) {
+	bad := func(format string, a ...any) { errs = append(errs, fmt.Sprintf(format, a...)) }
+	defer func() {
+		if r := recover(); r != nil {
+			bad("checking %q panicked: %v", ex.text, r)
+		}
+	}()
+	fields, err := splitExample(ex.text)
+	if err != nil {
+		bad("%v: %q", err, ex.text)
+		return
+	}
+	switch ex.kind {
+	case "adb":
+		if adbProgramRe.MatchString(fields[0]) {
+			bad("write the command without the adb prefix: %q", ex.text)
+			return
+		}
+		if forbiddenRecipe(fields) {
+			bad("a recipe never does this (spec §2.3): %q", ex.text)
+			return
+		}
+		g, argv := classify.SplitGlobal(fields)
+		if g.Serial != "" || len(g.Forbidden) > 0 || len(g.Pass) > 0 {
+			bad("skills never use adb's global options: %q", ex.text)
+			return
+		}
+		if len(argv) == 0 {
+			bad("empty command: %q", ex.text)
+			return
+		}
+		got := cl.Classify(argv).Level.String()
+		switch {
+		case ex.level == "":
+			bad("no annotation (the classifier says %s): add `# %s` to %q", got, got, ex.text)
+		case got != ex.level:
+			bad("annotated %s but the classifier says %s: %q", ex.level, got, ex.text)
+		}
+	case "adbuddy":
+		if adbProgramRe.MatchString(fields[0]) || fields[0] == "adbuddy" {
+			bad("write the subcommand without the adbuddy prefix: %q", ex.text)
+			return
+		}
+		if !skillAdbuddySubcommands[fields[0]] {
+			bad("a skill does not use `adbuddy %s` (allowed: screen, tap, type, foreground, screenshot, send, journal, undo): %q", fields[0], ex.text)
+			return
+		}
+		// A fresh tree per example: ParseFlags leaves values in the flags.
+		root := NewRoot(&App{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard, Getenv: func(string) string { return "" }})
+		cmd, rest, err := root.Find(fields)
+		if err != nil || cmd == root {
+			bad("adbuddy has no subcommand %q", fields[0])
+			return
+		}
+		// ParseFlags knows the persistent flags (--json), -ofile, --x=y and
+		// values that start with a dash; it fails on an unknown flag.
+		if err := cmd.ParseFlags(rest); err != nil {
+			bad("%q: %v", ex.text, err)
+			return
+		}
+		if err := cmd.ValidateArgs(cmd.Flags().Args()); err != nil {
+			bad("%q: %v", ex.text, err)
+		}
+	default:
+		bad("unknown block kind %q", ex.kind)
+	}
+	return
+}
+
 func TestSkillExamples(t *testing.T) {
 	cl, err := classify.New(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	checked := 0
-	for _, ex := range skillExamples(t) {
-		where := fmt.Sprintf("%s:%d", ex.file, ex.line)
-		fields, err := splitExample(ex.text)
-		if err != nil {
-			t.Errorf("%s: %v: %q", where, err, ex.text)
-			continue
-		}
-		checked++
-		switch ex.kind {
-		case "adb":
-			if fields[0] == "adb" {
-				t.Errorf("%s: write the command without the adb prefix: %q", where, ex.text)
-				continue
-			}
-			if forbiddenRecipeRe.MatchString(ex.text) {
-				t.Errorf("%s: a recipe never does this (spec §2.3): %q", where, ex.text)
-				continue
-			}
-			g, argv := classify.SplitGlobal(fields)
-			if g.Serial != "" || len(g.Forbidden) > 0 || len(g.Pass) > 0 {
-				t.Errorf("%s: skills never use adb's global options: %q", where, ex.text)
-				continue
-			}
-			got := cl.Classify(argv).Level.String()
-			switch {
-			case ex.level == "":
-				t.Errorf("%s: no annotation (the classifier says %s): add `# %s` to %q", where, got, got, ex.text)
-			case got != ex.level:
-				t.Errorf("%s: annotated %s but the classifier says %s: %q", where, ex.level, got, ex.text)
-			}
-		case "adbuddy":
-			if fields[0] == "adbuddy" {
-				t.Errorf("%s: write the subcommand without the adbuddy prefix: %q", where, ex.text)
-				continue
-			}
-			// A fresh tree per example: ParseFlags leaves values in the flags.
-			root := NewRoot(&App{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard, Getenv: func(string) string { return "" }})
-			cmd, rest, err := root.Find(fields)
-			if err != nil || cmd == root {
-				t.Errorf("%s: adbuddy has no subcommand %q", where, fields[0])
-				continue
-			}
-			// ParseFlags knows the persistent flags (--json), -ofile, --x=y and
-			// values that start with a dash; it fails on an unknown flag.
-			if err := cmd.ParseFlags(rest); err != nil {
-				t.Errorf("%s: %q: %v", where, ex.text, err)
-				continue
-			}
-			if err := cmd.ValidateArgs(cmd.Flags().Args()); err != nil {
-				t.Errorf("%s: %q: %v", where, ex.text, err)
-			}
-		}
+	examples := skillExamples(t)
+	for _, e := range checkSkillExamples(cl, examples) {
+		t.Error(e)
 	}
-	if checked == 0 {
-		t.Fatal("no skill example was found: the blocks must start with ```adb or ```adbuddy")
+	kinds := map[string]int{}
+	for _, ex := range examples {
+		kinds[ex.kind]++
+	}
+	if kinds["adb"] == 0 || kinds["adbuddy"] == 0 {
+		t.Fatalf("the skills need at least one ```adb and one ```adbuddy example, found %v", kinds)
+	}
+}
+
+// skillProblems runs the whole check over one Markdown file.
+func skillProblems(t *testing.T, cl *classify.Classifier, md string) []string {
+	t.Helper()
+	fsys := fstest.MapFS{"x/SKILL.md": {Data: []byte(md)}}
+	examples, errs := skillExamplesIn(fsys)
+	return append(errs, checkSkillExamples(cl, examples)...)
+}
+
+func adbBlock(lines ...string) string {
+	return "```adb\n" + strings.Join(lines, "\n") + "\n```\n"
+}
+
+func adbuddyBlock(lines ...string) string {
+	return "```adbuddy\n" + strings.Join(lines, "\n") + "\n```\n"
+}
+
+// TestSkillExamplesCatches keeps the guard honest: each of these must produce
+// at least one problem, and the good ones none.
+func TestSkillExamplesCatches(t *testing.T) {
+	cl, err := classify.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := map[string]string{
+		"level differs":          adbBlock("shell getprop ro.product.model   # red"),
+		"no annotation":          adbBlock("shell getprop ro.product.model"),
+		"bogus subcommand":       adbuddyBlock("bogus"),
+		"unknown flag":           adbuddyBlock("screen --nope"),
+		"extra argument":         adbuddyBlock("foreground extra"),
+		"adb in sh block":        "```sh\nadb shell ls\n```\n",
+		"pm clear":               adbBlock("shell pm clear com.example.app   # red"),
+		"serial":                 adbBlock("-s ABC123 shell getprop ro.product.model   # green"),
+		"unclosed block":         "```adb\nshell getprop ro.product.model   # green\n",
+		"backtick":               adbBlock("shell echo `whoami`   # green"),
+		"pipe":                   adbBlock("shell pm list packages -3 | wc -l   # green"),
+		"command substitution":   adbBlock("shell echo $(rm -r ~/Documents)   # red"),
+		"semicolon":              adbBlock("shell ls ; ls   # green"),
+		"redirection":            adbBlock("shell ls > out.txt   # green"),
+		"dollar in double quote": adbBlock(`shell "echo $HOME"   # green`),
+		"backslash in dq":        adbBlock(`shell "echo \x"   # green`),
+		"fence with a title":     "```adb title\nshell pm clear com.example.app\n```\n",
+		"upper case fence":       "```ADB\nshell pm clear com.example.app\n```\n",
+		"tilde fence sh":         "~~~sh\nadb shell ls\n~~~\n",
+		"tilde fence adb":        "~~~adb\nshell getprop ro.product.model   # green\n~~~\n",
+		"dollar prompt in sh":    "```sh\n$ adb shell rm -r /sdcard/Download\n```\n",
+		"adb in prose":           "Run this:\n\nadb shell pm clear com.example.app\n",
+		"adb indented block":     "Run this:\n\n    adb shell pm clear com.example.app\n",
+		"adb.exe in prose":       "PS> adb.exe shell ls\n",
+		"adb.exe prefix":         adbBlock("adb.exe shell getprop ro.product.model   # green"),
+		"adb path prefix":        adbBlock("/usr/bin/adb shell getprop ro.product.model   # green"),
+		"adb prefix":             adbBlock("adb shell getprop ro.product.model   # green"),
+		"pm clear two spaces":    adbBlock("shell 'pm  clear com.example.app'   # red"),
+		"cmd package clear":      adbBlock("shell cmd package clear com.example.app   # red"),
+		"rm -fr":                 adbBlock("shell rm -fr /sdcard/x   # red"),
+		"rm -r -f":               adbBlock("shell rm -r -f /sdcard/x   # red"),
+		"rm long options":        adbBlock("shell rm --recursive --force /sdcard/x   # red"),
+		"wipe_data":              adbBlock("shell recovery --wipe_data   # red"),
+		"reboot broadcast":       adbBlock("shell am broadcast -a android.intent.action.REBOOT   # red"),
+		"install -rg":            adbBlock("install -rg a.apk   # red"),
+		"install --grant":        adbBlock("install --grant-runtime-permissions a.apk   # red"),
+		"adbuddy serve":          adbuddyBlock("serve"),
+		"adbuddy setup":          adbuddyBlock("setup"),
+		"adbuddy annotation":     adbuddyBlock("screen   # green"),
+		"adbuddy prefix":         adbuddyBlock("adbuddy screen"),
+		"empty fence unclosed":   "```\nadb shell ls\n",
+	}
+	for name, md := range bad {
+		t.Run("bad/"+name, func(t *testing.T) {
+			if errs := skillProblems(t, cl, md); len(errs) == 0 {
+				t.Errorf("the guard let this through:\n%s", md)
+			}
+		})
+	}
+	good := map[string]string{
+		"getprop":        adbBlock("shell getprop ro.product.model   # green"),
+		"packages":       adbBlock("shell pm list packages -3   # green"),
+		"settings":       adbBlock("shell settings get global window_animation_scale   # green"),
+		"screenshot -o":  adbuddyBlock("screenshot -oshot.png"),
+		"screen":         adbuddyBlock("screen"),
+		"send":           adbuddyBlock(`send outbox/device-profile.md --caption "Device profile"`),
+		"foreground":     adbuddyBlock("foreground"),
+		"other language": "```text\nsome output\n```\n\nPlain prose about the phone.\n",
+	}
+	for name, md := range good {
+		t.Run("good/"+name, func(t *testing.T) {
+			if errs := skillProblems(t, cl, md); len(errs) != 0 {
+				t.Errorf("a good example failed: %v", errs)
+			}
+		})
 	}
 }
