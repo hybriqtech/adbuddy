@@ -77,7 +77,7 @@ class AdbuddyApp : Application() {
             try {
                 drafts.add(UriSource.copy(this@AdbuddyApp, uri))
             } catch (e: UploadFailed) {
-                onFailed(e.text.ifEmpty { e.code })
+                onFailed(e.text)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) { // a provider that fails (Drive offline, permission revoked) must not end the process

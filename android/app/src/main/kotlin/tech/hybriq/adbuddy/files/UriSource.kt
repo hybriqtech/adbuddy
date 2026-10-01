@@ -21,7 +21,16 @@ class UriSource private constructor(
     override val size: Long,
     override val sha256: String,
 ) : UploadSource {
-    override fun open(offset: Long): InputStream = FileInputStream(file).also { it.channel.position(offset) }
+    override fun open(offset: Long): InputStream {
+        val stream = FileInputStream(file)
+        try {
+            stream.channel.position(offset)
+        } catch (e: Exception) {
+            stream.close()
+            throw e
+        }
+        return stream
+    }
 
     override fun close() {
         file.delete()

@@ -17,6 +17,9 @@ class FakeChannel : Channel {
     /** Frames refused (sendFrame returns false) from this count on; -1: never. */
     var refuseFramesFrom = -1
     var queued = 0L
+
+    /** Runs after each frame is accepted. */
+    var onFrame: () -> Unit = {}
     private var next = 0
     private val _connected = MutableStateFlow(true)
     override val connected: StateFlow<Boolean> = _connected
@@ -36,6 +39,7 @@ class FakeChannel : Channel {
     override fun sendFrame(id: String, offset: Long, data: ByteArray): Boolean {
         if (refuseFramesFrom >= 0 && frames.size >= refuseFramesFrom) return false
         frames += Triple(id, offset, data)
+        onFrame()
         return true
     }
 

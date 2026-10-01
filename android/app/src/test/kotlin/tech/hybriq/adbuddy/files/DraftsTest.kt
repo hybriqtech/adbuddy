@@ -83,4 +83,73 @@ class DraftsTest {
         drafts.remove("nope")
         assertNull(drafts.items.value.firstOrNull())
     }
+
+    private class Tracked(val inner: BytesSource) : UploadSource by inner {
+        var closed = 0
+        override fun close() { closed++ }
+    }
+
+    private fun begins() = ch.sent.filter { it.type == Protocol.ATTACH_BEGIN }.map { Protocol.json.decodeFromJsonElement(tech.hybriq.adbuddy.bridge.AttachBegin.serializer(), it.payload).id }
+
+    @Test fun removeAndClearCloseTheSource() {
+        ch.handler = { _, _ -> true } // the host never answers: the uploads stay in flight
+        val a = Tracked(BytesSource(byteArrayOf(1)))
+        val b = Tracked(BytesSource(byteArrayOf(2)))
+        val c = Tracked(BytesSource(byteArrayOf(3)))
+        val ka = drafts.add(a)
+        drafts.add(b)
+        drafts.add(c)
+        drafts.remove(ka)
+        assertEquals(1, a.closed)
+        drafts.clear()
+        assertEquals(1, b.closed)
+        assertEquals(1, c.closed)
+    }
+
+    @Test fun removeRightAfterAddClosesTheSourceAndSendsNothing() {
+        val queue = ArrayDeque<Runnable>()
+        val lazy = object : kotlinx.coroutines.CoroutineDispatcher() {
+            override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) { queue += block }
+        }
+        val d = Drafts(CoroutineScope(lazy), Uploader(ch, pause = {}, newId = { id }), Captures(ch)) { "k${++n}" }
+        val src = Tracked(BytesSource(byteArrayOf(1)))
+        d.remove(d.add(src))
+        while (queue.isNotEmpty()) queue.removeFirst().run()
+        assertEquals(1, src.closed)
+        assertTrue(ch.sent.isEmpty())
+        assertTrue(d.items.value.isEmpty())
+    }
+
+    @Test fun twoRetriesInARowStartOneUpload() {
+        ch.handler = { s, cb -> if (s.type == Protocol.ATTACH_BEGIN) cb(FakeChannel.reply(Protocol.ERROR, """{"code":"failed","text":"x"}""", "r")); true }
+        val key = drafts.add(BytesSource(byteArrayOf(1)))
+        assertEquals(DraftStatus.FAILED, drafts.items.value.single().status)
+        ch.handler = { _, _ -> true } // the retry stays in flight
+        drafts.retry(key)
+        drafts.retry(key)
+        assertEquals(2, begins().size)
+        assertEquals(DraftStatus.UPLOADING, drafts.items.value.single().status)
+    }
+
+    @Test fun aRetryKeepsTheUploadId() {
+        var k = 0
+        val d = Drafts(CoroutineScope(Dispatchers.Unconfined), Uploader(ch, pause = {}, newId = { "%032x".format(++k) }), Captures(ch)) { "k${++n}" }
+        ch.handler = { s, cb -> if (s.type == Protocol.ATTACH_BEGIN) cb(FakeChannel.reply(Protocol.ERROR, """{"code":"failed","text":"x"}""", "r")); true }
+        val key = d.add(BytesSource(byteArrayOf(1)))
+        d.retry(key)
+        val ids = begins()
+        assertEquals(2, ids.size)
+        assertEquals(ids[0], ids[1])
+    }
+
+    @Test fun retryOfAFailedCaptureTakesAnotherOne() {
+        ch.handler = { s, cb -> if (s.type == Protocol.CAPTURE_REQUEST) cb(FakeChannel.reply(Protocol.ERROR, """{"code":"failed","text":"Cut"}""", "r")); true }
+        drafts.capture()
+        val key = drafts.items.value.single().key
+        assertEquals(DraftStatus.FAILED, drafts.items.value.single().status)
+        hostOk()
+        drafts.retry(key)
+        assertEquals(DraftStatus.DONE, drafts.items.value.single().status)
+        assertEquals(2, ch.sent.count { it.type == Protocol.CAPTURE_REQUEST })
+    }
 }

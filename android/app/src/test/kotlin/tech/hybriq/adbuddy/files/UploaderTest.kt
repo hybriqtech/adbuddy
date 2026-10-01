@@ -3,6 +3,11 @@ package tech.hybriq.adbuddy.files
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.security.MessageDigest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -117,6 +122,35 @@ class UploaderTest {
     @Test fun givesUpAfterRepeatedLostConnections() = runBlocking {
         ch.handler = { _, cb -> cb(null); true }
         try { up.upload(BytesSource(data)); fail() } catch (e: UploadFailed) { assertEquals("connection", e.code) }
+        assertEquals("1 try + 5 retries", 6, ch.sent.count { it.type == Protocol.ATTACH_BEGIN })
+    }
+
+    @Test fun progressResetsTheCountOfLostConnections() = runBlocking {
+        var begins = 0
+        // Each round gets one more frame through than the last before the connection drops, until the 9th begin.
+        ch.handler = { s, cb ->
+            when (s.type) {
+                Protocol.ATTACH_BEGIN -> { begins++; ch.refuseFramesFrom = if (begins < 9) ch.frames.size + 1 else -1; cb(ready(ch.frames.size.toLong() * 256 * 1024)) }
+                Protocol.ATTACH_END -> cb(done())
+            }
+            true
+        }
+        val big = ByteArray(10 * 256 * 1024) { it.toByte() }
+        up.upload(BytesSource(big))
+        assertEquals(9, begins)
+        assertEquals(10, ch.frames.size)
+    }
+
+    @Test fun cancelStopsTheFramesEvenWithTheQueueLow() = runBlocking {
+        host()
+        val job = launch(Dispatchers.Unconfined) {
+            val self = currentCoroutineContext()[Job]!!
+            ch.onFrame = { self.cancel() }
+            up.upload(BytesSource(data))
+        }
+        assertTrue(job.isCancelled)
+        assertEquals("no frame after the cancel", 1, ch.frames.size)
+        assertEquals(listOf(Protocol.ATTACH_BEGIN), ch.sent.map { it.type })
     }
 
     @Test fun anEmptyFileHasNoFrames() = runBlocking {

@@ -25,6 +25,6 @@ object FileNames {
             sb.append(s)
             used += n
         }
-        return sb.toString() + ext
+        return sb.toString().trimEnd('.', ' ').ifEmpty { "file" } + ext
     }
 }

@@ -3,6 +3,7 @@ package tech.hybriq.adbuddy.files
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,19 +55,25 @@ class Drafts(
     private val lock = Any()
     private val jobs = HashMap<String, Job>()
     private val sources = HashMap<String, UploadSource>()
+    private val captureKeys = HashSet<String>()
     private val ids = HashMap<String, String>() // a retry goes on from the host's offset: same id
 
     fun add(src: UploadSource): String {
         val key = newKey()
+        synchronized(lock) { sources[key] = src } // before the draft is visible: remove() always finds the source
         _items.update { it + Draft(key, src.name, src.mime, src.size, 0, DraftStatus.UPLOADING) }
-        synchronized(lock) { sources[key] = src }
         start(key, src)
         return key
     }
 
     fun capture() {
         val key = newKey()
+        synchronized(lock) { captureKeys += key }
         _items.update { it + Draft(key, CAPTURE_NAME, "image/png", 0, 0, DraftStatus.UPLOADING) }
+        takeCapture(key)
+    }
+
+    private fun takeCapture(key: String) {
         captures.take { a, text ->
             when {
                 a != null -> update(key) { it.copy(name = a.name, mime = a.mime, size = a.size, progress = a.size, status = DraftStatus.DONE, attachment = a) }
@@ -76,14 +83,19 @@ class Drafts(
     }
 
     fun retry(key: String) {
-        val src = synchronized(lock) { sources[key] } ?: return
-        if (_items.value.firstOrNull { it.key == key }?.status != DraftStatus.FAILED) return
-        update(key) { it.copy(status = DraftStatus.UPLOADING, progress = 0, error = "") }
-        start(key, src)
+        val (src, isCapture) = synchronized(lock) { sources[key] to (key in captureKeys) }
+        if (src == null && !isCapture) return
+        var won = false
+        _items.update { l ->
+            won = false
+            l.map { if (it.key == key && it.status == DraftStatus.FAILED) { won = true; it.copy(status = DraftStatus.UPLOADING, progress = 0, error = "") } else it }
+        }
+        if (!won) return // another retry (or a remove) got there first
+        if (src != null) start(key, src) else takeCapture(key)
     }
 
     fun remove(key: String) {
-        val (job, src) = synchronized(lock) { ids.remove(key); jobs.remove(key) to sources.remove(key) }
+        val (job, src) = synchronized(lock) { ids.remove(key); captureKeys.remove(key); jobs.remove(key) to sources.remove(key) }
         job?.cancel()
         src?.close()
         _items.update { l -> l.filterNot { it.key == key } }
@@ -95,7 +107,7 @@ class Drafts(
     }
 
     private fun start(key: String, src: UploadSource) {
-        val job = scope.launch {
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             gate.withPermit {
                 try {
                     val id = synchronized(lock) { ids.getOrPut(key) { uploader.newId() } }
@@ -110,7 +122,9 @@ class Drafts(
                 }
             }
         }
-        synchronized(lock) { jobs[key] = job }
+        job.invokeOnCompletion { synchronized(lock) { if (jobs[key] === job) jobs.remove(key) } }
+        val alive = synchronized(lock) { (sources[key] === src).also { if (it) jobs[key] = job } }
+        if (alive) job.start() else job.cancel() // removed meanwhile: remove() already closed the source
     }
 
     private fun fail(key: String, text: String) {

@@ -21,4 +21,10 @@ class FileNamesTest {
         assertTrue("no broken character", n.removeSuffix(".png").all { it == 'é' })
         assertEquals("short.txt", FileNames.clean("short.txt"))
     }
+
+    @Test fun aCutNeverLeavesDotsOrSpacesBeforeTheExtension() {
+        assertEquals("a".repeat(95) + ".png", FileNames.clean("a".repeat(95) + ". " + "b".repeat(10) + ".png"))
+        assertEquals("a".repeat(95) + ".png", FileNames.clean("a".repeat(95) + "  " + "b".repeat(10) + ".png"))
+        assertEquals("a".repeat(99), FileNames.clean("a".repeat(99) + ". " + "b".repeat(10)))
+    }
 }

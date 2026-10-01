@@ -3,7 +3,9 @@ package tech.hybriq.adbuddy.files
 import java.io.InputStream
 import java.security.SecureRandom
 import kotlin.coroutines.resume
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.JsonElement
@@ -77,6 +79,7 @@ class Uploader(
             src.open(off).use { input ->
                 val buf = ByteArray(Frame.MAX_DATA)
                 while (off < src.size) {
+                    currentCoroutineContext().ensureActive()
                     // OkHttp closes the socket past 16 MiB queued: wait for room (protocol spec §6.4).
                     while (channel.queuedBytes() > HIGH_WATER) {
                         pause(WAIT_MS)
