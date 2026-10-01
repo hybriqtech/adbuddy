@@ -525,7 +525,7 @@ func TestDoctorSkipsWhatDependsOnTheServer(t *testing.T) {
 	for _, c := range rep.Checks {
 		names = append(names, c.Name)
 	}
-	if got := strings.Join(names, ","); got != "config,adb,adb server,serve,phone,identity,network port,phone app,environment" {
+	if got := strings.Join(names, ","); got != "config,adb,adb server,serve,phone,identity,network port,phone app,environment,claude hooks" {
 		t.Errorf("order: %s", got)
 	}
 }
@@ -774,5 +774,36 @@ func TestDoctorHelpFollowsTheOrderOfTheChecks(t *testing.T) {
 			t.Fatalf("%q out of order in\n%s", w, out)
 		}
 		last = i
+	}
+}
+
+func TestDoctorWarnsOfGlobalClaudeHooks(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(cfg, "settings.json"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c := checkClaudeHooks(); c.Status != checkOK {
+		t.Errorf("no settings file: %+v", c)
+	}
+	write(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"x"}]}]}}`)
+	if c := checkClaudeHooks(); c.Status != checkOK {
+		t.Errorf("an unrelated hook: %+v", c)
+	}
+	write(`{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"x"}]}],"PreToolUse":[]}}`)
+	c := checkClaudeHooks()
+	if c.Status != checkWarn || !strings.Contains(c.Detail, "PermissionRequest") || strings.Contains(c.Detail, "PreToolUse") || c.Guidance == "" {
+		t.Errorf("a global PermissionRequest hook: %+v", c)
+	}
+	write(`{"hooks":{"PreToolUse":[{"hooks":[]}]}}`)
+	if c := checkClaudeHooks(); c.Status != checkWarn || !strings.Contains(c.Detail, "PreToolUse") {
+		t.Errorf("a global PreToolUse hook: %+v", c)
+	}
+	write(`{not json`)
+	if c := checkClaudeHooks(); c.Status != checkOK {
+		t.Errorf("unreadable settings must not alarm: %+v", c)
 	}
 }

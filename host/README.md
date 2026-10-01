@@ -145,6 +145,35 @@ The `adb` shim returns adb's own exit code, 126 when a command is denied, expire
 
 `adbuddy setup` installs the ADBuddy app (the latest release, or `--apk <file>`) and asks for your consent in it. Only if you accept, it gives the app the permission for "Cut access", exempts it from battery optimisation and turns on its accessibility service, keeping any other one. From then on `adbuddy serve` connects to the app through `adb reverse` on `127.0.0.1:<chat_port>`: 🔴 confirmations go to the phone (unlocking is required to allow), the app shows the journal live, and you can pause the agent from the phone. When the app is not connected, confirmations happen in the terminal as before. The agent cannot use the app's channel: `content` and `run-as` on `tech.hybriq.adbuddy` always ask first.
 
+## Claude Code chat view (M4)
+
+With Claude Code as the agent, the phone shows its answers as chat bubbles, the
+tools it uses, and its permission questions with buttons (Yes / Yes, always / No).
+The terminal stays as the fallback. Spec: `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md`.
+
+- **How:** `adbuddy env init` (and `serve`) put six hooks in the environment's
+  `.claude/settings.json` (`SessionStart`, `UserPromptSubmit`, `Stop`,
+  `Notification`, `PermissionRequest`, `SessionEnd`), each running the
+  environment's own `adbuddy hook <event>`, and the host follows Claude Code's
+  transcript. Your own hooks in that file are kept.
+- **`adbuddy hook` fails open:** if the host is down or anything is wrong it
+  says nothing and exits 0, so Claude Code asks on the terminal as usual (an
+  exit code 2 would block the agent, so it never uses it). With no phone connected,
+  permission questions are not held for the phone either.
+- **"Yes, always"** is only offered for a Bash command that is short, on one line,
+  with no shell operators, and that cannot touch adb, the shim or the phone. It adds
+  the exact command (never a wildcard) to the environment's
+  `.claude/settings.local.json`. A permission of Claude Code is not a 🔴
+  confirmation: the shim still classifies and journals every adb command.
+- **Your own global hooks** (`~/.claude/settings.json`) that answer
+  `PermissionRequest` or `PreToolUse` can answer the same request as ADBuddy's:
+  `adbuddy doctor` warns about them.
+- **If Claude Code changes its transcript format** the chat falls back to the last
+  answer of each turn (from the `Stop` hook) and the terminal view, and says so once.
+  Tested against Claude Code 2.1.x; recordings in `host/internal/claudecode/testdata`.
+- **Real Claude Code test** (spends a few cents, never touches the phone nor your
+  `~/.claude` settings): `ADBUDDY_REAL_CLAUDE=1 go test ./internal/cli -run TestRealClaudeCode -v -timeout 600s`.
+
 ## Manual check with a real phone
 
 With the phone paired and wireless debugging on:

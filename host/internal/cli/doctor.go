@@ -242,6 +242,7 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 		ws = w
 	}
 	add(checkWorkspace(ws))
+	add(checkClaudeHooks())
 	return rep
 }
 
