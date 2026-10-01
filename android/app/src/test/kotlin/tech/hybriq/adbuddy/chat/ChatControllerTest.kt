@@ -74,4 +74,14 @@ class ChatControllerTest {
         chat.discard("c1")
         assertEquals(0, chat.outgoing.value.size)
     }
+
+    @Test fun aNewConversationAsksTheHostAndShowsItsRefusal() = runBlocking {
+        ch.handler = { _, cb -> cb(FakeChannel.reply(Protocol.ERROR, """{"code":"failed","text":"Could not start the agent"}""", "r1")); true }
+        val seen = mutableListOf<String>()
+        val job = launch(Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) { chat.errors.collect { seen += it } }
+        chat.newConversation()
+        job.cancel()
+        assertEquals(Protocol.SESSION_NEW, ch.sent.single().type)
+        assertEquals(listOf("Could not start the agent"), seen)
+    }
 }

@@ -14,6 +14,7 @@ import tech.hybriq.adbuddy.bridge.ChatSend
 import tech.hybriq.adbuddy.bridge.ErrorReply
 import tech.hybriq.adbuddy.bridge.Message
 import tech.hybriq.adbuddy.bridge.Protocol
+import tech.hybriq.adbuddy.bridge.SessionNew
 
 /** A confirmed message is not here any more: Bridge applies the host's chat.message to the state before it calls onResult. */
 enum class SendStatus { SENDING, FAILED }
@@ -51,6 +52,14 @@ class ChatController(
         val o = _outgoing.value.firstOrNull { it.id == id && it.status == SendStatus.FAILED } ?: return
         set(id, SendStatus.SENDING)
         post(o)
+    }
+
+    /** Starts another conversation (session.new); the host's refusal goes to `errors`. The new state arrives as session.state. */
+    fun newConversation() {
+        val payload = Protocol.json.encodeToJsonElement(SessionNew.serializer(), SessionNew())
+        channel.request(Protocol.SESSION_NEW, payload) { m ->
+            if (m != null && m.type == Protocol.ERROR) Protocol.payload<ErrorReply>(m)?.let { _errors.tryEmit(it.text.ifEmpty { it.code }) }
+        }
     }
 
     fun discard(id: String) = _outgoing.update { l -> l.filterNot { it.id == id } }

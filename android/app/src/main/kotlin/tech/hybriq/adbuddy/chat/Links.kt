@@ -14,4 +14,26 @@ object Links {
         if (scheme != "http" && scheme != "https") return null
         return uri.host?.lowercase()
     }
+
+    data class Span(val start: Int, val end: Int, val url: String)
+
+    private val URL = Regex("https?://[^\\s<>\"]+")
+    private const val TRAILING = ".,;:!?'\""
+
+    /** The web links of a text, in order (spec M3 §5.1: plain text with links). The sentence's own punctuation is not part of one. */
+    fun find(text: String): List<Span> = URL.findAll(text).mapNotNull { m ->
+        val start = m.range.first
+        var end = m.range.last + 1
+        while (end > start) {
+            val c = text[end - 1]
+            val unbalanced = (c == ')' && count(text, start, end, '(') < count(text, start, end, ')')) ||
+                (c == ']' && count(text, start, end, '[') < count(text, start, end, ']')) ||
+                (c == '}' && count(text, start, end, '{') < count(text, start, end, '}'))
+            if (c in TRAILING || unbalanced) end-- else break
+        }
+        val url = text.substring(start, end)
+        if (domain(url) == null) null else Span(start, end, url)
+    }.toList()
+
+    private fun count(t: String, from: Int, to: Int, ch: Char) = (from until to).count { t[it] == ch }
 }
