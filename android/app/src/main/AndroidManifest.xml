@@ -12,6 +12,15 @@
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- The apps in the launcher, to propose which ones to protect from the
+         agent's helpers (M5 spec §4.3); no QUERY_ALL_PACKAGES. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:name=".AdbuddyApp"
         android:allowBackup="false"
