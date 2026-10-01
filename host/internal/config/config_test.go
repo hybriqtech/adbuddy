@@ -121,3 +121,39 @@ func TestAddress(t *testing.T) {
 		t.Fatalf("%+v %v\n%s", got, err, data)
 	}
 }
+
+func TestRemoteFields(t *testing.T) {
+	ok := Default()
+	ok.TailscaleIP, ok.TailscalePort = "100.101.102.103", 41234
+	ok.RemoteUntil = "2026-10-02T09:00:00Z"
+	if err := ok.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ok.RemoteUntilTime(); !got.Equal(time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)) {
+		t.Fatalf("until %v", got)
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := Save(path, ok); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load(path)
+	if err != nil || back.TailscaleIP != ok.TailscaleIP || back.RemoteUntil != ok.RemoteUntil {
+		t.Fatalf("%+v %v", back, err)
+	}
+	for name, mut := range map[string]func(*Config){
+		"ip outside CGNAT":  func(c *Config) { c.TailscaleIP = "198.51.100.5" },
+		"ip not an address": func(c *Config) { c.TailscaleIP = "tailscale" },
+		"port without ip":   func(c *Config) { c.TailscaleIP, c.TailscalePort = "", 4000 },
+		"port out of range": func(c *Config) { c.TailscalePort = 70000 },
+		"until not a time":  func(c *Config) { c.RemoteUntil = "tomorrow" },
+	} {
+		c := ok
+		mut(&c)
+		if c.Validate() == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	if (Config{RemoteUntil: "x"}).RemoteUntilTime() != (time.Time{}) {
+		t.Error("an unreadable until must read as none")
+	}
+}

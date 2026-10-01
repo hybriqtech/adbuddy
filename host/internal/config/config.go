@@ -29,6 +29,9 @@ type Config struct {
 	Rules          string   `toml:"rules"`           // user rules.yaml; empty = <config dir>/rules.yaml
 	Language       string   `toml:"language"`        // "en" or "es"; empty = from LANG
 	ChatPort       int      `toml:"chat_port"`       // port of the app channel on 127.0.0.1 (PC and phone); 0 = chosen on first use
+	TailscaleIP    string   `toml:"tailscale_ip"`    // the phone's Tailscale IPv4, as its app reported it; empty = unknown
+	TailscalePort  int      `toml:"tailscale_port"`  // wireless debugging port read from the phone over the same connection; 0 = unknown
+	RemoteUntil    string   `toml:"remote_until"`    // RFC 3339: remote mode (adb tcpip 5555) is on until then; empty = off
 }
 
 // Duration is a time.Duration written as text ("2m") in TOML.
@@ -97,6 +100,17 @@ func (c Config) Validate() error {
 	}
 	if c.ChatPort != 0 && (c.ChatPort < 1024 || c.ChatPort > 65535) {
 		return fmt.Errorf("chat_port must be between 1024 and 65535, got %d", c.ChatPort)
+	}
+	if c.TailscaleIP != "" && !ValidTailscaleIP(c.TailscaleIP) {
+		return fmt.Errorf("tailscale_ip must be an IPv4 address in 100.64.0.0/10, got %q", c.TailscaleIP)
+	}
+	if c.TailscalePort != 0 && (c.TailscaleIP == "" || c.TailscalePort < 1 || c.TailscalePort > 65535) {
+		return fmt.Errorf("tailscale_port needs tailscale_ip and must be between 1 and 65535, got %d", c.TailscalePort)
+	}
+	if c.RemoteUntil != "" {
+		if _, err := time.Parse(time.RFC3339, c.RemoteUntil); err != nil {
+			return fmt.Errorf("remote_until must be an RFC 3339 time (2026-10-02T09:00:00Z), got %q", c.RemoteUntil)
+		}
 	}
 	switch c.Language {
 	case "", "en", "es":
@@ -173,4 +187,21 @@ func validAddress(addr string) bool {
 	}
 	p, err := strconv.ParseUint(port, 10, 16)
 	return err == nil && p >= 1
+}
+
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
+// ValidTailscaleIP accepts only an IPv4 address in Tailscale's CGNAT range.
+func ValidTailscaleIP(s string) bool {
+	a, err := netip.ParseAddr(s)
+	return err == nil && a.Is4() && cgnat.Contains(a)
+}
+
+// RemoteUntilTime is remote_until as a time; zero when it is empty or unreadable.
+func (c Config) RemoteUntilTime() time.Time {
+	t, err := time.Parse(time.RFC3339, c.RemoteUntil)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
