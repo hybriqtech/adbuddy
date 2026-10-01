@@ -54,6 +54,11 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 
 - **La app muestra los `notice` del host** (revisión final de M2): hoy los ignora; el de respuesta tardía ("That question was already answered or moved to the PC terminal.") y el de tipo no soportado deberían verse en la pantalla de inicio.
 - **Fixtures JSON compartidas del protocolo:** las hace M3.0 en `protocol/fixtures/` (spec `2026-10-01-adbuddy-protocolo-m3-m5-design.md`, §12).
+- **Diseño de la app** (prueba del usuario en su Pixel 9 Pro XL con Android 17, 2026-10-01: "funciona bien aunque el diseño de la app es feo"). Antes de las pantallas nuevas de M3 (chat, terminal, adjuntos), una base visual común, que se aplica también a las que ya existen (consentimiento, inicio, Actividad, confirmaciones):
+  - **Barras del sistema:** Android 15+ dibuja de borde a borde; la pantalla de consentimiento pone el título bajo la barra de estado. Hay que respetar los insets (`Scaffold` o `windowInsetsPadding`) en todas las pantallas.
+  - **Modo oscuro:** el título de la pantalla de consentimiento sale en texto oscuro sobre fondo oscuro y el botón "Ahora no" casi no se lee. Los colores salen del tema (`MaterialTheme.colorScheme`), nunca fijos, con esquema claro y oscuro y color dinámico (Material You) en Android 12+.
+  - **Jerarquía:** la pantalla de consentimiento es texto suelto con dos botones; necesita estructura (cabecera, lista de lo que se concede con iconos, nota de privacidad aparte y acciones al pie).
+  - Usar el skill `frontend-design` al diseñar, y comprobar cada pantalla en claro, oscuro y con letra grande.
 - **`adbuddy doctor` desde la sesión del agente** usa el adb real fuera del shim (solo lecturas fijas, sin argumentos del agente) aunque haya pausa o una pregunta pendiente, y no lo apunta en el diario. Decidir si se registra o se bloquea en pausa.
 
 ## M5 · Ayudas al agente
