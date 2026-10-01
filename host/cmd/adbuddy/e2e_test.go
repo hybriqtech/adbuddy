@@ -77,11 +77,22 @@ func start(t *testing.T) *harness {
 // not empty, that config.toml.
 func startWith(t *testing.T, config string, extra ...testutil.FakeRule) *harness {
 	t.Helper()
+	return startWithData(t, config, nil, extra...)
+}
+
+// startWithData is startWith, and when prepare is not nil it calls it with
+// the data folder before serve starts: a test puts there what serve reads
+// at start (the trust of a development build of the phone app).
+func startWithData(t *testing.T, config string, prepare func(data string), extra ...testutil.FakeRule) *harness {
+	t.Helper()
 	data, err := os.MkdirTemp("", "e2d")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(data) })
+	if prepare != nil {
+		prepare(data)
+	}
 	tmp := t.TempDir()
 	h := &harness{t: t, data: data, ws: filepath.Join(tmp, "ws"), logPath: filepath.Join(tmp, "adb.log"), serveErr: &syncBuffer{}, serveOut: &syncBuffer{}}
 	rules := append(extra,
