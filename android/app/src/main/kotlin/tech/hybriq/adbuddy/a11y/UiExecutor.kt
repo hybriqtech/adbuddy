@@ -123,8 +123,9 @@ class UiExecutor(
     private fun pausedNow(r: UiRequest) = fail(r, ErrorCode.PROTECTED, "The agent is paused from the phone.")
 
     private fun dump(r: UiRequest, s: Screen, a: UiDumpArgs): UiResponse {
-        val (pkg, activity) = s.foreground()
         val locked = s.locked()
+        // Locked: there is no active app window, so the "last app seen" would be stale.
+        val (pkg, activity) = if (locked) "" to "" else s.foreground()
         if (!locked && guarded(pkg)) return protectedApp(r, pkg)
         s.acting(null)
         val d = Dumper.dump(s.windows(), s.screen(), s.rotation(), pkg.takeUnless { it == Packages.ADBUDDY }.orEmpty(), activity, locked, a.all == true, ::guarded)
@@ -202,6 +203,8 @@ class UiExecutor(
     }
 
     private fun foreground(r: UiRequest, s: Screen): UiResponse {
+        // Locked: unknown (empty), so the host falls back to dumpsys instead of trusting a stale app.
+        if (s.locked()) return ok(r, UiForeground("", "", false), UiForeground.serializer())
         val (pkg, activity) = s.foreground()
         val protected = pkg.isNotEmpty() && (guarded(pkg) || guardedOnScreen(s.windows()))
         return ok(r, UiForeground(pkg, activity, protected), UiForeground.serializer())

@@ -187,6 +187,22 @@ class UiExecutorTest {
         assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.SET_TEXT, obj("text" to "1234")))))
     }
 
+    @Test fun lockedForegroundIsUnknown() {
+        screen!!.locked = true
+        val f = x.run(req(UiOp.FOREGROUND)).result!!.jsonObject
+        assertEquals("", f["package"]!!.jsonPrimitive.content)
+        assertEquals("", f["activity"]!!.jsonPrimitive.content)
+        assertEquals("false", f["protected"]!!.jsonPrimitive.content)
+        val d = x.run(req(UiOp.DUMP)).result!!.jsonObject
+        assertEquals("", d["package"]!!.jsonPrimitive.content)
+        assertEquals("", d["activity"]!!.jsonPrimitive.content)
+        // Unlocked: unchanged.
+        screen!!.locked = false
+        val u = x.run(req(UiOp.FOREGROUND)).result!!.jsonObject
+        assertEquals("com.android.settings", u["package"]!!.jsonPrimitive.content)
+        assertEquals("false", u["protected"]!!.jsonPrimitive.content)
+    }
+
     @Test fun expiredUnavailableAndUnknown() {
         assertEquals(ErrorCode.EXPIRED, error(x.run(req(UiOp.DUMP, expires = "2026-10-01T09:59:59Z"))))
         assertEquals(ErrorCode.UNSUPPORTED, error(x.run(req("swipe"))))
