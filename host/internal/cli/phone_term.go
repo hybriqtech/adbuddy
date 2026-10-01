@@ -296,11 +296,20 @@ func (l *phoneLink) sendTerm(w *termWatch, typ string, payload any) bool {
 	return true
 }
 
+// backlogLen is the app's queue; a link made without startPhoneLink (a test's
+// bare one) asks the server.
+func (l *phoneLink) backlogLen() int {
+	if l.backlog == nil {
+		return l.srv.Backlog()
+	}
+	return l.backlog(l.srv)
+}
+
 // pressed reports whether the app's queue is past the limit, and remembers it
 // in w: after a pressure the snapshot waits for the queue to ease to half the
 // limit, so that it does not sit at the edge.
 func (l *phoneLink) pressed(w *termWatch) bool {
-	if backlogOf(l.srv) > termBacklogLimit {
+	if l.backlogLen() > termBacklogLimit {
 		w.pressure = true
 		return true
 	}
@@ -356,7 +365,7 @@ func (l *phoneLink) snapshotTerm(w *termWatch) {
 	if mgr == nil || l.pressed(w) {
 		return
 	}
-	if w.pressure && backlogOf(l.srv) > termBacklogLimit/2 {
+	if w.pressure && l.backlogLen() > termBacklogLimit/2 {
 		return // hysteresis
 	}
 	scr := mgr.Screen()

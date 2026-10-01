@@ -57,6 +57,8 @@ type phoneLink struct {
 	// termEvery is termInterval as it was when the link started: read here,
 	// not from the variable, by the goroutines that outlive a test.
 	termEvery time.Duration
+	// backlog is backlogOf at the same moment: termLoop and its senders call it.
+	backlog func(*bridge.Server) int
 }
 
 // maxNotices is how many unsupported types a connection is told of by notice:
@@ -98,7 +100,7 @@ var newToken = bridge.NewToken
 // confirms with fallback and never pauses, and says why: no failure of the
 // app's channel stops serve. Its only error is Interrupted (ctx ended).
 func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
-	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval}
+	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf}
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
 	without := func(why string) (*phoneLink, error) {
 		fmt.Fprintf(app.Stderr, "⚠ %s. 🔴 confirmations happen here, without the phone app.\n", why)

@@ -121,6 +121,10 @@ type proc struct {
 	gen     uint64
 	quiet   *time.Timer
 	done    chan struct{}
+	// grace is readGrace as it was when the process started: pump reads it
+	// from its own goroutine, which a test's restore of the variable does
+	// not wait for.
+	grace time.Duration
 	// wmu keeps a paste (text, pause, Enter) and other typing apart.
 	wmu sync.Mutex
 }
@@ -174,7 +178,7 @@ func (m *Manager) startLocked(agent string, resume bool) error {
 	if err != nil {
 		return err
 	}
-	pr := &proc{p: p, agent: agent, resumed: len(args) > 0, started: time.Now(), gen: m.gen, done: make(chan struct{})}
+	pr := &proc{p: p, agent: agent, resumed: len(args) > 0, started: time.Now(), grace: readGrace, gen: m.gen, done: make(chan struct{})}
 	pr.screen = term.New(newID("e_"), cols, rows)
 	pr.quiet = time.AfterFunc(time.Hour, func() { m.quietFor(pr) })
 	pr.quiet.Stop()
@@ -202,7 +206,7 @@ func (m *Manager) pump(pr *proc) {
 		if _, err := pr.p.Wait(waitCtx); err != nil {
 			return // pump is done
 		}
-		t := time.NewTimer(readGrace)
+		t := time.NewTimer(pr.grace)
 		defer t.Stop()
 		select {
 		case <-readDone:
