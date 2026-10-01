@@ -77,7 +77,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - **HECHO en M3b (T1):** `session.state.activity` lleva la última orden del agente (`phone.go`).
 - **Aplazados de M3b (revisiones de T4-T10):**
   - la etiqueta "red local o Tailscale" de la cabecera (M5b, con `RemoteState`); el límite de descarga automática en remoto ya usa `state.remote.enabled`;
-  - las preguntas 🔴 como tarjetas en el chat en vez del diálogo de M2 (M4, con los permisos del agente);
+  - las preguntas 🔴 como tarjetas en el chat en vez del diálogo de M2 (**M4 lo descartó con un ruling**, spec §7.5: son otra clase de pregunta, del shim, y mezclarlas con las del agente invita a contestar una por otra; siguen en `ConfirmDialog`; sigue como decisión de producto para un hito posterior);
   - **sin `attach.cancel` en el protocolo:** una subida quitada a medias sigue contando en el host (uno de los 4 huecos) hasta reconectar o una hora de inactividad; quitar y volver a añadir varios adjuntos grandes seguidos puede dar `busy`;
   - la descarga automática vuelve a arrancar lo que la persona canceló (`downloads[a.id] == null`);
   - las descargas escriben en el hilo lector de OkHttp (256 KiB por trama): si hay lag en los pings con almacenamiento lento, pasarlas a un escritor aparte;
@@ -86,9 +86,9 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - `Notify.doneLine` puede tomar la respuesta anterior si la última llega después de `session.state: waiting`;
   - `ACTION_RESUME` de la notificación no exige desbloqueo (como en M2): decidir en M5;
   - `TerminalModel`: el tamaño de la terminal lo manda el host y la vista hace scroll horizontal si no cabe;
-  - **Revisión final de M3b (menores, DEFER):** la burbuja sobre una `MainActivity` visible comparte un solo sink en `TerminalFeed` (al plegarla se manda `unwatch` y la terminal principal se congela hasta un onStop/onStart: pila de sinks); `PickMultipleVisualMedia(10)` no descuenta los borradores que ya hay; `trim()` puede borrar un fichero que sigue en `DownloadState.Done` (al pulsar, volver a `get`); `Downloads.get` hace E/S en el hilo principal; en `phone.go`, `state()` y `Publish` no van juntos bajo el lock (patrón anterior a M3b; la siguiente publicación lo corrige); "Trabajando: <orden>" no caduca (M4);
+  - **Revisión final de M3b (menores, DEFER):** la burbuja sobre una `MainActivity` visible comparte un solo sink en `TerminalFeed` (al plegarla se manda `unwatch` y la terminal principal se congela hasta un onStop/onStart: pila de sinks); `PickMultipleVisualMedia(10)` no descuenta los borradores que ya hay; `trim()` puede borrar un fichero que sigue en `DownloadState.Done` (al pulsar, volver a `get`); `Downloads.get` hace E/S en el hilo principal; en `phone.go`, `state()` y `Publish` no van juntos bajo el lock (patrón anterior a M3b; la siguiente publicación lo corrige); "Trabajando: <orden>" no caduca (M4: **resuelto en parte para Claude Code**, donde el estado lo fijan los hooks, `UserPromptSubmit`/`Stop`, spec §6.1; sin cambios para Codex y Gemini; sin ver en un móvil);
   - M3b se probó con tests JVM y `lintDebug`; nada de Compose, WebView ni notificaciones se ha visto en un móvil (ver "Validaciones manuales" del plan de M3b).
-  - **`Busy` solo reconoce los diálogos de Claude Code en inglés:** un Enter del chat puede aprobar un permiso de Codex o Gemini (adb sigue pasando por el shim). Para M4, con los permisos con botones.
+  - **`Busy` solo reconoce los diálogos de Claude Code en inglés:** un Enter del chat puede aprobar un permiso de Codex o Gemini (adb sigue pasando por el shim). **Resuelto para Claude Code en M4** (spec §6.2): con el adaptador, `chat.send` responde `busy` si hay permisos pendientes o atención, aunque la pantalla no se reconozca; sigue pendiente para Codex y Gemini (v1.1), que no tienen adaptador.
 - **`adbuddy doctor` desde la sesión del agente** usa el adb real fuera del shim (solo lecturas fijas, sin argumentos del agente) aunque haya pausa o una pregunta pendiente, y no lo apunta en el diario. Decidir si se registra o se bloquea en pausa.
 
 ## M5 · Ayudas al agente
@@ -158,7 +158,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 
 ## M4 · Adaptador de Claude Code
 
-Spec: `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md`. Plan (registro): `docs/superpowers/plans/2026-10-01-adbuddy-m4-claude-code.md`. Ledger y revisiones: `.superpowers/sdd/2026-10-01-adbuddy-m4/` (`progress.md`, `review-security.md`).
+Spec: `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md`. Plan (registro): `docs/superpowers/plans/2026-10-01-adbuddy-m4-claude-code.md`. Las revisiones y rulings viven en el ledger local de la sesión (no versionado); lo esencial está copiado en el plan (registro) y aquí.
 
 ### Validaciones manuales pendientes (nadie las ha corrido en un móvil)
 
@@ -173,18 +173,18 @@ Spec: `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md`. Plan
 
 ### Menores diferidos de las revisiones (no ejecutan nada sin confirmación)
 
-De la revisión opus de seguridad del host (`review-security.md`) y de su re-revisión:
+De la revisión opus de seguridad del host y de su re-revisión:
 - **M1, TOCTOU del transcript:** `tail.go` reabre la ruta en cada sondeo y la validación (`ValidTranscript`) se hizo una vez; el `Lstat` de la ronda B solo mira el último componente, así que un directorio intermedio cambiado por un enlace sigue colándose. Arreglo: abrir con el descriptor ya validado o repetir `EvalSymlinks` + `Inside`. El test del enlace se salta en Windows (corre en la CI de Linux).
 - **M7, retirada de tarjeta por herramienta + resumen:** `resolvePermsOf` retira una tarjeta cuando acaba cualquier herramienta con el mismo nombre y resumen (`description`). Es seguro (devuelve la decisión a la terminal) pero puede confundir. Cerrarlo con la validación de §5.2 (id de herramienta).
 - **M-a, carrera entre `chat.send` y `PermissionRequest`:** el freno de `agentBusy` solo actúa cuando la tarjeta ya existe; un `chat.send` admitido justo antes de que llegue el `PermissionRequest` puede teclear sobre el diálogo. Ventana de milisegundos, sin arreglo barato (el host no sabe que Claude Code va a preguntar).
 - **M-c, NotebookEdit:** el resumen y el detalle usan `notebook_path` (`rule.go`) y la guarda de la tarjeta (`CardSafe`) mira otros campos de ruta; comprobar con una grabación real de `NotebookEdit` que `notebook_path` es el único y que `CardSafe` ve lo que la persona aprueba.
-- **N3, resto:** `shownRune` rechaza control, Cf, Z, Mn, Me y una lista fija de rellenos (U+3164, U+115F, U+1160, U+FFA0, U+2800, U+034F); otros caracteres que no dibujan nada (selectores de variación, etiquetas U+E0000, símbolos sin glifo) no están en la lista.
+- **N3, resto:** `shownRune` ya rechaza los selectores de variación (Mn: U+FE0F, U+E0100…), las etiquetas U+E0000 (Cf), control, Z, Mn, Me y una lista fija de rellenos (U+3164, U+115F, U+1160, U+FFA0, U+2800, U+034F). Lo que queda sin rechazar: caracteres de uso privado (Co, p. ej. U+E000), puntos de código sin asignar (Cn) y símbolos sin glifo como U+FFFC (So).
 - **`android` como subcadena y sangrías de más de 8 espacios:** el rechazo de "Sí, siempre" por la subcadena `android` y el de la tarjeta por blancos largos llevan a la terminal comandos legítimos (lado seguro, a costa de comodidad). Además `android_serial` es redundante con `android`.
 - **Límite léxico de `AlwaysRule`:** ningún filtro léxico cubre `make install`, scripts propios o alias que llamen a `adb` por dentro (spec §5.3); el "Sí, siempre" se ofrece para ellos. La lista blanca de primeras palabras es un cambio de producto mayor.
 - **`isCompactSummary`** no se trata (el resumen de `/compact` puede salir como mensaje de usuario); validar con un `/compact` real. **`<user-prompt`** está en `ignoredPrompts` aunque la spec §4.2 no lo lista (inocuo, ignora prompts internos): ponerlo en la spec o quitarlo.
 - **Sin test del adaptador que relea el transcript con otro `Tailer`** (el id estable de los prompts de la terminal solo se prueba en el parser), y una aserción débil en `TestParserCapsAMessageBeforeJoining`.
 - **`wasSent` expira a los 2 min:** un prompt del móvil que Claude Code tarda más en escribir en el transcript sale repetido como mensaje de la terminal.
-- **Ids y versión del transcript:** acotados y validados en la tarea F (`^[A-Za-z0-9._-]{1,64}$` y `^[0-9A-Za-z._+-]{1,32}$`). Efecto secundario aceptado: una versión no válida queda vacía, y una versión desconocida cuenta como soportada.
+- **Ids y versión del transcript:** acotados y validados en la tarea F (ids `^[A-Za-z0-9._-]{1,64}$`, versión `^[0-9A-Za-z._+-]{1,32}$`, spec §4.2/§4.4). Una versión no válida cuenta como no soportada (degrada a la terminal con un texto fijo) y no borra una válida ya vista; los mensajes assistant del transcript llevan el prefijo `a_`. Un mensaje assistant sin `message.id` ni uuid válidos no se muestra: se cuenta (`Parser.Dropped`) y el adaptador lo deja en el log, pero la persona no ve nada en el móvil.
 
 De las revisiones de la app (Sonnet y opus):
 - **Color de la etiqueta "Claude Code pregunta":** `tertiary` sobre `tertiaryContainer`, contraste por comprobar (como `PaletteContrastTest`).

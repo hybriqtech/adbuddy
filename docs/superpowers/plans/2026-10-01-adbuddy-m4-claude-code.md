@@ -1,8 +1,8 @@
 # ADBuddy m4 · Adaptador de Claude Code · Plan de implementación (registro posterior)
 
-> **Este plan es un registro posterior de lo ejecutado.** M4 no tuvo un plan formal previo: se ejecutó desde `handoff.md` y la spec, con una revisión opus de seguridad y revisiones por tarea, y este documento se escribió al final (orden del handoff y del supervisor adbuddy-e5). Recoge qué se hizo, en qué commit, qué hallazgo cerró cada ronda de arreglos y qué se decidió. No lleva código ni pasos para repetir: el código es el de los commits, y la autoridad es la spec.
+> **Este plan es un registro posterior de lo ejecutado.** M4 no tuvo un plan formal previo: se ejecutó desde el handoff de la sesión y la spec, con una revisión opus de seguridad y revisiones por tarea, y este documento se escribió al final (orden del handoff y del supervisor adbuddy-e5). Recoge qué se hizo, en qué commit, qué hallazgo cerró cada ronda de arreglos y qué se decidió. No lleva código ni pasos para repetir: el código es el de los commits, y la autoridad es la spec.
 >
-> **Coste si el registro se equivoca:** puede no reflejar fielmente lo hecho. La fuente de verdad es `git log 244e56f..m4` y el ledger `.superpowers/sdd/2026-10-01-adbuddy-m4/progress.md`.
+> **Coste si el registro se equivoca:** puede no reflejar fielmente lo hecho. La fuente de verdad es `git log 244e56f..m4` y el ledger local de la sesión (no versionado).
 
 **Objetivo:** que, con Claude Code como agente, el chat del móvil muestre sus respuestas como burbujas (markdown seguro), la herramienta que usa en cada momento y los permisos como tarjetas con botones (Sí / Sí, siempre / No), sin debilitar nada de M2: el shim sigue clasificando igual aunque Claude Code ya haya permitido una llamada.
 
@@ -13,8 +13,7 @@
 **Spec y referencias:**
 - Spec: `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md`.
 - Spike (Claude Code 2.1.286, grabaciones en `host/internal/claudecode/testdata/cc-2.1.286/`): `docs/superpowers/specs/2026-10-01-adbuddy-m4-spike-claude-code.md`.
-- Revisión opus de seguridad del host: `.superpowers/sdd/2026-10-01-adbuddy-m4/review-security.md`.
-- Ledger con todas las revisiones, rulings y menores diferidos: `.superpowers/sdd/2026-10-01-adbuddy-m4/progress.md`; informes de tarea `task-*-report.md` en el mismo directorio.
+- Revisión opus de seguridad del host, ledger de la sesión e informes de tarea: ledger local de la sesión (no versionado). Sus hallazgos y rulings están copiados en este documento.
 - Pendientes que salen de M4 (validaciones manuales y menores diferidos): `docs/superpowers/plans/pendientes-m3-m5.md`, sección "M4".
 
 **Verificación:** `go vet ./...` y `go test -timeout 300s ./...` en el host (sin `-race`: el PC de desarrollo es Windows sin cgo, lo corre la CI de Linux); `:app:testDebugUnitTest` en la app. La prueba con Claude Code real (`ADBUDDY_REAL_CLAUDE=1`) usa un config temporal y nunca toca el móvil. Nada de Compose se ha visto en un móvil (ver las validaciones manuales de pendientes).
@@ -56,28 +55,32 @@
 - **C, reductor y PermissionUi (Sonnet), `f7e7f1c..782db14`:** `387c6f1` (**I-2**: una tarjeta no se contesta dos veces ni recién promovida; una sola vía y decisiones validadas), `665c032` y `5c6d791` (Markdown O(n²) en `[` sin cerrar y en `[` que comparten `]`), `fe3c4a4` (el snapshot se queda con la última versión y un estado final de herramienta no vuelve a `running`), `472ebe7` (sin `t!!`), `782db14` (la guarda de permisos falla cerrada, se rearma al reconectar y el controlador sigue las tarjetas del bridge). Re-revisión limpia.
 - **D, cableado de la UI (opus, por ser seguridad de app), `782db14..71b793c`:** `ad3ff16` (**I1**: un enlace con userinfo no es enlace y el texto del enlace no lleva bidi ni invisibles), `3ca8390` (**Me5**: validación manual del detalle largo en la spec) y `71b793c` (**Me1** la guarda se relee por época del controlador, **Me2** la etiqueta de Claude Code pesa más que el resumen, **Me4** No no espera al final del detalle). Re-revisión limpia.
 - **E, `ConversationView.asking` y titular (Sonnet con lente de privacidad), `71b793c..8cde298`:** `0c26ec2` (**I2**: `asking` solo con el enlace conectado y sin pausa; **M1** acciones y aviso "Listo" como funciones puras con tests) y `eeb8290` (**M3/M4/M5**: el titular de "Listo" sanea separadores e invisibles Unicode, quita solo delimitadores de markdown y acota el texto antes de las regex), más `8cde298` (docs: el aviso de permiso conserva Cortar acceso y es silencioso; canal alto en pendientes). Re-revisión limpia.
-- **F, documentación y acotado de entradas (`5edb8e8`, `ac39360`, `ddae3dc` y este registro):** en el host, acotado y validación de las entradas de texto del transcript que llegan al móvil (versión de Claude Code e ids de línea, de mensaje y de prompt; M2 y M3 de la revisión de seguridad); README de Android; sección M4 de pendientes.
+- **F, documentación y acotado de entradas (`5edb8e8`, `ac39360`, `ddae3dc`, `19f203d`):** en el host, validación de las entradas de texto del transcript que llegan al móvil (versión de Claude Code e ids de línea, de mensaje y de prompt; M2 y M3 de la revisión de seguridad); README de Android; sección M4 de pendientes; este registro.
+- **F, ronda 1 (revisión Sonnet):** cerró un "N3 resto" falso en pendientes (selectores de variación y etiquetas sí se rechazan; quedan Co, Cn y U+FFFC), los rulings del plan (copia fiel del ledger, con M7 y el de N3/M-a/M-c), los ids de `tool_use` y `tool_use_id` que llegaban sin validar, la versión basura (ahora no soportada, con texto fijo, sin borrar una válida), el mensaje assistant sin id válido (contado, `Parser.Dropped`, y anotado), el prefijo `a_` de los ids de mensajes del transcript, las imprecisiones del README, las referencias a un ledger no versionado y los ítems "(M4)" del bloque M3 de pendientes. La spec §4.2/§4.4 recoge la validación.
 
 ## Rulings tomados
 
-Copiados tal cual del ledger (`progress.md`) y de la spec §12.
+Copiados tal cual del ledger local de la sesión y de la spec §12.
 
 ### Del ledger
 - Ruling: no hay plan formal de M4; se ejecuta desde handoff.md y la spec, y el plan se escribe como registro tras las revisiones — por orden del handoff/supervisor adbuddy-e5 — cuesta: el plan podría no reflejar fielmente lo hecho.
 - Ruling: un subagente a la vez, Sonnet salvo seguridad/final (opus) — orden del supervisor — cuesta: más lento.
-- Ruling: arreglar I1-I3 y M4 antes de integrar (recomendación del revisor); M1,M2,M3,M5,M6 -> M6 se añade en el arreglo de I1 (test spec 5.3); M1-M3,M5,M7 se aplazan como menores y los triará la revisión final — son menores sin ejecución sin confirmación — cuesta: queda superficie menor abierta.
+- Ruling: arreglar I1-I3 y M4 antes de integrar (recomendación del revisor); M1,M2,M3,M5,M6,M7 -> M6 se añade en el arreglo de I1 (test spec 5.3); M1-M3,M5,M7 se aplazan como menores y los triará la revisión final — son menores sin ejecución sin confirmación — cuesta: queda superficie menor abierta.
 - Ruling: orden de tareas — A (host: seguridad I1,I2,I3,M4,M6) -> B (host: parser I-1 + menores de tail/transcript/M5) -> C (android: I-2, Markdown O(n^2), reductor) -> D cableado app -> E ConversationView.asking+headline -> F docs + plan registro; cada una con su revisión (opus para A, Sonnet el resto), revisión final opus — secuencial por orden del supervisor — cuesta: más lento que paralelizar host/android.
 - Ruling: aplazados como menores (los triará la revisión final): M1 TOCTOU, M2 versión sin validar, M3 ids sin validar, M7 retirada por tool+resumen, Markdown MAX_BLOCKS/imagen anidada, ToolStrip running — no ejecutan nada sin confirmación — cuesta: superficie menor abierta.
 - Ruling: N2 — ampliar palabras excluidas (android, flutter, bundletool, react-native, expo, doas, pkexec, run0) y documentar en spec §5.3 que ningún filtro léxico cubre make install/scripts/alias — la lista blanca de primeras palabras es mayor cambio de producto — cuesta: "Sí, siempre" ofrecido para scripts arbitrarios.
 - Ruling: M-b — parte host (CardSafe rechaza rachas largas de blancos y blancos al final de línea) en la ronda 1; parte app (softWrap=true, sin tope de alto o aviso de "hay más") en la tarea D de cableado — cuesta: hasta cablear, la tarjeta no está en uso.
+- Ruling: N3, M-a, M-c -> pendientes-m3-m5.md (tarea F) — impacto bajo.
+- Ruling: user-prompt ya estaba en ignoredPrompts, no listado en spec 4.2 -> se mantiene (inocuo, ignora prompts internos)
 - Ruling: ronda 1 de C arregla Importantes 1-2 y Menores 1,3,4,5,6; Menor 2 (conflación connected) se difiere — acotado por la caducidad del host — cuesta: tarjeta con answering hasta resolved/600 s en caso raro.
-- Ruling: defaults answering/guardLeftMs se quedan opcionales hasta D, que debe pasarlos explícitos y usar chat.canAnswer(id) + app.clock::now, y entonces hacerlos obligatorios (PermissionCard.kt dejó de compilar al hacerlo).
+- Ruling: defaults answering/guardLeftMs se quedan opcionales hasta D, que debe pasarlos explícitos y usar chat.canAnswer(id) + app.clock::now, y entonces hacerlos obligatorios (PermissionCard.kt dejó de compilar al hacerlo)
 - Ruling: ronda 1 de D arregla I1, Me1, Me2, Me3, Me4, Me5; Me6 se ignora — historial ya hecho, reescribir sin push no aporta — cuesta: commit grande en la PR.
 - Ruling: I1 — se mantiene "Cortar acceso" en el aviso asking (acción segura que solo estrecha el acceso; el aviso sin él obligaría a abrir la app para cortar) y se documenta en spec §7.4 — cuesta: lectura literal de "sin botones" incumplida.
 - Ruling: I3 — el aviso asking se queda silencioso en M4 (mismo canal LOW) y se apunta en pendientes-m3-m5.md y en la PR como decisión de producto (canal de importancia alta con versión pública genérica) — cambiar el canal es una decisión de producto de M3/M5, no de este hito — cuesta: un permiso pendiente con la app en segundo plano puede pasar desapercibido hasta que se mire el móvil; el permiso caduca a los 600 s y vuelve a la pregunta de la terminal.
 - Ruling: ronda 1 de E arregla I2, M1, M2, M3, M4, M5; M6 se ignora.
 - Ruling: tarea F incluye además un arreglo host mínimo de entradas del transcript (M2 versión y M3 ids/uuid acotados y validados) — son las únicas entradas de texto no validadas que llegan al móvil — cuesta: un commit más a revisar.
-- Ruling (tarea B): user-prompt ya estaba en ignoredPrompts, no listado en spec 4.2 -> se mantiene (inocuo, ignora prompts internos).
+- Ruling: ronda 1 de F arregla Importantes 1-3 y los menores: versión inválida => se trata como no soportada (degrada a terminal; antes vacía = soportada) con texto fijo — spec 4.4 manda degradar ante versión fuera de la lista probada y una versión basura es lo más fuera de lista — cuesta: un transcript corrupto con versión rara deja el chat en vista de terminal (permisos y shim no cambian).
+- Ruling: referencias a .superpowers/sdd en docs versionados — se sustituyen por "ledger local de la sesión (no versionado)" con los datos esenciales ya copiados en el plan — el directorio está en .gitignore a propósito — cuesta: el detalle de las revisiones no viaja en la PR.
 
 ### De la spec §12
 - **Ruling:** hooks de solo seis eventos, sin `PreToolUse`/`PostToolUse` — cada hook es un proceso por herramienta y el transcript ya las trae — si me equivoco, una latencia de "running" mayor y se añade `PostToolUse`.
@@ -91,7 +94,7 @@ Copiados tal cual del ledger (`progress.md`) y de la spec §12.
 
 ## Revisiones
 
-- **Opus de seguridad del host** (`review-security.md`): con reservas; confirmó que (a) un hook que falla abierto solo devuelve a Claude Code a su pregunta normal y (b) el shim nunca depende del hook. Importantes I1-I3, menores M1-M7: ver las rondas A.
+- **Opus de seguridad del host** (informe local, no versionado): con reservas; confirmó que (a) un hook que falla abierto solo devuelve a Claude Code a su pregunta normal y (b) el shim nunca depende del hook. Importantes I1-I3, menores M1-M7: ver las rondas A.
 - **Sonnet de parser y app:** importantes I-1 (ids de prompts de la terminal) e I-2 (tarjeta contestable en el hueco de la siguiente): rondas B y C.
 - **Por tarea:** C y E con Sonnet, D con opus; todas cerraron limpias en la ronda 1.
 - **Pendiente al escribir este registro:** la revisión final opus de toda la rama y la validación manual en un móvil (pendientes, sección "M4").

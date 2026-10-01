@@ -60,14 +60,16 @@ agents keep the terminal view.
   has no bidi or invisible characters. The input and the number of blocks are
   bounded.
 - **Tool strip:** the tools the agent is running (`tool.activity`: running, done,
-  error) appear as chips under their message, as the last item of the chat. Only the
-  short summary is shown, never the output of the tool.
+  error) appear as chips in a single strip, the last item of the chat, and only
+  while the agent is working. Only the short summary is shown, never the output of
+  the tool.
 - **Permission cards:** above the input, one per pending request, labelled "Claude
   Code asks" so they cannot be taken for ADBuddy's own questions. The card shows the
   tool, the summary and the whole detail, which scrolls. **Yes** and **Yes, always**
   (only if the host offers it) stay disabled until the detail has been scrolled to
-  the end and for a short guard after the card appears; **No** is always available.
-  The guard fails closed (a card that was never observed does not answer) and is
+  the end and for a short guard after the card appears. **No** skips only the wait
+  for the scroll: like the others it needs the link connected, is not offered on a
+  card that was just promoted and is not offered while the card is answering. The guard fails closed (a card that was never observed does not answer) and is
   re-armed when the link reconnects. A card answers once (it shows "answering" until
   the host says `permission.resolved`) and only the host removes it. A command the
   card cannot show whole is left to the terminal by the host.
@@ -84,7 +86,9 @@ agents keep the terminal view.
 M4 unit tests (JVM, no device):
 
 ```sh
-gradle :app:testDebugUnitTest --tests '*MarkdownTest' --tests '*LinksTest'   --tests '*ChatReducerTest' --tests '*PermissionUiTest' --tests '*ToolStripTest'   --tests '*ChatControllerTest' --tests '*ConversationViewTest'
+gradle :app:testDebugUnitTest --tests '*MarkdownTest' --tests '*LinksTest' \
+  --tests '*ChatReducerTest' --tests '*PermissionUiTest' --tests '*ToolStripTest' \
+  --tests '*ChatControllerTest' --tests '*ConversationViewTest'
 ```
 
 The composables (`MarkdownText`, `PermissionCard`, `ToolStripView`) have no tests:
