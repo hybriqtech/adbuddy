@@ -76,8 +76,8 @@ fun ChatScreen(
     terminal: TerminalFeed?,
     snackbar: SnackbarHostState,
     actions: ChatActions,
-    /** The remote-mode switch (RemoteCard), shown above the conversation; empty in previews. */
-    remoteCard: @Composable () -> Unit = {},
+    /** The remote-mode switch (RemoteCard), shown above the conversation; a preview passes an empty one. */
+    remoteCard: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
     var terminalShown by rememberSaveable { mutableStateOf(true) }
@@ -165,6 +165,7 @@ private fun ChatScreenPreview() {
             ),
             outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
             snackbar = remember { SnackbarHostState() }, actions = ChatActions.None,
+            remoteCard = {},
         )
     }
 }

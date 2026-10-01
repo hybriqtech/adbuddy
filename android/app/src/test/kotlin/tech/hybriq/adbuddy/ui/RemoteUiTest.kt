@@ -86,4 +86,42 @@ class RemoteUiTest {
         assertEquals("""{"enabled":true}""", RemoteUi.request(true).toString())
         assertEquals("""{"enabled":false}""", RemoteUi.request(false).toString())
     }
+
+    @Test fun `pending wins over UNKNOWN and DISCONNECTED`() {
+        assertEquals(Kind.PENDING, view(state(null), pending = true).kind)
+        assertEquals(Kind.PENDING, view(state(RemoteState(enabled = false)), pending = true, unknownSince = true).kind)
+        assertEquals(Kind.DISCONNECTED, view(state(null, Connection.WAITING), pending = true).kind)
+    }
+
+    @Test fun `unknownSince wins over a past expiry`() {
+        assertEquals(Kind.UNKNOWN, view(state(RemoteState(enabled = true, expiresAt = past)), unknownSince = true).kind)
+    }
+
+    @Test fun `only known states draw the switch`() {
+        assertFalse(view(state(null)).showSwitch)
+        assertFalse(view(state(RemoteState(enabled = false), Connection.WAITING)).showSwitch)
+        assertFalse(view(state(RemoteState(enabled = false)), unknownSince = true).showSwitch)
+        assertTrue(view(state(RemoteState(enabled = false))).showSwitch)
+        assertTrue(view(state(RemoteState(enabled = true, expiresAt = past))).showSwitch)
+        assertTrue(view(state(RemoteState(enabled = false)), pending = true).showSwitch)
+    }
+
+    @Test fun `unknownSince is identity of the remote the mark took`() {
+        val a = RemoteState(enabled = true, expiresAt = future)
+        assertTrue(RemoteUi.unknownSince(true, a, a))
+        // a new object with the same content: the host spoke again, recovered
+        assertFalse(RemoteUi.unknownSince(true, a, a.copy()))
+        assertTrue(RemoteUi.unknownSince(true, null, null))
+        assertFalse(RemoteUi.unknownSince(true, null, a))
+        assertFalse(RemoteUi.unknownSince(false, a, a))
+        assertFalse(RemoteUi.unknownSince(false, null, null))
+    }
+
+    @Test fun `msUntilClosing waits for the expiry plus a margin`() {
+        val exp = Instant.parse(future)
+        assertEquals(1_500L, RemoteUi.msUntilClosing(exp, exp.toEpochMilli() - 1_000))
+        assertNull(RemoteUi.msUntilClosing(exp, exp.toEpochMilli()))
+        assertNull(RemoteUi.msUntilClosing(exp, exp.toEpochMilli() + 5))
+        assertNull(RemoteUi.msUntilClosing(null, 0))
+    }
 }

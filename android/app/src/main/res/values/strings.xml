@@ -111,4 +111,5 @@
     <string name="remote_disable_title">Turn off remote mode?</string>
     <string name="remote_disable_body">Away from home, turning it off cuts access until you are back on your Wi-Fi.</string>
     <string name="remote_disable_confirm">Turn off</string>
+    <string name="remote_failed">Could not change remote mode</string>
 </resources>

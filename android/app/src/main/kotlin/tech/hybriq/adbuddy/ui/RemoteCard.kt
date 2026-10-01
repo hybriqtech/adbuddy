@@ -12,7 +12,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -20,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -45,29 +49,36 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
     var pending by remember { mutableStateOf(false) }
     var mark by remember { mutableStateOf<UnknownMark?>(null) }
     var ask by remember { mutableStateOf<Boolean?>(null) } // the value being confirmed
-    // After a null reply the card says unknown until the host speaks again: the next
-    // remote.state or snapshot builds a new RemoteState (or null), so it is no longer
-    // the same object the mark holds.
-    val unknownSince = mark?.let { it.remote === state.remote } == true
-    val view = RemoteUi.view(state, pending, unknownSince, Instant.ofEpochMilli(clock.now()))
+    val latest by rememberUpdatedState(state) // the reply's mark takes the state of then, not of the tap
+    // HostClock is not observable: a tick at the expiry recomposes the card so ON turns CLOSING by itself.
+    var tick by remember { mutableIntStateOf(0) }
+    val unknownSince = RemoteUi.unknownSince(mark != null, mark?.remote, state.remote)
+    val view = RemoteUi.view(state, pending, unknownSince, Instant.ofEpochMilli(clock.now() + tick * 0L)) // reads tick so the card recomposes
+    LaunchedEffect(view.expiresAt, view.kind, tick) {
+        RemoteUi.msUntilClosing(if (view.kind == Kind.ON) view.expiresAt else null, clock.now())?.let { delay(it); tick++ }
+    }
+    val failed = stringResource(R.string.remote_failed)
 
     fun send(enabled: Boolean) {
         pending = true
         val sent = bridge.request(Protocol.REMOTE_SET, RemoteUi.request(enabled)) { reply ->
             pending = false
             when {
-                reply == null -> mark = UnknownMark(state.remote) // the tunnel dropped (adbd restarts): unknown, not off
-                reply.type == Protocol.ERROR -> Protocol.payload<ErrorReply>(reply)?.let { onMessage(it.text.ifEmpty { it.code }) }
+                reply == null -> mark = UnknownMark(latest.remote) // the tunnel dropped (adbd restarts): unknown, not off
+                reply.type == Protocol.ERROR -> onMessage(Protocol.payload<ErrorReply>(reply)?.let { it.text.ifEmpty { it.code } }?.ifEmpty { null } ?: failed)
             }
         }
-        if (sent == null) pending = false
+        if (sent == null) {
+            pending = false
+            onMessage(failed)
+        }
     }
 
     ElevatedCard(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(stringResource(R.string.remote_title), style = MaterialTheme.typography.titleMedium)
-                val problem = view.kind == Kind.CLOSING || view.kind == Kind.UNKNOWN
+                val problem = view.kind == Kind.CLOSING || view.kind == Kind.UNKNOWN || view.kind == Kind.DISCONNECTED
                 Text(
                     detail(view, clock),
                     style = MaterialTheme.typography.bodySmall,
@@ -77,11 +88,13 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
                     Text(view.address, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Switch(
-                checked = view.kind == Kind.ON || view.kind == Kind.PENDING || view.kind == Kind.CLOSING,
-                onCheckedChange = { ask = it },
-                enabled = view.canToggle,
-            )
+            if (view.showSwitch) {
+                Switch(
+                    checked = view.kind == Kind.ON || view.kind == Kind.PENDING || view.kind == Kind.CLOSING,
+                    onCheckedChange = { ask = it },
+                    enabled = view.canToggle,
+                )
+            }
         }
     }
 
