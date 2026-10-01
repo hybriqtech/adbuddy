@@ -76,3 +76,8 @@ Plan: `docs/superpowers/plans/2026-10-01-adbuddy-m6a-releases.md` · Spec: `docs
 - Tasks 1-5 hechas, idénticas a la réplica: 47ae1d2 (T1), b4c4ccf (T2), 78bee28 (T3), 32fd8d0 (T4), 1b0de9f+2492963+1424327 (T5). Sin revisión opus propia: son byte a byte la réplica, ya revisada por opus (plan y re-revisión).
 - Task 6: 35b0d73 + revisión opus (2 importantes, 1 menor) arreglada en 875265f: `dumpsys deviceidle` entra en la regla de argumentos dinámicos; `pm reset-permissions` es especial con cualquier argumento (no existe `-p`); `appops reset` siempre especial (paquete no instalado → resetea todas las UID); sin `noPackage`. **El código de la Task 6 del plan queda desfasado respecto a 875265f.**
 - Aplazado (opus, Task 6): M-2 `deviceidle whitelist reset` no existe (defensivo); M-4 neutralizar por UID/PID (`appops set <uid>`, `kill`, `am kill-all`, `cmd netpolicy`) sale 🔴 no especial → a `pendientes-m3-m5.md`. Validar en emulador: `appops reset com.no.existe` resetea modos por UID.
+
+## Revisión final opus (2026-10-01)
+
+- Sin críticos ni huecos de seguridad. Arreglados: I-1 `gradle/actions` por SHA del commit (3f5f9ad…, antes el de la etiqueta anotada); M-1 trailers de dos commits; M-2 `handoff.md` con rutas personales fuera de la historia (el handoff de M6b va en `handoff-m6b.md`); M-3 `*.p12` y `*.pfx` en `.gitignore`.
+- Aplazados: M-4 `wget --https-only` no impide una redirección a http (exigir curl o corregir la frase de la spec §8 y de `install.sh`); M-5 la frase del README «a build from source pins no signing certificate» caducará con el pin real (mismo PR); `android.yml` usa `setup-gradle@v4` sin fijar (no afecta a las releases).
