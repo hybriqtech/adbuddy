@@ -114,9 +114,7 @@ jobs:
         run: |
           command -v go
           go version
-          printf '%s
-' "$PATH" | tr : '
-'
+          echo "$PATH" | tr : " "
       - name: The host reads the same certificate as apksigner
         run: APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" sh scripts/release-cert.sh "$RUNNER_TEMP/adbuddy.apk"
       - name: The APK has the test version
