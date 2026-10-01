@@ -107,7 +107,7 @@ Las tareas son secuenciales: todas tocan `internal/cli`.
    - **Tamaño:** el `Manager` no avisa de los cambios. En cada tick se compara `screen.Size()`; si cambió, primero se vacía lo acumulado y después se manda `terminal.size {epoch, offset: Offset(), cols, rows}`.
    - La retrollamada de `Subscribe` solo copia bajo el mutex; los envíos van fuera (ver Locks).
 4. **`terminal.unwatch`**, una conexión nueva (`area.attach`) o que la app se vaya (`area.gone`) terminan la suscripción. Usa `Server.Current(m)` para no aceptar un `watch` de una conexión reemplazada.
-5. **`terminal.input {data}`:** como mucho 64 KiB, o se descarta; va a `manager.Input`. **`terminal.resize {cols, rows}`:** 1..1000 por lado, o se descarta (protocolo); el host lo acota a 300×150 antes de `manager.ResizePhone`, para que un `terminal.snapshot` quepa en un mensaje. Test: un `snapshot` de una pantalla de 300×150 llena de estilos queda por debajo de 1 MiB; si no, detente y explícalo.
+5. **`terminal.input {data}`:** como mucho 64 KiB, o se descarta; va a `manager.Input`. **`terminal.resize {cols, rows}`:** 1..1000 por lado, o se descarta (protocolo); el host lo acota a 200×100 antes de `manager.ResizePhone`, para que un `terminal.snapshot` quepa en un mensaje. Test: un `snapshot` de una pantalla de 200×100 llena de estilos queda por debajo de 1 MiB; si no, detente y explícalo.
 6. **La terminal nunca provoca que se expulse a la app:** `SendTo` solo si `Backlog()` está por debajo del umbral.
 
 **Tests:**
@@ -115,7 +115,7 @@ Las tareas son secuenciales: todas tocan `internal/cli`.
 - salida en vivo agrupada; salida que llega entre el `watch` y la suscripción: sin duplicados ni huecos;
 - cambio de epoch y de tamaño (el `terminal.size` llega después de la salida anterior);
 - unwatch, y conexión nueva sin watch: no recibe nada;
-- input y resize con sus límites, y el acotado a 300×150;
+- input y resize con sus límites, y el acotado a 200×100;
 - presión: con `Backlog` alto, nada de output y luego un snapshot (inyecta `Backlog` con una variable de test o un umbral configurable).
 
 - [ ] Pasos 1-5 como en la tarea 6. Commit `feat(host): la terminal del agente en el móvil`.
