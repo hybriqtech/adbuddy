@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -76,6 +77,8 @@ fun TerminalView(feed: TerminalFeed, onLink: (url: String, domain: String) -> Un
     val themeJs = "termTheme('${hex(colors.surface.toArgb())}','${hex(colors.onSurface.toArgb())}','${hex(colors.primary.toArgb())}')"
     // A crash of the renderer leaves the WebView unusable (onRenderProcessGone): a new key makes a new view.
     var generation by remember { mutableIntStateOf(0) }
+    // The WebView is built once: it must call the current onLink, not the one of its first composition.
+    val onLinkNow by rememberUpdatedState(onLink)
 
     key(generation) {
         val holder = remember { arrayOfNulls<WebSink>(1) }
@@ -99,7 +102,7 @@ fun TerminalView(feed: TerminalFeed, onLink: (url: String, domain: String) -> Un
                     val bridge = TermBridge(
                         onInput = feed::input,
                         onSize = feed::resize,
-                        onLink = { url, domain -> onMain.post { onLink(url, domain) } },
+                        onLink = { url, domain -> onMain.post { onLinkNow(url, domain) } },
                     )
                     addJavascriptInterface(JsHost(bridge), "adbuddy")
                     val sink = WebSink(this)
@@ -126,7 +129,8 @@ fun TerminalView(feed: TerminalFeed, onLink: (url: String, domain: String) -> Un
                 }
             },
             update = { holder[0]?.setTheme(themeJs) },
-            onRelease = { it.destroy() },
+            // The sink stops drawing before its view is destroyed (the feed may still hand it effects until the detach).
+            onRelease = { holder[0]?.die(); it.destroy() },
         )
 
         // The stream runs only while the view is on screen (protocol spec §7).

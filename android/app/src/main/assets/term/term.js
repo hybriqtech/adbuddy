@@ -29,7 +29,13 @@
   // Replayed output may hold queries (DSR, DA) that xterm.js answers through onData: those answers are not the person's keys.
   var quiet = 0;
   function put(b64, isReplay) {
-    if (isReplay) { quiet++; term.write(bytes(b64), function () { quiet--; }); } else { term.write(bytes(b64)); }
+    if (isReplay) {
+      quiet++;
+      // If write throws, the callback never runs: without the catch the person's keys would stay muted for good.
+      try { term.write(bytes(b64), function () { quiet--; }); } catch (e) { quiet--; }
+    } else {
+      term.write(bytes(b64));
+    }
   }
   window.termReset = function (cols, rows, b64, isReplay) { term.reset(); term.resize(cols, rows); put(b64, isReplay); };
   window.termWrite = function (b64, isReplay) { put(b64, isReplay); };

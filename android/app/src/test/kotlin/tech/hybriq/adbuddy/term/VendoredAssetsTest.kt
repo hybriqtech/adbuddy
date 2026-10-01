@@ -23,7 +23,8 @@ class VendoredAssetsTest {
     @Test fun thePageLoadsOnlyItsOwnFilesUnderAStrictPolicy() {
         val html = File(dir, "index.html").readText()
         assertTrue(html.contains("Content-Security-Policy"))
-        assertTrue(html.contains("default-src 'none'"))
+        // The whole policy, not a fragment: an added 'unsafe-inline' script or a connect-src would not pass.
+        assertTrue(html.contains("content=\"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'none'; base-uri 'none'; form-action 'none'\""))
         assertFalse("no external URL", Regex("(src|href)=\"(https?:)?//").containsMatchIn(html))
         val js = File(dir, "term.js").readText()
         assertFalse("no network from our own script", Regex("fetch\\(|XMLHttpRequest|WebSocket|importScripts|eval\\(").containsMatchIn(js))
