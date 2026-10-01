@@ -13,8 +13,8 @@ import (
 	"github.com/charmbracelet/x/vt"
 )
 
-// TailSize is how much raw output the host keeps to resume a terminal without
-// a snapshot (protocol spec §7: at least 256 KiB).
+// TailSize is how much raw output the host keeps at least to resume a
+// terminal without a snapshot (protocol spec §7: at least 256 KiB).
 const TailSize = 256 << 10
 
 var (
@@ -28,31 +28,51 @@ type Screen struct {
 	em     *vt.Emulator
 	epoch  string
 	offset int64  // bytes written so far: the position of the next one
-	tail   []byte // the last TailSize bytes, ending at offset
+	tail   []byte // the last bytes written, ending at offset: at least TailSize (once written), at most twice that
 	paste  bool   // the program turned bracketed paste on
 	hidden bool   // the program hid the cursor
 	carry  []byte // the end of the last write, for a mode sequence split in two
 	cols   int
 	rows   int
+	closed bool
+	// drained is closed when the goroutine that drops the emulator's
+	// answers has ended.
+	drained chan struct{}
 }
 
 // New returns the screen of a new PTY process (a new epoch).
 func New(epoch string, cols, rows int) *Screen {
 	em := vt.NewEmulator(cols, rows)
+	// Nobody reads the scrollback, and its default keeps 10 000 lines (0
+	// means that default too).
+	em.SetScrollbackSize(1)
+	s := &Screen{em: em, epoch: epoch, cols: cols, rows: rows, drained: make(chan struct{})}
 	// The emulator answers the program's queries (cursor position…) on its
 	// read side: the host drops them, the real terminals answer (spec M3
 	// §4.2). Unread, they would block the emulator.
-	go io.Copy(io.Discard, em)
-	s := &Screen{em: em, epoch: epoch, cols: cols, rows: rows}
+	go func() {
+		defer close(s.drained)
+		_, _ = io.Copy(io.Discard, em)
+	}()
 	// Called from em.Write, with mu held.
 	em.SetCallbacks(vt.Callbacks{CursorVisibility: func(visible bool) { s.hidden = !visible }})
 	return s
 }
 
-// Close releases the emulator.
+// Close releases the emulator. Emulator.Close sets a flag that its Read
+// checks without a lock, so the goroutine that reads it ends first: closing
+// the answers' pipe gives it io.EOF.
 func (s *Screen) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+	if c, ok := s.em.InputPipe().(io.Closer); ok {
+		_ = c.Close()
+		<-s.drained
+	}
 	return s.em.Close()
 }
 
@@ -64,15 +84,20 @@ func (s *Screen) Write(p []byte) int64 {
 	s.em.Write(p)
 	s.offset += int64(len(p))
 	s.tail = append(s.tail, p...)
-	if over := len(s.tail) - TailSize; over > 0 {
-		s.tail = append(s.tail[:0:0], s.tail[over:]...)
+	// Cut back to TailSize only once it doubled, in place: not a copy of
+	// the whole tail on each write.
+	if len(s.tail) > 2*TailSize {
+		n := copy(s.tail, s.tail[len(s.tail)-TailSize:])
+		s.tail = s.tail[:n]
 	}
 	s.scanPaste(p)
 	return at
 }
 
 // scanPaste follows the bracketed paste mode, also when its sequence comes
-// split between two writes.
+// split between two writes. It only sees the mode on its own (ESC[?2004h
+// and ESC[?2004l): not inside a combined sequence such as ESC[?25;2004h,
+// nor turned off by a reset (RIS, ESC c).
 func (s *Screen) scanPaste(p []byte) {
 	buf := append(s.carry, p...)
 	on, off := bytes.LastIndex(buf, pasteOn), bytes.LastIndex(buf, pasteOff)
@@ -94,9 +119,11 @@ func (s *Screen) Resize(cols, rows int) {
 	s.cols, s.rows = cols, rows
 }
 
-// Epoch names the PTY process; Offset is the position of the next byte.
+// Epoch names the PTY process whose output this is (protocol spec §7).
 func (s *Screen) Epoch() string { return s.epoch }
 
+// Offset is how many bytes of output were written so far: the position the
+// next byte will have.
 func (s *Screen) Offset() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -161,6 +188,13 @@ func (s *Screen) inputModes() string {
 // (spike S4: Render separates lines with a bare \n, which a terminal does not
 // take as a new line at column 0). The alternate screen comes first: it
 // changes the screen that is drawn on.
+//
+// It does not carry everything a terminal keeps: the active style (the
+// snapshot ends with ESC[0m, so text the program writes next without setting
+// its style again comes out plain), the scroll region (ESC[r) and, while the
+// alternate screen is on, the main screen under it (leaving the alternate
+// screen shows an empty one until the program repaints). The modes it does
+// carry are those of Modes.
 func (s *Screen) Snapshot() (data []byte, offset int64, cols, rows int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

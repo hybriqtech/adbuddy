@@ -5,9 +5,68 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/vt"
 )
+
+// The tail keeps at least TailSize bytes and at most twice that, and stays
+// in step with the offset, also with many small writes.
+func TestTailBounds(t *testing.T) {
+	s := New("e_1", 80, 24)
+	defer s.Close()
+	chunk := bytes.Repeat([]byte("y"), 1000)
+	for i := 0; i < 3*TailSize/len(chunk); i++ {
+		s.Write(chunk)
+		s.mu.Lock()
+		n := len(s.tail)
+		s.mu.Unlock()
+		if n > 2*TailSize || (s.Offset() >= TailSize && n < TailSize) {
+			t.Fatalf("tail of %d bytes at offset %d", n, s.Offset())
+		}
+	}
+	at := s.Write([]byte("end"))
+	if got, ok := s.Since("e_1", at-int64(len(chunk))); !ok || string(got) != string(chunk)+"end" {
+		t.Fatalf("Since = %d bytes, %v", len(got), ok)
+	}
+	if _, ok := s.Since("e_1", s.Offset()-2*TailSize-1); ok {
+		t.Fatal("Since beyond twice TailSize")
+	}
+}
+
+// The emulator keeps no scrollback: nobody reads it.
+func TestNoScrollback(t *testing.T) {
+	s := New("e_1", 20, 5)
+	defer s.Close()
+	for i := 0; i < 200; i++ {
+		s.Write([]byte("a line that scrolls\r\n"))
+	}
+	s.mu.Lock()
+	n := s.em.Scrollback().Len()
+	s.mu.Unlock()
+	if n > 1 {
+		t.Fatalf("scrollback of %d lines", n)
+	}
+}
+
+// Close ends the goroutine that drains the emulator's answers before it
+// closes the emulator, and the screen takes writes after it.
+func TestCloseEndsTheDrain(t *testing.T) {
+	s := New("e_1", 20, 5)
+	s.Write([]byte("\x1b[6n")) // a query: the emulator answers on its pipe
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.drained:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the drain goroutine still runs after Close")
+	}
+	s.Write([]byte("after"))
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // tui is output in the style of a TUI: colours, absolute moves, a partial
 // repaint and Unicode.
@@ -16,12 +75,30 @@ var tui = []byte("\x1b[2J\x1b[H\x1b[1;38;2;200;100;0mClaude\x1b[0m banner\r\n" +
 	"\x1b[7;3H\x1b[32m● ÑANDÚ42\x1b[0m\r\n" +
 	"\x1b[10;1H────────────\x1b[11;1H❯ \x1b[11;3Hdraft\x1b[2D")
 
-// redraw writes data to a clean emulator of the size and returns its text.
-func redraw(data []byte, cols, rows int) string {
+// redraw writes data to a clean emulator of the size.
+func redraw(data []byte, cols, rows int) *vt.Emulator {
 	em := vt.NewEmulator(cols, rows)
 	go io.Copy(io.Discard, em)
 	em.Write(data)
-	return em.String()
+	return em
+}
+
+// sameScreen checks that the redrawn emulator shows the screen of s: text,
+// styles and cursor.
+func sameScreen(t *testing.T, s *Screen, got *vt.Emulator) {
+	t.Helper()
+	s.mu.Lock()
+	text, render, cur := s.em.String(), s.em.Render(), s.em.CursorPosition()
+	s.mu.Unlock()
+	if got.String() != text {
+		t.Errorf("redrawn text:\n%s\nwant:\n%s", got.String(), text)
+	}
+	if got.Render() != render {
+		t.Errorf("redrawn with styles:\n%q\nwant:\n%q", got.Render(), render)
+	}
+	if got.CursorPosition() != cur {
+		t.Errorf("redrawn cursor at %v, want %v", got.CursorPosition(), cur)
+	}
 }
 
 // A snapshot written to a clean terminal draws the same screen (spike S4).
@@ -33,9 +110,9 @@ func TestSnapshotRedrawsTheScreen(t *testing.T) {
 	if off != int64(len(tui)) || cols != 60 || rows != 14 {
 		t.Fatalf("offset %d size %dx%d", off, cols, rows)
 	}
-	if got := redraw(data, cols, rows); got != s.Text() {
-		t.Fatalf("redrawn:\n%s\nwant:\n%s", got, s.Text())
-	}
+	em := redraw(data, cols, rows)
+	defer em.Close()
+	sameScreen(t, s, em)
 	if !strings.Contains(s.Text(), "● ÑANDÚ42") {
 		t.Fatalf("screen %q", s.Text())
 	}
@@ -52,9 +129,9 @@ func TestSnapshotAfterResize(t *testing.T) {
 	if cols != 40 || rows != 12 {
 		t.Fatalf("size %dx%d", cols, rows)
 	}
-	if got := redraw(data, cols, rows); got != s.Text() {
-		t.Fatalf("redrawn:\n%s\nwant:\n%s", got, s.Text())
-	}
+	em := redraw(data, cols, rows)
+	defer em.Close()
+	sameScreen(t, s, em)
 }
 
 // Since returns what follows an offset of this epoch while it is in the tail.
@@ -80,8 +157,9 @@ func TestSince(t *testing.T) {
 			t.Errorf("Since(%s, %d) ok", c.epoch, c.off)
 		}
 	}
-	// Older than the tail: a snapshot is due.
-	s.Write(bytes.Repeat([]byte("x"), TailSize))
+	// Older than the tail: a snapshot is due. The tail holds between
+	// TailSize and twice that.
+	s.Write(bytes.Repeat([]byte("x"), 2*TailSize))
 	if _, ok := s.Since("e_1", 6); ok {
 		t.Fatal("Since an offset out of the tail")
 	}
@@ -134,13 +212,12 @@ func TestSnapshotCarriesTheModes(t *testing.T) {
 	if !strings.HasSuffix(snap, "\x1b[?25l\x1b[?2004h") {
 		t.Fatalf("the snapshot does not end with the modes: %q", snap)
 	}
-	em := vt.NewEmulator(cols, rows)
-	go io.Copy(io.Discard, em)
+	em := redraw(data, cols, rows)
 	defer em.Close()
-	em.Write(data)
-	if !em.IsAltScreen() || em.String() != s.Text() {
-		t.Fatalf("redrawn (alt %v):\n%s\nwant:\n%s", em.IsAltScreen(), em.String(), s.Text())
+	if !em.IsAltScreen() {
+		t.Fatal("redrawn out of the alternate screen")
 	}
+	sameScreen(t, s, em)
 	s.Write([]byte("\x1b[?1049l\x1b[?25h\x1b[?2004l"))
 	if got := string(s.Modes()); got != off {
 		t.Fatalf("modes after turning them off %q, want %q", got, off)
