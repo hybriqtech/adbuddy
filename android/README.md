@@ -6,7 +6,9 @@ pause the agent or cut its access at any time. Milestone M2: consent,
 confirmations, activity panel, Pause and Cut access. Milestone M3 adds the chat
 with the agent: its terminal (xterm.js) with quick keys, attachments, downloads
 and screenshots, and a conversation notification with direct reply, a bubble
-and a "Done" notice.
+and a "Done" notice. Milestone M4 adds the Claude Code adapter: the agent's
+answers as readable bubbles, a strip with the tool it is using, and permission
+cards with buttons.
 
 The app is installed and set up by the host (`adbuddy setup`), over the adb
 connection you paired: you do not need to install it by hand.
@@ -42,6 +44,52 @@ never run them on your own phone.
   a `RemoteInput`: notification listeners and watches you have authorised can fire it.
 - **Privacy:** neither the chat nor the terminal text is written to any log, and the
   lock screen shows no message text, no activity and no PC name.
+
+## Claude Code (M4)
+
+When the agent is Claude Code, the host reads its transcript and hooks and sends
+the app the answers, the tool activity and the permission requests (spec
+`docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md`). Other
+agents keep the terminal view.
+
+- **Safe markdown:** answers are drawn from a small parser of our own
+  (`chat/Markdown.kt`): paragraphs, headings, lists, quotes, bold, italic, code and
+  code blocks. No HTML (it shows as text) and no images (only their alt text; the
+  URL is never loaded). Only `http(s)` links, shown with their real domain and
+  asked before they open; a link with a user-info part is not a link, and its text
+  has no bidi or invisible characters. The input and the number of blocks are
+  bounded.
+- **Tool strip:** the tools the agent is running (`tool.activity`: running, done,
+  error) appear as chips under their message, as the last item of the chat. Only the
+  short summary is shown, never the output of the tool.
+- **Permission cards:** above the input, one per pending request, labelled "Claude
+  Code asks" so they cannot be taken for ADBuddy's own questions. The card shows the
+  tool, the summary and the whole detail, which scrolls. **Yes** and **Yes, always**
+  (only if the host offers it) stay disabled until the detail has been scrolled to
+  the end and for a short guard after the card appears; **No** is always available.
+  The guard fails closed (a card that was never observed does not answer) and is
+  re-armed when the link reconnects. A card answers once (it shows "answering" until
+  the host says `permission.resolved`) and only the host removes it. A command the
+  card cannot show whole is left to the terminal by the host.
+- **Notice:** with a request pending and the app in the background, a generic
+  notice ("Claude Code needs an answer") opens the chat. It has no command, no
+  text and no buttons except Cut access, and it is silent (same channel as the
+  conversation). It is not shown while the link is paused or disconnected. The
+  "Done" notice shows the first words of the agent's last message, cleaned of
+  separators, invisible characters and markdown delimiters.
+- **ADBuddy's 🔴 questions** still use `ConfirmDialog` (M2), unchanged: a Yes on a
+  Claude Code card never answers one of them, and neither does a Yes on one of them
+  answer a card.
+
+M4 unit tests (JVM, no device):
+
+```sh
+gradle :app:testDebugUnitTest --tests '*MarkdownTest' --tests '*LinksTest'   --tests '*ChatReducerTest' --tests '*PermissionUiTest' --tests '*ToolStripTest'   --tests '*ChatControllerTest' --tests '*ConversationViewTest'
+```
+
+The composables (`MarkdownText`, `PermissionCard`, `ToolStripView`) have no tests:
+they are validated by hand on a device (see "M4" in
+`docs/superpowers/plans/pendientes-m3-m5.md`).
 
 ## How it talks to the host
 
