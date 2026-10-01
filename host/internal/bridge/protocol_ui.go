@@ -27,6 +27,10 @@ type UIResponse struct {
 
 // DeviceInfo is what the app knows of how to reach the phone away from home,
 // and the protected apps the host's guard refuses to act on (M5 spec §4.3).
+// ProtectedApps nil (absent) means "no change": the host keeps the last list.
+// Present, even empty, it is the whole list. A list longer than
+// MaxProtectedApps or with a package that is not ValidPackage is refused
+// whole.
 type DeviceInfo struct {
 	TailscaleIP   string   `json:"tailscaleIp,omitempty"`
 	WifiADBPort   int      `json:"wifiAdbPort,omitempty"`

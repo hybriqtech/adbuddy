@@ -23,7 +23,8 @@
           "postedAt": "2026-10-01T09:59:30Z",
           "ongoing": true
         }
-      ]
+      ],
+      "truncated": false
     }
   }
 }

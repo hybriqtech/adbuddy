@@ -231,6 +231,11 @@ La salida del PTY es un flujo con posición propia, fuera del búfer de eventos:
   - `dump` devuelve `{locked, package, elements[]}`.
 
   Los campos de cada elemento, los gestos y las operaciones nuevas los fija la spec de M5. M5 puede ampliar `ui.*` (operaciones, `args`, `result`) añadiendo sus fixtures, sin tocar el resto del protocolo.
+
+  **Fijado en M5** (spec `2026-10-01-adbuddy-m5-ayudas-remoto-design.md`, §3 y §12):
+  - los `args` y el `result` de cada operación (`bridge/ui_ops.go` y `ProtocolUiOps.kt`), con sus límites y el registro operación → tipos en `protocol/fixtures/ui.json`;
+  - el código `ambiguous`;
+  - `device.info.protectedApps`. Si el campo falta, el host conserva la lista anterior; si viene, aunque sea vacía, es la lista entera.
 - **Códigos de error propios:**
   - `unavailable`: el servicio de accesibilidad no está activo;
   - `protected`: la acción caería sobre una app protegida o sobre la propia ADBuddy, `tech.hybriq.adbuddy` (pendientes de M5);

@@ -1,0 +1,55 @@
+{
+  "ops": [
+    "dump",
+    "click",
+    "setText",
+    "foreground",
+    "notifications"
+  ],
+  "responses": {
+    "ui.response": "click",
+    "ui.response@clickgesture": "click",
+    "ui.response@dump": "dump",
+    "ui.response@dumplocked": "dump",
+    "ui.response@settext": "setText",
+    "ui.response@foreground": "foreground",
+    "ui.response@notifications": "notifications",
+    "ui.response@notificationsmany": "notifications"
+  },
+  "errors": [
+    "ui.response@error",
+    "ui.response@ambiguous"
+  ],
+  "limits": {
+    "maxUiResult": 524288,
+    "maxNotifications": 50,
+    "maxNotificationText": 1024,
+    "maxSetText": 4096,
+    "maxProtectedApps": 1000,
+    "maxPackage": 255
+  },
+  "packages": {
+    "valid": [
+      "com.example.bank",
+      "tech.hybriq.adbuddy",
+      "a.b",
+      "Com.X_1.y2",
+      "a.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b"
+    ],
+    "invalid": [
+      "",
+      "bank",
+      ".a.b",
+      "a..b",
+      "a.b.",
+      "1a.b",
+      "a.1b",
+      "a.b/c",
+      "a.b c",
+      "a.b\n",
+      "a-b.c",
+      "ä.b",
+      "a.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b.b"
+    ]
+  }
+}
