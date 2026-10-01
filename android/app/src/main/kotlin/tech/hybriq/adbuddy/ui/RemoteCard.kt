@@ -1,0 +1,117 @@
+package tech.hybriq.adbuddy.ui
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import tech.hybriq.adbuddy.R
+import tech.hybriq.adbuddy.bridge.Bridge
+import tech.hybriq.adbuddy.bridge.BridgeState
+import tech.hybriq.adbuddy.bridge.ErrorReply
+import tech.hybriq.adbuddy.bridge.Protocol
+import tech.hybriq.adbuddy.bridge.RemoteState
+import tech.hybriq.adbuddy.confirm.HostClock
+import tech.hybriq.adbuddy.ui.RemoteUi.Kind
+
+/** The state a remote.set left unknown: the remote value it left (by identity) while the host has not spoken again. */
+private class UnknownMark(val remote: RemoteState?)
+
+/**
+ * The remote-mode switch (M5). The logic is RemoteUi; this only draws it.
+ * Turning it on asks first (port 5555 open on any network); turning it off does not
+ * ask, except for the note on losing access away from home.
+ */
+@Composable
+fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: (String) -> Unit, modifier: Modifier = Modifier) {
+    var pending by remember { mutableStateOf(false) }
+    var mark by remember { mutableStateOf<UnknownMark?>(null) }
+    var ask by remember { mutableStateOf<Boolean?>(null) } // the value being confirmed
+    // After a null reply the card says unknown until the host speaks again: the next
+    // remote.state or snapshot builds a new RemoteState (or null), so it is no longer
+    // the same object the mark holds.
+    val unknownSince = mark?.let { it.remote === state.remote } == true
+    val view = RemoteUi.view(state, pending, unknownSince, Instant.ofEpochMilli(clock.now()))
+
+    fun send(enabled: Boolean) {
+        pending = true
+        val sent = bridge.request(Protocol.REMOTE_SET, RemoteUi.request(enabled)) { reply ->
+            pending = false
+            when {
+                reply == null -> mark = UnknownMark(state.remote) // the tunnel dropped (adbd restarts): unknown, not off
+                reply.type == Protocol.ERROR -> Protocol.payload<ErrorReply>(reply)?.let { onMessage(it.text.ifEmpty { it.code }) }
+            }
+        }
+        if (sent == null) pending = false
+    }
+
+    ElevatedCard(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(stringResource(R.string.remote_title), style = MaterialTheme.typography.titleMedium)
+                val problem = view.kind == Kind.CLOSING || view.kind == Kind.UNKNOWN
+                Text(
+                    detail(view, clock),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (problem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (view.kind == Kind.ON && view.address.isNotEmpty()) {
+                    Text(view.address, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Switch(
+                checked = view.kind == Kind.ON || view.kind == Kind.PENDING || view.kind == Kind.CLOSING,
+                onCheckedChange = { ask = it },
+                enabled = view.canToggle,
+            )
+        }
+    }
+
+    ask?.let { enable ->
+        AlertDialog(
+            onDismissRequest = { ask = null },
+            title = { Text(stringResource(if (enable) R.string.remote_enable_title else R.string.remote_disable_title)) },
+            text = { Text(stringResource(if (enable) R.string.remote_enable_body else R.string.remote_disable_body)) },
+            confirmButton = {
+                TextButton(onClick = { ask = null; send(enable) }) {
+                    Text(stringResource(if (enable) R.string.remote_enable_confirm else R.string.remote_disable_confirm))
+                }
+            },
+            dismissButton = { TextButton(onClick = { ask = null }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
+}
+
+@Composable
+private fun detail(v: RemoteUi.RemoteView, clock: HostClock): String = when (v.kind) {
+    Kind.OFF -> stringResource(R.string.remote_off)
+    Kind.ON -> v.expiresAt?.let { stringResource(R.string.remote_until, localTime(it, clock)) } ?: stringResource(R.string.remote_on)
+    Kind.CLOSING -> stringResource(R.string.remote_closing)
+    Kind.PENDING -> stringResource(R.string.remote_pending)
+    Kind.UNKNOWN -> stringResource(R.string.remote_unknown)
+    Kind.DISCONNECTED -> stringResource(R.string.remote_disconnected)
+}
+
+private val TIME = DateTimeFormatter.ofPattern("HH:mm")
+
+/** expiresAt is in the host's clock; HostClock moves it to the phone's before it is shown as local time. */
+private fun localTime(hostInstant: Instant, clock: HostClock): String =
+    TIME.format(Instant.ofEpochMilli(clock.toLocal(hostInstant.toEpochMilli())).atZone(ZoneId.systemDefault()))

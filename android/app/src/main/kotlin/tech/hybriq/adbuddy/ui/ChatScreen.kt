@@ -76,6 +76,8 @@ fun ChatScreen(
     terminal: TerminalFeed?,
     snackbar: SnackbarHostState,
     actions: ChatActions,
+    /** The remote-mode switch (RemoteCard), shown above the conversation; empty in previews. */
+    remoteCard: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
     var terminalShown by rememberSaveable { mutableStateOf(true) }
@@ -97,6 +99,7 @@ fun ChatScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { inner ->
         Column(Modifier.padding(inner).consumeWindowInsets(inner).imePadding().fillMaxSize()) {
+            remoteCard()
             if (terminalOn) {
                 TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.weight(0.45f).fillMaxSize())
             }

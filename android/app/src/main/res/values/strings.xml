@@ -97,4 +97,18 @@
     <string name="file_downloading">Downloading… %1$d%%</string>
     <string name="file_open">Tap to open</string>
     <string name="file_failed">Download failed: tap to retry</string>
+    <string name="remote_title">Remote mode</string>
+    <string name="remote_off">Off</string>
+    <string name="remote_on">On</string>
+    <string name="remote_until">Until %1$s</string>
+    <string name="remote_closing">Closing… the PC is trying to close port 5555</string>
+    <string name="remote_pending">Working…</string>
+    <string name="remote_unknown">Unknown: the host will tell when it reconnects</string>
+    <string name="remote_disconnected">Not connected to the PC</string>
+    <string name="remote_enable_title">Turn on remote mode?</string>
+    <string name="remote_enable_body">Port 5555 stays open on any network, including public ones, for up to 12 hours. Your PC\'s key is still required. Turn it off when you are back home.</string>
+    <string name="remote_enable_confirm">Turn on</string>
+    <string name="remote_disable_title">Turn off remote mode?</string>
+    <string name="remote_disable_body">Away from home, turning it off cuts access until you are back on your Wi-Fi.</string>
+    <string name="remote_disable_confirm">Turn off</string>
 </resources>

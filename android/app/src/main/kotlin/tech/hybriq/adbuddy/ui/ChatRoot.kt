@@ -119,7 +119,9 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, onClos
         BackHandler { showActivity = false }
         ActivityScreen(state, onBack = { showActivity = false })
     } else {
-        ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions)
+        ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions) {
+            RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
+        }
     }
     // After both screens, so a question shows wherever the person is.
     ConfirmHost(state, app.bridge, app.clock, focusConfirm, closed, onClose)
