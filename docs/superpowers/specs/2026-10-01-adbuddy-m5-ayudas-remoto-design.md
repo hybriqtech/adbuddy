@@ -168,7 +168,7 @@ Una ayuda recorre en el daemon el mismo camino que `exec`:
 | Guarda de §4.3 | Sí | Sí |
 | Diario | Una entrada con `argv` `["adbuddy", "<op>", …]`, `source` del agente y la descripción de la regla | Igual |
 
-Las descripciones salen de reglas propias de las ayudas (`helper.screen`, `helper.tap`…), con título en inglés y en español como las demás. No pasan por el clasificador de shell: su `argv` no es una orden de adb.
+El `argv` del diario lo construye el daemon a partir de la operación y sus `args` (el del cliente no cuenta), con el texto de `type` recortado a 60 caracteres. Las descripciones salen de reglas propias de las ayudas (`helper.screen`, `helper.tap`…), con título en inglés y en español como las demás. No pasan por el clasificador de shell: su `argv` no es una orden de adb.
 
 ### 4.2 ADBuddy no actúa sobre sí misma
 
@@ -185,21 +185,24 @@ Las descripciones salen de reglas propias de las ayudas (`helper.screen`, `helpe
 
 La app manda la lista al host en `device.info` (campo nuevo `protectedApps`, §12), al conectar y cada vez que cambia. El host guarda la última en su carpeta de datos (`protected.json`), fuera del entorno del agente. Así sirve aunque la app se desconecte después.
 
-**La guarda.** El daemon la aplica antes de admitir:
+**La guarda.** El daemon la aplica después de las puertas (pausa, pregunta 🔴, admisión) y justo antes de ejecutar; si llega una pausa mientras mira, la orden se bloquea igualmente. La aplica a:
 
-- las órdenes con un hallazgo de interfaz (`Finding.UI`: `input`, `am start` y `monkey`);
-- las de leer la pantalla (`screencap` y `uiautomator dump`);
+- las órdenes con un hallazgo de interfaz (`Finding.UI`: `input`, `am start` y `monkey`) y `cmd input`;
+- las de leer la pantalla (`screencap`, `screenrecord` y `uiautomator dump`);
 - las ayudas, salvo `foreground` y `notifications`.
 
 Con eso:
 
-1. Pide el primer plano, a la app (`foreground`) o, sin app, por adb: `dumpsys activity activities`, de donde lee `topResumedActivity` o `mResumedActivity`.
+0. **Una orden guardada va sola** (revisión del plan, C1): un único hallazgo, sin `;`, `&`, `|`, comillas invertidas, `$(` ni saltos de línea en su texto, y `input keyevent`/`keycombination` con una sola tecla. Si no, se bloquea ("must run alone"). Así una orden no puede abrir una app protegida y tocarla después de que la guarda haya mirado. Los bucles necesitan `;` o un salto de línea, así que también quedan fuera.
+1. Pide el primer plano, a la app (`foreground`) o, sin app, por adb: `dumpsys activity activities`, de donde lee **todas** las actividades reanudadas (`topResumedActivity`, `mResumedActivity` y `ResumedActivity`): con pantalla dividida, PiP o una segunda pantalla hay varias, y cuenta cualquiera. La app, por su parte, marca `protected` si cualquier ventana de aplicación en pantalla está protegida o no deja ver su contenido.
 2. Si el paquete en primer plano está en la lista o es ADBuddy, bloquea: `Blocked by ADBuddy: <app> is a protected app; ask the user to do this part`. El código de salida es 126.
 3. Con `am start -n <paquete>/…`, `am start -p <paquete>` o `monkey -p <paquete>` sobre un paquete protegido, bloquea igual. Un intent implícito (`am start -a VIEW -d https://…`) puede abrir una app protegida: entonces se bloquea lo siguiente que intente leer o tocar.
-4. **Si no puede saber el primer plano** (la app no responde y `dumpsys` falla o no se puede leer), bloquea: falla cerrada, tanto para tocar como para leer la pantalla (ruling del supervisor). Un `dumpsys` legible sin actividad reanudada (la pantalla apagada) quiere decir que no hay nada delante: no bloquea, y así el agente puede encender la pantalla (`input keyevent 224`).
+4. **Si no puede saber el primer plano** (la app no responde y `dumpsys` falla o no se puede leer), bloquea: falla cerrada, tanto para tocar como para leer la pantalla (ruling del supervisor). Sin actividad reanudada, solo cuenta como "nada delante" si `dumpsys power` dice `mWakefulness=Asleep` o `Dozing` (pantalla apagada): así el agente puede encender la pantalla (`input keyevent 224`). Con la pantalla encendida y sin actividad reanudada (la pantalla de bloqueo, o un `dumpsys` que no se entiende) bloquea, y eso también evita capturar las notificaciones de la pantalla de bloqueo.
 5. **Sin lista** (el host nunca ha recibido una), solo protege a ADBuddy. Lo dice una vez por sesión en la terminal de `serve`.
 
 **Coste.** Cada orden guardada añade una consulta de primer plano: unos 120-165 ms con la app (el transporte medido en S1) y unos 300 ms por `dumpsys`. Solo la pagan las órdenes de interfaz y de captura.
+
+**Lo que la app no enseña.** `dump` omite los nodos de las apps protegidas y `click` los rechaza, aunque estén en la otra mitad de una pantalla dividida; y el respaldo por adb hace lo mismo (`uidump.Parse`/`Find` con la lista).
 
 **Límite honesto.** La guarda mira el primer plano un instante antes de ejecutar. Una app que pase a primer plano entre esa consulta y el toque (por ejemplo, abierta por una notificación) no se detecta. En la app, `click` vuelve a comprobar el paquete del nodo o de la ventana justo antes de actuar, y eso cierra el hueco para las ayudas. Para `input`, el hueco queda documentado.
 

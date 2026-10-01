@@ -90,6 +90,9 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - Versión mínima del protocolo entre host y app (`MIN_PROTOCOL_VERSION`), para detectar una app desfasada.
   - Receptor del token protegido con `android:permission="android.permission.WRITE_SECURE_SETTINGS"`: solo el usuario shell o el sistema pueden enviarlo. Útil como alternativa al proveedor, pero **sin** pasar el token en la línea de comandos como hace ARTEMIS (`am broadcast --es token …`): lo mantenemos por stdin (plan de M2).
 
+- **Revisión del plan de M5a (opus), para M5c:**
+  - I7: `dumpsys notification --noredact` es 🟢, y la persiana (`input swipe` y después `adbuddy screen` o `screenshot`) enseña los códigos 2FA de las apps protegidas como nodos de `com.android.systemui`. Decidir si se oculta su contenido en `dump`, si `dumpsys notification` pasa a la guarda y si la persiana desplegada cuenta como "protegido".
+  - La heurística de M5a no protege Mensajes ni Gmail, que reciben códigos: proponerlas en la pantalla de M5c.
 - **ADBuddy es app protegida frente a sus propias ayudas** (revisión de M2): las acciones de accesibilidad (tocar, leer la pantalla) nunca actúan sobre `tech.hybriq.adbuddy`, para que el agente no pueda pulsar Permitir en su diálogo.
 - **Si aparece otra vía de inyección de toques fuera del shim**, pedir autenticación (BiometricPrompt o credencial) al pulsar Permitir en la app. En M2 bastan el bloqueo de órdenes mientras hay una pregunta 🔴 pendiente y que los trabajos en segundo plano sean 🔴 especiales.
 - **`TokenProvider` y `BridgeService` no sobrescriben `dump()`**: `dumpsys activity provider|service` es 🟢 para el agente.
