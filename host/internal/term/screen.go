@@ -211,3 +211,33 @@ func (s *Screen) Text() string {
 	defer s.mu.Unlock()
 	return s.em.String()
 }
+
+// PlainSnapshot is Snapshot without styles: the screen's text (trailing
+// spaces trimmed), the cursor and the modes, as bytes with no SGR. It is what
+// a screen too heavy to send styled becomes. If the text is still over
+// maxData bytes (maxData > 0), its first lines are left out; the cursor moves
+// up with them.
+func (s *Screen) PlainSnapshot(maxData int) (data []byte, offset int64, cols, rows int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lines := strings.Split(s.em.String(), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	pos := s.em.CursorPosition()
+	head := s.altMode() + "\x1b[0m\x1b[2J\x1b[H"
+	tail := s.inputModes()
+	size := len(head) + len(tail) + 32
+	for _, l := range lines {
+		size += len(l) + 2
+	}
+	dropped := 0
+	for maxData > 0 && size > maxData && dropped < len(lines)-1 {
+		size -= len(lines[dropped]) + 2
+		dropped++
+	}
+	body := strings.Join(lines[dropped:], "\r\n")
+	y := max(pos.Y-dropped, 0)
+	snap := head + body + fmt.Sprintf("\x1b[%d;%dH", y+1, pos.X+1) + tail
+	return []byte(snap), s.offset, s.cols, s.rows
+}

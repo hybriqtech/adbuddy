@@ -97,12 +97,18 @@ func TestTerminalWatchResumesFromTheTailOrSnapshots(t *testing.T) {
 	r := termRig(t, 50*time.Millisecond)
 	r.say(t, "hello world")
 	epoch := r.m.Screen().Epoch()
+	r.m.ResizePhone(100, 30)
 
 	r.watch(t, epoch, 5)
 	m := r.nextTerm(t)
 	out := payloadOf[bridge.TerminalOutput](t, m)
 	if m.Type != bridge.TypeTerminalOutput || out.Epoch != epoch || out.Offset != 5 || string(out.Data) != " world" || m.Seq != 0 {
 		t.Fatalf("got %s %+v", m.Type, out)
+	}
+	// It also learns the size, which changed while it was not watching.
+	m = r.nextTerm(t)
+	if sz := payloadOf[bridge.TerminalSize](t, m); m.Type != bridge.TypeTerminalSize || sz.Epoch != epoch || sz.Offset != 11 || sz.Cols != 100 || sz.Rows != 30 {
+		t.Fatalf("got %s %s, want the size 100x30 at 11", m.Type, m.Payload)
 	}
 	r.settle(t)
 
@@ -112,7 +118,7 @@ func TestTerminalWatchResumesFromTheTailOrSnapshots(t *testing.T) {
 		m = r.nextTerm(t)
 		snap := payloadOf[bridge.TerminalSnapshot](t, m)
 		if m.Type != bridge.TypeTerminalSnapshot || snap.Epoch != epoch || snap.Offset != 11 ||
-			snap.Cols != session.DefaultCols || snap.Rows != session.DefaultRows || !strings.Contains(string(snap.Data), "hello world") {
+			snap.Cols != 100 || snap.Rows != 30 || !strings.Contains(string(snap.Data), "hello world") {
 			t.Fatalf("watch %+v: got %s %+v", w, m.Type, snap)
 		}
 	}
@@ -253,29 +259,122 @@ func TestTerminalOutputRightAfterTheWatch(t *testing.T) {
 	r := termRig(t, 200*time.Millisecond)
 	r.say(t, "one")
 	r.watch(t, "", 0)
-	r.say(t, "two")
+	// The snapshot is the screen at offset 3, with "one".
 	m := r.nextTerm(t)
 	snap := payloadOf[bridge.TerminalSnapshot](t, m)
-	if m.Type != bridge.TypeTerminalSnapshot {
-		t.Fatalf("got %s", m.Type)
+	if m.Type != bridge.TypeTerminalSnapshot || snap.Offset != 3 || !strings.Contains(string(snap.Data), "one") {
+		t.Fatalf("got %s %+v", m.Type, snap)
 	}
-	var text string
-	if snap.Offset == 3 { // "two" came after the snapshot
-		out := payloadOf[bridge.TerminalOutput](t, r.nextTerm(t))
-		if out.Offset != 3 || string(out.Data) != "two" {
-			t.Fatalf("got %+v", out)
-		}
-		text = "onetwo"
-	} else if snap.Offset == 6 {
-		text = string(snap.Data)
-		if !strings.Contains(text, "onetwo") {
-			t.Fatalf("snapshot at 6 without the output: %q", text)
-		}
-	} else {
-		t.Fatalf("snapshot at %d", snap.Offset)
+	// What comes next continues at 3: once, with no gap.
+	r.say(t, "two")
+	out := payloadOf[bridge.TerminalOutput](t, r.nextTerm(t))
+	if out.Offset != 3 || string(out.Data) != "two" {
+		t.Fatalf("got %+v, want two at 3", out)
 	}
 	r.settle(t)
-	_ = text
+}
+
+// More output than the host keeps for a tick gives up on the pieces and sends
+// the screen instead.
+func TestTerminalOverflowSendsASnapshot(t *testing.T) {
+	r := termRig(t, 500*time.Millisecond)
+	r.say(t, "ab")
+	r.watch(t, r.m.Screen().Epoch(), 2)
+	r.nextTerm(t) // the size
+	chunk := []byte(strings.Repeat("z", 600<<10))
+	epoch := r.m.Screen().Epoch()
+	r.l.onTermOutput(session.Output{Epoch: epoch, Offset: 2, Data: chunk})
+	r.l.onTermOutput(session.Output{Epoch: epoch, Offset: 2 + int64(len(chunk)), Data: chunk})
+	m := r.nextTerm(t)
+	snap := payloadOf[bridge.TerminalSnapshot](t, m)
+	if m.Type != bridge.TypeTerminalSnapshot || snap.Offset != 2 {
+		t.Fatalf("got %s %d bytes, want a snapshot at 2", m.Type, len(m.Payload))
+	}
+	r.settle(t)
+}
+
+// A watch whose connection is gone (SendTo says ErrNoApp) ends.
+func TestTerminalWatchEndsWhenItsConnectionIsGone(t *testing.T) {
+	r := termRig(t, 50*time.Millisecond)
+	r.say(t, "x")
+	w := &termWatch{msg: bridge.Message{Type: bridge.TypeTerminalWatch}, done: make(chan struct{}), snapDue: true}
+	r.l.term.mu.Lock()
+	r.l.term.w = w
+	r.l.term.mu.Unlock()
+	r.l.termTick(w)
+	if r.watched() {
+		t.Fatal("the watch of a gone connection is still on")
+	}
+	select {
+	case <-w.done:
+	default:
+		t.Fatal("its tick goroutine was not told to end")
+	}
+}
+
+// A size change under pressure is not sent: the snapshot that follows has
+// it. And after a pressure the snapshot waits until the queue is down to
+// half the limit.
+func TestTerminalSizeUnderPressureAndHysteresis(t *testing.T) {
+	level := pressureLevel(t)
+	r := termRig(t, 50*time.Millisecond)
+	r.watch(t, "", 0)
+	r.nextTerm(t)
+
+	level.Store(int64(termBacklogLimit + 1))
+	r.m.ResizePhone(100, 30)
+	time.Sleep(4 * termInterval)
+	level.Store(int64(termBacklogLimit/2 + 1)) // eased, but not enough
+	r.settle(t)
+	level.Store(int64(termBacklogLimit / 2))
+	m := r.nextTerm(t)
+	snap := payloadOf[bridge.TerminalSnapshot](t, m)
+	if m.Type != bridge.TypeTerminalSnapshot || snap.Cols != 100 || snap.Rows != 30 {
+		t.Fatalf("got %s %s, want a snapshot of 100x30", m.Type, m.Payload)
+	}
+	r.settle(t) // and no terminal.size after it
+}
+
+// pressureLevel makes the app's queue look as long as the returned value says
+// (negative: the real one).
+func pressureLevel(t *testing.T) *atomic.Int64 {
+	t.Helper()
+	level := &atomic.Int64{}
+	level.Store(-1)
+	old := backlogOf
+	backlogOf = func(s *bridge.Server) int {
+		if n := level.Load(); n >= 0 {
+			return int(n)
+		}
+		return old(s)
+	}
+	t.Cleanup(func() { backlogOf = old })
+	return level
+}
+
+// A screen the PC made huge and full of styles goes as a plain snapshot, so
+// that the message does not pass what the app takes (1 MiB).
+func TestTerminalHugeStyledScreenGoesPlain(t *testing.T) {
+	r := termRig(t, 50*time.Millisecond)
+	r.m.AttachPC("pc_1", 400, 200)
+	var b strings.Builder
+	for y := range 200 {
+		for x := range 400 {
+			fmt.Fprintf(&b, "\x1b[38;2;%d;%d;%d;48;2;%d;%d;%dm%c", x%256, y%256, (x+y)%256, (x*3)%256, (y*5)%256, (x+y*2)%256, 'a'+rune((x+y)%26))
+		}
+		b.WriteString("\x1b[0m\r\n")
+	}
+	r.say(t, b.String())
+	r.watch(t, "", 0)
+	m := r.nextTerm(t)
+	snap := payloadOf[bridge.TerminalSnapshot](t, m)
+	if m.Type != bridge.TypeTerminalSnapshot || len(m.Payload) >= 1<<20 || snap.Cols != 400 || snap.Rows != 200 {
+		t.Fatalf("got %s of %d bytes %dx%d", m.Type, len(m.Payload), snap.Cols, snap.Rows)
+	}
+	if strings.Contains(string(snap.Data), "38;2;") || !strings.Contains(string(snap.Data), "abcdefghij") {
+		t.Fatal("the snapshot is not plain text")
+	}
+	t.Logf("plain snapshot payload: %d bytes", len(m.Payload))
 }
 
 // Another process of the agent sends its own screen.

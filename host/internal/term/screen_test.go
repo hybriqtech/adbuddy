@@ -3,6 +3,7 @@ package term
 import (
 	"bytes"
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -221,5 +222,30 @@ func TestSnapshotCarriesTheModes(t *testing.T) {
 	s.Write([]byte("\x1b[?1049l\x1b[?25h\x1b[?2004l"))
 	if got := string(s.Modes()); got != off {
 		t.Fatalf("modes after turning them off %q, want %q", got, off)
+	}
+}
+
+// A plain snapshot draws the text and the modes with no styles, and gives up
+// its first lines when it is over the limit.
+func TestPlainSnapshotHasNoStyles(t *testing.T) {
+	s := New("e_p", 20, 5)
+	defer s.Close()
+	s.Write([]byte("\x1b[1;31mred\x1b[0m\r\nline two\r\n\x1b[?2004h\x1b[?25l"))
+	data, off, cols, rows := s.PlainSnapshot(0)
+	got := string(data)
+	if n := regexp.MustCompile("\x1b\\[[0-9;]*m").FindAllString(got, -1); len(n) != 1 || n[0] != "\x1b[0m" {
+		t.Fatalf("styles in %q", got)
+	}
+	for _, want := range []string{"red\r\nline two", "\x1b[?2004h", "\x1b[?25l", "\x1b[?1049l", "\x1b[3;1H"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("no %q in %q", want, got)
+		}
+	}
+	if off != s.Offset() || cols != 20 || rows != 5 {
+		t.Fatalf("got %d %dx%d", off, cols, rows)
+	}
+	small, _, _, _ := s.PlainSnapshot(85)
+	if len(small) > 110 || strings.Contains(string(small), "red") || !strings.Contains(string(small), "line two") {
+		t.Fatalf("limited: %q", small)
 	}
 }

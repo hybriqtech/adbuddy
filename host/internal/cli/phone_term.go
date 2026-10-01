@@ -69,6 +69,7 @@ type termWatch struct {
 	buf        []byte // output accepted and not yet sent
 	bufOff     int64
 	cols, rows int
+	pressure   bool // the queue was pressed since the last snapshot
 }
 
 // subscribeTerm takes the one subscription to the session's output (useSession
@@ -146,6 +147,14 @@ func (l *phoneLink) onTermWatch(m bridge.Message) {
 	l.endWatchLocked(nil)
 	l.term.w = w // from here on the live output is kept in its inbox
 	l.term.mu.Unlock()
+	// The connection may have been replaced meanwhile (OnAttach ran before w
+	// was installed, so nothing would end it).
+	if !l.srv.Current(m) {
+		l.term.mu.Lock()
+		l.endWatchLocked(w)
+		l.term.mu.Unlock()
+		return
+	}
 
 	w.snapDue = true // unless the app only lacks what the tail has
 	if mgr := l.session(); mgr != nil {
@@ -156,9 +165,10 @@ func (l *phoneLink) onTermWatch(m bridge.Message) {
 				w.cols, w.rows = scr.Size()
 				w.buf, w.bufOff = data, tw.Offset
 				l.flushTerm(w)
-				if len(data) == 0 {
-					// Up to date: it still learns the size it has to draw with.
-					l.sendTerm(w, bridge.TypeTerminalSize, bridge.TerminalSize{Epoch: w.epoch, Offset: w.next, Cols: w.cols, Rows: w.rows})
+				if !w.snapDue {
+					// It resumes without a snapshot, so it learns the size to
+					// draw with: it may have changed while it was away.
+					l.sendSize(w, w.next)
 				}
 			}
 		}
@@ -212,8 +222,21 @@ func (l *phoneLink) termTick(w *termWatch) {
 	// Only after the output before it went out.
 	if cols != 0 && epoch == w.epoch && (cols != w.cols || rows != w.rows) {
 		w.cols, w.rows = cols, rows
-		l.sendTerm(w, bridge.TypeTerminalSize, bridge.TerminalSize{Epoch: epoch, Offset: off, Cols: cols, Rows: rows})
+		l.sendSize(w, off)
+		if w.snapDue {
+			l.snapshotTerm(w)
+		}
 	}
+}
+
+// sendSize tells the app the size w holds, from byte offset on. With the
+// app's queue pressed it asks for a snapshot instead, which carries the size.
+func (l *phoneLink) sendSize(w *termWatch, offset int64) {
+	if l.pressed(w) {
+		w.snapDue, w.buf = true, nil
+		return
+	}
+	l.sendTerm(w, bridge.TypeTerminalSize, bridge.TerminalSize{Epoch: w.epoch, Offset: offset, Cols: w.cols, Rows: w.rows})
 }
 
 // takeTerm moves the inbox into the pending output, as session.ServeAttach
@@ -269,14 +292,45 @@ func (l *phoneLink) sendTerm(w *termWatch, typ string, payload any) bool {
 	return true
 }
 
-func (l *phoneLink) pressed() bool { return backlogOf(l.srv) > termBacklogLimit }
+// pressed reports whether the app's queue is past the limit, and remembers it
+// in w: after a pressure the snapshot waits for the queue to ease to half the
+// limit, so that it does not sit at the edge.
+func (l *phoneLink) pressed(w *termWatch) bool {
+	if backlogOf(l.srv) > termBacklogLimit {
+		w.pressure = true
+		return true
+	}
+	return false
+}
+
+// maxSnapshotMessage is the most a terminal.snapshot message may weigh: the
+// app takes 1 MiB, and a PC terminal can make the screen bigger than the one
+// the phone asks for.
+const maxSnapshotMessage = 900 << 10
+
+// screenSnapshot is the screen as a terminal.snapshot, without styles when
+// the styled one would not fit in a message.
+func screenSnapshot(scr interface {
+	Snapshot() ([]byte, int64, int, int)
+	PlainSnapshot(int) ([]byte, int64, int, int)
+	Epoch() string
+}) bridge.TerminalSnapshot {
+	data, off, cols, rows := scr.Snapshot()
+	snap := bridge.TerminalSnapshot{Epoch: scr.Epoch(), Offset: off, Cols: cols, Rows: rows, Data: data}
+	if raw, err := json.Marshal(snap); err == nil && len(raw) <= maxSnapshotMessage {
+		return snap
+	}
+	// base64 takes 4 bytes for 3, and the envelope and fields some more.
+	snap.Data, snap.Offset, snap.Cols, snap.Rows = scr.PlainSnapshot(maxSnapshotMessage/4*3 - 1024)
+	return snap
+}
 
 // flushTerm sends the pending output in chunks. With the app's queue pressed
 // it drops it and asks for a snapshot instead: the terminal never fills the
 // queue whose overflow drops the app.
 func (l *phoneLink) flushTerm(w *termWatch) {
 	for len(w.buf) > 0 {
-		if l.pressed() {
+		if l.pressed(w) {
 			w.snapDue, w.buf = true, nil
 			return
 		}
@@ -291,23 +345,26 @@ func (l *phoneLink) flushTerm(w *termWatch) {
 }
 
 // snapshotTerm sends the screen when it can: there is an agent and the app's
-// queue is not pressed. Otherwise it stays due.
+// queue is not pressed (and, after a pressure, is down to half the limit).
+// Otherwise it stays due.
 func (l *phoneLink) snapshotTerm(w *termWatch) {
 	mgr := l.session()
-	if mgr == nil || l.pressed() {
+	if mgr == nil || l.pressed(w) {
 		return
+	}
+	if w.pressure && backlogOf(l.srv) > termBacklogLimit/2 {
+		return // hysteresis
 	}
 	scr := mgr.Screen()
 	if scr == nil {
 		return
 	}
-	data, off, cols, rows := scr.Snapshot()
-	epoch := scr.Epoch()
-	if !l.sendTerm(w, bridge.TypeTerminalSnapshot, bridge.TerminalSnapshot{Epoch: epoch, Offset: off, Cols: cols, Rows: rows, Data: data}) {
+	snap := screenSnapshot(scr)
+	if !l.sendTerm(w, bridge.TypeTerminalSnapshot, snap) {
 		return
 	}
-	w.snapDue, w.buf = false, nil
-	w.epoch, w.next, w.cols, w.rows = epoch, off, cols, rows
+	w.snapDue, w.buf, w.pressure = false, nil, false
+	w.epoch, w.next, w.cols, w.rows = snap.Epoch, snap.Offset, snap.Cols, snap.Rows
 }
 
 func (l *phoneLink) onTermUnwatch(m bridge.Message) {
