@@ -5485,6 +5485,9 @@ Necesitan un móvil, y nunca el del usuario sin su permiso explícito. La primer
 5. **Respaldo sin la app:** con el servicio de accesibilidad apagado, `adbuddy screen` usa `uiautomator`; con el servicio encendido y la app desconectada, da el error de `UI_UNAVAILABLE` sin desconectar el servicio.
 6. **`dumpsys activity activities`** en Android 11, 13-15 de otro fabricante y 17: `uidump.Foreground` encuentra la actividad reanudada (si falla, se añaden muestras reales a `uidump_test.go`).
 7. **Ventanas:** con un diálogo, el teclado o la pantalla partida, `screen` los muestra en su `window`, y `tap --xy` sobre la barra de notificaciones con una pregunta 🔴 pendiente da `protected`.
+8. **Marco de la superposición:** con la superposición visible, dos `tap --xy` seguidos en menos de 4 s sobre un punto libre no dan `protected`, y un `tap` por texto cuyo `ACTION_CLICK` falle (elemento no pulsable) llega a tocar. Si el marco a pantalla completa sale en `getWindows()`, todo toque da `protected` mientras dura: no se arregla filtrando por `accessibilityTitle` (otra app podría ponerse el mismo título y ocultarse al volcado), sino con otra señal que solo ADBuddy pueda dar.
+9. **Servicio y `dumpsys power`:** `uidump.ServiceOn` y la expresión de `uidump.Asleep` contra la salida real de `settings get secure enabled_accessibility_services` y `dumpsys power` (pantalla apagada, encendida, bloqueada, Dozing).
+10. **Notificaciones de apps protegidas (límite honesto):** con la persiana bajada o una notificación emergente de una app protegida, `screen` y `screenshot` pueden mostrarla (sus nodos son de `com.android.systemui`); decidir en la spec §4.3 si se avisa o si se omiten esas filas.
 
 ## Después de M5a
 
