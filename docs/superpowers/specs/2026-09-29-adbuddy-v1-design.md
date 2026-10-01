@@ -268,6 +268,8 @@ Tailscale es opcional y se recomienda en la documentación y en la app.
 
 ### 5.3 Protocolo (JSON sobre WebSocket, `v1`)
 
+> **Sustituida para M3-M5** por [la spec del protocolo común](2026-10-01-adbuddy-protocolo-m3-m5-design.md): clases de mensaje (eventos, respuestas y flujos), `rid` y `error`, terminal con `epoch` y `offset`, descarga con `file.get` en lugar de `file.incoming`, `permission.resolved` y `remote.*`. La tabla siguiente queda como referencia de la v1 original.
+
 Todos los mensajes llevan el sobre `{"v":1,"seq":<n>,"type":"…","ts":"…","payload":{…}}`.
 
 **Host → app**

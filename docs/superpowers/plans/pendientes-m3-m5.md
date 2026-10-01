@@ -38,7 +38,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 - **Confianza previa de la carpeta del entorno** en Claude Code (§5.1, S3): averiguar dónde y con qué clave guarda Claude Code la confianza de una carpeta y preconfiar el entorno antes de lanzar el agente en el PTY; si no es posible, detectar el diálogo y elegir "Yes" de forma explícita (un Enter a ciegas elige "No, exit").
 
 - **La app muestra los `notice` del host** (revisión final de M2): hoy los ignora; el de respuesta tardía ("That question was already answered or moved to the PC terminal.") y el de tipo no soportado deberían verse en la pantalla de inicio.
-- **Fixtures JSON compartidas del protocolo** en `testdata/` que lean los tests de Go y de Kotlin: hoy el contrato lo sostienen cadenas escritas a mano (`ProtocolTest.kt`) y la app falsa del e2e. Hacerlo antes de que el protocolo crezca con el chat.
+- **Fixtures JSON compartidas del protocolo:** las hace M3.0 en `protocol/fixtures/` (spec `2026-10-01-adbuddy-protocolo-m3-m5-design.md`, §12).
 - **`adbuddy doctor` desde la sesión del agente** usa el adb real fuera del shim (solo lecturas fijas, sin argumentos del agente) aunque haya pausa o una pregunta pendiente, y no lo apunta en el diario. Decidir si se registra o se bloquea en pausa.
 
 ## M5 · Ayudas al agente
