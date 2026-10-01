@@ -3,7 +3,20 @@
     <string name="a11y_label">Ayudante del agente de ADBuddy</string>
     <string name="a11y_description">Permite que el agente de código de tu PC lea la pantalla y toque por ti, siempre visible en pantalla con un botón de Pausa. Nunca lee contraseñas ni actúa en apps protegidas, como la de tu banco.</string>
 
-    <string name="channel_status">Conexión con el PC</string>
+    <string name="channel_conversation">Conversación con el agente</string>
+    <string name="channel_done">El agente ha terminado</string>
+    <string name="notif_working">Trabajando…</string>
+    <string name="notif_working_on">Trabajando: %1$s</string>
+    <string name="notif_waiting">Esperándote</string>
+    <string name="notif_stopped">El agente se ha detenido</string>
+    <string name="notif_you">Tú</string>
+    <string name="notif_reply">Responder</string>
+    <string name="notif_reply_hint">Escribe al agente</string>
+    <string name="notif_capture">Enviar captura</string>
+    <string name="notif_done_title">Listo</string>
+    <string name="notif_done_default">El agente ha terminado</string>
+    <string name="notif_capture_failed">No se pudo hacer la captura</string>
+    <string name="notif_cut_failed">No se pudo cortar el acceso ADB</string>
     <string name="channel_confirm">Confirmaciones</string>
     <string name="status_connected">Conectado a %1$s</string>
     <string name="status_connecting">Conectando con el PC…</string>

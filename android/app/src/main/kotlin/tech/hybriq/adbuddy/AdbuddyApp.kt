@@ -83,7 +83,9 @@ class AdbuddyApp : Application() {
         terminal = TerminalFeed(channel)
         scope.launch { channel.connected.collect { terminal.onConnectedChanged(it) } }
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL_STATUS, getString(R.string.channel_status), NotificationManager.IMPORTANCE_LOW))
+        nm.deleteNotificationChannel(LEGACY_STATUS)
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_CONVERSATION, getString(R.string.channel_conversation), NotificationManager.IMPORTANCE_LOW).apply { setAllowBubbles(true) })
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_DONE, getString(R.string.channel_done), NotificationManager.IMPORTANCE_DEFAULT))
         nm.createNotificationChannel(NotificationChannel(CHANNEL_CONFIRM, getString(R.string.channel_confirm), NotificationManager.IMPORTANCE_HIGH))
     }
 
@@ -106,7 +108,10 @@ class AdbuddyApp : Application() {
     }
 
     companion object {
-        const val CHANNEL_STATUS = "status"
+        /** The conversation notification (replaces "status"): bubbles allowed, low importance, never a sound. */
+        const val CHANNEL_CONVERSATION = "conversation"
+        const val CHANNEL_DONE = "done"
         const val CHANNEL_CONFIRM = "confirm"
+        private const val LEGACY_STATUS = "status"
     }
 }

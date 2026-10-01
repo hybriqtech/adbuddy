@@ -48,6 +48,15 @@
             </intent-filter>
         </activity>
 
+        <!-- The bubble of the conversation notification: embeddable and resizable, as the Bubbles API asks. -->
+        <activity
+            android:name=".ChatBubbleActivity"
+            android:exported="false"
+            android:allowEmbedded="true"
+            android:resizeableActivity="true"
+            android:documentLaunchMode="always"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Exported so `adb shell content …` reaches it; it answers only the
              shell user (uid 2000). -->
         <provider

@@ -4,7 +4,20 @@
     <string name="a11y_label">ADBuddy agent helper</string>
     <string name="a11y_description">Lets the coding agent on your PC read the screen and tap for you, always shown on screen with a Pause button. It never reads passwords and never acts in protected apps such as your bank.</string>
 
-    <string name="channel_status">Connection with the PC</string>
+    <string name="channel_conversation">Conversation with the agent</string>
+    <string name="channel_done">Agent finished</string>
+    <string name="notif_working">Working…</string>
+    <string name="notif_working_on">Working: %1$s</string>
+    <string name="notif_waiting">Waiting for you</string>
+    <string name="notif_stopped">The agent stopped</string>
+    <string name="notif_you">You</string>
+    <string name="notif_reply">Reply</string>
+    <string name="notif_reply_hint">Message the agent</string>
+    <string name="notif_capture">Send screenshot</string>
+    <string name="notif_done_title">Done</string>
+    <string name="notif_done_default">The agent finished</string>
+    <string name="notif_capture_failed">Could not take the screenshot</string>
+    <string name="notif_cut_failed">Could not cut ADB access</string>
     <string name="channel_confirm">Confirmations</string>
     <string name="status_connected">Connected to %1$s</string>
     <string name="status_connecting">Connecting to the PC…</string>
