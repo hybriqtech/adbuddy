@@ -70,3 +70,14 @@ Ruling: `dumpsys package <paquete>` es 🟢 en el clasificador real (el brief de
 Task 5: re-revisión ronda 1 (rereviewer Sonnet): 9/9 ADDRESSED, sin rotura nueva
 Task 5: complete (commits 498a1a8..b7d2c4a, 1 ronda de arreglos)
 Task 5: minor (deferred): debloat sub-promete `undo` en la desinstalación de apps de sistema (`--user 0` sí deja `install-existing`); es conservador.
+
+Rebase 2026-10-02: rama `m6b` creada y rebasada sobre origin/main f9f4422 (14 commits; sin conflictos; identidad hybriqtech y trailer exacto en los 14; `go build/vet/test ./...` en verde). `m6a` queda como copia histórica sin tocar; el PR final va desde `m6b` (supervisor). Los SHA de este ledger anteriores a esta línea son los de antes del rebase.
+
+Task 6: review opus (04caa1a): spec cumple en lo esencial, calidad "Needs fixes" — 4 Importantes (excepción de `rm -r` sin casos negativos pese a lo afirmado; nombres con espacios/metacaracteres en `mv`; `pull` de ocultos/`.trashed` y prosa "green" falsa; manifiesto roto al mover la carpeta) + 11 menores
+Task 6: fix round 1/5 en curso (todo)
+Task 6: Ruling: la guarda de T2 gana una excepción exacta (`shell rm -r /sdcard/ADBuddy-papelera`) — el brief de T6 exige vaciar la papelera con una sola orden 🔴 y el test prohibía todo `rm -r` — limitada a storage-cleanup (hallazgo 8) y con casos negativos; cuesta una excepción en una guarda de seguridad (revisada por opus).
+Pendiente final: nota de §2.5 (el agente adapta el entrecomillado a su shell) en device-profile, debloat y battery (T6 la añade a sus tres skills).
+
+Task 6: re-revisión ronda 1 (rereviewer Sonnet): 18/18 ADDRESSED, sin rotura Critical/Important
+Task 6: complete (commits a4c29a4..f754605, 1 ronda de arreglos)
+Task 6: minor (deferred): backup-to-pc: `find` recursivo vs `stat` de un nivel (decir "primer nivel"); un fichero normal dentro de una carpeta oculta (`.thumbnails/`) sale 🔴 por tramo oculto: decir "o dentro de una carpeta que empieza por punto"; `NOTES.md` "where they keep the copies" roza con "siempre dentro del entorno"; mensaje del commit dice que quitó casos de `bad` y solo movió uno.
