@@ -1,7 +1,7 @@
 # ADBuddy · M6a · Pipeline de releases y app de confianza · Diseño
 
 - **Fecha:** 2026-10-01
-- **Estado:** escrito por delegación del usuario. Revisión de seguridad 1 (nautilus-19 con `adbuddy-reviewer-opus`): 2 críticos, 4 importantes y 6 menores. Re-revisión 2: 0 críticos, 4 importantes y 8 menores. Todo incorporado (§12). Las decisiones están en §11.
+- **Estado:** escrito por delegación del usuario. Revisión de seguridad 1 (nautilus-19 con `adbuddy-reviewer-opus`): 2 críticos, 4 importantes y 6 menores. Re-revisión 2: 0 críticos, 4 importantes y 8 menores. Re-revisión 3: 1 crítico, 2 importantes y 8 menores. Todo incorporado (§12). Las decisiones están en §11.
 - **Spec de la v1:** [2026-09-29-adbuddy-v1-design.md](2026-09-29-adbuddy-v1-design.md) (§12, §4.6 y la fila M6 de §13)
 - **Parte de:** línea B (M6 sin protocolo), rama `m6a`, que sale de `main` (0ec286f)
 - **En paralelo con:** M3 (tern-51) y M5 (nautilus-19), con el supervisor adbuddy-e5
@@ -159,7 +159,8 @@ Cualquier fallo es un error con la causa; nunca hay pánico ni lecturas fuera de
 - **Un APK de desarrollo concreto, solo si el usuario lo elige (revisión 2, I-1).** `adbuddy setup --apk <fichero>` es la vía para instalar un build propio:
   1. lee el fichero **una vez** y comprueba con `Signers` que tiene un bloque de firma válido; si no, no lo instala;
   2. si no lo firma el certificado de release, guarda el **SHA-256 del APK entero** (no el de su certificado) en `<data>/app/trusted-dev-apk`, con un aviso: `⚠ Trusting this development build of the app (SHA-256 <sha> of <file>): adbuddy serve will hand the phone app's token to exactly this APK. Delete <path> to stop.`;
-  3. lo copia a `<data>/app/dev.apk` (0600) e instala **esa copia**, para que nadie lo cambie entre la lectura y la instalación.
+  3. lo copia a `<data>/app/chosen.apk` (0600, escrito en un temporal y renombrado) e instala **esa copia**, para que nadie lo cambie entre la lectura y la instalación. Lo lee como mucho `MaxAPK`: el fichero podría ser un FIFO;
+  4. escribe `trusted-dev-apk` **solo cuando la instalación termina bien**, y lo borra junto con `chosen.apk`.
 
   ¿Por qué el digest y no el certificado? La clave de debug de Android está en el PC (`~/.android/debug.keystore`, con la contraseña pública `android`). Con ella, un agente con acceso al PC podría firmar otra app y **actualizar** la de desarrollo con `adb install -r` (🟡). Android le dejaría sus datos, token incluido, y sus permisos. Con el digest solo vale ese APK exacto: cada build nuevo pide repetir `setup --apk`.
 - **`LoadTrust`** lee `trusted-dev-apk` solo si es un fichero normal (no un enlace) que contiene un SHA-256 y, en Unix, con permisos 0600. Si no, no confía en nada de desarrollo. La carpeta de datos está fuera del entorno del agente, así que `adb pull` no puede escribir ahí: `daemon/pcwrite.go` solo deja escribir dentro del entorno.
@@ -191,10 +192,17 @@ Cualquier fallo es un error con la causa; nunca hay pánico ni lecturas fuera de
 
 Falla **cerrado**: cualquier error (un adb que no responde, una salida rara) envuelve `ErrNoTrustedApp` o `ErrAppTooOld`, y no hay `Verified`.
 
-`Verifier` recuerda para cada ruta el último resultado definitivo: bien, `ErrSigner`, `ErrAppTooOld` o `ErrUnpinned`. Los fallos de adb no los recuerda. En Android 11+ cada instalación o actualización va a una carpeta aleatoria nueva, así que la misma ruta es el mismo APK. Por eso las reconexiones de `serve` no vuelven a leer el APK hasta que la app se reinstala.
+`Verifier` recuerda el último resultado definitivo (bien, `ErrSigner`, `ErrAppTooOld` o `ErrUnpinned`), pero no los fallos de adb (re-revisión 3, I-a e I-b):
+
+- **La clave de la caché** es la ruta, el `stat -c '%s %i %Y'` de `base.apk` (tamaño, inodo y mtime) y la confianza vigente. La seguridad no depende de que una actualización cambie de carpeta: basta con que cambie el `stat`, y eso se comprueba en el emulador (validación 3).
+- **La confianza se relee en cada llamada:** `NewVerifier` recibe una función que devuelve la `Trust` actual. Borrar `trusted-dev-apk` surte efecto enseguida, también en un `serve` que ya está en marcha.
+
+Así, las reconexiones de `serve` no vuelven a leer el APK hasta que algo cambia.
 
 **Límites del modelo:**
 - Con root o `adb root` (que es 🔴 especial), la shell del móvil puede mentir, y no hay garantía.
+- No protege de un agente que ejecute herramientas en el PC fuera de `adbuddy`: podría escribir los ficheros del host o ejecutar el adb real. Hoy los separan los permisos del arnés: el entorno solo preaprueba `Bash(adbuddy:*)` (`workspace.go`), y `setup` se niega a ejecutarse con `ADBUDDY_SOURCE=agent`.
+- `trusted-dev-apk` es uno solo por PC. Con dos móviles, el `setup` de uno con la app de release deja de confiar en el build de desarrollo del otro. Falla cerrado, así que solo molesta.
 - En un móvil sin root, `pm`, `stat`, `base64` y `sh` están en `/system`, y el usuario `shell` no puede escribir en `/data/app`.
 
 ### 6.3 Dónde se exige
@@ -217,7 +225,16 @@ Antes de actuar, cada una vuelve a llamar a `pm path` y falla si la ruta cambió
 - demasiado vieja: `⚠ The ADBuddy app on the phone is too old for this host: run adbuddy setup to update it.`;
 - en los dos casos setup sigue sin la app, y las 🔴 van a la terminal.
 
-**En `serve` (`phone.go`, `connect`):** `Verify` antes de cada `Handshake`, también al reconectar. Si falla, no se entrega el token, se avisa una vez (como hoy con los fallos de conexión) y las 🔴 siguen en la terminal.
+**En `serve` (`phone.go`, `connect`):** `Verify` antes de cada `Handshake`, también al reconectar. El token rota **antes** de verificar: si `Verify` falla, la app que tenía el anterior ya no puede entrar. Si falla, no se entrega token nuevo, se avisa una vez (como hoy con los fallos de conexión) y las 🔴 siguen en la terminal.
+
+**Cada conexión, atada a la instalación verificada (re-revisión 3, C-1).** Una actualización firmada con la misma clave (`adb install -r`, 🟡) conserva los datos de la app, el token incluido, y `adb reverse` sobrevive. La app nueva podría reconectarse con el token heredado sin que hubiera un handshake nuevo. Por eso el canal tiene un gancho `bridge.Options.Admit`:
+
+- se llama en la goroutine de cada conexión, tras validar el token y antes de `OnConnect` y `OnAttach`;
+- falla cerrado: `false`, un `ctx` cancelado o 20 s sin respuesta rechazan la conexión como si no tuviera el token;
+- `serve` lo usa con `Verifier.Same`: la app que llega ha de tener la ruta y el `stat` del último `Verify` bueno, y su confianza tiene que seguir vigente;
+- si no, la rechaza y pide una comprobación nueva: `connect()` rota el token y vuelve a verificar antes de dar ninguno.
+
+Con el certificado de release ya no se podía actualizar sin la clave de hybriqtech. Esto cierra también el caso de desarrollo.
 
 **`setup --apk` e `INSTALL_FAILED_UPDATE_INCOMPATIBLE`:** Android no actualiza una app firmada con otra clave. `Install` reconoce ese error (`ErrOtherSigner`) y setup dice qué hacer: `Uninstall it on the phone (it forgets its pairing with this PC) and run adbuddy setup again.`
 
@@ -260,7 +277,10 @@ Ruling del supervisor. Un caso de `host/internal/classify`, con revisión opus. 
 Además (revisión 2, M-6):
 
 - `cmd` entra en la regla de argumentos dinámicos de `special.go`, como ya lo están `pm`, `appops` y `am`;
-- tres órdenes que neutralizan la app sin nombrarla pasan a 🔴 especiales: `pm reset-permissions` (quitaría WRITE_SECURE_SETTINGS, y con ello "Cortar acceso"), `dumpsys deviceidle whitelist reset` y `cmd appops reset`.
+- las órdenes que neutralizan la app sin nombrarla pasan a 🔴 especiales, también en sus otras formas:
+  - `pm reset-permissions` y `cmd package reset-permissions` sin `-p`, que quitarían WRITE_SECURE_SETTINGS, y con ello "Cortar acceso";
+  - `dumpsys deviceidle whitelist reset` y `cmd deviceidle whitelist reset`;
+  - `cmd appops reset` y `appops reset` sin paquete.
 
 Si alguna de estas órdenes llega a quitar la app, la real deja de estar y entra en juego §6. Hoy `mentionsADBuddy` ya debería cubrirlas, por nombre de paquete en las palabras (en `shell` solo cuando el nivel no es 🟢). M6a lo deja escrito en `testdata/habitual.jsonl`, una línea por orden con `"level":"red","special":true`, y añade a `special.go` lo que no salga.
 
@@ -379,6 +399,22 @@ Están en `docs/releasing.md`, en "User actions", y en "Validaciones manuales pe
 | M-7: cachés y contenido de lo que se firma | §4 (sin cachés, artefacto único, rutas absolutas) y §11 (riesgo aceptado) |
 | M-8: PowerShell, bypass de administradores, almacenamiento adoptado y `doctor` | §10, §6.2 y M6c (`doctor`, en `pendientes-m3-m5.md`) |
 
+### Re-revisión 3
+
+| Hallazgo | Resuelto en |
+|---|---|
+| C-1: una actualización con la clave de debug hereda el token vigente sin handshake nuevo | §6.3 (`bridge.Options.Admit` con `Verifier.Same`, y el token rota antes de verificar) |
+| I-a: borrar `trusted-dev-apk` no surte efecto hasta reiniciar `serve` | §6.2 (la confianza se relee en cada llamada y forma parte de la clave de la caché) |
+| I-b: la caché por ruta da por hecho, sin evidencia, que la misma ruta es el mismo APK | §6.2 (clave = ruta + `stat` + confianza) y validación 3 |
+| Me-1: el valor cero, en `still()` | §6.2 |
+| Me-2: `--apk` limitado, copia atómica, confianza solo tras instalar | §6.1 |
+| Me-3: otras formas de las órdenes de *reset* | §7 |
+| Me-4: la autoridad con el provider desactivado | validación 3 |
+| Me-5: el límite del modelo en el PC | §6.2, "Límites del modelo" |
+| Me-6: comillas y CR LF | `shq.Join` cita la ruta; el límite de `base64` cuenta CR LF |
+| Me-7: un `trusted-dev-apk` por PC | §6.2, "Límites del modelo" |
+| Me-8: el plan desalineado | plan reescrito con esta spec |
+
 ## 13. Tests
 
 - **Parser** (`phoneapp/apksig_test.go`), con APK sintéticos de `phoneapp/apktest`:
@@ -410,6 +446,7 @@ Están en `docs/releasing.md`, en "User actions", y en "Validaciones manuales pe
 | `host/internal/cli/setup.go` | — | la ayuda de `--apk` | sí |
 | `host/internal/cli/phone.go` y `phone_test.go` | compartido | `connect()` (`Verify` + `Handshake` con `Verified`, y el aviso de `trusted-dev-apk`) y el adb falso de los tests | sí, en un commit propio |
 | `host/cmd/adbuddy/phone_e2e_test.go` | compartido | reglas `pm path`, `stat` y `base64`, y el APK de desarrollo de confianza en el directorio de datos | sí |
+| `host/internal/bridge/server.go` | tern (M3) | `Options.Admit`, `admitTimeout` y su llamada en `handle`, en un commit propio tras m3-bridge | sí |
 | `host/internal/classify/special.go` y `testdata/habitual.jsonl` | — | §7 | sí (ruling) |
 | `android/app/build.gradle.kts` | tern (dependencias) | las 2 líneas de versión, en su propio commit | sí |
 | `pendientes-m3-m5.md` | cada uno su sección | solo M6 | sí |

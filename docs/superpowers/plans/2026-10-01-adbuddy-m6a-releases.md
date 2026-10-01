@@ -22,6 +22,7 @@
 - **Rutas permitidas.** Solo estas (acordadas con el supervisor):
   - host: `host/internal/phoneapp/**`, `host/cmd/apkcert/**`, `host/internal/cli/appsetup.go`, `host/internal/cli/appsetup_test.go` y la línea de ayuda de `--apk` en `host/internal/cli/setup.go`;
   - en `host/internal/cli/phone.go`, solo `connect()` y las dos líneas que crean su `Verifier`, **en un commit propio**; además `host/internal/cli/phone_test.go` y `host/cmd/adbuddy/phone_e2e_test.go`;
+  - canal: `host/internal/bridge/server.go` (solo `Options.Admit`, `admitTimeout` y su llamada en `handle`, **en un commit propio** tras m3-bridge) y el nuevo `host/internal/bridge/admit_test.go`;
   - clasificador: `host/internal/classify/special.go` y `host/internal/classify/testdata/habitual.jsonl`;
   - en `android/app/build.gradle.kts`, las dos líneas `versionCode`/`versionName`, **en un commit propio**;
   - scripts: `scripts/install.sh`, `scripts/install_test.sh`, `scripts/release-key.sh`, `scripts/release-version.sh`, `scripts/release-version_test.sh` y `scripts/release-cert.sh`;
@@ -58,8 +59,8 @@
 Ledger: `.superpowers/sdd/2026-10-01-adbuddy-m6a-releases/progress.md`.
 
 **Revisores:**
-- `adbuddy-reviewer-opus` para las Tasks 1-5 y 9 (parser, app de confianza, clasificador y secretos de la CI);
-- `adbuddy-reviewer` para las Tasks 6-8 y 10.
+- `adbuddy-reviewer-opus` para las Tasks 1-6 y 10 (parser, app de confianza, gancho `Admit`, clasificador y secretos de la CI);
+- `adbuddy-reviewer` para las Tasks 7-9 y 11.
 
 ## Mapa de ficheros
 
@@ -67,10 +68,10 @@ Ledger: `.superpowers/sdd/2026-10-01-adbuddy-m6a-releases/progress.md`.
 |---|---|
 | `host/internal/phoneapp/apksig.go` | `Signers` (certificados de los firmantes, con las condiciones de la spec §5) y `CheckSigner` |
 | `host/internal/phoneapp/apktest/apktest.go` | APK falsos con Signing Block para los tests (`APK`, `Build`, `Cert`, `SHA256`, `LP`) |
-| `host/internal/phoneapp/trust.go` | `Trust`, `LoadTrust`, `TrustDevCert`, `Verifier`, `Verified` y `MinAppVersionCode` |
+| `host/internal/phoneapp/trust.go` | `Trust`, `LoadTrust`, `TrustDevAPK`, `ForgetDevAPK`, `Verifier`, `Verified` y `MinAppVersionCode` |
 | `host/internal/phoneapp/release.go` | `SigningCertSHA256`, `ErrUnpinned`, `Download(…, cert)` |
 | `host/internal/phoneapp/phoneapp.go` | `Install` (`--no-incremental`, `ErrOtherSigner`) y funciones que piden `Verified` |
-| `host/internal/cli/appsetup.go` | `releaseCert`, `releaseURL` con límites, `trustAPK` y el flujo de setup con `Verified` |
+| `host/internal/cli/appsetup.go` | `releaseCert`, `releaseURL` con límites, `chooseAPK` y el flujo de setup con `Verified` |
 | `host/internal/cli/phone.go` | `connect()`: `Verify` antes de `Handshake` |
 | `host/internal/classify/special.go` | Órdenes que quitan o neutralizan la app: 🔴 especial |
 | `host/cmd/apkcert/main.go` | Herramienta de la CI |
@@ -379,6 +380,24 @@ func TestSigners(t *testing.T) {
 		{name: "repeated padding", apk: apktest.APK(v2, apktest.Block{ID: apktest.Padding, Raw: []byte{0}}, apktest.Block{ID: apktest.Padding, Raw: []byte{0}}), err: "repeated block"},
 		{name: "v1 signature", apk: apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Files: []string{"AndroidManifest.xml", "META-INF/CERT.SF", "META-INF/CERT.RSA"}}), err: "v1 signature"},
 		{name: "v1 signature, lower case", apk: apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Files: []string{"AndroidManifest.xml", "meta-inf/x.ec"}}), err: "v1 signature"},
+		{name: "v1 signature in a subfolder", apk: apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Files: []string{"AndroidManifest.xml", "META-INF/a/b.SF"}}), err: "v1 signature"},
+		{name: "NUL in a name", apk: apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Files: []string{"AndroidManifest.xml", "META-INF/A.SF\x00.txt"}}), err: "bad name"},
+		{name: "invalid UTF-8 in a name", apk: apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Files: []string{"AndroidManifest.xml", "a\xff"}}), err: "bad name"},
+		{name: "entry count too small", apk: func() []byte {
+			b := apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Files: []string{"AndroidManifest.xml", "classes.dex"}})
+			binary.LittleEndian.PutUint16(b[len(b)-22+10:], 1)
+			return b
+		}(), err: "more than its entry count"},
+		{name: "entry count too big", apk: func() []byte {
+			b := slices.Clone(good)
+			binary.LittleEndian.PutUint16(b[eocd+10:], 2)
+			return b
+		}(), err: "bad entry"},
+		{name: "multi-disk", apk: func() []byte {
+			b := slices.Clone(good)
+			binary.LittleEndian.PutUint16(b[eocd+4:], 1)
+			return b
+		}(), err: "multi-disk"},
 		{name: "key rotation", apk: apktest.APK(apktest.Block{ID: apktest.V3, Signers: []apktest.Signer{{Cert: ours, Rotation: true}}}), err: "key rotation"},
 		{name: "no signers", apk: apktest.APK(apktest.Block{ID: apktest.V2, Raw: apktest.LP()}), err: "no signers"},
 		{name: "empty certificate", apk: apktest.APK(apktest.Block{ID: apktest.V2, Signers: by([]byte{})}), err: "empty certificate"},
@@ -476,7 +495,6 @@ Expected: FAIL de compilación (`undefined: Signers`, `undefined: CheckSigner`, 
 package phoneapp
 
 import (
-	"archive/zip"
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
@@ -484,6 +502,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // IDs of the APK Signing Block (source.android.com/docs/security/features/apksigning).
@@ -526,8 +545,11 @@ var sigMagic = []byte("APK Sig Block 42")
 // signature Android falls back to could hide behind a block only the host
 // sees.
 func Signers(apk []byte) ([]string, error) {
-	pairs, err := signingBlock(apk)
+	pairs, names, err := signingBlock(apk)
 	if err != nil {
+		return nil, err
+	}
+	if err := noV1(names); err != nil {
 		return nil, err
 	}
 	var out []string
@@ -552,9 +574,6 @@ func Signers(apk []byte) ([]string, error) {
 	}
 	if !seen[blockV2] && !seen[blockV3] && !seen[blockV31] {
 		return nil, errors.New("no APK Signature Scheme v2 or v3 block")
-	}
-	if err := noV1(apk); err != nil {
-		return nil, err
 	}
 	return out, nil
 }
@@ -586,38 +605,76 @@ type pair struct {
 }
 
 // signingBlock returns the ID-value pairs of the APK Signing Block, which
-// sits right before the zip's central directory.
-func signingBlock(apk []byte) ([]pair, error) {
+// sits right before the zip's central directory, and the names of the
+// zip's entries.
+func signingBlock(apk []byte) ([]pair, []string, error) {
 	if len(apk) < eocdSize {
-		return nil, errors.New("not a zip file (no end of central directory)")
+		return nil, nil, errors.New("not a zip file (no end of central directory)")
 	}
 	eocd := len(apk) - eocdSize
 	if binary.LittleEndian.Uint32(apk[eocd:]) != 0x06054b50 || binary.LittleEndian.Uint16(apk[eocd+20:]) != 0 {
-		return nil, errors.New("no end of central directory at the end of the file (an APK has no zip comment)")
+		return nil, nil, errors.New("no end of central directory at the end of the file (an APK has no zip comment)")
 	}
 	if eocd >= 20 && binary.LittleEndian.Uint32(apk[eocd-20:]) == 0x07064b50 {
-		return nil, errors.New("ZIP64 APKs are not supported")
+		return nil, nil, errors.New("ZIP64 APKs are not supported")
 	}
+	if binary.LittleEndian.Uint16(apk[eocd+4:]) != 0 || binary.LittleEndian.Uint16(apk[eocd+6:]) != 0 {
+		return nil, nil, errors.New("multi-disk zips are not supported")
+	}
+	count := binary.LittleEndian.Uint16(apk[eocd+10:])
 	cdSize := uint64(binary.LittleEndian.Uint32(apk[eocd+12:]))
 	cdOffset := uint64(binary.LittleEndian.Uint32(apk[eocd+16:]))
-	if cdOffset == 0xffffffff || cdSize == 0xffffffff {
-		return nil, errors.New("ZIP64 APKs are not supported")
+	if cdOffset == 0xffffffff || cdSize == 0xffffffff || count == 0xffff {
+		return nil, nil, errors.New("ZIP64 APKs are not supported")
 	}
 	if cdOffset+cdSize != uint64(eocd) {
-		return nil, errors.New("the central directory is not right before its end record")
+		return nil, nil, errors.New("the central directory is not right before its end record")
+	}
+	names, err := centralNames(apk[cdOffset:eocd], int(count))
+	if err != nil {
+		return nil, nil, err
 	}
 	if cdOffset < 32 || !bytes.Equal(apk[cdOffset-16:cdOffset], sigMagic) {
-		return nil, errors.New("no APK Signing Block")
+		return nil, nil, errors.New("no APK Signing Block")
 	}
 	size := binary.LittleEndian.Uint64(apk[cdOffset-24:])
 	if size < 24 || size > cdOffset-8 {
-		return nil, errors.New("bad APK Signing Block size")
+		return nil, nil, errors.New("bad APK Signing Block size")
 	}
 	start := cdOffset - 8 - size
 	if binary.LittleEndian.Uint64(apk[start:]) != size {
-		return nil, errors.New("the APK Signing Block sizes do not match")
+		return nil, nil, errors.New("the APK Signing Block sizes do not match")
 	}
-	return pairsOf(apk[start+8 : cdOffset-24])
+	pairs, err := pairsOf(apk[start+8 : cdOffset-24])
+	return pairs, names, err
+}
+
+// centralNames walks the central directory cd entry by entry (archive/zip
+// accepts counts modulo 65536): exactly count entries that fill it, and no
+// name with a NUL or invalid UTF-8, as libziparchive demands.
+func centralNames(cd []byte, count int) ([]string, error) {
+	var names []string
+	for i := 0; i < count; i++ {
+		if len(cd) < 46 || binary.LittleEndian.Uint32(cd) != 0x02014b50 {
+			return nil, errors.New("bad entry in the central directory")
+		}
+		n := int(binary.LittleEndian.Uint16(cd[28:]))
+		m := int(binary.LittleEndian.Uint16(cd[30:]))
+		k := int(binary.LittleEndian.Uint16(cd[32:]))
+		if 46+n+m+k > len(cd) {
+			return nil, errors.New("bad entry in the central directory")
+		}
+		name := cd[46 : 46+n]
+		if bytes.IndexByte(name, 0) >= 0 || !utf8.Valid(name) {
+			return nil, errors.New("bad name in the central directory")
+		}
+		names = append(names, string(name))
+		cd = cd[46+n+m+k:]
+	}
+	if len(cd) != 0 {
+		return nil, errors.New("the central directory holds more than its entry count")
+	}
+	return names, nil
 }
 
 func pairsOf(b []byte) ([]pair, error) {
@@ -637,21 +694,18 @@ func pairsOf(b []byte) ([]pair, error) {
 	return out, nil
 }
 
-// noV1 fails when the zip holds a v1 (JAR) signature: ours never do
-// (minSdk 30), and Android falls back to v1 when it misses the block.
-func noV1(apk []byte) error {
-	z, err := zip.NewReader(bytes.NewReader(apk), int64(len(apk)))
-	if err != nil {
-		return fmt.Errorf("unreadable zip: %w", err)
-	}
-	for _, f := range z.File {
-		name := strings.ToUpper(f.Name)
+// noV1 fails when an entry is part of a v1 (JAR) signature, at any depth
+// under META-INF/: ours never have one (minSdk 30), and Android falls back
+// to v1 when it misses the block.
+func noV1(names []string) error {
+	for _, n := range names {
+		name := strings.ToUpper(n)
 		if !strings.HasPrefix(name, "META-INF/") {
 			continue
 		}
 		for _, ext := range []string{".SF", ".RSA", ".DSA", ".EC"} {
 			if strings.HasSuffix(name, ext) {
-				return fmt.Errorf("the APK has a v1 signature (%s)", f.Name)
+				return fmt.Errorf("the APK has a v1 signature (%s)", n)
 			}
 		}
 	}
@@ -734,7 +788,7 @@ func schemeSigners(v []byte, v3 bool) ([]string, error) {
 }
 ```
 
-(`archive/zip` lee el directorio central desde el mismo EOCD que `signingBlock` ya validó: es el último registro del fichero, sin comentario ni ZIP64, y el directorio central acaba justo donde empieza. Así ve las mismas entradas que el verificador v1 de Android.)
+(El directorio central se recorre a mano y no con `archive/zip`, que acepta recuentos módulo 65536 y nombres que libziparchive rechaza. Así se ven las mismas entradas que el verificador v1 de Android.)
 
 - [ ] **Step 5: Ejecutarlos y ver que pasan**
 
@@ -775,9 +829,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Produces:
   - `const phoneapp.SigningCertSHA256 = ""` y `const phoneapp.MinAppVersionCode = 0`;
   - `phoneapp.ErrUnpinned`, `phoneapp.ErrNoTrustedApp`, `phoneapp.ErrAppTooOld` y `phoneapp.ErrOtherSigner`;
-  - `type phoneapp.Trust struct{ Release, Dev string }`, `func phoneapp.LoadTrust(release, dataDir string) Trust`, `func phoneapp.TrustDevCert(dataDir, cert string) (path string, err error)` y `func phoneapp.DevCertPath(dataDir string) string`;
+  - `type phoneapp.Trust struct{ Release, DevAPK string }`, `func phoneapp.LoadTrust(release, dataDir string) Trust`, `func phoneapp.TrustDevAPK(dataDir, digest string) (path string, err error)`, `func phoneapp.ForgetDevAPK(dataDir string) (removed bool, err error)` y `func phoneapp.DevTrustPath(dataDir string) string`;
   - `type phoneapp.Verified` (campos no exportados), con `func (Verified) Cert() string`, `func (Verified) Dev() bool` y `func (Verified) still(ctx, a) error` (no exportada, para la Task 3);
-  - `type phoneapp.Verifier`, con `func phoneapp.NewVerifier(t Trust, minCode int) *Verifier` y `func (*Verifier) Verify(ctx context.Context, a ADB) (Verified, error)`;
+  - `type phoneapp.Verifier`, con `func phoneapp.NewVerifier(load func() Trust, minCode int) *Verifier`, `func (*Verifier) Verify(ctx context.Context, a ADB) (Verified, error)` y `func (*Verifier) Same(ctx context.Context, a ADB) error`;
+  - `func phoneapp.WritePrivate(p string, data []byte) error` y `const phoneapp.MaxAPK`;
   - `func phoneapp.Download(ctx context.Context, client *http.Client, base, dir, cert string) (string, error)`;
   - en `cli`: `var releaseCert = phoneapp.SigningCertSHA256`, `func releaseURL(app *App) (string, error)`, y en los tests `testCert`, `otherCert`, `testAPK(cert []byte) []byte`, `release`, `releaseSignedBy` y `writeAPKSignedBy`.
 
@@ -790,11 +845,14 @@ package phoneapp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -805,6 +863,13 @@ import (
 
 const testPath = "/data/app/~~AbC1-_==/tech.hybriq.adbuddy-XyZ2+/=/base.apk"
 
+// dumpsysOf is `dumpsys package` for the app with versionCode code, after a
+// hidden system copy with a higher one that must not count.
+func dumpsysOf(code int) string {
+	return fmt.Sprintf("Packages:\n  Package [tech.hybriq.adbuddy] (1a2b3c):\n    versionCode=%d minSdk=30 targetSdk=37\n    versionName=0.2.0\n"+
+		"Hidden system packages:\n  Package [tech.hybriq.adbuddy] (4d5e6f):\n    versionCode=999999 minSdk=30 targetSdk=37\n", code)
+}
+
 // installed makes f answer like a phone with apk installed at path with
 // versionCode code.
 func installed(f *fakeADB, path string, apk []byte, code int) {
@@ -812,7 +877,7 @@ func installed(f *fakeADB, path string, apk []byte, code int) {
 		f.answers = map[string][]string{}
 	}
 	f.answers["shell pm path tech.hybriq.adbuddy"] = []string{"package:" + path + "\n"}
-	f.answers["shell "+shq.Join("stat", "-c", "%s", path)] = []string{strconv.Itoa(len(apk)) + "\n"}
+	f.answers["shell "+shq.Join("stat", "-c", "%s %i %Y", path)] = []string{strconv.Itoa(len(apk)) + " 4242 1700000000\n"}
 	enc := base64.StdEncoding.EncodeToString(apk)
 	var wrapped strings.Builder
 	for len(enc) > 76 {
@@ -821,25 +886,32 @@ func installed(f *fakeADB, path string, apk []byte, code int) {
 	}
 	wrapped.WriteString(enc + "\n")
 	f.answers["shell "+shq.Join("base64", path)] = []string{wrapped.String()}
-	f.answers["shell dumpsys package tech.hybriq.adbuddy"] = []string{fmt.Sprintf("Packages:\n    versionCode=%d minSdk=30 targetSdk=37\n    versionName=0.2.0\n", code)}
+	f.answers["shell dumpsys package tech.hybriq.adbuddy"] = []string{dumpsysOf(code)}
 }
 
 func signedBy(cert []byte) []byte {
 	return apktest.APK(apktest.Block{ID: apktest.V2, Signers: []apktest.Signer{{Cert: cert}}}, apktest.Block{ID: apktest.V3, Signers: []apktest.Signer{{Cert: cert}}})
 }
 
+func digest(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
 func TestVerify(t *testing.T) {
-	rel, dev := apktest.SHA256(ours), apktest.SHA256(other)
+	rel := apktest.SHA256(ours)
 	f := &fakeADB{}
 	installed(f, testPath, signedBy(ours), 5)
-	v, err := NewVerifier(Trust{Release: rel}, 5).Verify(context.Background(), f)
+	v, err := NewVerifier(fixed(Trust{Release: rel}), 5).Verify(context.Background(), f)
 	if err != nil || v.Cert() != rel || v.Dev() || v.path != testPath {
 		t.Fatalf("release: %+v %v", v, err)
 	}
+	// A development build is trusted for its exact bytes, not its key.
+	dev := signedBy(other)
 	f = &fakeADB{}
-	installed(f, testPath, signedBy(other), 1)
-	v, err = NewVerifier(Trust{Release: rel, Dev: dev}, 0).Verify(context.Background(), f)
-	if err != nil || v.Cert() != dev || !v.Dev() {
+	installed(f, testPath, dev, 1)
+	v, err = NewVerifier(fixed(Trust{Release: rel, DevAPK: digest(dev)}), 0).Verify(context.Background(), f)
+	if err != nil || v.Cert() != apktest.SHA256(other) || !v.Dev() {
 		t.Fatalf("development: %+v %v", v, err)
 	}
 }
@@ -848,15 +920,22 @@ func TestVerify(t *testing.T) {
 func TestVerifyFailsClosed(t *testing.T) {
 	rel := apktest.SHA256(ours)
 	good := signedBy(ours)
+	dev := signedBy(other)
+	// Same key as the trusted development build, other bytes.
+	sameKey := apktest.APK(apktest.Block{ID: apktest.V2, Signers: []apktest.Signer{{Cert: other}}})
+	stat := "shell " + shq.Join("stat", "-c", "%s %i %Y", testPath)
+	b64 := "shell " + shq.Join("base64", testPath)
 	cases := []struct {
 		name  string
 		setup func(f *fakeADB)
-		trust Trust
+		trust *Trust // nil: Trust{Release: rel}
 		min   int
 		is    error
 	}{
 		{name: "someone else's app", setup: func(f *fakeADB) { installed(f, testPath, signedBy(other), 1) }, is: ErrSigner},
-		{name: "nothing trusted", trust: Trust{}, setup: func(f *fakeADB) { installed(f, testPath, good, 1) }, is: ErrUnpinned},
+		{name: "same key as the development build", trust: &Trust{Release: rel, DevAPK: digest(dev)},
+			setup: func(f *fakeADB) { installed(f, testPath, sameKey, 1) }, is: ErrSigner},
+		{name: "nothing trusted", trust: &Trust{}, setup: func(f *fakeADB) { installed(f, testPath, good, 1) }, is: ErrUnpinned},
 		{name: "too old", min: 2, setup: func(f *fakeADB) { installed(f, testPath, good, 1) }, is: ErrAppTooOld},
 		{name: "not installed", setup: func(f *fakeADB) { f.answers = map[string][]string{"shell pm path tech.hybriq.adbuddy": {""}} }, is: ErrNoTrustedApp},
 		{name: "two paths", setup: func(f *fakeADB) {
@@ -864,22 +943,38 @@ func TestVerifyFailsClosed(t *testing.T) {
 			f.answers["shell pm path tech.hybriq.adbuddy"] = []string{"package:" + testPath + "\npackage:/data/app/x/split_a.apk\n"}
 		}, is: ErrNoTrustedApp},
 		{name: "odd path", setup: func(f *fakeADB) { installed(f, "/sdcard/../data/app/x/base.apk", good, 1) }, is: ErrNoTrustedApp},
-		{name: "not under /data/app", setup: func(f *fakeADB) { installed(f, "/data/local/tmp/base.apk", good, 1) }, is: ErrNoTrustedApp},
+		{name: "not under /data/app", setup: func(f *fakeADB) { installed(f, "/mnt/expand/u/app/x/base.apk", good, 1) }, is: ErrNoTrustedApp},
+		{name: "reinstalled while read", setup: func(f *fakeADB) {
+			installed(f, testPath, good, 1)
+			f.answers["shell pm path tech.hybriq.adbuddy"] = []string{"package:" + testPath + "\n", "package:/data/app/~~N==/tech.hybriq.adbuddy-N==/base.apk\n"}
+		}, is: ErrNoTrustedApp},
 		{name: "too big", setup: func(f *fakeADB) {
 			installed(f, testPath, good, 1)
-			f.answers["shell "+shq.Join("stat", "-c", "%s", testPath)] = []string{strconv.Itoa(maxAPK+1) + "\n"}
+			f.answers[stat] = []string{strconv.Itoa(maxAPK+1) + " 1 1\n"}
 		}, is: ErrNoTrustedApp},
 		{name: "size that does not match", setup: func(f *fakeADB) {
 			installed(f, testPath, good, 1)
-			f.answers["shell "+shq.Join("stat", "-c", "%s", testPath)] = []string{"7\n"}
+			f.answers[stat] = []string{"7 4242 1700000000\n"}
+		}, is: ErrNoTrustedApp},
+		{name: "base64 longer than the size", setup: func(f *fakeADB) {
+			installed(f, testPath, good, 1)
+			f.answers[b64] = []string{base64.StdEncoding.EncodeToString(append(good, make([]byte, 4096)...)) + "\n"}
 		}, is: ErrNoTrustedApp},
 		{name: "unreadable base64", setup: func(f *fakeADB) {
 			installed(f, testPath, good, 1)
-			f.answers["shell "+shq.Join("base64", testPath)] = []string{"base64: permission denied\n"}
+			f.answers[b64] = []string{"base64: permission denied\n"}
 		}, is: ErrNoTrustedApp},
-		{name: "no version code", setup: func(f *fakeADB) {
+		{name: "versionCode only in another package", setup: func(f *fakeADB) {
 			installed(f, testPath, good, 1)
-			f.answers["shell dumpsys package tech.hybriq.adbuddy"] = []string{"Packages:\n"}
+			f.answers["shell dumpsys package tech.hybriq.adbuddy"] = []string{"Packages:\n  Package [tech.hybriq.adbuddyx] (1):\n    versionCode=5\n"}
+		}, is: ErrNoTrustedApp},
+		{name: "odd stat", setup: func(f *fakeADB) {
+			installed(f, testPath, good, 1)
+			f.answers[stat] = []string{"stat: bad format\n"}
+		}, is: ErrNoTrustedApp},
+		{name: "updated in place while read", setup: func(f *fakeADB) {
+			installed(f, testPath, good, 1)
+			f.answers[stat] = []string{strconv.Itoa(len(good)) + " 4242 1700000000\n", strconv.Itoa(len(good)) + " 4343 1700000099\n"}
 		}, is: ErrNoTrustedApp},
 		{name: "adb fails", setup: func(f *fakeADB) {}, is: ErrNoTrustedApp},
 	}
@@ -887,11 +982,11 @@ func TestVerifyFailsClosed(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := &fakeADB{}
 			c.setup(f)
-			trust := c.trust
-			if c.name != "nothing trusted" {
-				trust = Trust{Release: rel}
+			trust := Trust{Release: rel}
+			if c.trust != nil {
+				trust = *c.trust
 			}
-			v, err := NewVerifier(trust, c.min).Verify(context.Background(), f)
+			v, err := NewVerifier(fixed(trust), c.min).Verify(context.Background(), f)
 			if !errors.Is(err, c.is) || v != (Verified{}) {
 				t.Fatalf("got %+v, %v; want %v", v, err, c.is)
 			}
@@ -905,7 +1000,7 @@ func TestVerifierRemembersThePath(t *testing.T) {
 	rel := apktest.SHA256(ours)
 	f := &fakeADB{}
 	installed(f, testPath, signedBy(other), 1)
-	vr := NewVerifier(Trust{Release: rel}, 0)
+	vr := NewVerifier(fixed(Trust{Release: rel}), 0)
 	for i := 0; i < 3; i++ {
 		if _, err := vr.Verify(context.Background(), f); !errors.Is(err, ErrSigner) {
 			t.Fatalf("%d: %v", i, err)
@@ -914,9 +1009,9 @@ func TestVerifierRemembersThePath(t *testing.T) {
 	if n := countCalls(f, "shell "+shq.Join("base64", testPath)); n != 1 {
 		t.Fatalf("read the app %d times", n)
 	}
-	other := "/data/app/~~New==/tech.hybriq.adbuddy-New==/base.apk"
-	installed(f, other, signedBy(ours), 1)
-	if v, err := vr.Verify(context.Background(), f); err != nil || v.path != other {
+	newPath := "/data/app/~~New==/tech.hybriq.adbuddy-New==/base.apk"
+	installed(f, newPath, signedBy(ours), 1)
+	if v, err := vr.Verify(context.Background(), f); err != nil || v.path != newPath {
 		t.Fatalf("after reinstall: %+v %v", v, err)
 	}
 }
@@ -929,7 +1024,7 @@ func TestVerifierRetriesAfterAnADBFailure(t *testing.T) {
 	key := "shell " + shq.Join("base64", testPath)
 	saved := f.answers[key]
 	delete(f.answers, key) // the fake exits 1 without an answer
-	vr := NewVerifier(Trust{Release: rel}, 0)
+	vr := NewVerifier(fixed(Trust{Release: rel}), 0)
 	if _, err := vr.Verify(context.Background(), f); !errors.Is(err, ErrNoTrustedApp) {
 		t.Fatalf("first: %v", err)
 	}
@@ -945,7 +1040,10 @@ func TestStill(t *testing.T) {
 	if err := (Verified{}).still(context.Background(), f); !errors.Is(err, ErrNoTrustedApp) {
 		t.Fatalf("zero Verified: %v", err)
 	}
-	v := Verified{path: testPath, cert: "x"}
+	if len(f.calls) != 0 {
+		t.Fatalf("a zero Verified ran %q", f.calls)
+	}
+	v := Verified{path: testPath, key: strconv.Itoa(len(signedBy(ours))) + " 4242 1700000000", cert: "x"}
 	if err := v.still(context.Background(), f); err != nil {
 		t.Fatal(err)
 	}
@@ -955,28 +1053,88 @@ func TestStill(t *testing.T) {
 	}
 }
 
-func TestTrustDevCert(t *testing.T) {
+func TestDevTrust(t *testing.T) {
 	dir := t.TempDir()
 	if got := LoadTrust("r", dir); got != (Trust{Release: "r"}) {
 		t.Fatalf("empty: %+v", got)
 	}
-	c := apktest.SHA256(other)
-	p, err := TrustDevCert(dir, c)
-	if err != nil || p != DevCertPath(dir) {
+	d := digest([]byte("apk"))
+	p, err := TrustDevAPK(dir, d)
+	if err != nil || p != DevTrustPath(dir) {
 		t.Fatal(p, err)
 	}
-	if got := LoadTrust("r", dir); got != (Trust{Release: "r", Dev: c}) {
+	if got := LoadTrust("r", dir); got != (Trust{Release: "r", DevAPK: d}) {
 		t.Fatalf("saved: %+v", got)
 	}
-	if _, err := TrustDevCert(dir, "not hex"); err == nil {
-		t.Fatal("bad certificate saved")
+	if _, err := TrustDevAPK(dir, "not hex"); err == nil {
+		t.Fatal("bad digest saved")
 	}
-	os.WriteFile(DevCertPath(dir), []byte("garbage\n"), 0o600)
-	if got := LoadTrust("r", dir); got.Dev != "" {
+	if removed, err := ForgetDevAPK(dir); !removed || err != nil {
+		t.Fatalf("forget: %v %v", removed, err)
+	}
+	if removed, err := ForgetDevAPK(dir); removed || err != nil {
+		t.Fatalf("forget again: %v %v", removed, err)
+	}
+	os.MkdirAll(filepath.Dir(DevTrustPath(dir)), 0o700)
+	os.WriteFile(DevTrustPath(dir), []byte("garbage\n"), 0o600)
+	if got := LoadTrust("r", dir); got.DevAPK != "" {
 		t.Fatalf("garbage trusted: %+v", got)
 	}
-	if fi, err := os.Stat(filepath.Dir(DevCertPath(dir))); err != nil || fi.Mode().Perm()&0o077 != 0 && os.PathSeparator == '/' {
-		t.Fatalf("folder mode: %v %v", fi.Mode(), err)
+	if runtime.GOOS != "windows" {
+		os.WriteFile(DevTrustPath(dir), []byte(d+"\n"), 0o644)
+		os.Chmod(DevTrustPath(dir), 0o644)
+		if got := LoadTrust("r", dir); got.DevAPK != "" {
+			t.Fatalf("world-readable file trusted: %+v", got)
+		}
+		os.Remove(DevTrustPath(dir))
+		target := filepath.Join(dir, "elsewhere")
+		os.WriteFile(target, []byte(d+"\n"), 0o600)
+		if err := os.Symlink(target, DevTrustPath(dir)); err == nil {
+			if got := LoadTrust("r", dir); got.DevAPK != "" {
+				t.Fatalf("link trusted: %+v", got)
+			}
+		}
+	}
+}
+
+// fixed is a trust loader that always returns t.
+func fixed(t Trust) func() Trust { return func() Trust { return t } }
+
+// Same refuses an app updated in place (same path, other stat), any app
+// before a good Verify, and a development build no longer trusted.
+func TestSame(t *testing.T) {
+	rel := apktest.SHA256(ours)
+	f := &fakeADB{}
+	installed(f, testPath, signedBy(ours), 1)
+	vr := NewVerifier(fixed(Trust{Release: rel}), 0)
+	if err := vr.Same(context.Background(), f); !errors.Is(err, ErrNoTrustedApp) {
+		t.Fatalf("before Verify: %v", err)
+	}
+	if _, err := vr.Verify(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	if err := vr.Same(context.Background(), f); err != nil {
+		t.Fatalf("same app: %v", err)
+	}
+	f.answers["shell "+shq.Join("stat", "-c", "%s %i %Y", testPath)] = []string{"99 1 2\n"}
+	if err := vr.Same(context.Background(), f); !errors.Is(err, ErrNoTrustedApp) {
+		t.Fatalf("updated in place: %v", err)
+	}
+
+	dev := signedBy(other)
+	trust := Trust{DevAPK: digest(dev)}
+	f = &fakeADB{}
+	installed(f, testPath, dev, 1)
+	vr = NewVerifier(func() Trust { return trust }, 0)
+	if _, err := vr.Verify(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	trust.DevAPK = "" // trusted-dev-apk deleted while serve runs
+	if err := vr.Same(context.Background(), f); !errors.Is(err, ErrNoTrustedApp) {
+		t.Fatalf("development build no longer trusted: %v", err)
+	}
+	if _, err := vr.Verify(context.Background(), f); !errors.Is(err, ErrNoTrustedApp) {
+		t.Fatalf("Verify after the trust went: %v", err)
 	}
 }
 
@@ -993,7 +1151,7 @@ func countCalls(f *fakeADB, key string) int {
 
 - [ ] **Step 2: Ejecutarlos y ver que fallan**
 
-Run (desde `host/`): `go test -timeout 5m ./internal/phoneapp/ -run 'TestVerify|TestStill|TestTrustDevCert'`
+Run (desde `host/`): `go test -timeout 5m ./internal/phoneapp/ -run 'TestVerify|TestStill|TestDevTrust|TestSame'`
 Expected: FAIL de compilación (`undefined: NewVerifier`, `Trust`, `Verified`…).
 
 - [ ] **Step 3: `trust.go`**
@@ -1004,13 +1162,19 @@ Expected: FAIL de compilación (`undefined: NewVerifier`, `Trust`, `Verified`…
 package phoneapp
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1026,7 +1190,7 @@ const MinAppVersionCode = 0
 
 var (
 	// ErrNoTrustedApp means the app on the phone could not be checked or is
-	// not signed with a trusted certificate: it gets nothing.
+	// not one this host trusts: it gets nothing.
 	ErrNoTrustedApp = errors.New("the ADBuddy app on the phone is not trusted, so it gets no token or permissions " +
 		"(run `adbuddy setup`, or `adbuddy setup --apk <file>` for a development build)")
 	// ErrAppTooOld means the app is older than MinAppVersionCode.
@@ -1042,74 +1206,118 @@ var basePathRe = regexp.MustCompile(`^/data/app/[A-Za-z0-9._~=+/-]+/base\.apk$`)
 
 var versionCodeRe = regexp.MustCompile(`(?m)^\s*versionCode=(\d+)`)
 
-var certRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var sha256Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// Trust is the certificates (hex SHA-256) the host trusts for the app.
+// statKeyRe is `stat -c '%s %i %Y'`: size, inode and mtime of base.apk.
+var statKeyRe = regexp.MustCompile(`^(\d+) \d+ \d+$`)
+
+// Trust is what the host trusts for the app (spec M6a §6.1).
 type Trust struct {
-	Release string // SigningCertSHA256, or a test's
-	Dev     string // the development one `setup --apk` trusted, if any
+	Release string // SHA-256 of the release certificate: SigningCertSHA256, or a test's
+	DevAPK  string // SHA-256 of the one development APK `setup --apk` trusted, if any
 }
 
-func (t Trust) certs() []string {
-	var c []string
-	for _, s := range []string{t.Release, t.Dev} {
-		if s != "" {
-			c = append(c, s)
-		}
-	}
-	return c
+// DevTrustPath is where TrustDevAPK keeps the development APK's SHA-256.
+func DevTrustPath(dataDir string) string {
+	return filepath.Join(dataDir, "app", "trusted-dev-apk")
 }
 
-// DevCertPath is where TrustDevCert keeps the development certificate.
-func DevCertPath(dataDir string) string {
-	return filepath.Join(dataDir, "app", "trusted-dev-cert")
-}
-
-// LoadTrust returns release and the development certificate saved in
-// dataDir. A file that does not hold one certificate trusts nothing.
+// LoadTrust returns release and the development APK trusted in dataDir.
+// Only a regular file (not a link) holding one SHA-256, and private on
+// Unix, counts: anything else trusts no development build.
 func LoadTrust(release, dataDir string) Trust {
 	t := Trust{Release: release}
-	if b, err := os.ReadFile(DevCertPath(dataDir)); err == nil {
-		if c := strings.TrimSpace(string(b)); certRe.MatchString(c) {
-			t.Dev = c
-		}
+	p := DevTrustPath(dataDir)
+	before, err := os.Lstat(p)
+	if err != nil || !before.Mode().IsRegular() || runtime.GOOS != "windows" && before.Mode().Perm()&0o077 != 0 {
+		return t
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return t
+	}
+	defer f.Close()
+	if after, err := f.Stat(); err != nil || !os.SameFile(before, after) {
+		return t // swapped for something else between the two looks
+	}
+	b, err := io.ReadAll(io.LimitReader(f, 128))
+	if err != nil {
+		return t
+	}
+	if d := strings.TrimSpace(string(b)); sha256Re.MatchString(d) {
+		t.DevAPK = d
 	}
 	return t
 }
 
-// TrustDevCert saves cert as the trusted development certificate.
-func TrustDevCert(dataDir, cert string) (string, error) {
-	if !certRe.MatchString(cert) {
-		return "", fmt.Errorf("not a certificate SHA-256: %q", cert)
+// TrustDevAPK saves digest, the SHA-256 of a development APK, as trusted.
+func TrustDevAPK(dataDir, digest string) (string, error) {
+	if !sha256Re.MatchString(digest) {
+		return "", fmt.Errorf("not a SHA-256: %q", digest)
 	}
-	p := DevCertPath(dataDir)
+	p := DevTrustPath(dataDir)
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return "", err
 	}
-	return p, os.WriteFile(p, []byte(cert+"\n"), 0o600)
+	return p, WritePrivate(p, []byte(digest+"\n"))
 }
 
-// Verified is the proof that the app installed on the phone is ours: only
-// Verifier.Verify makes one, and its fields are not exported. The functions
-// that give the app something (the token, consent, permissions) take it,
-// so none of them can run without the check (spec M6a §6.3).
+// WritePrivate writes data to p (0600) through a new temporary file renamed
+// over it, so it never writes through a link someone left at p.
+func WritePrivate(p string, data []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(p), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+	if err := f.Chmod(0o600); err != nil && runtime.GOOS != "windows" {
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
+}
+
+// ForgetDevAPK stops trusting the development APK; removed says whether
+// one was trusted.
+func ForgetDevAPK(dataDir string) (removed bool, err error) {
+	err = os.Remove(DevTrustPath(dataDir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Verified is the proof that the app installed on the phone is one this
+// host trusts. Only Verifier.Verify makes a non-zero one (its fields are
+// not exported); the functions that give the app something (the token,
+// consent, permissions) take it and refuse the zero value (spec M6a §6.3).
 type Verified struct {
-	path string // the base.apk that was checked
-	cert string // its certificate's SHA-256
-	dev  bool   // signed with the development certificate
+	path   string // the base.apk that was checked
+	key    string // its stat (size, inode, mtime): an update in place changes it
+	cert   string // its certificate's SHA-256
+	digest string // its SHA-256
+	dev    bool   // the trusted development APK, not a release
 }
 
 // Cert is the SHA-256 of the app's certificate.
 func (v Verified) Cert() string { return v.cert }
 
-// Dev reports whether the app is a development build trusted by setup --apk.
+// Dev reports whether the app is the development build setup --apk trusted.
 func (v Verified) Dev() bool { return v.dev }
 
-// still checks, right before acting, that the app checked is still the one
-// installed (a reinstall moves it to a new folder). A zero Verified never
-// passes.
+// still checks, right before acting, that v is not the zero value and that
+// the app checked is still the one installed: same path (a reinstall moves
+// it to a new folder) and same stat (an update in place would change it).
 func (v Verified) still(ctx context.Context, a ADB) error {
-	if v.path == "" {
+	if v.path == "" || v.key == "" || v.cert == "" {
 		return fmt.Errorf("%w (not checked)", ErrNoTrustedApp)
 	}
 	p, err := appPath(ctx, a)
@@ -1119,91 +1327,204 @@ func (v Verified) still(ctx context.Context, a ADB) error {
 	if p != v.path {
 		return fmt.Errorf("%w (the app was reinstalled after it was checked)", ErrNoTrustedApp)
 	}
+	k, _, err := statKey(ctx, a, p)
+	if err != nil {
+		return err
+	}
+	if k != v.key {
+		return fmt.Errorf("%w (the app changed after it was checked)", ErrNoTrustedApp)
+	}
 	return nil
 }
 
-// Verifier checks the installed app against a Trust. It remembers the last
-// definite answer for the app's path, so serve's reconnections do not read
-// the APK again until the app is reinstalled.
+// Verifier checks the installed app against the Trust that load returns,
+// read again on every call (deleting trusted-dev-apk takes effect at once).
+// It remembers the last definite answer for the app's path, stat and trust,
+// so serve's reconnections do not read the APK again until something
+// changes. Failures of adb are not remembered.
 type Verifier struct {
-	trust   Trust
+	load    func() Trust
 	minCode int
 
-	mu   sync.Mutex
-	path string
-	v    Verified
-	err  error
+	mu  sync.Mutex
+	key string   // path, stat and trust of the remembered answer
+	v   Verified // the remembered answer
+	err error
+	ok  Verified // the last good answer, for Same
 }
 
-// NewVerifier returns a Verifier for t and minCode (MinAppVersionCode).
-func NewVerifier(t Trust, minCode int) *Verifier {
-	return &Verifier{trust: t, minCode: minCode}
+// NewVerifier returns a Verifier for the trust load returns (LoadTrust)
+// and minCode (MinAppVersionCode).
+func NewVerifier(load func() Trust, minCode int) *Verifier {
+	return &Verifier{load: load, minCode: minCode}
 }
 
-// Verify reads the installed app (pm path, stat, base64) and checks it with
-// CheckSigner and its version code. It is safe without verifying any
-// cryptography: Android verified that APK when it installed it, and Signers
-// reads the same block Android did (spec M6a §5). Every failure is an
+// Same returns nil when the app installed now is the one the last good
+// Verify checked (same path and stat) and its trust still holds. Serve
+// asks it for every app that connects with the token (bridge
+// Options.Admit): an update with the same key keeps the app's data, the
+// token included, but not its path and stat (spec M6a §6.3).
+func (vr *Verifier) Same(ctx context.Context, a ADB) error {
+	vr.mu.Lock()
+	last := vr.ok
+	vr.mu.Unlock()
+	if last.dev && vr.load().DevAPK != last.digest {
+		return fmt.Errorf("%w (the development build is no longer trusted)", ErrNoTrustedApp)
+	}
+	return last.still(ctx, a)
+}
+
+// Verify reads the installed app (pm path, stat, base64) and checks who
+// signed it and its version code (spec M6a §6.2). It is safe without
+// verifying any cryptography: Android verified that APK when it installed
+// it, and Signers reads the same block Android did. Every failure is an
 // ErrNoTrustedApp or an ErrAppTooOld, and gives no Verified.
 func (vr *Verifier) Verify(ctx context.Context, a ADB) (Verified, error) {
 	path, err := appPath(ctx, a)
 	if err != nil {
 		return Verified{}, err
 	}
+	sk, n, err := statKey(ctx, a, path)
+	if err != nil {
+		return Verified{}, err
+	}
+	trust := vr.load()
+	key := strings.Join([]string{path, sk, trust.Release, trust.DevAPK}, "|")
 	vr.mu.Lock()
 	defer vr.mu.Unlock()
-	if vr.path == path {
+	if vr.key == key {
 		return vr.v, vr.err
 	}
-	v, err := vr.check(ctx, a, path)
+	v, err := vr.check(ctx, a, trust, path, sk, n)
 	if err == nil || errors.Is(err, ErrSigner) || errors.Is(err, ErrAppTooOld) || errors.Is(err, ErrUnpinned) {
-		vr.path, vr.v, vr.err = path, v, err // definite: remembered for this path
+		vr.key, vr.v, vr.err = key, v, err // definite: remembered for this app and trust
+	}
+	if err == nil {
+		vr.ok = v
 	}
 	return v, err
 }
 
-func (vr *Verifier) check(ctx context.Context, a ADB, path string) (Verified, error) {
-	trusted := vr.trust.certs()
-	if len(trusted) == 0 {
+func (vr *Verifier) check(ctx context.Context, a ADB, trust Trust, path, sk string, n int64) (Verified, error) {
+	if trust.Release == "" && trust.DevAPK == "" {
 		return Verified{}, fmt.Errorf("%w: %w", ErrNoTrustedApp, ErrUnpinned)
 	}
-	out, err := shell(ctx, a, "stat", "-c", "%s", path)
-	if err != nil {
-		return Verified{}, fmt.Errorf("%w (stat: %w)", ErrNoTrustedApp, err)
-	}
-	n, err := strconv.ParseInt(out, 10, 64)
-	if err != nil || n <= 0 || n > maxAPK {
-		return Verified{}, fmt.Errorf("%w (unexpected size %q)", ErrNoTrustedApp, out)
-	}
-	raw, err := runFor(ctx, a, pullTimeout, nil, "shell", shq.Join("base64", path))
+	data, err := readAPK(ctx, a, path, n)
 	if err != nil {
 		return Verified{}, fmt.Errorf("%w (reading the app: %w)", ErrNoTrustedApp, err)
 	}
-	data, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(raw), ""))
-	if err != nil || int64(len(data)) != n {
-		return Verified{}, fmt.Errorf("%w (the app read back does not match its size)", ErrNoTrustedApp)
+	signers, err := Signers(data)
+	if err != nil {
+		return Verified{}, fmt.Errorf("%w: %w", ErrNoTrustedApp, fmt.Errorf("%w (%v)", ErrSigner, err))
 	}
-	if err := CheckSigner(data, trusted...); err != nil {
-		return Verified{}, fmt.Errorf("%w: %w", ErrNoTrustedApp, err)
+	digest := digestOf(data)
+	dev := false
+	if err := CheckSigner(data, trust.Release); err != nil {
+		if trust.DevAPK == "" || digest != trust.DevAPK {
+			return Verified{}, fmt.Errorf("%w: %w", ErrNoTrustedApp, err)
+		}
+		dev = true
 	}
-	signers, _ := Signers(data) // CheckSigner just read them
 	dump, err := shell(ctx, a, "dumpsys", "package", Package)
 	if err != nil {
 		return Verified{}, fmt.Errorf("%w (dumpsys: %w)", ErrNoTrustedApp, err)
 	}
-	m := versionCodeRe.FindStringSubmatch(dump)
-	if m == nil {
-		return Verified{}, fmt.Errorf("%w (no versionCode in dumpsys)", ErrNoTrustedApp)
-	}
-	code, err := strconv.Atoi(m[1])
+	code, err := versionCodeOf(dump)
 	if err != nil {
-		return Verified{}, fmt.Errorf("%w (versionCode %q)", ErrNoTrustedApp, m[1])
+		return Verified{}, fmt.Errorf("%w (%v)", ErrNoTrustedApp, err)
 	}
 	if code < vr.minCode {
 		return Verified{}, fmt.Errorf("%w (version code %d, at least %d)", ErrAppTooOld, code, vr.minCode)
 	}
-	c := signers[0]
-	return Verified{path: path, cert: c, dev: c != vr.trust.Release}, nil
+	v := Verified{path: path, key: sk, cert: signers[0], digest: digest, dev: dev}
+	if err := v.still(ctx, a); err != nil {
+		return Verified{}, fmt.Errorf("%w (the app changed while it was checked)", err)
+	}
+	return v, nil
+}
+
+// statKey returns `stat -c '%s %i %Y'` of path (size, inode and mtime) and
+// the size, which must be at most maxAPK.
+func statKey(ctx context.Context, a ADB, path string) (string, int64, error) {
+	out, err := shell(ctx, a, "stat", "-c", "%s %i %Y", path)
+	if err != nil {
+		return "", 0, fmt.Errorf("%w (stat: %w)", ErrNoTrustedApp, err)
+	}
+	m := statKeyRe.FindStringSubmatch(out)
+	if m == nil {
+		return "", 0, fmt.Errorf("%w (unexpected stat %q)", ErrNoTrustedApp, out)
+	}
+	n, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil || n <= 0 || n > maxAPK {
+		return "", 0, fmt.Errorf("%w (unexpected size %q)", ErrNoTrustedApp, m[1])
+	}
+	return out, n, nil
+}
+
+// readAPK reads the n bytes of path with base64, its output bounded to
+// what n bytes take in base64 with toybox's line breaks.
+func readAPK(ctx context.Context, a ADB, path string, n int64) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, pullTimeout)
+	defer cancel()
+	enc := (n + 2) / 3 * 4
+	out := &boundedBuffer{max: int(enc + 2*(enc/76) + 16)} // CR LF after each line at worst
+	var errb bytes.Buffer
+	code, err := a.Run(ctx, "", []string{"shell", shq.Join("base64", path)}, nil, out, &errb)
+	switch {
+	case out.over:
+		return nil, errors.New("base64 printed more than the app's size")
+	case err != nil:
+		return nil, err
+	case code != 0:
+		return nil, fmt.Errorf("base64: exit %d: %s", code, strings.TrimSpace(errb.String()))
+	}
+	data, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(out.buf.String()), ""))
+	if err != nil || int64(len(data)) != n {
+		return nil, errors.New("the app read back does not match its size")
+	}
+	return data, nil
+}
+
+// boundedBuffer keeps at most max bytes; past that it refuses the write
+// and remembers it.
+type boundedBuffer struct {
+	buf  bytes.Buffer
+	max  int
+	over bool
+}
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	if b.over || b.buf.Len()+len(p) > b.max {
+		b.over = true
+		return 0, errors.New("output too long")
+	}
+	return b.buf.Write(p)
+}
+
+// versionCodeOf reads the versionCode of the app's own "Package [...]"
+// block of `dumpsys package`, not of a hidden system copy.
+func versionCodeOf(dump string) (int, error) {
+	head := "Package [" + Package + "]"
+	i := strings.Index(dump, head)
+	if i < 0 {
+		return 0, errors.New("no package block in dumpsys")
+	}
+	block := dump[i+len(head):]
+	for _, end := range []string{"Package [", "Hidden system packages:"} {
+		if j := strings.Index(block, end); j >= 0 {
+			block = block[:j]
+		}
+	}
+	m := versionCodeRe.FindStringSubmatch(block)
+	if m == nil {
+		return 0, errors.New("no versionCode in dumpsys")
+	}
+	return strconv.Atoi(m[1])
+}
+
+func digestOf(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
 }
 
 // appPath returns where the app's base.apk is, or an ErrNoTrustedApp.
@@ -1233,7 +1554,7 @@ func appPath(ctx context.Context, a ADB) (string, error) {
 
 - [ ] **Step 4: Ejecutar los tests de `trust.go`**
 
-Run (desde `host/`): `go test -timeout 5m ./internal/phoneapp/ -run 'TestVerify|TestStill|TestTrustDevCert' -v`
+Run (desde `host/`): `go test -timeout 5m ./internal/phoneapp/ -run 'TestVerify|TestStill|TestDevTrust|TestSame' -v`
 Expected: PASS.
 
 - [ ] **Step 5: `Download`, `Install` y sus tests**
@@ -1249,6 +1570,9 @@ const SigningCertSHA256 = ""
 // ErrUnpinned means this build pins no signing certificate, so it downloads
 // no APK.
 var ErrUnpinned = errors.New("this build of adbuddy has no pinned signing certificate for the app")
+
+// MaxAPK bounds every APK the host reads: downloaded, installed or --apk.
+const MaxAPK = maxAPK
 ```
 
 Cambia el comentario y la cabecera de `Download`, y añade la comprobación tras la del checksum:
@@ -1612,17 +1936,17 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `host/internal/phoneapp/phoneapp.go` (`AskConsent`, `Grant`, `AllowBackground` y `EnableAccessibility` piden `Verified`)
 - Modify: `host/internal/phoneapp/phoneapp_test.go` (sus llamadas)
-- Modify: `host/internal/cli/appsetup.go` (`trustAPK`, `Verify` y el resto del flujo)
+- Modify: `host/internal/cli/appsetup.go` (`chooseAPK`, `Verify`, `ForgetDevAPK` y el resto del flujo)
 - Modify: `host/internal/cli/appsetup_test.go` (`appRules` y casos)
 
 **Interfaces:**
-- Consumes: `Verified`, `Verifier`, `LoadTrust`, `TrustDevCert`, `ErrNoTrustedApp`, `ErrAppTooOld`, `ErrUnpinned` y `Signers` (Tasks 1-2); `testCert`, `otherCert`, `testAPK`, `pinTestCert` y `writeAPKSignedBy` (Task 2).
+- Consumes: `Verified`, `Verifier`, `LoadTrust`, `TrustDevAPK`, `ForgetDevAPK`, `ErrNoTrustedApp`, `ErrAppTooOld`, `ErrUnpinned` y `Signers` (Tasks 1-2); `testCert`, `otherCert`, `testAPK`, `pinTestCert` y `writeAPKSignedBy` (Task 2).
 - Produces:
   - `func phoneapp.AskConsent(ctx context.Context, a ADB, v Verified, hostName string, timeout, every time.Duration) error`;
   - `func phoneapp.Grant(ctx context.Context, a ADB, v Verified) error`;
   - `func phoneapp.AllowBackground(ctx context.Context, a ADB, v Verified) error`;
   - `func phoneapp.EnableAccessibility(ctx context.Context, a ADB, v Verified) (previous string, err error)`;
-  - en `cli`: `func trustAPK(e *env, apk string, warn func(string, ...any)) error`, y en los tests `appRulesFor(consent string, apk []byte, over ...testutil.FakeRule)`.
+  - en `cli`: `func chooseAPK(e *env, apk string) (copyPath, devDigest string, err error)` y `func forgetDevBuild(e *env) (bool, error)`, y en los tests `appRulesFor(consent string, apk []byte, over ...testutil.FakeRule)`.
 
 - [ ] **Step 1: Las funciones de `phoneapp` piden `Verified`**
 
@@ -1711,35 +2035,50 @@ Expected: PASS en `phoneapp`. `go vet` falla en `internal/cli` con `not enough a
 
 - [ ] **Step 3: El flujo de setup**
 
-En `host/internal/cli/appsetup.go`, añade `"slices"` a los imports y la función:
+En `host/internal/cli/appsetup.go`, añade `"crypto/sha256"`, `"encoding/hex"` e `"io"` a los imports y las funciones:
 
 ```go
-// trustAPK reads who signed apk (setup --apk). When it is not the release
-// certificate it becomes the trusted development one, said out loud: serve
-// will hand the token to an app signed with it (spec M6a §6.1).
-func trustAPK(e *env, apk string, warn func(string, ...any)) error {
-	data, err := os.ReadFile(apk)
+// chooseAPK reads the --apk file once (at most MaxAPK: it could be a FIFO)
+// and returns a private copy to install, so nobody swaps it between the
+// check and adb install. When the release certificate does not sign it, it
+// also returns its SHA-256: that exact APK (not its key: the debug key
+// lives on this PC) is trusted as the development build once it installs
+// (spec M6a §6.1).
+func chooseAPK(e *env, apk string) (copyPath, devDigest string, err error) {
+	f, err := os.Open(apk)
 	if err != nil {
-		return err
+		return "", "", err
 	}
-	certs, err := phoneapp.Signers(data)
+	data, err := io.ReadAll(io.LimitReader(f, phoneapp.MaxAPK+1))
+	f.Close()
 	if err != nil {
-		return fmt.Errorf("%s is not a signed APK (%v)", apk, err)
+		return "", "", err
 	}
-	slices.Sort(certs)
-	certs = slices.Compact(certs)
-	if len(certs) != 1 {
-		return fmt.Errorf("%s has %d different signers", apk, len(certs))
+	if len(data) > phoneapp.MaxAPK {
+		return "", "", fmt.Errorf("%s is larger than %d MiB", apk, phoneapp.MaxAPK>>20)
 	}
-	if certs[0] == releaseCert {
-		return nil
+	if _, err := phoneapp.Signers(data); err != nil {
+		return "", "", fmt.Errorf("%s is not a signed APK (%v)", apk, err)
 	}
-	path, err := phoneapp.TrustDevCert(e.dirs.Data, certs[0])
-	if err != nil {
-		return err
+	dir := filepath.Join(e.dirs.Data, "app")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", "", err
 	}
-	warn("⚠ Trusting the development signing certificate %s of %s: `adbuddy serve` will hand the phone app's token to an app signed with it. Delete %s to stop.\n", certs[0], apk, path)
-	return nil
+	copyPath = filepath.Join(dir, "chosen.apk")
+	if err := phoneapp.WritePrivate(copyPath, data); err != nil {
+		return "", "", err
+	}
+	if releaseCert != "" && phoneapp.CheckSigner(data, releaseCert) == nil {
+		return copyPath, "", nil
+	}
+	sum := sha256.Sum256(data)
+	return copyPath, hex.EncodeToString(sum[:]), nil
+}
+
+// forgetDevBuild stops trusting the development build and removes its copy.
+func forgetDevBuild(e *env) (bool, error) {
+	os.Remove(filepath.Join(e.dirs.Data, "app", "chosen.apk"))
+	return phoneapp.ForgetDevAPK(e.dirs.Data)
 }
 ```
 
@@ -1750,17 +2089,38 @@ En `setupApp`, la rama de `--apk` queda así:
 			res.note(err.Error())
 			warn("⚠ %v: skipping the app. Check the path of --apk, then "+again+"\n", err)
 			return res
-		} else if err := trustAPK(e, apk, warn); err != nil {
-			res.note(err.Error())
-			warn("⚠ %v: skipping the app. Pass a signed APK to --apk, then "+again+"\n", err)
-			return res
+		} else {
+			chosen, digest, err := chooseAPK(e, apk)
+			if err != nil {
+				res.note(err.Error())
+				warn("⚠ %v: skipping the app. Pass a signed APK to --apk, then "+again+"\n", err)
+				return res
+			}
+			apk, devDigest = chosen, digest
 		}
 ```
+
+Declara `devDigest := ""` al principio de `setupApp`. Justo después del bloque de error de `Install` (cuando la instalación fue bien), añade:
+
+```go
+		if devDigest != "" {
+			path, err := phoneapp.TrustDevAPK(e.dirs.Data, devDigest)
+			if err != nil {
+				res.note(err.Error())
+				warn("⚠ Could not trust the development build (%v): setup goes on without the app.\n", err)
+				return res
+			}
+			warn("⚠ Trusting this development build of the app (SHA-256 %s): `adbuddy serve` will hand the phone app's token to exactly this APK. Delete %s to stop.\n", devDigest, path)
+		}
+```
+
+(La confianza se escribe solo cuando la instalación termina bien: un `--apk` que no se instala no deja nada de confianza.)
 
 Justo después de `res.Installed, res.Version = true, version`, inserta:
 
 ```go
-	v, err := phoneapp.NewVerifier(phoneapp.LoadTrust(releaseCert, e.dirs.Data), phoneapp.MinAppVersionCode).Verify(ctx, a)
+	load := func() phoneapp.Trust { return phoneapp.LoadTrust(releaseCert, e.dirs.Data) }
+	v, err := phoneapp.NewVerifier(load, phoneapp.MinAppVersionCode).Verify(ctx, a)
 	if err != nil {
 		res.note(err.Error())
 		switch {
@@ -1776,7 +2136,11 @@ Justo después de `res.Installed, res.Version = true, version`, inserta:
 		return res
 	}
 	if v.Dev() {
-		say("Note: the ADBuddy app on the phone is a development build (certificate %s).\n", v.Cert())
+		say("Note: the ADBuddy app on the phone is the development build you trusted (certificate %s).\n", v.Cert())
+	} else if removed, err := forgetDevBuild(e); err != nil {
+		warn("⚠ Could not stop trusting the development build (%v): delete %s by hand.\n", err, phoneapp.DevTrustPath(e.dirs.Data))
+	} else if removed {
+		say("The app on the phone is a release: ADBuddy no longer trusts the development build.\n")
 	}
 ```
 
@@ -1799,9 +2163,9 @@ func appRules(consent string, over ...testutil.FakeRule) []testutil.FakeRule {
 func appRulesFor(consent string, apk []byte, over ...testutil.FakeRule) []testutil.FakeRule {
 	rules := append([]testutil.FakeRule{}, over...)
 	return append(rules,
-		testutil.FakeRule{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n    versionCode=1 minSdk=30 targetSdk=37\n    versionName=0.2.0\n"},
+		testutil.FakeRule{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n  Package [tech.hybriq.adbuddy] (1a2b):\n    versionCode=1 minSdk=30 targetSdk=37\n    versionName=0.2.0\n"},
 		testutil.FakeRule{Match: `^shell pm path tech\.hybriq\.adbuddy$`, Stdout: "package:" + testAppPath + "\n"},
-		testutil.FakeRule{Match: `^shell stat -c `, Stdout: strconv.Itoa(len(apk)) + "\n"},
+		testutil.FakeRule{Match: `^shell stat -c `, Stdout: strconv.Itoa(len(apk)) + " 1 1\n"},
 		testutil.FakeRule{Match: `^shell base64 `, Stdout: base64.StdEncoding.EncodeToString(apk) + "\n"},
 		// … the rules appRules already had (install, requestSetup, am start,
 		// getSetupConsent, pm grant, deviceidle, settings), unchanged …
@@ -1826,7 +2190,16 @@ En el bucle de `TestSetupAppBranches`, justo antes de `e := newSetupEnv(…)`, a
 			{Match: `^shell base64 `, Stdout: base64.StdEncoding.EncodeToString(testAPK(otherCert)) + "\n"}},
 			args:   func(t *testing.T) []string { return []string{"--apk", writeAPKSignedBy(t, otherCert)} },
 			want:   want{true, true, true, true, "0.2.0", "granted"},
-			stderr: []string{"Trusting the development signing certificate " + apktest.SHA256(otherCert), "development build"}, calls: []string{"install -r "}},
+			stderr: []string{"Trusting this development build of the app", "development build you trusted"}, calls: []string{"install -r --no-incremental "}},
+		{name: "a release forgets the development build", consent: "granted",
+			args: func(t *testing.T) []string {
+				if _, err := phoneapp.TrustDevAPK(os.Getenv("ADBUDDY_DATA_DIR"), strings.Repeat("a", 64)); err != nil {
+					t.Fatal(err)
+				}
+				return nil
+			},
+			want:   want{true, true, true, true, "0.2.0", "granted"},
+			stderr: []string{"no longer trusts the development build"}},
 		{name: "apk that is not signed", consent: "granted",
 			args: func(t *testing.T) []string {
 				p := filepath.Join(t.TempDir(), "x.apk")
@@ -1837,7 +2210,7 @@ En el bucle de `TestSetupAppBranches`, justo antes de `e := newSetupEnv(…)`, a
 			stderr: []string{"not a signed APK", "skipping the app"}, noChange: true},
 ```
 
-(Con el caso `"apk that is not signed"` la app ya figura instalada, así que `want.installed` es `true`. Lo que se comprueba es que setup no reinstala ni concede nada.) El caso de "apk de desarrollo" deja escrito `trusted-dev-cert` en el directorio de datos del test, que es un `t.TempDir()`, así que no afecta a los demás casos.
+(Con el caso `"apk that is not signed"` la app ya figura instalada, así que `want.installed` es `true`. Lo que se comprueba es que setup no reinstala ni concede nada.) El caso de "apk de desarrollo" deja escrito `trusted-dev-apk` en el directorio de datos del test, que es un `t.TempDir()`, así que no afecta a los demás casos.
 
 Si `noChange` comprueba que no hay llamadas que cambien el móvil, `pm path`, `stat`, `base64` y `dumpsys` cuentan como lecturas. Si la comprobación es una lista de prefijos prohibidos, no hay que tocarla. Si es una lista de llamadas permitidas, añade esas cuatro.
 
@@ -1860,7 +2233,182 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Serve solo entrega el token a la app verificada
+### Task 4: Gancho `Admit` en el servidor del canal
+
+**Files:**
+- Modify: `host/internal/bridge/server.go` (`Options.Admit`, `admitTimeout` y `handle`). **Commit propio**, rebasado sobre `main` con m3-bridge dentro (f36e74d o posterior).
+- Test: `host/internal/bridge/admit_test.go`
+
+**Interfaces:**
+- Consumes: nada de las tareas anteriores.
+- Produces: `bridge.Options.Admit func(ctx context.Context, h Hello) bool`, que se llama en la goroutine de cada conexión tras validar el token y antes de `attach`. `false`, un `ctx` cancelado o `admitTimeout` (20 s) rechazan la conexión con `StatusPolicyViolation` "unauthorized", sin `OnConnect` ni `OnAttach`. Con `nil` se admite a todos.
+
+- [ ] **Step 0: Rebasar**
+
+Run: `git fetch origin && git rebase origin/main`. Expected: sin conflictos (en `main` solo cambió `server.go`, por `SendTo`). Comprueba que `git log origin/main --oneline | grep -c m3-bridge` o el commit f36e74d están en la historia.
+
+- [ ] **Step 1: El test que falla**
+
+`host/internal/bridge/admit_test.go`:
+
+```go
+package bridge
+
+import (
+	"context"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+)
+
+// Admit is asked after the token and before anything is announced: a
+// refused app is closed like one without the token, and neither OnConnect
+// nor OnAttach hear of it.
+func TestAdmitDecidesAfterTheToken(t *testing.T) {
+	var asked, attached atomic.Int32
+	var admit atomic.Bool
+	var conns calls
+	h := start(t, Options{
+		Admit:     func(ctx context.Context, hl Hello) bool { asked.Add(1); return admit.Load() },
+		OnConnect: conns.add,
+		OnAttach:  func() { attached.Add(1) },
+	})
+	if st := closeStatus(t, h.dial("nope", 0)); st != websocket.StatusPolicyViolation {
+		t.Fatalf("wrong token: %v", st)
+	}
+	if n := asked.Load(); n != 0 {
+		t.Fatalf("Admit asked %d times before the token", n)
+	}
+	if st := closeStatus(t, h.dial(token, 0)); st != websocket.StatusPolicyViolation {
+		t.Fatalf("refused: %v", st)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if asked.Load() != 1 || h.srv.Connected() || len(conns.get()) != 0 || attached.Load() != 0 {
+		t.Fatalf("refused app: asked %d, connected %v, OnConnect %v, OnAttach %d", asked.Load(), h.srv.Connected(), conns.get(), attached.Load())
+	}
+	admit.Store(true)
+	c := h.dial(token, 0)
+	defer c.CloseNow()
+	if m := recv(t, c); m.Type != TypeWelcome {
+		t.Fatalf("admitted: got %q, want a welcome", m.Type)
+	}
+	conns.waitFor(t, []bool{true}, 5*time.Second)
+	if attached.Load() != 1 {
+		t.Fatalf("OnAttach %d times", attached.Load())
+	}
+}
+
+// An Admit that does not answer in time rejects the app (fail closed).
+func TestAdmitThatHangsRejects(t *testing.T) {
+	old := admitTimeout
+	admitTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { admitTimeout = old })
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	h := start(t, Options{Admit: func(ctx context.Context, hl Hello) bool { <-release; return true }})
+	if st := closeStatus(t, h.dial(token, 0)); st != websocket.StatusPolicyViolation {
+		t.Fatalf("hung Admit: %v", st)
+	}
+	if h.srv.Connected() {
+		t.Fatal("an app counts as connected while Admit hangs")
+	}
+}
+
+// Without Admit every app with the token gets in, as before.
+func TestNoAdmitAdmitsEveryone(t *testing.T) {
+	h := start(t, Options{})
+	c := h.dial(token, 0)
+	defer c.CloseNow()
+	if m := recv(t, c); m.Type != TypeWelcome {
+		t.Fatalf("got %q, want a welcome", m.Type)
+	}
+}
+```
+
+(Si `closeStatus`, `recv`, `calls`, `start` o `token` se llaman de otra forma en `bridge_test.go` tras m3-bridge, ajusta los nombres. No cambies `bridge_test.go`.)
+
+- [ ] **Step 2: Ejecutarlo y ver que falla**
+
+Run (desde `host/`): `go test -timeout 5m ./internal/bridge/ -run Admit`
+Expected: FAIL de compilación (`unknown field Admit`, `undefined: admitTimeout`).
+
+- [ ] **Step 3: El gancho**
+
+En `host/internal/bridge/server.go`, en `Options`, después de `OnReject`:
+
+```go
+	// Admit, when set, decides whether an app that has the token may
+	// attach: serve checks there that it is still the installation it
+	// verified (spec M6a §6.3). It runs in the connection's own goroutine,
+	// after the token and the version checks and before OnConnect or
+	// OnAttach, so it may do I/O; false, a cancelled ctx or more than
+	// admitTimeout reject the app as one without the token. nil admits
+	// every app with the token.
+	Admit func(ctx context.Context, h Hello) bool
+```
+
+Junto a las demás variables del paquete:
+
+```go
+// admitTimeout bounds Options.Admit (a variable for the tests).
+var admitTimeout = 20 * time.Second
+```
+
+En `handle`, justo después del bloque `if hello.Protocol < MinAppProtocol { … }` y antes de `cl := &client{…}`:
+
+```go
+	if !s.admit(ctx, hello) {
+		c.Close(websocket.StatusPolicyViolation, "unauthorized")
+		return
+	}
+```
+
+y el método:
+
+```go
+// admit asks Options.Admit, failing closed: false, a cancelled ctx or no
+// answer within admitTimeout reject the app.
+func (s *Server) admit(ctx context.Context, h Hello) bool {
+	if s.o.Admit == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, admitTimeout)
+	defer cancel()
+	done := make(chan bool, 1)
+	go func() { done <- s.o.Admit(ctx, h) }()
+	select {
+	case ok := <-done:
+		return ok && ctx.Err() == nil
+	case <-ctx.Done():
+		return false
+	}
+}
+```
+
+- [ ] **Step 4: Ejecutar los tests del paquete**
+
+Run (desde `host/`): `go test -timeout 5m ./internal/bridge/ && go test -timeout 5m -race ./internal/bridge/ -run Admit`
+Expected: PASS. Si `-race` no está disponible en este PC, apúntalo en el ledger: la CI lo pasa en Linux.
+
+- [ ] **Step 5: gofmt, vet y commit propio**
+
+Run (desde `host/`): `gofmt -l ./internal/bridge && go vet ./internal/bridge/`
+Expected: sin salida.
+
+```bash
+git add host/internal/bridge/server.go host/internal/bridge/admit_test.go
+git commit -m "feat(host): gancho Admit en el canal para rechazar una app que no es la verificada
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+Avisa al controlador para que se lo diga a tern-51 y a nautilus-19: `server.go` ha cambiado.
+
+---
+
+### Task 5: Serve solo entrega el token a la app verificada
 
 **Files:**
 - Modify: `host/internal/phoneapp/phoneapp.go` (`Handshake` pide `Verified`)
@@ -1870,7 +2418,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `host/cmd/adbuddy/phone_e2e_test.go` (`phoneAppRules` y el certificado de desarrollo)
 
 **Interfaces:**
-- Consumes: `Verifier`, `Verified`, `LoadTrust` y `TrustDevCert` (Task 2); `releaseCert`, `testCert`, `otherCert`, `testAPK`, `pinTestCert` y `testAppPath` (Tasks 2-3).
+- Consumes: `Verifier` (con `Same`), `Verified`, `LoadTrust`, `DevTrustPath` y `TrustDevAPK` (Task 2); `bridge.Options.Admit` (Task 4); `releaseCert`, `testCert`, `otherCert`, `testAPK`, `pinTestCert` y `testAppPath` (Tasks 2-3).
 - Produces: `func phoneapp.Handshake(ctx context.Context, a ADB, v Verified, token string, port int, hostName string) error`.
 
 - [ ] **Step 1: `Handshake` pide `Verified`**
@@ -1905,22 +2453,21 @@ En `host/internal/cli/phone.go`, sustituye el bloque de `connect` (desde el come
 	// the tunnel is back, so a token captured meanwhile is worth nothing.
 	// The token only goes to the app checked right before (spec M6a §6.3):
 	// verifier reads the APK again only after a reinstall.
-	verifier := phoneapp.NewVerifier(phoneapp.LoadTrust(releaseCert, e.dirs.Data), phoneapp.MinAppVersionCode)
-	devSaid := false
+	if trust := phoneapp.LoadTrust(releaseCert, e.dirs.Data); trust.DevAPK != "" {
+		fmt.Fprintf(app.Stderr, "⚠ ADBuddy trusts a development build of the phone app (SHA-256 %s, from `adbuddy setup --apk`): it gets the token like a release. Delete %s to stop.\n", trust.DevAPK, phoneapp.DevTrustPath(e.dirs.Data))
+	}
 	connect := func() error {
-		v, err := verifier.Verify(ctx, a)
-		if err != nil {
-			return err
-		}
-		if v.Dev() && !devSaid {
-			devSaid = true
-			fmt.Fprintf(app.Stderr, "⚠ The phone app is a development build trusted by `adbuddy setup --apk` (certificate %s): it gets the token like a release.\n", v.Cert())
-		}
+		// A new token first: whatever app held the old one loses it, even
+		// when this check then fails.
 		token, err := newToken()
 		if err != nil {
 			return fmt.Errorf("could not make a token: %w", err)
 		}
 		l.srv.SetToken(token)
+		v, err := l.verifier.Verify(ctx, a)
+		if err != nil {
+			return err
+		}
 		if err := phoneapp.Tunnel(ctx, a, port); err != nil {
 			return err
 		}
@@ -1928,7 +2475,44 @@ En `host/internal/cli/phone.go`, sustituye el bloque de `connect` (desde el come
 	}
 ```
 
-El resto de `startPhoneLink` no cambia. `connect` se llama primero en línea y después solo desde la goroutine del ticker: `devSaid` no se comparte entre goroutines.
+Tres cambios más en `startPhoneLink`, en el mismo commit:
+
+1. Añade el campo `verifier *phoneapp.Verifier` a `phoneLink` y el canal `recheck chan struct{}`. Créalos justo antes de `l.srv = bridge.New(...)`:
+
+```go
+	l.verifier = phoneapp.NewVerifier(func() phoneapp.Trust { return phoneapp.LoadTrust(releaseCert, e.dirs.Data) }, phoneapp.MinAppVersionCode)
+	l.recheck = make(chan struct{}, 1)
+```
+
+2. En las `bridge.Options` de `bridge.New`, el gancho de la Task 5. Toda app que llegue con el token ha de ser la instalación verificada. Si no lo es, se rechaza y se vuelve a verificar enseguida, con un token nuevo:
+
+```go
+		Admit: func(ctx context.Context, _ bridge.Hello) bool {
+			if err := l.verifier.Same(ctx, a); err != nil {
+				fmt.Fprintf(app.Stderr, "⚠ An app with the token connected, but it is not the app ADBuddy checked (%s): refused, checking the app again.\n", classify.Printable(err.Error()))
+				select {
+				case l.recheck <- struct{}{}:
+				default:
+				}
+				return false
+			}
+			return true
+		},
+```
+
+3. En la goroutine del ticker, el `select` espera también a `l.recheck`. Cuando llega, `connected = false`, para que vuelva a ejecutarse `connect()`:
+
+```go
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			case <-l.recheck:
+				connected = false
+			}
+```
+
+El aviso de `trusted-dev-apk` sale al arrancar siempre que exista el fichero, lleve o no la app ese APK (spec §6.1). Si `connect()` falla en `Verify`, el token ya ha rotado: la app que tenía el anterior no puede volver a entrar.
 
 - [ ] **Step 3: El adb falso de `phone_test.go`**
 
@@ -1936,11 +2520,11 @@ En `host/internal/cli/phone_test.go`, añade `"encoding/base64"` y `"github.com/
 
 ```go
 	case strings.Contains(joined, "dumpsys package"):
-		io.WriteString(stdout, "Packages:\n    versionCode=1 minSdk=30 targetSdk=37\n    versionName=0.2.0\n")
+		io.WriteString(stdout, "Packages:\n  Package [tech.hybriq.adbuddy] (1a2b):\n    versionCode=1 minSdk=30 targetSdk=37\n    versionName=0.2.0\n")
 	case joined == "shell pm path tech.hybriq.adbuddy":
 		io.WriteString(stdout, "package:"+testAppPath+"\n")
 	case strings.HasPrefix(joined, "shell stat -c "):
-		io.WriteString(stdout, strconv.Itoa(len(f.app()))+"\n")
+		io.WriteString(stdout, strconv.Itoa(len(f.app()))+" 1 1\n")
 	case strings.HasPrefix(joined, "shell base64 "):
 		io.WriteString(stdout, base64.StdEncoding.EncodeToString(f.app())+"\n")
 ```
@@ -1989,33 +2573,35 @@ Ajusta la llamada a `startLink` a su firma y a lo que devuelve. Si su segundo re
 - [ ] **Step 4: El e2e**
 
 En `host/cmd/adbuddy/phone_e2e_test.go`:
-- añade a `phoneAppRules(port)`, antes de las demás, las reglas de `pm path`, `stat` y `base64`, que sirven `e2eAPK`, y la línea `versionCode=1 minSdk=30 targetSdk=37` en la respuesta de `dumpsys package`;
+- añade a `phoneAppRules(port)`, antes de las demás, las reglas de `pm path`, `stat` y `base64`, que sirven `e2eAPK`. La respuesta de `dumpsys package` pasa a `"Packages:\n  Package [tech.hybriq.adbuddy] (1a2b):\n    versionCode=1 minSdk=30 targetSdk=37\n    versionName=0.2.0\n"`;
 - define, a nivel de paquete:
 
 ```go
-// e2eCert signs the app the fake phone has installed; each test trusts it
-// as the development certificate (the binary pins none).
+// e2eAPK is the app the fake phone has installed; each test trusts it as
+// the development build (the binary pins no release certificate).
 var (
 	e2eCert = apktest.Cert("e2e")
 	e2eAPK  = apktest.APK(apktest.Block{ID: apktest.V2, Signers: []apktest.Signer{{Cert: e2eCert}}})
 )
 
-// trustE2EApp makes the host in dataDir trust e2eCert.
+// trustE2EApp makes the host in dataDir trust e2eAPK.
 func trustE2EApp(t *testing.T, dataDir string) {
 	t.Helper()
-	if _, err := phoneapp.TrustDevCert(dataDir, apktest.SHA256(e2eCert)); err != nil {
+	sum := sha256.Sum256(e2eAPK)
+	if _, err := phoneapp.TrustDevAPK(dataDir, hex.EncodeToString(sum[:])); err != nil {
 		t.Fatal(err)
 	}
 }
 ```
 
+- añade los imports que falten (`crypto/sha256`, `encoding/hex`, `encoding/base64`, `strconv`, `phoneapp` y `phoneapp/apktest`);
 - llama a `trustE2EApp(t, <el ADBUDDY_DATA_DIR del test>)` en cada test que use `phoneAppRules`, justo donde fija `ADBUDDY_DATA_DIR`. Si el directorio de datos lo elige un helper compartido con otros tests (de `e2e_test.go`, que es de tern), llama a `trustE2EApp` desde el test, no desde el helper.
 
 Las reglas:
 
 ```go
 		{Match: `^shell pm path tech\.hybriq\.adbuddy$`, Stdout: "package:/data/app/~~E2e==/tech.hybriq.adbuddy-E2e==/base.apk\n"},
-		{Match: `^shell stat -c `, Stdout: strconv.Itoa(len(e2eAPK)) + "\n"},
+		{Match: `^shell stat -c `, Stdout: strconv.Itoa(len(e2eAPK)) + " 1 1\n"},
 		{Match: `^shell base64 `, Stdout: base64.StdEncoding.EncodeToString(e2eAPK) + "\n"},
 ```
 
@@ -2046,7 +2632,7 @@ Comprueba que el primer commit compila por sí solo: `git stash push -u -m m6a-t
 
 ---
 
-### Task 5: Quitar o neutralizar la app de ADBuddy es 🔴 especial
+### Task 6: Quitar o neutralizar la app de ADBuddy es 🔴 especial
 
 **Files:**
 - Modify: `host/internal/classify/testdata/habitual.jsonl`
@@ -2086,6 +2672,13 @@ Al final de `host/internal/classify/testdata/habitual.jsonl`, añade:
 {"argv":["uninstall","tech.hybriq.adbuddy"],"level":"red","special":true}
 {"argv":["uninstall","-k","tech.hybriq.adbuddy"],"level":"red","special":true}
 {"argv":["shell","pm","uninstall","tech.hybriq.adbuddy"],"level":"red","special":true}
+{"sh":"cmd package uninstall $(pm list packages | grep hybr | cut -c9-)","level":"red","special":true}
+{"sh":"pm reset-permissions","level":"red","special":true}
+{"sh":"dumpsys deviceidle whitelist reset","level":"red","special":true}
+{"sh":"cmd deviceidle whitelist reset","level":"red","special":true}
+{"sh":"cmd appops reset","level":"red","special":true}
+{"sh":"cmd package reset-permissions","level":"red","special":true}
+{"sh":"appops reset","level":"red","special":true}
 ```
 
 Comprueba antes que `readJSONL` admite líneas `#` en medio del fichero: su comentario dice "lines starting with # are comments".
@@ -2095,29 +2688,64 @@ Comprueba antes que `readJSONL` admite líneas `#` en medio del fichero: su come
 Run (desde `host/`): `go test -timeout 10m ./internal/classify/ -run 'Corpus|Habitual'`. Si ningún test se llama así, ejecuta `go test -timeout 10m ./internal/classify/` y busca en la salida las líneas nuevas.
 Expected: o PASS, o FAIL con las líneas que hoy no salen 🔴 especiales. **Apunta en el ledger cuáles fallaron.**
 
-- [ ] **Step 3: Arreglar lo que no salga (solo si el Step 2 falló)**
+- [ ] **Step 3: Arreglar lo que no salga**
 
-En `host/internal/classify/special.go`, en `specialReason`, justo después del bloque `if scope == "adb" { … }` (antes de `switch name {`), añade:
+`specialReason` ya tiene la regla general `if level != Green && mentionsADBuddy(v)` (special.go, al final del `switch` de shell), así que las órdenes que nombran el paquete deberían salir ya. Se espera que fallen dos grupos. En `host/internal/classify/special.go`:
+
+1. **`cmd` con argumentos dinámicos.** En la regla de argumentos dinámicos, añade `cmd`:
 
 ```go
-	// pm, `cmd package`, `cmd appops` and am commands that are not 🟢 and
-	// name ADBuddy's app would remove, wipe, disable, suspend, stop or strip
-	// it: the phone would be left without its trusted app (spec M6a §7).
-	if level != Green && mentionsADBuddy(v[1:]) {
-		sub := ""
-		if len(v) > 1 {
-			sub = v[1]
-		}
-		switch {
-		case name == "pm",
-			name == "cmd" && (sub == "package" || sub == "appops"),
-			name == "am" && (sub == "force-stop" || sub == "kill" || sub == "stop-app"):
-			return "affects the ADBuddy app"
-		}
+	if level != Green && (name == "pm" || name == "appops" || name == "am" || name == "cmd") && hasDynamic(ws[1:]) {
+		return "arguments only known on the phone could name ADBuddy or a critical app"
 	}
 ```
 
-Si el caso con la variable (`p=…; pm uninstall $p`) o el de `xargs` no sale 🔴 especial, mira cómo llegan las palabras a `specialReason` (`Word.Dynamic` y el valor ya resuelto de las variables propias). Haz que una palabra dinámica en `pm`/`cmd package` con un verbo de la lista también dé "affects the ADBuddy app", siguiendo el patrón de `content` con `hasDynamic`. No admitas nada nuevo en la lista blanca del evaluador.
+2. **Órdenes de *reset* que neutralizan la app sin nombrarla.** Justo antes de esa regla:
+
+```go
+	if level != Green && resetsEveryApp(name, v) {
+		return "resets the permissions, battery exemptions or app ops of every app, ADBuddy's included"
+	}
+```
+
+con:
+
+```go
+// resetsEveryApp: pm reset-permissions without -p, `deviceidle whitelist
+// reset` and `cmd appops reset` without a package strip ADBuddy's app of
+// WRITE_SECURE_SETTINGS (Cut access), its battery exemption or its app ops
+// without naming it (spec M6a §7).
+func resetsEveryApp(name string, v []string) bool {
+	has := func(i int, s string) bool { return len(v) > i && v[i] == s }
+	switch {
+	case name == "pm" && has(1, "reset-permissions"):
+		return !slices.Contains(v[2:], "-p")
+	case name == "cmd" && has(1, "package") && has(2, "reset-permissions"):
+		return !slices.Contains(v[3:], "-p")
+	case name == "appops" && has(1, "reset"):
+		for _, w := range v[2:] {
+			if !strings.HasPrefix(w, "-") && w != "0" {
+				return false
+			}
+		}
+		return true
+	case (name == "dumpsys" || name == "cmd") && has(1, "deviceidle") && has(2, "whitelist") && has(3, "reset"):
+		return true
+	case name == "cmd" && has(1, "appops") && has(2, "reset"):
+		for _, w := range v[3:] {
+			if !strings.HasPrefix(w, "-") && w != "0" { // a package: only that one
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+```
+
+(Añade `"slices"` a los imports si falta. `cmd appops reset --user 0` sigue siendo de todas las apps: el `0` es el valor de `--user`.)
+
+Si otra línea nueva sigue sin salir 🔴 especial, sigue el mismo patrón: una condición estrecha sobre `name` y sus subórdenes. No admitas nada nuevo en la lista blanca del evaluador.
 
 Vuelve a ejecutar **todo** el paquete: `go test -timeout 10m ./internal/classify/`. Debe pasar entero. Si una línea de `habitual.jsonl` o de `m2-levels.jsonl` que ya existía sube de nivel, el arreglo es demasiado ancho: estréchalo. Nunca toques esas líneas.
 
@@ -2137,7 +2765,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Herramienta `apkcert`
+### Task 7: Herramienta `apkcert`
 
 **Files:**
 - Create: `host/cmd/apkcert/main.go`
@@ -2299,7 +2927,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: Versión desde la etiqueta
+### Task 8: Versión desde la etiqueta
 
 **Files:**
 - Create: `scripts/release-version.sh`
@@ -2478,7 +3106,7 @@ por:
         versionName = providers.gradleProperty("adbuddy.versionName").getOrElse("0.2.0")
 ```
 
-En este PC no hay JDK, así que no compiles. La comprobación la hacen `android.yml` (build de debug, con los valores por defecto) y `release-check.yml` (Task 9, con `-P…`). Comprueba a mano que `git diff android/` solo muestra esas líneas.
+En este PC no hay JDK, así que no compiles. La comprobación la hacen `android.yml` (build de debug, con los valores por defecto) y `release-check.yml` (Task 10, con `-P…`). Comprueba a mano que `git diff android/` solo muestra esas líneas.
 
 - [ ] **Step 7: Commit propio de Gradle**
 
@@ -2491,14 +3119,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Script de instalación
+### Task 9: Script de instalación
 
 **Files:**
 - Create: `scripts/install.sh`
 - Test: `scripts/install_test.sh`
 
 **Interfaces:**
-- Consumes: los nombres de los archivos de goreleaser (Task 9): `adbuddy_<versión>_<os>_<arch>.tar.gz`, donde `<os>_<arch>` es `linux_amd64`, `linux_arm64` o `darwin_all`, y `checksums.txt` con líneas `<hex>  <fichero>`. Cada `.tar.gz` lleva `adbuddy` en su raíz.
+- Consumes: los nombres de los archivos de goreleaser (Task 10): `adbuddy_<versión>_<os>_<arch>.tar.gz`, donde `<os>_<arch>` es `linux_amd64`, `linux_arm64` o `darwin_all`, y `checksums.txt` con líneas `<hex>  <fichero>`. Cada `.tar.gz` lleva `adbuddy` en su raíz.
 - Produces: `scripts/install.sh`, con `ADBUDDY_VERSION`, `ADBUDDY_INSTALL_DIR` y `ADBUDDY_DOWNLOAD_URL` (spec §8).
 
 - [ ] **Step 1: El test que falla**
@@ -2629,7 +3257,7 @@ Expected: `FAIL` en cada caso y salida 1.
 #!/bin/sh
 # Installs the adbuddy host on Linux or macOS (spec M6a §8):
 #
-#   curl -fsSL https://raw.githubusercontent.com/hybriqtech/adbuddy/main/scripts/install.sh | sh
+#   curl -fsSL https://github.com/hybriqtech/adbuddy/releases/latest/download/install.sh | sh
 #
 # ADBUDDY_VERSION=v0.3.0 installs that release instead of the latest one.
 # ADBUDDY_INSTALL_DIR picks the folder (default: ~/.local/bin; no sudo).
@@ -2748,7 +3376,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: goreleaser y los workflows de release
+### Task 10: goreleaser y los workflows de release
 
 **Files:**
 - Create: `.goreleaser.yaml`
@@ -2757,7 +3385,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Create: `.github/workflows/release-check.yml`
 
 **Interfaces:**
-- Consumes: `sh scripts/release-version.sh` (Task 7), `sh scripts/install.sh` y `sh scripts/install_test.sh` (Task 8), `go run ./cmd/apkcert` (Task 6) y las propiedades `adbuddy.versionName` y `adbuddy.versionCode` (Task 7).
+- Consumes: `sh scripts/release-version.sh` (Task 8), `sh scripts/install.sh` y `sh scripts/install_test.sh` (Task 9), `go run ./cmd/apkcert` (Task 7) y las propiedades `adbuddy.versionName` y `adbuddy.versionCode` (Task 8).
 - Produces: `APKSIGNER=… sh scripts/release-cert.sh <apk> [--pinned]` sale con 0 cuando `apksigner` y `apkcert` dan un único certificado y es el mismo (y, con `--pinned`, el fijado).
 
 - [ ] **Step 1: `scripts/release-cert.sh`**
@@ -2853,6 +3481,9 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# The installer travels with each release: curl … /releases/latest/download/install.sh | sh
+# (a change on main reaches nobody until the next release; spec M6a §8).
+
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot"
 
@@ -2866,9 +3497,11 @@ release:
   draft: true
   prerelease: auto
   mode: keep-existing
+  extra_files:
+    - glob: scripts/install.sh
 ```
 
-(El binario universal de macOS tiene `.Arch` = `all`, así que su archivo es `adbuddy_<v>_darwin_all.tar.gz`, el que espera `install.sh`. `LICENSE` lo añade la Task 10. Si goreleaser falla porque falta, crea antes un `LICENSE` provisional en esta tarea y sustitúyelo en la 10.)
+(El binario universal de macOS tiene `.Arch` = `all`, así que su archivo es `adbuddy_<v>_darwin_all.tar.gz`, el que espera `install.sh`. `LICENSE` lo añade la Task 11. Si goreleaser falla porque falta, crea antes un `LICENSE` provisional en esta tarea y sustitúyelo en la 10.)
 
 - [ ] **Step 3: `.github/workflows/release.yml`**
 
@@ -2931,7 +3564,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: host/go.mod
-          cache-dependency-path: host/go.sum
+          cache: false
       - name: Host tests
         working-directory: host
         run: |
@@ -2944,6 +3577,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@b9bee63ef481cc545e4517ec730544a4d8b1dfa0 # v6.4.0
         with:
           gradle-version: "9.8.0"
+          cache-disabled: true
       - name: Install Android SDK platform 37
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0"
       - name: App unit tests
@@ -2951,7 +3585,7 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest
 
   host:
-    needs: test
+    needs: [version, test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -2963,7 +3597,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: host/go.mod
-          cache-dependency-path: host/go.sum
+          cache: false
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
@@ -2988,6 +3622,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@b9bee63ef481cc545e4517ec730544a4d8b1dfa0 # v6.4.0
         with:
           gradle-version: "9.8.0"
+          cache-disabled: true
       - name: Install Android SDK platform 37
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0"
       - name: Build the release APK (unsigned)
@@ -3014,7 +3649,10 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: apk-unsigned
-          path: in
+          path: ${{ runner.temp }}/in
+      - name: The artifact is one APK
+        run: |
+          [ "$(ls -A "$RUNNER_TEMP/in")" = "app-release-unsigned.apk" ] || { echo "::error::unexpected artifact: $(ls -A "$RUNNER_TEMP/in")"; exit 1; }
       - name: Install build-tools
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;$BUILD_TOOLS"
       - name: Sign
@@ -3031,18 +3669,18 @@ jobs:
           trap 'rm -f "$ks"' EXIT
           printf '%s' "$KS" | base64 -d > "$ks"
           bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
-          mkdir -p out
-          "$bt/zipalign" -f 4 in/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          mkdir -p "$RUNNER_TEMP/out"
+          "$bt/zipalign" -f 4 "$RUNNER_TEMP/in/app-release-unsigned.apk" "$RUNNER_TEMP/aligned.apk"
           "$bt/apksigner" sign --ks "$ks" --ks-type PKCS12 --ks-pass env:KS_PASS --ks-key-alias adbuddy \
             --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
-            --out out/adbuddy.apk "$RUNNER_TEMP/aligned.apk"
+            --out "$RUNNER_TEMP/out/adbuddy.apk" "$RUNNER_TEMP/aligned.apk"
       - name: Remove the keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.p12"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: apk-signed
-          path: out/adbuddy.apk
+          path: ${{ runner.temp }}/out/adbuddy.apk
           if-no-files-found: error
           retention-days: 1
 
@@ -3058,7 +3696,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: host/go.mod
-          cache-dependency-path: host/go.sum
+          cache: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: apk-signed
@@ -3208,7 +3846,7 @@ Run: `sh -n scripts/release-cert.sh && sh scripts/release-version_test.sh && sh 
 Expected: sin errores de sintaxis, los dos tests pasan, y la última orden sale con 1 diciendo "unknown option --bad".
 
 Run (desde `host/`): `go run github.com/goreleaser/goreleaser/v2@latest check -f ../.goreleaser.yaml`
-Expected: `config is valid` (un aviso por `LICENSE` es aceptable hasta la Task 10). Si `go run` no puede descargar goreleaser, apúntalo en el ledger y sigue: lo comprueba la CI.
+Expected: `config is valid` (un aviso por `LICENSE` es aceptable hasta la Task 11). Si `go run` no puede descargar goreleaser, apúntalo en el ledger y sigue: lo comprueba la CI.
 
 Run: `uv run --with pyyaml python -c "import yaml,sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]" .goreleaser.yaml .github/workflows/release.yml .github/workflows/release-check.yml`
 Expected: sin salida (YAML válido).
@@ -3218,6 +3856,9 @@ Expected: sin salida: todas las acciones están fijadas por SHA.
 
 Run: `grep -n 'secrets\.' .github/workflows/release.yml`
 Expected: solo `GITHUB_TOKEN`, en el job `host`, y las dos líneas del paso `Sign` del job `sign`.
+
+Run: `grep -n 'cache' .github/workflows/release.yml`
+Expected: solo `cache: false` y `cache-disabled: true`.
 
 - [ ] **Step 6: Commit**
 
@@ -3230,7 +3871,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 10: Clave de release, LICENSE y documentación
+### Task 11: Clave de release, LICENSE y documentación
 
 **Files:**
 - Create: `scripts/release-key.sh`
@@ -3309,7 +3950,7 @@ Expected: sin errores de sintaxis. La segunda orden sale con 1, con "keytool not
 Run: `curl -fsSL https://www.apache.org/licenses/LICENSE-2.0.txt -o LICENSE && head -3 LICENSE && grep -c "END OF TERMS AND CONDITIONS" LICENSE`
 Expected: la cabecera "Apache License / Version 2.0, January 2004" y `1`.
 
-El texto no se cambia. El copyright (© 2026 hybriqtech) va en `host/README.md` (Step 4). Si la Task 9 dejó un `LICENSE` provisional, este lo sustituye.
+El texto no se cambia. El copyright (© 2026 hybriqtech) va en `host/README.md` (Step 4). Si la Task 10 dejó un `LICENSE` provisional, este lo sustituye.
 
 - [ ] **Step 3: `docs/releasing.md`**
 
@@ -3333,13 +3974,19 @@ Only the repository owner can do these, in their own terminal and on github.com.
 3. **Create the `release` environment** (Settings › Environments › New environment):
    - Deployment branches and tags: *Selected branches and tags*, add the tag rule `v*`.
    - Required reviewers: yourself.
-4. **Add its two secrets** with the commands the script printed (`--env release`): `ADBUDDY_KEYSTORE_B64` and `ADBUDDY_KEYSTORE_PASSWORD`. They are environment secrets, not repository secrets: a workflow on another branch cannot read them. The key alias is always `adbuddy`.
-5. **Protect the tags** (Settings › Rules › Rulesets › New tag ruleset): target `v*`, restrict creations, updates and deletions, bypass for repository admins only.
+   - Turn off *Allow administrators to bypass configured protection rules*.
+4. **Add its two secrets** with the commands the script printed (`--env release`): `ADBUDDY_KEYSTORE_B64` and `ADBUDDY_KEYSTORE_PASSWORD`. Run them in **Git Bash**, not PowerShell: they use `|` and `<` the POSIX way. They are environment secrets, not repository secrets, so a workflow on another branch cannot read them. The key alias is always `adbuddy`.
+5. **Rulesets** (Settings › Rules › Rulesets):
+   - a tag ruleset on `v*`: restrict creations, updates and deletions; only repository admins bypass;
+   - a branch ruleset on `main`: no direct pushes and no force pushes, changes only through pull requests, and **no bypass list** (not even GitHub Actions). The release jobs that may write (`host` and `publish-apk`) then cannot touch `main`.
+
+   With the `main` ruleset on, branches no longer reach `main` with a local fast-forward and `git push`: open a pull request and merge it with **Rebase and merge**. That keeps the history linear, as today.
 6. **Pin the certificate:** put the SHA-256 the script printed (lowercase hex, no colons) in `SigningCertSHA256` in `host/internal/phoneapp/release.go`, in its own commit and PR. Until then `adbuddy setup` downloads no app (it says so), and `publish-apk` fails.
-7. **Your phone** has a development build signed with another key. Before the first release, uninstall ADBuddy on the phone; it forgets its pairing, and `adbuddy setup` pairs again. Until then, `adbuddy setup --apk <your build>` keeps trusting your development build, and `adbuddy serve` says so every time it starts.
+7. **Your phone** has a development build signed with another key. Before the first release, uninstall ADBuddy on the phone; it forgets its pairing, and `adbuddy setup` pairs again. Until then, run `adbuddy setup --apk <your build>` once (and again after each new build) so the host trusts that exact APK. `adbuddy serve` says so every time it starts.
 
 ## Cutting a release
 
+0. **Before the first public release only:** the emulator checks of validation 3 in `docs/superpowers/plans/2026-10-01-adbuddy-m6a-releases.md` have passed on API 30, 33 and the latest. Do not tag v0.x until they have.
 1. `main` is green and holds what you want to ship.
 2. If this release fixes a security bug in the app, raise `MinAppVersionCode` in `host/internal/phoneapp/trust.go` to this release's versionCode (`sh scripts/release-version.sh vX.Y.Z`), in the same release.
 3. Tag a commit of `main` and push the tag: `git tag v0.3.0 && git push origin v0.3.0`. For a prerelease, use `v0.3.0-rc.1`. Tags must be `vX.Y.Z` or `vX.Y.Z-rc.N`; `scripts/release-version.sh` explains the limits. A tag on a commit that is not on `main` releases nothing.
@@ -3352,8 +3999,11 @@ If a job fails, delete the draft and the tag (`git push origin :v0.3.0`), fix th
 
 - `adbuddy setup` checks a downloaded APK against `adbuddy.apk.sha256`. Then it checks that **every** signer in its v2, v3 and v3.1 blocks has the pinned certificate, and that Android would find the same blocks.
 - Before it hands the token to the app, and before it asks for consent or grants a permission, the host reads the **installed** app back from the phone. It checks the same things there, and that its version is not below `MinAppVersionCode`. An app with our name signed by anyone else gets nothing, wherever it came from.
+- The installed app must be in `/data/app` (not on adopted storage) and the phone must not be rooted: with root the phone's shell could lie.
+- Every app that connects with the token must still be that installation (same path and `stat` of `base.apk`). An update in place keeps the app's data, the token included, so it is refused and the app is checked again before a new token goes out.
+- What ADBuddy does not protect against: an agent that can run tools on the PC outside `adbuddy` (it could edit the host's files or run the real adb). The agent environment only pre-approves `adbuddy` commands, and `adbuddy setup` refuses to run from the agent.
 - `ADBUDDY_RELEASE_URL` (the e2e tests) only takes `https://` or a loopback `http://`. Another origin could only serve old or current APKs that hybriqtech signed, and `MinAppVersionCode` stops the old ones.
-- `adbuddy setup --apk <file>` installs a file you choose. If it is not signed with the release key, its certificate becomes the trusted development one. Delete the file setup names to stop trusting it.
+- `adbuddy setup --apk <file>` installs a private copy of a file you choose. If the release key does not sign it, **that exact APK** (its SHA-256) becomes the trusted development build: not its key, because the debug key lives on your PC. `adbuddy serve` says so every time it starts, and a setup that finds a release on the phone stops trusting it.
 - Key rotation is not supported: rotating the key needs a host release that reads the v3 lineage first.
 
 ## If the key leaks
@@ -3379,7 +4029,7 @@ Sustituye la sección `## Build` (el título y su bloque de código) por:
 - **Linux and macOS:**
 
   ```sh
-  curl -fsSL https://raw.githubusercontent.com/hybriqtech/adbuddy/main/scripts/install.sh | sh
+  curl -fsSL https://github.com/hybriqtech/adbuddy/releases/latest/download/install.sh | sh
   ```
 
   It installs the latest release in `~/.local/bin` after checking its SHA-256. `ADBUDDY_INSTALL_DIR` picks another folder, and `ADBUDDY_VERSION=v0.3.0` another release.
@@ -3440,7 +4090,14 @@ Lo que no se puede probar en este PC o sin el usuario:
    - los bloques que AGP o `apksigner` añaden al Signing Block;
    - las entradas de `setup-java@v6` y `setup-go@v7`.
 2. **La app de release (R8) funciona en un móvil:** el APK de `release-check` en un emulador con imagen válida, o en el móvil del usuario **solo con su permiso**, porque obliga a desinstalar el build de debug. Hay que mirar sobre todo la serialización de los mensajes (kotlinx.serialization con R8).
-3. **`VerifyInstalled` contra un Android real:** la salida de `pm path`, `stat -c %s` y `base64` de toybox en API 30 y en la 37, y el tiempo de leer el APK por Wi-Fi. En el emulador cuando M2.5b tenga una imagen que funcione, o en el Pixel del usuario con su permiso: es solo lectura, pero es su móvil.
+3. **El comportamiento de Android que da por hecho la spec, en un emulador con API 30, 33 y la última, antes de la primera release pública** (ruling de la spec §11; queda como paso que bloquea en `docs/releasing.md`). Hay que comprobar:
+   - que los APK de ataque de §5 se comportan como se supone: el hueco antes del EOCD con v1 y `targetSdk` 29, solo v3.1 más v1 en la API 30, y ZIP64. Y que el host los rechaza;
+   - la salida de `pm path`, `stat -c '%s %i %Y'` y `base64` de toybox, y el tiempo de leer el APK por Wi-Fi;
+   - que una actualización (`install -r`) cambia la ruta, o al menos el `stat`, de `base.apk`;
+   - que el `base.apk` instalado sin `--no-incremental` es idéntico byte a byte al fichero;
+   - que Android rechaza un provider con la misma autoridad también con el nuestro desactivado.
+
+   En el emulador cuando M2.5b tenga una imagen que funcione; en el Pixel del usuario, solo lo que sea de lectura y con su permiso.
 4. **Acciones del usuario** (`docs/releasing.md`, "User actions"): clave, environment `release` con revisor, los dos secretos, ruleset de etiquetas y el PR con `SigningCertSHA256`. Después, la primera etiqueta. Hay que comprobar que el borrador tiene los 9 ficheros y que `adbuddy setup` descarga, verifica e instala la app desde la release publicada.
 5. **`gh release upload` a un borrador por nombre de etiqueta:** se ve en la primera release real o en un fork. Si `gh` no encuentra el borrador, se usa el id de la release que crea goreleaser (`gh api repos/{owner}/{repo}/releases --jq '.[] | select(.draft and .tag_name == env.TAG) | .id'` y `gh api … /assets`).
 6. **El build de debug del usuario tras M6a:** su próximo `adbuddy serve` no entregará el token a la app de debug que tiene instalada hasta que ejecute `adbuddy setup --apk <ese APK>`. Hay que decírselo al integrar.
