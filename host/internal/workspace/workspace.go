@@ -91,6 +91,9 @@ func Init(o Options) (Result, error) {
 		res.note(f.name, changed, created)
 	}
 
+	if err := installSkills(o.Dir, o.Force, &res); err != nil {
+		return res, err
+	}
 	changed, created, err := mergeClaudeSettings(filepath.Join(o.Dir, ".claude", "settings.json"), filepath.Join(BinDir(o.Dir), exe("adbuddy")))
 	if err != nil {
 		return res, err

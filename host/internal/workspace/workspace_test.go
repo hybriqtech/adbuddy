@@ -41,7 +41,7 @@ func TestInitCreatesEnvironment(t *testing.T) {
 			t.Errorf("%s: %v", f, err)
 		}
 	}
-	if len(res.Created) != 6 {
+	if want := 6 + 2*len(skillFiles(t)); len(res.Created) != want {
 		t.Fatalf("created %q", res.Created)
 	}
 	if st, err := os.Stat(JournalDir(dir)); err != nil || !st.IsDir() {
@@ -153,8 +153,10 @@ func TestClaudeSettingsWriteLeavesNoTempFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].Name() != "settings.json" {
-		t.Fatalf("entries %v", entries)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".settings-") {
+			t.Fatalf("temp file left behind: %v", entries)
+		}
 	}
 	if !json.Valid([]byte(read(t, filepath.Join(dir, ".claude", "settings.json")))) {
 		t.Fatal("invalid JSON")
