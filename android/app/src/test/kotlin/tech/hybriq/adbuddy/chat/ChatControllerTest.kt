@@ -21,6 +21,12 @@ class ChatControllerTest {
     private var now = 1_000_000L
     private val chat = ChatController(ch, clock = { now }) { "c${++n}" }
 
+    /** Shows the cards and lets the guard of the first one pass, as the screen does. */
+    private fun show(vararg ids: String) {
+        chat.onPermissions(ids.map { req(it) })
+        now += PermissionUi.PROMOTE_GUARD_MS
+    }
+
     private fun sendOf(i: Int) = Protocol.json.decodeFromJsonElement(ChatSend.serializer(), ch.sent[i].payload)
 
     @Test fun aSentMessageWaitsForTheHost() {
@@ -90,6 +96,7 @@ class ChatControllerTest {
     }
 
     @Test fun aPermissionAnswerIsAStreamMessageWithNoRid() {
+        show("p_1")
         assertEquals(true, chat.answerPermission("p_1", "allow_always"))
         val sent = ch.sent.single()
         assertEquals(Protocol.PERMISSION_REPLY, sent.type)
@@ -103,6 +110,7 @@ class ChatControllerTest {
     private fun answers() = ch.sent.filter { it.type == Protocol.PERMISSION_REPLY }
 
     @Test fun twoAnswersToTheSameIdSendOnlyOne() {
+        show("p_1")
         assertEquals(true, chat.answerPermission("p_1", "allow"))
         assertEquals("a second tap is not sent", false, chat.answerPermission("p_1", "deny"))
         assertEquals(1, answers().size)
@@ -111,12 +119,16 @@ class ChatControllerTest {
     }
 
     @Test fun anotherIdCanStillBeAnswered() {
+        show("p_1")
         assertEquals(true, chat.answerPermission("p_1", "allow"))
+        chat.onPermissions(listOf(req("p_2")))
+        now += PermissionUi.PROMOTE_GUARD_MS
         assertEquals(true, chat.answerPermission("p_2", "deny"))
         assertEquals(2, answers().size)
     }
 
     @Test fun onlyTheProtocolsDecisionsAreSent() {
+        show("p_1")
         for (d in listOf("", "maybe", "ALLOW", "allow ")) assertEquals(d, false, chat.answerPermission("p_1", d))
         assertEquals(0, ch.sent.size)
         assertEquals("a refused decision does not mark the card as answering", emptySet<String>(), chat.answering.value)
@@ -126,27 +138,28 @@ class ChatControllerTest {
         val c = ChatController(object : tech.hybriq.adbuddy.bridge.Channel by ch {
             override fun send(type: String, payload: kotlinx.serialization.json.JsonElement) = false
         })
+        c.onPermissions(listOf(req("p_1")))
+        now += 600
         assertEquals(false, c.answerPermission("p_1", "allow"))
         assertEquals(emptySet<String>(), c.answering.value)
     }
 
     @Test fun theResolvedOfTheHostEndsTheAnswering() {
+        show("p_1")
         chat.answerPermission("p_1", "allow")
         ch.emit(Protocol.PERMISSION_RESOLVED, """{"id":"p_1","decision":"allow","by":"phone"}""")
         assertEquals(emptySet<String>(), chat.answering.value)
     }
 
     @Test fun aCardGoneFromTheListEndsItsAnswering() {
-        chat.onPermissions(listOf(req("p_1"), req("p_2")))
-        now += 600
+        show("p_1", "p_2")
         chat.answerPermission("p_1", "allow")
         chat.onPermissions(listOf(req("p_2")))
         assertEquals(emptySet<String>(), chat.answering.value)
     }
 
     @Test fun aFreshlyPromotedCardCannotBeAnsweredYet() {
-        chat.onPermissions(listOf(req("p_1"), req("p_2")))
-        now += PermissionUi.PROMOTE_GUARD_MS
+        show("p_1", "p_2")
         assertEquals(true, chat.answerPermission("p_1", "allow"))
         // p_1 resolved: p_2 takes its place under the thumb
         chat.onPermissions(listOf(req("p_2")))
@@ -162,22 +175,59 @@ class ChatControllerTest {
     }
 
     @Test fun aCardThatIsNotTheFirstCannotBeAnswered() {
-        chat.onPermissions(listOf(req("p_1"), req("p_2")))
-        now += 10_000
+        show("p_1", "p_2")
         assertEquals(false, chat.answerPermission("p_2", "allow"))
         assertEquals(0, answers().size)
     }
 
     @Test fun afterALostConnectionTheCardCanBeAnsweredAgain() = runBlocking {
         val c = ChatController(ch, scope = this, clock = { now }) { "c" }
+        ch.setPermissions(listOf(req("p_1")))
+        kotlinx.coroutines.yield()
+        now += 600
         c.answerPermission("p_1", "allow")
         assertEquals(false, c.answerPermission("p_1", "allow"))
         ch.setConnected(false)
         kotlinx.coroutines.yield()
         assertEquals(emptySet<String>(), c.answering.value)
         ch.setConnected(true)
+        kotlinx.coroutines.yield()
+        assertEquals("a reconnection rearms the guard", false, c.answerPermission("p_1", "allow"))
+        now += 600
         assertEquals(true, c.answerPermission("p_1", "allow"))
         assertEquals(2, answers().size)
+        coroutineContext.cancelChildren()
+    }
+
+    @Test fun nothingObservedMeansNothingCanBeAnswered() {
+        now += 10_000
+        assertEquals(false, chat.canAnswer("p_1"))
+        assertEquals(false, chat.answerPermission("p_1", "allow"))
+        assertEquals(0, ch.sent.size)
+    }
+
+    @Test fun anEmptyListThenANewCardGuardsTheNewCard() {
+        chat.onPermissions(emptyList())
+        now += 10_000
+        assertEquals("a card nobody listed", false, chat.answerPermission("p_1", "allow"))
+        chat.onPermissions(listOf(req("p_1")))
+        assertEquals(false, chat.answerPermission("p_1", "allow"))
+        now += 599
+        assertEquals(false, chat.answerPermission("p_1", "allow"))
+        now += 1
+        assertEquals(true, chat.answerPermission("p_1", "allow"))
+    }
+
+    @Test fun theControllerFollowsTheBridgesPermissionsByItself() = runBlocking {
+        val c = ChatController(ch, scope = this, clock = { now }) { "c" }
+        ch.setPermissions(listOf(req("p_1")))
+        kotlinx.coroutines.yield()
+        assertEquals(false, c.answerPermission("p_1", "allow"))
+        now += 600
+        assertEquals(true, c.answerPermission("p_1", "allow"))
+        ch.setPermissions(emptyList())
+        kotlinx.coroutines.yield()
+        assertEquals("the card went: its answering too", emptySet<String>(), c.answering.value)
         coroutineContext.cancelChildren()
     }
 }

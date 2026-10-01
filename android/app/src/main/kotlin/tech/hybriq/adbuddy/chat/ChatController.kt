@@ -36,7 +36,7 @@ class ChatController(
     private val channel: Channel,
     /** With a scope, a lost connection frees the answered cards (the answer may never have arrived). */
     scope: CoroutineScope? = null,
-    clock: () -> Long = System::currentTimeMillis,
+    clock: () -> Long = { System.nanoTime() / 1_000_000 },
     private val newId: () -> String = { "c" + UUID.randomUUID().toString().replace("-", "") },
 ) {
     private val _outgoing = MutableStateFlow<List<Outgoing>>(emptyList())
@@ -51,7 +51,9 @@ class ChatController(
     init {
         channel.listen(Protocol.PERMISSION_RESOLVED) { m -> Protocol.payload<PermissionResolved>(m)?.let { r -> _answering.update { it - r.id } } }
         // An answer sent on a socket that dropped may never have reached the host: the card can be answered again.
-        scope?.launch { channel.connected.collect { if (!it) _answering.value = emptySet() } }
+        scope?.launch { channel.connected.collect { if (!it) _answering.value = emptySet() else guard.rearm() } }
+        // The cards come from the bridge's state: the screen does not have to tell the controller.
+        scope?.launch { channel.permissions.collect { onPermissions(it) } }
     }
 
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 8)
@@ -82,17 +84,17 @@ class ChatController(
         }
     }
 
-    /** The cards on screen, oldest first (the state's list, each time it changes): starts the promote guard and forgets the answered ones that went. */
+    /** The cards, oldest first (the bridge's list, each time it changes; with a scope the constructor follows it by itself): starts the promote guard and forgets the answered ones that went. */
     fun onPermissions(permissions: List<PermissionRequest>) {
         guard.observe(permissions.map { it.id })
         val ids = permissions.map { it.id }.toSet()
         _answering.update { a -> a.filter { it in ids }.toSet() }
     }
 
-    /** Milliseconds before the card may be answered (its promote guard); 0 when it may. */
-    fun guardLeftMs(id: String): Long = guard.leftMs(id)
+    /** Milliseconds before the card may be answered (its promote guard); 0 when it may, or when it never may (then [canAnswer] says no). Finite: fit for PermissionUi.nextTickMs. */
+    fun guardLeftMs(id: String): Long = guard.leftMs(id) ?: 0L
 
-    /** Whether the card may be answered now, apart from the connection and its time (PermissionUi.canAnswer). */
+    /** Whether the card may be answered now, apart from the connection and its time (PermissionUi.canAnswer): not answered yet, the first one, and past its guard. */
     fun canAnswer(id: String): Boolean = id !in _answering.value && guard.leftMs(id) == 0L
 
     /**

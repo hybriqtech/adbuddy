@@ -21,6 +21,9 @@ class FakeChannel : Channel {
     /** Runs after each frame is accepted. */
     var onFrame: () -> Unit = {}
     private var next = 0
+    private val _permissions = MutableStateFlow<List<tech.hybriq.adbuddy.bridge.PermissionRequest>>(emptyList())
+    override val permissions: StateFlow<List<tech.hybriq.adbuddy.bridge.PermissionRequest>> = _permissions
+    fun setPermissions(l: List<tech.hybriq.adbuddy.bridge.PermissionRequest>) { _permissions.value = l }
     private val _connected = MutableStateFlow(true)
     override val connected: StateFlow<Boolean> = _connected
     private val listeners = mutableMapOf<String, MutableList<(Message) -> Unit>>()

@@ -3,6 +3,7 @@ package tech.hybriq.adbuddy.bridge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.json.JsonElement
@@ -23,6 +24,9 @@ interface Channel {
 
     /** True while the host has welcomed the app. */
     val connected: StateFlow<Boolean>
+
+    /** The agent's permission questions the host has pending, oldest first (ChatState.permissions). */
+    val permissions: StateFlow<List<PermissionRequest>>
 }
 
 class BridgeChannel(private val bridge: Bridge, scope: CoroutineScope) : Channel {
@@ -34,4 +38,6 @@ class BridgeChannel(private val bridge: Bridge, scope: CoroutineScope) : Channel
     override fun listenFrames(listener: (Chunk) -> Unit) = bridge.listenFrames(listener)
     override val connected: StateFlow<Boolean> =
         bridge.state.map { it.connection == BridgeState.Connection.CONNECTED }.stateIn(scope, SharingStarted.Eagerly, false)
+    override val permissions: StateFlow<List<PermissionRequest>> =
+        bridge.state.map { it.chat.permissions }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, bridge.state.value.chat.permissions)
 }

@@ -56,32 +56,38 @@ object PermissionUi {
 
     /** The payload of the answer: a permission.reply, which has no rid (protocol spec §5.2). The only way to build it: ChatController uses it. */
     fun reply(id: String, decision: String) = PermissionReply(id, decision)
-
-    fun reply(p: PermissionRequest, decision: String) = reply(p.id, decision)
 }
 
 /**
  * Which card may be answered: the first one, and only once it has been first for
  * [PermissionUi.PROMOTE_GUARD_MS] (the person may be tapping the card that was there before).
- * The clock is injected so a test can move it. Thread safe.
+ * It fails closed: before the first [observe], for a card that is not the first, and for one nobody listed, nothing may be answered.
+ * The clock is injected (default: monotonic, [System.nanoTime]) so a test can move it. Thread safe.
  */
-class PermissionGuard(private val clock: () -> Long = System::currentTimeMillis) {
+class PermissionGuard(private val clock: () -> Long = { System.nanoTime() / 1_000_000 }) {
+    private var observed = false
     private var firstId: String? = null
     private var since = 0L
 
-    /** The cards as the screen shows them now, oldest first: a new first one starts the guard. */
+    /** The cards as the screen shows them now, oldest first: a new first one (or the first after none) starts the guard. */
     @Synchronized fun observe(ids: List<String>) {
         val first = ids.firstOrNull()
-        if (first != firstId) {
-            firstId = first
-            since = clock()
-        }
+        if (!observed || first != firstId) since = clock()
+        observed = true
+        firstId = first
     }
 
-    /** Milliseconds before [id] may be answered; 0 when it may. Before any observe nothing is known, so nothing is guarded. */
-    @Synchronized fun leftMs(id: String): Long {
-        val f = firstId ?: return 0
-        if (f != id) return Long.MAX_VALUE // not the card on screen
+    /** A reconnection: the person may have been tapping while the screen was stale, so the first card is guarded again. */
+    @Synchronized fun rearm() {
+        since = clock()
+    }
+
+    /**
+     * Milliseconds (0..PROMOTE_GUARD_MS) before [id] may be answered; 0 when it may. null when it may not be answered at all
+     * (nothing observed, not the first card, unknown): that is not a time, so nextTickMs never gets it.
+     */
+    @Synchronized fun leftMs(id: String): Long? {
+        if (!observed || firstId != id) return null
         return (since + PermissionUi.PROMOTE_GUARD_MS - clock()).coerceIn(0, PermissionUi.PROMOTE_GUARD_MS)
     }
 }
