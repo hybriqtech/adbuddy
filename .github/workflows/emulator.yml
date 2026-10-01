@@ -18,6 +18,10 @@ jobs:
     name: oracle against the emulator's mksh
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # On the runner avdmanager writes the AVD under $XDG_CONFIG_HOME/.android
+    # and the emulator looks under $HOME/.android: one folder for both.
+    env:
+      ANDROID_AVD_HOME: /home/runner/.android/avd
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
