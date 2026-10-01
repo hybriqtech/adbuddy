@@ -178,7 +178,9 @@ func HookTimeout(event string) int {
 // here makes safe is an error.
 func HookCommand(exePath, event string) (string, error) {
 	p := filepath.ToSlash(exePath)
-	if strings.ContainsAny(p, "\"$`\r\n") {
+	// After ToSlash no backslash is left on Windows; one left on POSIX is an
+	// escape inside the double quotes (a trailing one would eat the closing quote).
+	if strings.ContainsAny(p, "\"$`\\\r\n") {
 		return "", fmt.Errorf("the environment path %q has characters that cannot go in a hook command", exePath)
 	}
 	return `"` + p + `" hook ` + event, nil

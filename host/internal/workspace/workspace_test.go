@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -457,12 +458,24 @@ func TestBadHooksSettingsAreNotClobbered(t *testing.T) {
 }
 
 func TestHookCommandRefusesAPathThatQuotingCannotMakeSafe(t *testing.T) {
-	for _, p := range []string{`/a"b/adbuddy`, "/a$HOME/adbuddy", "/a`x`/adbuddy", "/a\nb/adbuddy"} {
+	bad := []string{`/a"b/adbuddy`, "/a$HOME/adbuddy", "/a`x`/adbuddy", "/a\nb/adbuddy", "/a\rb/adbuddy"}
+	if runtime.GOOS != "windows" {
+		// On POSIX a backslash is part of the name and an escape inside the double quotes.
+		bad = append(bad, `/a\b/adbuddy`, `/a\`, `C:\Users\me\adbuddy.exe`)
+	}
+	for _, p := range bad {
 		if _, err := HookCommand(p, "Stop"); err == nil {
 			t.Errorf("%q accepted", p)
 		}
 	}
-	if c, err := HookCommand(`C:\Users\me\ADBuddy env\.adbuddy\bin\adbuddy.exe`, "Stop"); err != nil || c != `"C:/Users/me/ADBuddy env/.adbuddy/bin/adbuddy.exe" hook Stop` {
+	if runtime.GOOS == "windows" {
+		// Claude Code runs hooks in bash on Windows: backslashes become slashes.
+		if c, err := HookCommand(`C:\Users\me\ADBuddy env\.adbuddy\bin\adbuddy.exe`, "Stop"); err != nil || c != `"C:/Users/me/ADBuddy env/.adbuddy/bin/adbuddy.exe" hook Stop` {
+			t.Errorf("%q %v", c, err)
+		}
+		return
+	}
+	if c, err := HookCommand("/home/me/ADBuddy env/.adbuddy/bin/adbuddy", "Stop"); err != nil || c != `"/home/me/ADBuddy env/.adbuddy/bin/adbuddy" hook Stop` {
 		t.Errorf("%q %v", c, err)
 	}
 }
