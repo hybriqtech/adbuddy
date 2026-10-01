@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -464,7 +465,7 @@ func TestHookCommandRefusesAPathThatQuotingCannotMakeSafe(t *testing.T) {
 		bad = append(bad, `/a\b/adbuddy`, `/a\`, `C:\Users\me\adbuddy.exe`)
 	}
 	for _, p := range bad {
-		if _, err := HookCommand(p, "Stop"); err == nil {
+		if _, err := HookCommand(p, "Stop"); !errors.Is(err, ErrUnsafeHookPath) {
 			t.Errorf("%q accepted", p)
 		}
 	}

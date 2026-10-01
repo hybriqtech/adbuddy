@@ -85,7 +85,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				return NewError("EXECUTABLE_UNKNOWN", err.Error(), "")
 			}
 			if _, err := workspace.Init(workspace.Options{Dir: ws, Exe: exe}); err != nil {
-				return NewError("WORKSPACE_FAILED", err.Error(), "Check that "+ws+" is writable.")
+				return NewError("WORKSPACE_FAILED", err.Error(), workspaceHint(err, ws))
 			}
 			cls, err := loadClassifier(e)
 			if err != nil {

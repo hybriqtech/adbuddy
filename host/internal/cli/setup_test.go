@@ -18,6 +18,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/platformtools"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
+	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 )
 
 // phoneRules answers the read-only commands setup sends to the phone.
@@ -708,5 +709,15 @@ func TestSetupWarnsWhenRemoteModeWasOnForAnotherPhone(t *testing.T) {
 	}
 	if cfg := loadSetupConfig(t, e); cfg.RemoteUntil != "" {
 		t.Fatalf("remote_until %q", cfg.RemoteUntil)
+	}
+}
+
+func TestWorkspaceHintDistinguishesAnUnsafePath(t *testing.T) {
+	unsafe := fmt.Errorf("wrapped: %w", workspace.ErrUnsafeHookPath)
+	if h := workspaceHint(unsafe, "/w"); strings.Contains(h, "writable") || !strings.Contains(h, "another path") {
+		t.Errorf("unsafe path: %q", h)
+	}
+	if h := workspaceHint(fmt.Errorf("disk full"), "/w"); h != "Check that /w is writable." {
+		t.Errorf("other error: %q", h)
 	}
 }

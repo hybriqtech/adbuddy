@@ -315,7 +315,7 @@ connection address with --connect (or type it when asked).`,
 					return NewError("EXECUTABLE_UNKNOWN", err.Error(), "")
 				}
 				if _, err := workspace.Init(workspace.Options{Dir: ws, Exe: exe, Profile: prof.Markdown(), Force: true}); err != nil {
-					return NewError("WORKSPACE_FAILED", err.Error(), "Check that "+ws+" is writable.")
+					return NewError("WORKSPACE_FAILED", err.Error(), workspaceHint(err, ws))
 				}
 				if err := device.WriteJSON(ws, prof); err != nil {
 					return NewError("WORKSPACE_FAILED", err.Error(), "")
@@ -640,4 +640,13 @@ func qrHint(ctx context.Context, runner adb.Runner, say func(string, ...any)) (s
 		say("%s", noPhoneHint)
 	}()
 	return func() { cancel(); <-done }
+}
+
+// workspaceHint is the guidance for a workspace.Init failure: an unsafe path
+// is not a permissions problem.
+func workspaceHint(err error, ws string) string {
+	if errors.Is(err, workspace.ErrUnsafeHookPath) {
+		return "Use another path: it cannot contain backslashes (on Linux and macOS), quotes, $, backticks or line breaks."
+	}
+	return "Check that " + ws + " is writable."
 }

@@ -172,6 +172,10 @@ func HookTimeout(event string) int {
 	return 10
 }
 
+// ErrUnsafeHookPath marks an environment path that cannot be quoted safely
+// for the hook command.
+var ErrUnsafeHookPath = errors.New("the workspace path contains a character that cannot be quoted safely for the hook command")
+
 // HookCommand is the command Claude Code runs for an event's hook: the
 // environment's own adbuddy by absolute path, with forward slashes (Claude
 // Code runs hooks in bash, on Windows too), quoted. A path that no quoting
@@ -181,7 +185,7 @@ func HookCommand(exePath, event string) (string, error) {
 	// After ToSlash no backslash is left on Windows; one left on POSIX is an
 	// escape inside the double quotes (a trailing one would eat the closing quote).
 	if strings.ContainsAny(p, "\"$`\\\r\n") {
-		return "", fmt.Errorf("the environment path %q has characters that cannot go in a hook command", exePath)
+		return "", fmt.Errorf("%w: %q", ErrUnsafeHookPath, exePath)
 	}
 	return `"` + p + `" hook ` + event, nil
 }
