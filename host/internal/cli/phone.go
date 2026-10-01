@@ -18,6 +18,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
+	"github.com/hybriqtech/adbuddy/host/internal/session"
 )
 
 // tunnelCheck is how often serve checks that the chat tunnel is still in
@@ -44,7 +45,9 @@ type phoneLink struct {
 	paused  bool
 	onPause func() // withdraws the question waiting for an answer (daemon.CancelConfirmations)
 	entries []json.RawMessage
-	noticed map[string]bool // types told unsupported by notice on this connection
+	noticed map[string]bool  // types told unsupported by notice on this connection
+	sess    session.Info     // the agent's session, as shown on the phone
+	manager *session.Manager // nil until serve starts the session
 }
 
 // maxNotices is how many unsupported types a connection is told of by notice:
@@ -255,7 +258,29 @@ func (l *phoneLink) Entry(j journal.Entry) {
 func (l *phoneLink) state() bridge.SessionState {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return bridge.SessionState{Agent: l.agent, State: "idle", Paused: l.paused}
+	st := bridge.SessionState{Agent: l.agent, State: session.StateStopped, Paused: l.paused, View: "terminal"}
+	if i := l.sess; i.Agent != "" {
+		st.Agent, st.State, st.Conversation, st.PCAttached = i.Agent, i.State, i.Conversation, i.PCAttached
+	}
+	return st
+}
+
+// sessionInfo takes the agent's session info (session.Options.OnInfo) and
+// shows it on the phone.
+func (l *phoneLink) sessionInfo(i session.Info) {
+	l.mu.Lock()
+	l.sess = i
+	l.mu.Unlock()
+	if l.srv != nil {
+		_ = l.srv.Publish(bridge.TypeSessionState, l.state())
+	}
+}
+
+// useSession gives the chat area the agent's session.
+func (l *phoneLink) useSession(m *session.Manager) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.manager = m
 }
 
 // snapshot is called with the server's lock held: neither it nor the parts

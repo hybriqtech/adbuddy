@@ -112,7 +112,7 @@ func startWith(t *testing.T, config string, extra ...testutil.FakeRule) *harness
 	h.env = append(inherited, "ADBUDDY_DATA_DIR="+data, "ADBUDDY_CONFIG_DIR="+filepath.Join(tmp, "cfg"),
 		"FAKEADB_SCRIPT="+script, "FAKEADB_LOG="+h.logPath, "LANG=en_US.UTF-8")
 
-	cmd := exec.Command(adbuddyBin, "serve", "--adb", fakeADB, "--serial", "dev1", "--workspace", h.ws, "--confirm", "terminal")
+	cmd := exec.Command(adbuddyBin, "serve", "--adb", fakeADB, "--serial", "dev1", "--workspace", h.ws, "--confirm", "terminal", "--no-agent")
 	cmd.Env = h.env
 	cmd.Stdout, cmd.Stderr = h.serveOut, h.serveErr
 	if h.serveIn, err = cmd.StdinPipe(); err != nil {

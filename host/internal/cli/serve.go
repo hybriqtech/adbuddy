@@ -34,6 +34,7 @@ var deviceWait = 45 * time.Second
 
 func newServeCmd(app *App) *cobra.Command {
 	var adbPath, serial, wsDir, confirmMode string
+	var noAgent bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the ADBuddy host: live journal and confirmations for the agent's adb commands",
@@ -188,7 +189,13 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				OnNotice:  func(n string) { fmt.Fprintln(app.Stderr, "⏳ "+n) },
 			})
 			link.OnPause(d.CancelConfirmations)
+			sess := newSession(app, ws, active, link.sessionInfo)
+			defer sess.Stop()
+			link.useSession(sess)
 			srv, err := ipc.Listen(e.dirs.Data, secret, func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {
+				if req.Kind == ipc.KindAttach || req.Kind == ipc.KindSession {
+					return handleSession(ctx, sess, agentName, req, c)
+				}
 				return d.Handle(ctx, req, c)
 			})
 			if errors.Is(err, ipc.ErrAlreadyRunning) {
@@ -197,8 +204,14 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			if err != nil {
 				return NewError("SOCKET_FAILED", err.Error(), "")
 			}
-			fmt.Fprintf(app.Stderr, "ADBuddy is serving %s (session %s).\nJournal: %s\nIn another terminal run: adbuddy run %s\nPress Ctrl+C to stop.\n\n",
-				active, session, workspace.JournalDir(ws), agentName)
+			fmt.Fprintf(app.Stderr, "ADBuddy is serving %s (session %s).\nJournal: %s\nPress Ctrl+C to stop.\n",
+				active, session, workspace.JournalDir(ws))
+			if noAgent {
+				fmt.Fprintf(app.Stderr, "In another terminal run: adbuddy run %s\n\n", agentName)
+			} else {
+				startAgent(app, sess, agentName)
+				fmt.Fprintln(app.Stderr)
+			}
 			if err := serveUntil(ctx, stop, srv); err != nil {
 				return NewError("SOCKET_FAILED", err.Error(), "")
 			}
@@ -209,6 +222,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 	cmd.Flags().StringVar(&adbPath, "adb", "", "path to the real adb (default: adb_path in config.toml, else the adb installed by adbuddy setup)")
 	cmd.Flags().StringVar(&serial, "serial", "", "the phone to use when several are connected")
 	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: workspace in config.toml, else ~/ADBuddy/default)")
+	cmd.Flags().BoolVar(&noAgent, "no-agent", false, "do not start the agent here: run it yourself with `adbuddy run` (no chat from the phone)")
 	cmd.Flags().StringVar(&confirmMode, "confirm", "auto", "where to confirm 🔴 commands: auto (this terminal if interactive, else deny), terminal (read the answers from stdin even when it is not interactive, e.g. a pipe) or deny")
 	return cmd
 }

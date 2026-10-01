@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,8 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// serve starts the agent: never a real one from the tests.
+	lookAgent = func(string) (string, error) { return "", exec.ErrNotFound }
 	code := m.Run()
 	if fakeDir != "" {
 		os.RemoveAll(fakeDir)

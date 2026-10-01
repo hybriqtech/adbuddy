@@ -273,7 +273,7 @@ func TestServeWaitsForRequestsInFlight(t *testing.T) {
 	defer cancel()
 	served := make(chan int, 1)
 	go func() {
-		served <- mainContext(ctx, []string{"serve", "--adb", adb, "--serial", "dev1", "--workspace", ws, "--confirm", "terminal"}, stdin, io.Discard, serveErr)
+		served <- mainContext(ctx, []string{"serve", "--adb", adb, "--serial", "dev1", "--workspace", ws, "--confirm", "terminal", "--no-agent"}, stdin, io.Discard, serveErr)
 	}()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
