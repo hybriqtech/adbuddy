@@ -360,3 +360,26 @@ func TestServeInterruptedWhileStarting(t *testing.T) {
 		t.Fatalf("took %v", d)
 	}
 }
+
+// M5b: serve gives the daemon the remote mode's state, so the default
+// capture is JPEG while it is on (Closing counts as on).
+func TestServeWiresRemoteActive(t *testing.T) {
+	g := newRemoteRig(t, withTailscale(), "41234")
+	f := remoteActive(g.ctl)
+	if f() {
+		t.Fatal("remote mode reported on before enabling it")
+	}
+	if _, err := g.ctl.Enable(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !f() {
+		t.Fatal("remote mode on but RemoteActive says off")
+	}
+	src, err := os.ReadFile("serve.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), "RemoteActive: remoteActive(ctl)") {
+		t.Fatal("serve.go does not give daemon.Options the remote mode's state")
+	}
+}

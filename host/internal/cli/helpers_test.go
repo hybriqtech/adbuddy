@@ -210,7 +210,12 @@ func TestScreenshotWritesTheFile(t *testing.T) {
 	img := []byte("\x89PNG fake bytes")
 	reqs := helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
 		_, _ = c.Stdout().Write(img)
-		_ = c.Data(daemon.ScreenshotResult{Format: "png", Bytes: len(img)})
+		var a daemon.ScreenshotArgs
+		_ = json.Unmarshal(req.UIArgs, &a)
+		if a.Format == "" {
+			a.Format = "png"
+		}
+		_ = c.Data(daemon.ScreenshotResult{Format: a.Format, Bytes: len(img)})
 		return ipc.Exit{}
 	})
 	dir := t.TempDir()
@@ -222,7 +227,7 @@ func TestScreenshotWritesTheFile(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(dir, strings.TrimSpace(out))); err != nil || !bytes.Equal(got, img) {
 		t.Fatalf("file %q %v", got, err)
 	}
-	if r := (*reqs)[0]; r.UIOp != daemon.OpScreenshot || string(r.UIArgs) != `{"scale":0.5,"format":"png"}` {
+	if r := (*reqs)[0]; r.UIOp != daemon.OpScreenshot || string(r.UIArgs) != `{"scale":0,"format":""}` {
 		t.Fatalf("request %+v", r)
 	}
 	out, _, code = runHelper(t, "screenshot", "-o", "s.jpg", "--scale", "1", "--json")
@@ -252,5 +257,43 @@ func TestScreenshotCut(t *testing.T) {
 	}
 	if _, err := os.Stat("s.png"); !os.IsNotExist(err) {
 		t.Fatalf("saved anyway: %v", err)
+	}
+}
+
+// M5b: without --scale and --format the daemon decides; the file is named
+// after the format it says it made, not after the one asked for.
+func TestScreenshotDefaultsAreTheDaemons(t *testing.T) {
+	img := []byte("ÿØ fake jpeg")
+	reqs := helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_, _ = c.Stdout().Write(img)
+		_ = c.Data(daemon.ScreenshotResult{Format: "jpeg", Bytes: len(img)})
+		return ipc.Exit{}
+	})
+	t.Chdir(t.TempDir())
+	out, errOut, code := runHelper(t, "screenshot")
+	if code != 0 || !strings.HasSuffix(strings.TrimSpace(out), ".jpg") {
+		t.Fatalf("exit %d %q %q", code, out, errOut)
+	}
+	if got, err := os.ReadFile(strings.TrimSpace(out)); err != nil || !bytes.Equal(got, img) {
+		t.Fatalf("file %q %v", got, err)
+	}
+	out, _, code = runHelper(t, "screenshot", "--json")
+	if code != 0 || !strings.Contains(out, `"format":"jpeg"`) || !strings.Contains(out, `.jpg"`) {
+		t.Fatalf("json: %d %q", code, out)
+	}
+	if _, _, code := runHelper(t, "screenshot", "--scale", "0.3"); code != 0 {
+		t.Fatalf("scale: %d", code)
+	}
+	if _, _, code := runHelper(t, "screenshot", "-o", "x.png"); code != 0 {
+		t.Fatalf("-o png: %d", code)
+	}
+	for i, want := range []string{`{"scale":0,"format":""}`, `{"scale":0,"format":""}`, `{"scale":0.3,"format":""}`, `{"scale":0,"format":"png"}`} {
+		if got := string((*reqs)[i].UIArgs); got != want {
+			t.Errorf("request %d: %s, want %s", i, got, want)
+		}
+	}
+	// An explicit 0 is still wrong.
+	if _, _, code := runHelper(t, "screenshot", "--scale", "0"); code != ExitUsage {
+		t.Fatalf("--scale 0: %d", code)
 	}
 }

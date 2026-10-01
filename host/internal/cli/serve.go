@@ -213,8 +213,8 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			ui, protected := link.helpers()
 			d := daemon.New(daemon.Options{
 				Classifier: cls, ADB: active, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: link.Confirmer(),
-				Paused: link.Paused,
-				UI:     ui, Protected: protected,
+				Paused: link.Paused, RemoteActive: remoteActive(ctl),
+				UI: ui, Protected: protected,
 				Serials: active.Serials, CurrentSerial: active.Serial,
 				Serial: activeSerial, Identity: identity, Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
 				UndoneLog: undoneLogPath(e.dirs.Data, workspace.JournalDir(ws)),
@@ -358,4 +358,10 @@ func rulesPath(e env) string {
 		return e.cfg.Rules
 	}
 	return e.dirs.RulesFile()
+}
+
+// remoteActive is what the daemon asks to know whether the remote mode is on:
+// Enabled, which includes a pending close.
+func remoteActive(ctl *remote.Controller) func() bool {
+	return func() bool { return ctl.State().Enabled }
 }

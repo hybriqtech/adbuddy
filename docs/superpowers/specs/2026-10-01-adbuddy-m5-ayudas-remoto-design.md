@@ -151,7 +151,7 @@ La hace el host, nunca la app: `exec-out screencap -p` por el adb del host. Ante
 - **Escala:** por defecto 0,5; `--scale 1` deja el tamaño original. El reescalado es un filtro de caja con la biblioteca estándar de Go (`image`, `image/png`, `image/jpeg`), sin dependencias nuevas.
 - **Formato:** PNG por defecto, o JPEG con calidad 80.
 - **Fichero:** `-o` relativo a la carpeta del agente. Por defecto, `screenshots/<AAAAMMDD-hhmmss>.png` dentro del entorno. Lo escribe la CLI, en el proceso del agente: el daemon le manda los bytes por el flujo de datos del IPC, en tramas de 1 MiB.
-- Con el modo remoto activo, el valor por defecto pasa a 0,5 en JPEG (M5b, §3.3 de la v1).
+- Con el modo remoto activo, el valor por defecto pasa a 0,5 en JPEG (M5b, §3.3 de la v1; lo decide el daemon, §13).
 
 ## 4. Seguridad
 

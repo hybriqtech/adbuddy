@@ -45,6 +45,9 @@ type Options struct {
 	Journal    *journal.Store
 	Confirmer  confirm.Confirmer
 	Serial     string // serial at start; the agent's ANDROID_SERIAL
+	// RemoteActive says whether the remote mode is on (Closing counts as
+	// on): then the default capture is JPEG. nil: off. Called concurrently.
+	RemoteActive func() bool
 	// Serials: the serials the agent may name besides Serial and the identity
 	// (every one the session used: the agent keeps the ANDROID_SERIAL it
 	// started with when the phone changes address). nil: only Serial.

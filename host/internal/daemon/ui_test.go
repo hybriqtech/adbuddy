@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"os"
 	"strings"
@@ -593,5 +594,87 @@ func TestForegroundHelper(t *testing.T) {
 	s, exit := e.helper(t, bridge.UIOpForeground, struct{}{}, "adbuddy", "foreground")
 	if exit.Code != 0 || !strings.Contains(string(s.data[0]), `"package":"com.android.settings"`) {
 		t.Fatalf("exit %+v data %q", exit, s.data)
+	}
+}
+
+// M5b: the default capture (scale 0, format "") is decided here, by the
+// daemon, before the journal entry is made.
+func pngBytes(t *testing.T) string {
+	t.Helper()
+	var b bytes.Buffer
+	if err := png.Encode(&b, image.NewNRGBA(image.Rect(0, 0, 40, 80))); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+func TestScreenshotDefaults(t *testing.T) {
+	cases := []struct {
+		name   string
+		remote func() bool
+		args   ScreenshotArgs
+		format string
+		w, h   int
+		argv   string
+	}{
+		{"plain default", nil, ScreenshotArgs{}, "png", 20, 40, "adbuddy screenshot --scale 0.5 --format png"},
+		{"remote default", func() bool { return true }, ScreenshotArgs{}, "jpeg", 20, 40, "adbuddy screenshot --scale 0.5 --format jpeg"},
+		{"remote off", func() bool { return false }, ScreenshotArgs{}, "png", 20, 40, "adbuddy screenshot --scale 0.5 --format png"},
+		{"explicit png in remote", func() bool { return true }, ScreenshotArgs{Format: "png"}, "png", 20, 40, "adbuddy screenshot --scale 0.5 --format png"},
+		{"explicit scale", nil, ScreenshotArgs{Scale: 1}, "png", 40, 80, "adbuddy screenshot --scale 1 --format png"},
+		{"explicit scale and jpeg in remote", func() bool { return true }, ScreenshotArgs{Scale: 1, Format: "jpeg"}, "jpeg", 40, 80, "adbuddy screenshot --scale 1 --format jpeg"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			e.d.o.RemoteActive = c.remote
+			e.adb.out["exec-out screencap -p"] = pngBytes(t)
+			s, exit := e.helper(t, OpScreenshot, c.args, "adbuddy", "screenshot")
+			if exit.Code != 0 {
+				t.Fatalf("exit %+v", exit)
+			}
+			var img image.Image
+			var err error
+			if c.format == "png" {
+				img, err = png.Decode(&s.out)
+			} else {
+				img, err = jpeg.Decode(&s.out)
+			}
+			if err != nil || img.Bounds().Dx() != c.w || img.Bounds().Dy() != c.h {
+				t.Fatalf("image %v (%v)", img, err)
+			}
+			if got := strings.Join(e.last(t).Argv, " "); got != c.argv {
+				t.Fatalf("journal argv %q, want %q", got, c.argv)
+			}
+		})
+	}
+}
+
+// The result says what was done, so the client names its file after it.
+func TestScreenshotResultFormat(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.RemoteActive = func() bool { return true }
+	e.adb.out["exec-out screencap -p"] = pngBytes(t)
+	s, exit := e.helper(t, OpScreenshot, ScreenshotArgs{}, "adbuddy", "screenshot")
+	if exit.Code != 0 || len(s.data) != 1 {
+		t.Fatalf("exit %+v, data %d", exit, len(s.data))
+	}
+	var r ScreenshotResult
+	if err := json.Unmarshal(s.data[0], &r); err != nil || r.Format != "jpeg" || r.Bytes != s.out.Len() {
+		t.Fatalf("result %+v (%v)", r, err)
+	}
+}
+
+// What is explicit and wrong stays UI_INVALID, in remote mode too.
+func TestScreenshotInvalidWithRemote(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.RemoteActive = func() bool { return true }
+	for _, a := range []ScreenshotArgs{{Scale: -0.1}, {Scale: 1.5}, {Format: "gif"}, {Scale: 0.5, Format: "PNG"}} {
+		if _, exit := e.helper(t, OpScreenshot, a); exit.Code != 2 || exit.ErrorCode != "UI_INVALID" {
+			t.Errorf("%+v: %+v", a, exit)
+		}
+	}
+	if len(e.adb.ran()) != 0 {
+		t.Fatalf("adb ran %q", e.adb.ran())
 	}
 }

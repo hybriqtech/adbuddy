@@ -291,7 +291,8 @@ func newScreenshotCmd(app *App) *cobra.Command {
 		Use:   "screenshot",
 		Short: "Save a screenshot of the phone, scaled down",
 		Long: `Save a screenshot of the phone's screen as a PNG or JPEG file, scaled by
---scale (0.5 by default). Without -o it goes to screenshots/ in this folder.`,
+--scale (0.5 by default; 0.5 and JPEG while the remote mode is on). Without -o
+it goes to screenshots/ in this folder.`,
 		Example: "  adbuddy screenshot\n  adbuddy screenshot --scale 1 -o screen.png\n  adbuddy screenshot --format jpeg --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -300,18 +301,15 @@ func newScreenshotCmd(app *App) *cobra.Command {
 					format = screenshot.JPEG
 				}
 			}
-			if format == "" {
+			if out != "" && format == "" && strings.ToLower(filepath.Ext(out)) == ".png" {
 				format = screenshot.PNG
 			}
-			if format != screenshot.PNG && format != screenshot.JPEG {
+			if format != "" && format != screenshot.PNG && format != screenshot.JPEG {
 				return UsageError("--format must be png or jpeg")
 			}
-			if !(scale > 0 && scale <= 1) {
+			// Without --scale (0) or --format ("") the daemon decides.
+			if cmd.Flags().Changed("scale") && !(scale > 0 && scale <= 1) {
 				return UsageError("--scale must be more than 0 and at most 1")
-			}
-			if out == "" {
-				ext := map[string]string{screenshot.PNG: ".png", screenshot.JPEG: ".jpg"}[format]
-				out = filepath.Join("screenshots", time.Now().Format("20060102-150405")+ext)
 			}
 			var img bytes.Buffer
 			data, err := callHelper(cmd, app, daemon.OpScreenshot, daemon.ScreenshotArgs{Scale: scale, Format: format}, &img)
@@ -322,6 +320,13 @@ func newScreenshotCmd(app *App) *cobra.Command {
 			if err := json.Unmarshal(data, &r); err != nil || r.Bytes != img.Len() {
 				return NewError("UI_FAILED", "the screenshot did not arrive whole", "Try again.")
 			}
+			if out == "" { // named after what the daemon made
+				ext := map[string]string{screenshot.PNG: ".png", screenshot.JPEG: ".jpg"}[r.Format]
+				if ext == "" {
+					ext = ".png"
+				}
+				out = filepath.Join("screenshots", time.Now().Format("20060102-150405")+ext)
+			}
 			if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 				return NewError("WRITE_FAILED", err.Error(), "")
 			}
@@ -329,14 +334,14 @@ func newScreenshotCmd(app *App) *cobra.Command {
 				return NewError("WRITE_FAILED", err.Error(), "")
 			}
 			if app.JSON {
-				return WriteData(app.Stdout, map[string]any{"path": out, "format": format, "bytes": img.Len()})
+				return WriteData(app.Stdout, map[string]any{"path": out, "format": r.Format, "bytes": img.Len()})
 			}
 			fmt.Fprintln(app.Stdout, out)
 			return nil
 		},
 	}
-	cmd.Flags().Float64Var(&scale, "scale", 0.5, "size relative to the screen, more than 0 and at most 1")
-	cmd.Flags().StringVar(&format, "format", "", "png or jpeg (default: from -o's extension, else png)")
-	cmd.Flags().StringVarP(&out, "output", "o", "", "file to write (default: screenshots/<date>-<time>.png)")
+	cmd.Flags().Float64Var(&scale, "scale", 0, "size relative to the screen, more than 0 and at most 1 (default 0.5; 0.5 and JPEG in remote mode)")
+	cmd.Flags().StringVar(&format, "format", "", "png or jpeg (default: from -o's extension, else png; jpeg in remote mode)")
+	cmd.Flags().StringVarP(&out, "output", "o", "", "file to write (default: screenshots/<date>-<time>.png or .jpg)")
 	return cmd
 }

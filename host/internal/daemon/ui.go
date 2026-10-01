@@ -100,6 +100,9 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if err != nil {
 		return ipc.Exit{Code: exitUsage, ErrorCode: "UI_INVALID", Error: err.Error()}
 	}
+	// The defaults are decided here, before the journal entry and the helper
+	// run, so the journal records what was really done.
+	req.UIArgs = d.withDefaults(req.UIOp, req.UIArgs)
 	now := d.o.Now().UTC()
 	e := journal.Entry{
 		ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUser,
@@ -233,12 +236,37 @@ func checkUIArgs(op string, raw json.RawMessage) (string, error) {
 		if err := strict(&a); err != nil {
 			return "", err
 		}
-		if !(a.Scale > 0 && a.Scale <= 1) || a.Format != screenshot.PNG && a.Format != screenshot.JPEG {
+		// 0 and "" mean the default, which ui resolves (withDefaults).
+		if !(a.Scale == 0 || 0 < a.Scale && a.Scale <= 1) || a.Format != "" && a.Format != screenshot.PNG && a.Format != screenshot.JPEG {
 			return "", errors.New("screenshot needs a scale above 0 and at most 1, and the format png or jpeg")
 		}
 		return "", nil
 	}
 	return "", errors.New("unknown helper")
+}
+
+// withDefaults fills in what a helper's args leave to the default (already
+// checked): a screenshot is half size, PNG, or JPEG with the remote mode on.
+func (d *Daemon) withDefaults(op string, raw json.RawMessage) json.RawMessage {
+	if op != OpScreenshot {
+		return raw
+	}
+	var a ScreenshotArgs
+	_ = json.Unmarshal(raw, &a)
+	if a.Scale == 0 {
+		a.Scale = 0.5
+	}
+	if a.Format == "" {
+		a.Format = screenshot.PNG
+		if d.o.RemoteActive != nil && d.o.RemoteActive() {
+			a.Format = screenshot.JPEG
+		}
+	}
+	out, err := json.Marshal(a)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 // helperArgv is the command the journal records for a helper, made here from
