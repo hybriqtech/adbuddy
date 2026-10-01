@@ -2,8 +2,11 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -64,6 +67,49 @@ func releaseURL(app *App) (string, error) {
 
 const again = "Run `adbuddy setup` again to retry."
 
+// chooseAPK reads the --apk file once (at most MaxAPK: it could be a FIFO)
+// and returns a private copy to install, so nobody swaps it between the
+// check and adb install. When the release certificate does not sign it, it
+// also returns its SHA-256: that exact APK (not its key: the debug key
+// lives on this PC) is trusted as the development build once it installs
+// (spec M6a §6.1).
+func chooseAPK(e *env, apk string) (copyPath, devDigest string, err error) {
+	f, err := os.Open(apk)
+	if err != nil {
+		return "", "", err
+	}
+	data, err := io.ReadAll(io.LimitReader(f, phoneapp.MaxAPK+1))
+	f.Close()
+	if err != nil {
+		return "", "", err
+	}
+	if len(data) > phoneapp.MaxAPK {
+		return "", "", fmt.Errorf("%s is larger than %d MiB", apk, phoneapp.MaxAPK>>20)
+	}
+	if _, err := phoneapp.Signers(data); err != nil {
+		return "", "", fmt.Errorf("%s is not a signed APK (%v)", apk, err)
+	}
+	dir := filepath.Join(e.dirs.Data, "app")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", "", err
+	}
+	copyPath = filepath.Join(dir, "chosen.apk")
+	if err := phoneapp.WritePrivate(copyPath, data); err != nil {
+		return "", "", err
+	}
+	if releaseCert != "" && phoneapp.CheckSigner(data, releaseCert) == nil {
+		return copyPath, "", nil
+	}
+	sum := sha256.Sum256(data)
+	return copyPath, hex.EncodeToString(sum[:]), nil
+}
+
+// forgetDevBuild stops trusting the development build and removes its copy.
+func forgetDevBuild(e *env) (bool, error) {
+	os.Remove(filepath.Join(e.dirs.Data, "app", "chosen.apk"))
+	return phoneapp.ForgetDevAPK(e.dirs.Data)
+}
+
 // setupApp runs steps 5-6 of spec §3.1: install the app (from apk, or the
 // latest release) unless it is there, ask for consent in the app, then grant
 // WRITE_SECURE_SETTINGS, exempt it from battery optimisation and enable its
@@ -72,6 +118,7 @@ const again = "Run `adbuddy setup` again to retry."
 // terminal). On Ctrl+C it returns quietly and the caller stops.
 func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string, say func(string, ...any)) appResult {
 	res := appResult{Consent: "skipped"}
+	devDigest, devFile := "", "" // the --apk that becomes the trusted development build, and its path
 	// warn reports a problem, unless it is just Ctrl+C.
 	warn := func(format string, args ...any) {
 		if ctx.Err() == nil {
@@ -116,6 +163,14 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 			res.note(err.Error())
 			warn("⚠ %v: skipping the app. Check the path of --apk, then "+again+"\n", err)
 			return res
+		} else {
+			chosen, digest, err := chooseAPK(e, apk)
+			if err != nil {
+				res.note(err.Error())
+				warn("⚠ %v: skipping the app. Pass a signed APK to --apk, then "+again+"\n", err)
+				return res
+			}
+			devFile, devDigest, apk = apk, digest, chosen
 		}
 		say("Installing the ADBuddy app on the phone…\n")
 		if err := phoneapp.Install(ctx, a, apk); err != nil {
@@ -127,6 +182,15 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 			}
 			return res
 		}
+		if devDigest != "" {
+			path, err := phoneapp.TrustDevAPK(e.dirs.Data, devDigest)
+			if err != nil {
+				res.note(err.Error())
+				warn("⚠ Could not trust the development build (%v): setup goes on without the app.\n", err)
+				return res
+			}
+			warn("⚠ Trusting this development build of the app (SHA-256 %s of %s): adbuddy serve will hand the phone app's token to exactly this APK. Delete %s to stop.\n", devDigest, devFile, path)
+		}
 		if version, err = phoneapp.InstalledVersion(ctx, a); err != nil || version == "" {
 			res.note("the app does not appear as installed")
 			warn("⚠ The app does not appear as installed on the phone. Setup goes on without it. " + again + "\n")
@@ -134,6 +198,29 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 		}
 	}
 	res.Installed, res.Version = true, version
+	load := func() phoneapp.Trust { return phoneapp.LoadTrust(releaseCert, e.dirs.Data) }
+	v, err := phoneapp.NewVerifier(load, phoneapp.MinAppVersionCode).Verify(ctx, a)
+	if err != nil {
+		res.note(err.Error())
+		switch {
+		case errors.Is(err, phoneapp.ErrAppTooOld):
+			warn("⚠ The ADBuddy app on the phone is too old for this host: run `adbuddy setup` again to update it. 🔴 confirmations will happen in the terminal.\n")
+		case errors.Is(err, phoneapp.ErrUnpinned):
+			warn("This build of adbuddy trusts no signing certificate for the app yet, so it skips it: pass --apk <file> to install and trust a development build. 🔴 confirmations will happen in the terminal.\n")
+		case errors.Is(err, phoneapp.ErrSigner):
+			warn("⚠ The ADBuddy app on the phone is not signed by hybriqtech (a development build?), so ADBuddy will not trust it. Uninstall it on the phone and run `adbuddy setup` again, or pass --apk <that APK> to trust a development build. 🔴 confirmations will happen in the terminal.\n")
+		default:
+			warn("⚠ Could not check the ADBuddy app on the phone (%v), so ADBuddy will not trust it. "+again+" 🔴 confirmations will happen in the terminal.\n", err)
+		}
+		return res
+	}
+	if v.Dev() {
+		say("Note: the ADBuddy app on the phone is the development build you trusted (certificate %s).\n", v.Cert())
+	} else if removed, err := forgetDevBuild(e); err != nil {
+		warn("⚠ Could not stop trusting the development build (%v): delete %s by hand.\n", err, phoneapp.DevTrustPath(e.dirs.Data))
+	} else if removed {
+		say("The app on the phone is a release: ADBuddy no longer trusts the development build.\n")
+	}
 	if _, err := chatPort(e); err != nil {
 		res.note(err.Error())
 		warn("⚠ %v. Setup goes on; the app's chat needs it. "+again+"\n", err)
@@ -141,7 +228,7 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 
 	host, _ := os.Hostname()
 	say("Open the phone: the ADBuddy app explains what this PC will do. Accept there to continue (waiting up to %s).\n", waitText(consentWait))
-	switch err := phoneapp.AskConsent(ctx, a, phoneapp.HostName(host), consentWait, time.Second); {
+	switch err := phoneapp.AskConsent(ctx, a, v, phoneapp.HostName(host), consentWait, time.Second); {
 	case errors.Is(err, phoneapp.ErrConsentDenied):
 		res.Consent = "denied"
 		say("You said no in the app: ADBuddy works without it, and 🔴 confirmations happen in the terminal. Run `adbuddy setup` again to change it.\n")
@@ -159,19 +246,19 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 		return res
 	}
 	res.Consent = "granted"
-	if err := phoneapp.Grant(ctx, a); err != nil {
+	if err := phoneapp.Grant(ctx, a, v); err != nil {
 		res.note(err.Error())
 		warn("⚠ Could not give the app the permission to cut access: %v. "+again+"\n", err)
 	} else {
 		res.Permission = true
 	}
-	if err := phoneapp.AllowBackground(ctx, a); err != nil {
+	if err := phoneapp.AllowBackground(ctx, a, v); err != nil {
 		res.note(err.Error())
 		warn("⚠ Could not exempt the app from battery optimisation (it may disconnect with the screen off): %v. "+again+"\n", err)
 	} else {
 		res.Battery = true
 	}
-	if prev, err := phoneapp.EnableAccessibility(ctx, a); err != nil {
+	if prev, err := phoneapp.EnableAccessibility(ctx, a, v); err != nil {
 		res.note(err.Error())
 		warn("⚠ Could not turn on the app's accessibility service: %v. Turn it on by hand: Settings > Accessibility > ADBuddy, or run `adbuddy setup` again to retry.\n", err)
 	} else {

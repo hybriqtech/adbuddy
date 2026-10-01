@@ -175,10 +175,15 @@ var ErrConsentDenied = errors.New("setup was refused in the app")
 var ErrConsentTimeout = errors.New("no answer in the app")
 
 // AskConsent opens the consent screen (spec §3.1 step 6.1) and waits for the
-// answer. It takes at most timeout + consentGrace, even if adb hangs.
-func AskConsent(ctx context.Context, a ADB, hostName string, timeout, every time.Duration) error {
+// answer. It takes at most timeout + consentGrace, even if adb hangs. v is
+// the proof that the app is ours (Verifier.Verify): nothing is asked of an
+// app that is not the one checked.
+func AskConsent(ctx context.Context, a ADB, v Verified, hostName string, timeout, every time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout+consentGrace)
 	defer cancel()
+	if err := v.still(ctx, a); err != nil {
+		return err
+	}
 	if _, err := Call(ctx, a, "requestSetup", "host:s:"+HostName(hostName)); err != nil {
 		return err
 	}
@@ -211,16 +216,24 @@ func AskConsent(ctx context.Context, a ADB, hostName string, timeout, every time
 	}
 }
 
-// Grant gives the app WRITE_SECURE_SETTINGS (for "Cut access").
-func Grant(ctx context.Context, a ADB) error {
+// Grant gives the app WRITE_SECURE_SETTINGS (for "Cut access"), once v
+// still holds.
+func Grant(ctx context.Context, a ADB, v Verified) error {
+	if err := v.still(ctx, a); err != nil {
+		return err
+	}
 	_, err := shell(ctx, a, "pm", "grant", Package, SecureWrites)
 	return err
 }
 
 // AllowBackground exempts the app from battery optimisation, so it may start
 // its foreground service when the host hands over the token and keep the
-// channel open while the screen is off (Android 12+ restricts both).
-func AllowBackground(ctx context.Context, a ADB) error {
+// channel open while the screen is off (Android 12+ restricts both), once v
+// still holds.
+func AllowBackground(ctx context.Context, a ADB, v Verified) error {
+	if err := v.still(ctx, a); err != nil {
+		return err
+	}
 	out, err := shell(ctx, a, "dumpsys", "deviceidle", "whitelist", "+"+Package)
 	if err != nil {
 		return err
@@ -232,9 +245,12 @@ func AllowBackground(ctx context.Context, a ADB) error {
 }
 
 // EnableAccessibility adds the app's service to the enabled ones without
-// removing any (spec §3.1 step 6.2) and turns accessibility on. It returns
-// the previous list so the caller can report it.
-func EnableAccessibility(ctx context.Context, a ADB) (previous string, err error) {
+// removing any (spec §3.1 step 6.2) and turns accessibility on, once v still
+// holds. It returns the previous list so the caller can report it.
+func EnableAccessibility(ctx context.Context, a ADB, v Verified) (previous string, err error) {
+	if err := v.still(ctx, a); err != nil {
+		return "", err
+	}
 	previous, err = shell(ctx, a, "settings", "get", "secure", "enabled_accessibility_services")
 	if err != nil {
 		return "", err

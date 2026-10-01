@@ -2,12 +2,14 @@ package cli
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,13 +20,22 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
 
-// appRules answers what setup sends to the phone about the app. The first
-// rule that matches answers, so a test puts its changes in front (over).
+const testAppPath = "/data/app/~~Ab==/tech.hybriq.adbuddy-Cd==/base.apk"
+
+// appRules answers like a phone whose app (signed with testCert) says
+// consent.
 func appRules(consent string, over ...testutil.FakeRule) []testutil.FakeRule {
+	return appRulesFor(consent, testAPK(testCert), over...)
+}
+
+// appRulesFor answers like a phone with apk installed at testAppPath, whose
+// app says consent. The first rule that matches answers, so a test puts its
+// changes in front (over).
+func appRulesFor(consent string, apk []byte, over ...testutil.FakeRule) []testutil.FakeRule {
 	provider := `^shell content call --uri content://tech\.hybriq\.adbuddy\.bridge --method `
 	rules := append([]testutil.FakeRule{}, over...)
+	rules = append(rules, appReadRules(apk)...)
 	return append(append(rules, []testutil.FakeRule{
-		{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n    versionName=0.2.0\n"},
 		{Match: `^install -r `, Stdout: "Performing Streamed Install\nSuccess\n"},
 		{Match: provider + `requestSetup --extra `, Stdout: "Result: Bundle[{ok=true}]\n"},
 		{Match: `^shell am start -n tech\.hybriq\.adbuddy/\.MainActivity -a tech\.hybriq\.adbuddy\.action\.SETUP$`, Stdout: "Starting: Intent\n"},
@@ -35,6 +46,21 @@ func appRules(consent string, over ...testutil.FakeRule) []testutil.FakeRule {
 		{Match: `^shell settings put secure `},
 	}...), phoneRules()...)
 }
+
+// appReadRules answers what the host reads of the installed app: its
+// versionCode and versionName, and its path, stat and bytes (pm path, stat
+// and base64).
+func appReadRules(apk []byte) []testutil.FakeRule {
+	return []testutil.FakeRule{
+		{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n  Package [tech.hybriq.adbuddy] (1a2b):\n    versionCode=1 minSdk=30 targetSdk=37\n    versionName=0.2.0\n"},
+		{Match: `^shell pm path tech\.hybriq\.adbuddy$`, Stdout: "package:" + testAppPath + "\n"},
+		{Match: `^shell stat -c `, Stdout: strconv.Itoa(len(apk)) + " 1 1\n"},
+		{Match: `^shell base64 `, Stdout: base64.StdEncoding.EncodeToString(apk) + "\n"},
+	}
+}
+
+// The tests that reach the app pin testCert as the release certificate.
+func init() { releaseCert = apktest.SHA256(testCert) }
 
 func setupJSON(t *testing.T, out string) setupResult {
 	t.Helper()
@@ -184,6 +210,7 @@ func TestSetupAppBranches(t *testing.T) {
 		noStderr []string // texts that must not be there
 		noChange bool     // no consent: nothing changed on the phone
 		calls    []string // adb calls that must be there
+		apk      []byte   // the app on the phone (nil: signed with testCert)
 	}{
 		{name: "apk", consent: "granted", over: []testutil.FakeRule{notInstalled(1)},
 			args:   func(t *testing.T) []string { return []string{"--apk", writeAPK(t)} },
@@ -234,6 +261,34 @@ func TestSetupAppBranches(t *testing.T) {
 			args:   func(t *testing.T) []string { return []string{"--apk", writeAPK(t)} },
 			want:   want{consent: "skipped"},
 			stderr: []string{"signed with another key", "Uninstall it on the phone", "adbuddy setup"}, noStderr: []string{"Could not install the app"}, noChange: true},
+		{name: "installed app signed by someone else", consent: "granted", apk: testAPK(otherCert),
+			want:   want{installed: true, version: "0.2.0", consent: "skipped"},
+			stderr: []string{"not signed by hybriqtech", "--apk <that APK>"}, noChange: true},
+		{name: "nothing trusted", consent: "granted",
+			args:   func(t *testing.T) []string { setVar(t, &releaseCert, ""); return nil },
+			want:   want{installed: true, version: "0.2.0", consent: "skipped"},
+			stderr: []string{"trusts no signing certificate"}, noChange: true},
+		{name: "apk of a development build", consent: "granted", apk: testAPK(otherCert), over: []testutil.FakeRule{notInstalled(1)},
+			args:   func(t *testing.T) []string { return []string{"--apk", writeAPKSignedBy(t, otherCert)} },
+			want:   want{true, true, true, true, "0.2.0", "granted"},
+			stderr: []string{"Trusting this development build of the app (SHA-256 ", " of ", "development build you trusted"}, calls: []string{"install -r --no-incremental "}},
+		{name: "a release forgets the development build", consent: "granted",
+			args: func(t *testing.T) []string {
+				if _, err := phoneapp.TrustDevAPK(os.Getenv("ADBUDDY_DATA_DIR"), strings.Repeat("a", 64)); err != nil {
+					t.Fatal(err)
+				}
+				return nil
+			},
+			want:   want{true, true, true, true, "0.2.0", "granted"},
+			stderr: []string{"no longer trusts the development build"}},
+		{name: "apk that is not signed", consent: "granted",
+			args: func(t *testing.T) []string {
+				p := filepath.Join(t.TempDir(), "x.apk")
+				os.WriteFile(p, []byte("not an apk"), 0o600)
+				return []string{"--apk", p}
+			},
+			want:   want{consent: "skipped"},
+			stderr: []string{"not a signed APK", "skipping the app"}, noChange: true},
 		{name: "install fails", consent: "granted",
 			over:   []testutil.FakeRule{notInstalled(0), {Match: `^install -r `, Stdout: "Failure [INSTALL_FAILED_OLDER_SDK]\n"}},
 			args:   func(t *testing.T) []string { return []string{"--apk", writeAPK(t)} },
@@ -272,7 +327,11 @@ func TestSetupAppBranches(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			e := newSetupEnv(t, appRules(c.consent, c.over...))
+			apk := c.apk
+			if apk == nil {
+				apk = testAPK(testCert)
+			}
+			e := newSetupEnv(t, appRulesFor(c.consent, apk, c.over...))
 			if c.wait > 0 {
 				setVar(t, &consentWait, c.wait)
 			}

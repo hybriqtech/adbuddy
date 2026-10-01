@@ -20,6 +20,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp/apktest"
+	"github.com/hybriqtech/adbuddy/host/internal/shq"
 )
 
 type fakeADB struct {
@@ -273,27 +274,27 @@ func consentAnswers(consents ...string) map[string][]string {
 
 func TestAskConsent(t *testing.T) {
 	f := &fakeADB{answers: consentAnswers("pending", "pending", "granted")}
-	if err := AskConsent(context.Background(), f, "My PC", time.Second, time.Millisecond); err != nil {
+	if err := AskConsent(context.Background(), f, verified(f), "My PC", time.Second, time.Millisecond); err != nil {
 		t.Fatal(err, f.calls)
 	}
 	f = &fakeADB{answers: consentAnswers("pending", "denied")}
-	if err := AskConsent(context.Background(), f, "My PC", time.Second, time.Millisecond); !errors.Is(err, ErrConsentDenied) {
+	if err := AskConsent(context.Background(), f, verified(f), "My PC", time.Second, time.Millisecond); !errors.Is(err, ErrConsentDenied) {
 		t.Fatalf("denied: %v", err)
 	}
 	f = &fakeADB{answers: consentAnswers("pending")}
-	if err := AskConsent(context.Background(), f, "My PC", 20*time.Millisecond, time.Millisecond); !errors.Is(err, ErrConsentTimeout) {
+	if err := AskConsent(context.Background(), f, verified(f), "My PC", 20*time.Millisecond, time.Millisecond); !errors.Is(err, ErrConsentTimeout) {
 		t.Fatalf("timeout: %v", err)
 	}
 }
 
 func TestAskConsentCleansTheHostName(t *testing.T) {
 	f := &fakeADB{answers: consentAnswers("granted")}
-	if err := AskConsent(context.Background(), f, "My PC\n", time.Second, time.Millisecond); err != nil {
+	if err := AskConsent(context.Background(), f, verified(f), "My PC\n", time.Second, time.Millisecond); err != nil {
 		t.Fatal(err, f.calls)
 	}
 	f = &fakeADB{answers: consentAnswers("granted")}
 	f.answers[consentCall("requestSetup", "'host:s:My PC reboot'")] = []string{"Result: Bundle[{ok=true}]\n"}
-	if err := AskConsent(context.Background(), f, "My PC; reboot", time.Second, time.Millisecond); err != nil {
+	if err := AskConsent(context.Background(), f, verified(f), "My PC; reboot", time.Second, time.Millisecond); err != nil {
 		t.Fatal(err, f.calls)
 	}
 }
@@ -302,7 +303,7 @@ func TestAskConsentRejectsUnknownAnswers(t *testing.T) {
 	for _, c := range []string{"maybe", "GRANTED", ""} {
 		f := &fakeADB{answers: consentAnswers(c)}
 		err := within(t, 5*time.Second, func() error {
-			return AskConsent(context.Background(), f, "My PC", time.Hour, time.Hour)
+			return AskConsent(context.Background(), f, verified(f), "My PC", time.Hour, time.Hour)
 		})
 		if err == nil || errors.Is(err, ErrConsentTimeout) || errors.Is(err, ErrConsentDenied) {
 			t.Errorf("%q: %v", c, err)
@@ -343,16 +344,16 @@ func TestEachCommandHasItsOwnDeadline(t *testing.T) {
 		"shell pm grant tech.hybriq.adbuddy android.permission.WRITE_SECURE_SETTINGS": {""},
 		"install -r --no-incremental /tmp/a.apk":                                      {"Success\n"},
 	}}
-	if err := Grant(context.Background(), f); err != nil {
+	if err := Grant(context.Background(), f, verified(f)); err != nil {
 		t.Fatal(err)
 	}
 	if err := Install(context.Background(), f, "/tmp/a.apk"); err != nil {
 		t.Fatal(err)
 	}
-	if l := f.left[0]; l <= 14*time.Second || l > 15*time.Second {
+	if l := f.left[2]; l <= 14*time.Second || l > 15*time.Second {
 		t.Errorf("Grant: %v left", l)
 	}
-	if l := f.left[1]; l <= 2*time.Minute || l > 3*time.Minute {
+	if l := f.left[3]; l <= 2*time.Minute || l > 3*time.Minute {
 		t.Errorf("Install: %v left", l)
 	}
 }
@@ -384,14 +385,14 @@ func TestAskConsentHasATimeLimit(t *testing.T) {
 	set(t, &consentGrace, 30*time.Millisecond)
 	f := &fakeADB{answers: consentAnswers("pending"), hang: map[string]bool{consentCall("getSetupConsent"): true}}
 	err := within(t, 5*time.Second, func() error {
-		return AskConsent(context.Background(), f, "My PC", 10*time.Millisecond, time.Millisecond)
+		return AskConsent(context.Background(), f, verified(f), "My PC", 10*time.Millisecond, time.Millisecond)
 	})
 	if err == nil {
 		t.Fatal("a hanging content call was waited for forever")
 	}
 	f = &fakeADB{hangAll: true}
 	err = within(t, 5*time.Second, func() error {
-		return AskConsent(context.Background(), f, "My PC", 10*time.Millisecond, time.Millisecond)
+		return AskConsent(context.Background(), f, verified(f), "My PC", 10*time.Millisecond, time.Millisecond)
 	})
 	if err == nil {
 		t.Fatal("a hanging requestSetup was waited for forever")
@@ -439,7 +440,7 @@ func TestEnableAccessibilityKeepsOtherServices(t *testing.T) {
 	for prev, want := range cases {
 		put := "shell settings put secure enabled_accessibility_services " + want
 		f := &fakeADB{answers: map[string][]string{get: {prev + "\n"}, put: {""}, on: {""}}}
-		got, err := EnableAccessibility(context.Background(), f)
+		got, err := EnableAccessibility(context.Background(), f, verified(f))
 		if err != nil || got != prev {
 			t.Errorf("%q: %q %v %v", prev, got, err, f.calls)
 		}
@@ -462,26 +463,75 @@ func TestEnableAccessibilityKeepsOtherServices(t *testing.T) {
 func TestAllowBackground(t *testing.T) {
 	key := "shell dumpsys deviceidle whitelist +tech.hybriq.adbuddy"
 	f := &fakeADB{answers: map[string][]string{key: {"Added: tech.hybriq.adbuddy\n"}}}
-	if err := AllowBackground(context.Background(), f); err != nil {
+	if err := AllowBackground(context.Background(), f, verified(f)); err != nil {
 		t.Fatal(err, f.calls)
 	}
 	f.answers[key] = []string{"Unknown package: tech.hybriq.adbuddy\n"}
-	if err := AllowBackground(context.Background(), f); err == nil {
+	if err := AllowBackground(context.Background(), f, verified(f)); err == nil {
 		t.Fatal("an exemption that was not added was accepted")
 	}
 }
 
 func TestGrant(t *testing.T) {
 	f := &fakeADB{answers: map[string][]string{"shell pm grant tech.hybriq.adbuddy android.permission.WRITE_SECURE_SETTINGS": {""}}}
-	if err := Grant(context.Background(), f); err != nil {
+	if err := Grant(context.Background(), f, verified(f)); err != nil {
 		t.Fatal(err, f.calls)
 	}
-	if len(f.calls) != 1 {
+	if len(f.calls) != 3 || !strings.HasPrefix(f.calls[2], "shell pm grant ") {
 		t.Fatalf("calls %v", f.calls)
 	}
 	f = &fakeADB{answers: map[string][]string{}}
-	if err := Grant(context.Background(), f); err == nil {
+	if err := Grant(context.Background(), f, verified(f)); err == nil {
 		t.Fatal("a failed grant was accepted")
+	}
+}
+
+// verified makes f answer pm path and stat like a phone with the app at
+// testPath, and returns the proof the functions that give the app something
+// take (the same app, as Verified.still sees it).
+func verified(f *fakeADB) Verified {
+	if f.answers == nil {
+		f.answers = map[string][]string{}
+	}
+	f.answers["shell pm path tech.hybriq.adbuddy"] = []string{"package:" + testPath + "\n"}
+	f.answers["shell "+shq.Join("stat", "-c", "%s %i %Y", testPath)] = []string{"100 1 1\n"}
+	return Verified{path: testPath, key: "100 1 1", cert: "test"}
+}
+
+// Nothing is given to an app that is not the one checked.
+func TestGivingNeedsTheCheckedApp(t *testing.T) {
+	f := &fakeADB{}
+	v := verified(f)
+	pmPath := "shell pm path tech.hybriq.adbuddy"
+	stat := "shell " + shq.Join("stat", "-c", "%s %i %Y", testPath)
+	check := func(label string, v Verified) {
+		t.Helper()
+		if err := Grant(context.Background(), f, v); !errors.Is(err, ErrNoTrustedApp) {
+			t.Errorf("%s: Grant: %v", label, err)
+		}
+		if err := AllowBackground(context.Background(), f, v); !errors.Is(err, ErrNoTrustedApp) {
+			t.Errorf("%s: AllowBackground: %v", label, err)
+		}
+		if _, err := EnableAccessibility(context.Background(), f, v); !errors.Is(err, ErrNoTrustedApp) {
+			t.Errorf("%s: EnableAccessibility: %v", label, err)
+		}
+		if err := AskConsent(context.Background(), f, v, "My PC", time.Second, time.Millisecond); !errors.Is(err, ErrNoTrustedApp) {
+			t.Errorf("%s: AskConsent: %v", label, err)
+		}
+	}
+	check("zero Verified", Verified{})
+	if len(f.calls) != 0 {
+		t.Fatalf("a zero Verified ran %q", f.calls)
+	}
+	f.answers[pmPath] = []string{"package:/data/app/~~New==/tech.hybriq.adbuddy-New==/base.apk\n"}
+	check("reinstalled", v)
+	f.answers[pmPath] = []string{"package:" + testPath + "\n"}
+	f.answers[stat] = []string{"999 1 1\n"}
+	check("updated in place", v)
+	for _, c := range f.calls {
+		if c != pmPath && c != stat {
+			t.Fatalf("ran %q", c)
+		}
 	}
 }
 
