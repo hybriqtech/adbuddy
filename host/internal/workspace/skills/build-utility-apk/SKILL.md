@@ -5,7 +5,7 @@ description: "Use when the user wants a small custom Android app with its own sc
 
 # Build a small utility app
 
-The rules in `AGENTS.md` apply; this skill is a recipe, not a permission to skip any of them. It is the one skill that works on the PC, outside the reach of ADBuddy: ADBuddy does not check what is installed or compiled there, so the safety of this skill is the rules below, and they are not optional. Only the final `adb install` goes through ADBuddy.
+The rules in `AGENTS.md` apply; this skill is a recipe, not a permission to skip any of them. It is the one skill that works on the PC, outside the reach of ADBuddy: ADBuddy does not check what is installed or compiled there, so the safety of this skill is the rules below, and they are not optional. Everything that talks to the phone (`adb` and `adbuddy` commands) goes through ADBuddy; what is done on the PC does not.
 
 ## When to use
 
@@ -33,7 +33,9 @@ gradle --version
 
 2. Before downloading anything, say in the chat what would be installed: a JDK 17, `cmdline-tools`, `build-tools`, one Android platform, and Gradle (about 130 MB). Say where each comes from, how much it weighs (several hundred MB in all) and where it will go. Say too that the first build downloads the Android Gradle Plugin and its dependencies from `google()` and `mavenCentral()` into the Gradle cache of the user (hundreds of MB more). Then wait for the user's yes. Only official sources are allowed: the Android site (`cmdline-tools` and the SDK), the Gradle site, and the package manager of the system for the JDK, which neither of those two distributes: if the PC has no package manager, stop and ask. Check the published SHA-256 of every zip you download. Nothing is installed as administrator (`sudo`, an elevated prompt) unless you ask for that separately and the user says yes to that too. If the user says no, or you cannot reach an official source, stop and ask what they want.
 
-3. Install only `cmdline-tools`, `build-tools` and `platforms`. Never install `platform-tools`: it brings another `adb`, and you must not use another one. Do these checks after installing, when you reuse an SDK that was already there (it may have `platform-tools`), and again right before step 9. First check that the `adb` that resolves is the one of the environment (`.adbuddy/bin`) and not one of the SDK. Then list what `sdkmanager` has installed and check that `platform-tools` is not in the list: a `platform-tools` that is not on the PATH does not show in the first check. If another `adb` is first, or `platform-tools` is installed, stop and tell the user. In Windows use `where.exe adb` or `Get-Command -All adb`: in PowerShell 5.1 plain `where` is an alias of another command and prints nothing.
+3. The licenses of the SDK are accepted by the user before `sdkmanager` installs anything. Put `cmdline-tools` in place first (it is a zip from the Android site, with its published SHA-256 checked), then ask the user to run `sdkmanager --licenses` in a terminal of their own, read the text and answer by themselves, and wait. You cannot answer the prompts, and you must never run it with `yes |` or any other trick that answers for them. Never create or edit files in the `licenses/` folder of the SDK (writing the hashes there is a way of accepting without the user). If they do not accept, the work stops here.
+
+4. Only after that, install with `sdkmanager` only `build-tools` and `platforms`. Never install `platform-tools`: it brings another `adb`, and you must not use another one. Do these checks after installing, when you reuse an SDK that was already there (it may have `platform-tools`), and again right before step 9. First check that the `adb` that resolves is the one of the environment (`.adbuddy/bin`) and not one of the SDK. Then list what `sdkmanager` has installed and check that `platform-tools` is not in the list: a `platform-tools` that is not on the PATH does not show in the first check. If another `adb` is first, or `platform-tools` is installed, stop and tell the user. In Windows use `where.exe adb` or `Get-Command -All adb`: in PowerShell 5.1 plain `where` is an alias of another command and prints nothing.
 
 ```text
 command -v adb
@@ -41,18 +43,19 @@ where.exe adb
 sdkmanager --list_installed
 ```
 
-4. The licenses of the SDK are accepted by the user, in a terminal of their own: ask them to run `sdkmanager --licenses` there, read the text and answer by themselves, and wait. You cannot answer the prompts, and you must never run it with `yes |` or any other trick that answers for them. Never create or edit files in the `licenses/` folder of the SDK (writing the hashes there is a way of accepting without the user). If they do not accept, the work stops here.
-
 5. Say in the chat which dependencies the app will declare, that it is written in Java (no Kotlin, so there is no extra plugin), and that no other plugin or repository will be used. Then show the plan (the name, what the app does, the dependencies, the permissions if any) and wait for a yes before creating anything. The project goes in `apps/<name>/` of the workspace (for example `apps/utilidad/`). It has one activity, no permissions except the ones the user asked for and that you explained to them, and it is signed with the debug key. Its `applicationId` never starts with `tech.hybriq.adbuddy`: use something like `com.example.utilidad`. Put the location of the SDK in `local.properties` (`sdk.dir`).
 
-6. Nothing may be downloaded after the yes without having been announced. Set these in the project before the first build:
+6. Nothing may be downloaded after the yes without having been announced. The order matters: first generate the wrapper with the official Gradle you installed in step 2, giving the version and the checksum published on the Gradle site (if you cannot get the checksum, stop and ask). That creates `gradle/wrapper/gradle-wrapper.properties`. Only then check that the file has `distributionSha256Sum` with that checksum, and fix it if not. Never copy `gradle-wrapper.jar` or `gradlew` from another project or from a web page: that is unverified code on the PC, and the checksum only covers the distribution zip. If you prefer, build with that Gradle directly, without a wrapper.
+
+```text
+gradle wrapper --gradle-version 8.7 --gradle-distribution-sha256-sum the-published-checksum
+```
+
+Then set the rest in the project before the first build. `gradle-wrapper.properties` must now contain `distributionSha256Sum=` followed by the published checksum:
 
 ```text
 # gradle.properties
 android.builder.sdkDownload=false
-
-# gradle/wrapper/gradle-wrapper.properties
-distributionSha256Sum=the checksum published by Gradle for that exact distribution
 
 # settings.gradle: the same two repositories in both blocks, nothing else
 pluginManagement { repositories { google(); mavenCentral() } }
@@ -62,11 +65,7 @@ dependencyResolutionManagement {
 }
 ```
 
-Do not use `gradlePluginPortal()` and no third-party plugin. The wrapper is generated only by the official Gradle you installed in step 2, with the version and the checksum published on the Gradle site; if you cannot get the checksum, stop and ask. Never copy `gradle-wrapper.jar` or `gradlew` from another project or from a web page: that is unverified code on the PC, and the checksum only covers the distribution zip. If you prefer, build with that Gradle directly, without a wrapper. If the build needs something that was not announced, stop and ask the user before it is downloaded.
-
-```text
-gradle wrapper --gradle-version 8.7 --gradle-distribution-sha256-sum the-published-checksum
-```
+Do not use `gradlePluginPortal()` and no third-party plugin. If the build needs something that was not announced, stop and ask the user before it is downloaded.
 
 7. Build on the PC, only the task that makes the APK (`assembleDebug`). Set `JAVA_HOME` only for that command, never permanently. Never run `installDebug`, `flutter run`, or anything else that talks to the phone by itself: it would use the adb of the SDK and skip ADBuddy. The result is `apps/utilidad/app/build/outputs/apk/debug/app-debug.apk`. If the build fails, show the error to the user and do not go on to install.
 
@@ -120,7 +119,7 @@ send outbox/utilidad.apk --caption "Utility app"
 - Do not uninstall an app that is already on the phone, and do not try another way to install when `adb install` fails.
 - Do not give the app an accessibility service, device administrator, notification listener, VPN, overlay, default-app roles, `REQUEST_INSTALL_PACKAGES`, `QUERY_ALL_PACKAGES`, or SMS or call permissions. Nor a keyboard (IME), an autofill service, screen capture (MediaProjection), usage access, access to all files, `WRITE_SETTINGS`, exported components, or any `<service>` protected by a `android.permission.BIND_` permission. Never build an app to do on the phone something ADBuddy would block or ask the user to confirm. If the request needs it, say so and stop.
 - Do not use an `applicationId` that starts with `tech.hybriq.adbuddy`, and do not touch protected apps.
-- Do not add repositories other than `google()` and `mavenCentral()`, `gradlePluginPortal()`, third-party plugins or unannounced dependencies.
+- Do not add any repository except `google()` and `mavenCentral()` (never `gradlePluginPortal()`), nor third-party plugins, nor unannounced dependencies.
 
 ## When you finish
 
