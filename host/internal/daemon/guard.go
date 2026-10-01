@@ -69,7 +69,7 @@ func (d *Daemon) guard(ctx context.Context, res classify.Result, args []string) 
 	if !runsUnwrapped(res.Findings[0], args) {
 		return aloneReason
 	}
-	return d.guardForeground(ctx)
+	return d.guardForeground(ctx, closesShade(res.Findings[0].Words))
 }
 
 // runsUnwrapped reports whether the shell text of args starts with the
@@ -126,8 +126,29 @@ func manyKeys(words []string) bool {
 	return false
 }
 
+// closingKeys are the only keys that may be pressed while the shade is open:
+// Home and Back close it.
+var closingKeys = map[string]bool{"3": true, "4": true, "KEYCODE_HOME": true, "KEYCODE_BACK": true}
+
+// closesShade reports whether words are exactly `input keyevent <key>` with
+// one of closingKeys and no option: `--longpress 3` opens the assistant, and
+// every other key could act on the shade. (The guard has already required
+// that the command runs alone and with one key.)
+func closesShade(words []string) bool {
+	return len(words) == 3 && path.Base(words[0]) == "input" && words[1] == "keyevent" && closingKeys[words[2]]
+}
+
+// The fixed commands the guard asks the phone for the shade (no text of the
+// agent goes into them).
+const (
+	focusCmd   = "dumpsys window | grep -E 'mCurrentFocus'"
+	windowsCmd = "dumpsys window windows"
+	powerCmd   = "dumpsys power"
+)
+
 // guardForeground returns why nothing may touch or read the screen now, or "".
-func (d *Daemon) guardForeground(ctx context.Context) string {
+// closing is true for the key that closes the shade (closesShade).
+func (d *Daemon) guardForeground(ctx context.Context, closing bool) string {
 	f, err := d.inFront(ctx)
 	if err != nil {
 		return "could not tell which app is in the foreground (" + err.Error() + "); ADBuddy does not touch or read the screen without knowing"
@@ -140,7 +161,54 @@ func (d *Daemon) guardForeground(ctx context.Context) string {
 	if f.appProtected {
 		return protectedReason(f.first())
 	}
+	if why := d.systemUIReason(ctx, f.viaApp, closing); why != "" && !d.screenOff(ctx) {
+		return why
+	}
 	return ""
+}
+
+// systemUIReason returns why the system interface on top of the apps
+// protects the screen, or "": the notification shade or the quick settings
+// open (a 2FA code can be on them), and, when the app does not tell, a window
+// of systemui that is not a fixed one (a heads-up notification, with no app
+// name here). It fails closed: what it cannot read blocks. The caller lifts
+// the block when the screen is off (the lock screen is the shade then).
+func (d *Daemon) systemUIReason(ctx context.Context, viaApp, closing bool) string {
+	const unknown = "; ADBuddy does not touch or read the screen without knowing"
+	out, code, err := d.o.ADB.Shell(ctx, focusCmd)
+	focus, ok := uidump.ParseFocus(out)
+	if err != nil || code != 0 || !ok {
+		return "could not tell whether the notification shade is open" + unknown
+	}
+	if closing {
+		return ""
+	}
+	for _, title := range focus {
+		if uidump.IsShade(title) {
+			return "the notification shade is open; close it with Back (input keyevent 4) or ask the user to do this part"
+		}
+	}
+	if viaApp {
+		return "" // the app's foreground says if a notification is on screen
+	}
+	out, code, err = d.o.ADB.Shell(ctx, windowsCmd)
+	windows, ok := uidump.ParseSystemUIWindows(out)
+	if err != nil || code != 0 || !ok {
+		return "could not tell whether a system window is on screen" + unknown
+	}
+	if len(windows) > 0 {
+		for i, w := range windows {
+			windows[i] = classify.Printable(w)
+		}
+		return "a system window is on screen (" + strings.Join(windows, ", ") + "), maybe a notification; wait for it to go away or ask the user to do this part"
+	}
+	return ""
+}
+
+// screenOff reports whether dumpsys power says the screen is off.
+func (d *Daemon) screenOff(ctx context.Context) bool {
+	out, code, err := d.o.ADB.Shell(ctx, powerCmd)
+	return err == nil && code == 0 && uidump.Asleep(out)
 }
 
 // refuse ends a command the guard stopped: blocked, or abandoned when the
@@ -170,6 +238,7 @@ type front struct {
 	packages     []string
 	activity     string // the top one's, when known
 	appProtected bool   // the app says something on screen is protected
+	viaApp       bool   // the app said it, not dumpsys
 }
 
 func (f front) first() string {
@@ -190,7 +259,7 @@ func (d *Daemon) inFront(ctx context.Context) (front, error) {
 		cancel()
 		var fg bridge.UIForeground
 		if err == nil && json.Unmarshal(raw, &fg) == nil && fg.Package != "" {
-			return front{packages: []string{fg.Package}, activity: fg.Activity, appProtected: fg.Protected}, nil
+			return front{packages: []string{fg.Package}, activity: fg.Activity, appProtected: fg.Protected, viaApp: true}, nil
 		}
 	}
 	if ctx.Err() != nil {
@@ -212,7 +281,7 @@ func (d *Daemon) inFront(ctx context.Context) (front, error) {
 	if len(f.packages) > 0 {
 		return f, nil
 	}
-	power, code, err := d.o.ADB.Shell(ctx, "dumpsys power")
+	power, code, err := d.o.ADB.Shell(ctx, powerCmd)
 	if err != nil || code != 0 || !uidump.Asleep(power) {
 		return front{}, errNothingResumed
 	}

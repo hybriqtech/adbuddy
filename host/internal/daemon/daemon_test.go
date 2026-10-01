@@ -113,6 +113,9 @@ func newEnv(t *testing.T) *env {
 		adb: &fakeADB{shell: map[string]string{
 			// What the guard reads before input and screencap (M5 spec §4.3).
 			"dumpsys activity activities": settingsInFront,
+			// And the shade (M5b Task 10): an app in focus, no system window on screen.
+			fixedFocusCmd:   focusApp,
+			fixedWindowsCmd: windowsQuiet,
 		}, exits: map[string]int{}, out: map[string]string{}},
 		conf:  &fakeConfirmer{decision: confirm.Allow},
 		store: journal.OpenSigned(filepath.Join(ws, "journal"), []byte("test key")),

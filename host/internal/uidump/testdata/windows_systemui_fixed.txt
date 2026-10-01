@@ -1,0 +1,18 @@
+WINDOW MANAGER WINDOWS (dumpsys window windows)
+  Window #0 Window{3f1a2b u0 StatusBar}:
+    mDisplayId=0 rootTaskId=1 mSession=Session{5c6d 1234:u0a10123} mClient=android.os.BinderProxy@7e8f
+    mOwnerUid=10123 showForAllUsers=true package=com.android.systemui appop=NONE
+    mAttrs={(0,0)(fillxfill) gr=TOP CENTER_VERTICAL sim={adjust=pan} ty=STATUS_BAR fmt=TRANSLUCENT}
+    mViewVisibility=0x0 mHaveFrame=true mObscured=false
+  Window #1 Window{9a8b7c u0 NavigationBar0}:
+    mDisplayId=0 rootTaskId=1 mSession=Session{5c6d 1234:u0a10123} mClient=android.os.BinderProxy@1122
+    mOwnerUid=10123 showForAllUsers=true package=com.android.systemui appop=NONE
+    mViewVisibility=0x0 mHaveFrame=true mObscured=false
+  Window #2 Window{aa11bb u0 com.android.settings/com.android.settings.Settings}:
+    mDisplayId=0 rootTaskId=2 mSession=Session{77 4321:u0a10150} mClient=android.os.BinderProxy@3344
+    mOwnerUid=10150 showForAllUsers=false package=com.android.settings appop=NONE
+    mViewVisibility=0x0 mHaveFrame=true mObscured=false
+  Window #3 Window{cc22dd u0 ScreenDecorOverlay}:
+    mDisplayId=0 rootTaskId=1 mSession=Session{5c6d 1234:u0a10123} mClient=android.os.BinderProxy@5566
+    mOwnerUid=10123 showForAllUsers=true package=com.android.systemui appop=NONE
+    mViewVisibility=0x8 mHaveFrame=true mObscured=false

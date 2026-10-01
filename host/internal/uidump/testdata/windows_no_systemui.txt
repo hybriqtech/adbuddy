@@ -1,0 +1,4 @@
+WINDOW MANAGER WINDOWS (dumpsys window windows)
+  Window #0 Window{aa11bb u0 com.android.settings/com.android.settings.Settings}:
+    mOwnerUid=10150 showForAllUsers=false package=com.android.settings appop=NONE
+    mViewVisibility=0x0 mHaveFrame=true mObscured=false

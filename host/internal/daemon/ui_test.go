@@ -8,6 +8,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -95,8 +96,9 @@ func TestScreenByTheApp(t *testing.T) {
 		j.Source != journal.SourceAgent || strings.Join(j.Argv, " ") != "adbuddy screen" || j.Description != "Read the screen" {
 		t.Fatalf("journal %+v", j)
 	}
-	// The guard asked what is in the foreground first; adb did nothing.
-	if got := a.called(); len(got) != 2 || !strings.HasPrefix(got[0], "foreground") || len(e.adb.ran()) != 0 {
+	// The guard asked what is in the foreground first; adb only said whether
+	// the shade is open (the app is the one that says if a notification is up).
+	if got := a.called(); len(got) != 2 || !strings.HasPrefix(got[0], "foreground") || !reflect.DeepEqual(e.adb.ran(), []string{"precheck: " + fixedFocusCmd}) {
 		t.Fatalf("app %q adb %q", got, e.adb.ran())
 	}
 }

@@ -1,0 +1,2 @@
+Segmentation of the window manager failed
+nothing here
