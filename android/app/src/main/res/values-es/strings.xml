@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="a11y_label">Ayudante del agente de ADBuddy</string>
-    <string name="a11y_description">El host de ADBuddy en tu PC la activa durante la configuración, para funciones que llegarán más adelante. Por ahora no lee la pantalla ni actúa en ella.</string>
+    <string name="a11y_description">Permite que el agente de código de tu PC lea la pantalla y toque por ti, siempre visible en pantalla con un botón de Pausa. Nunca lee contraseñas ni actúa en apps protegidas, como la de tu banco.</string>
 
     <string name="channel_status">Conexión con el PC</string>
     <string name="channel_confirm">Confirmaciones</string>
@@ -47,4 +47,5 @@
     <string name="cut_failed">No se ha podido apagar la depuración. Apaga la depuración USB y la depuración inalámbrica en Opciones de desarrollador.</string>
     <string name="restore_failed">No se ha podido volver a activar la depuración. Actívala en Opciones de desarrollador.</string>
     <string name="filter_all">Todo</string>
+    <string name="overlay_pill">Agente usando la pantalla · Pausar</string>
 </resources>

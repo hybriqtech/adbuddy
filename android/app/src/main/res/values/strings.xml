@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name" translatable="false">ADBuddy</string>
     <string name="a11y_label">ADBuddy agent helper</string>
-    <string name="a11y_description">The ADBuddy host on your PC turns this on during setup, for features that come later. For now it does not read the screen or act on it.</string>
+    <string name="a11y_description">Lets the coding agent on your PC read the screen and tap for you, always shown on screen with a Pause button. It never reads passwords and never acts in protected apps such as your bank.</string>
 
     <string name="channel_status">Connection with the PC</string>
     <string name="channel_confirm">Confirmations</string>
@@ -49,4 +49,5 @@
     <string name="cut_failed">Debugging could not be turned off. Turn off USB debugging and wireless debugging in Developer options.</string>
     <string name="restore_failed">Debugging could not be turned back on. Turn it on in Developer options.</string>
     <string name="filter_all">All</string>
+    <string name="overlay_pill">Agent using the screen · Pause</string>
 </resources>
