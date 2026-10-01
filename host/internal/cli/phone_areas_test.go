@@ -48,13 +48,13 @@ func linkedApp(t *testing.T) (*phoneLink, *websocket.Conn) {
 func TestUnhandledTypesAreAnswered(t *testing.T) {
 	_, c := linkedApp(t)
 
-	sendApp(t, c, bridge.TypeChatSend, "r_1", bridge.ChatSend{ID: "m_1", Text: "hello"})
+	sendApp(t, c, "made.up.request", "r_1", bridge.Empty{})
 	m := readApp(t, c)
 	if m.Type != bridge.TypeError || m.RID != "r_1" || m.Seq != 0 {
 		t.Fatalf("got %s rid %q seq %d, want an error for r_1", m.Type, m.RID, m.Seq)
 	}
 	var er bridge.ErrorReply
-	if err := json.Unmarshal(m.Payload, &er); err != nil || er.Code != bridge.CodeUnsupported || !strings.Contains(er.Text, "chat.send") {
+	if err := json.Unmarshal(m.Payload, &er); err != nil || er.Code != bridge.CodeUnsupported || !strings.Contains(er.Text, "made.up.request") {
 		t.Fatalf("payload %s", m.Payload)
 	}
 

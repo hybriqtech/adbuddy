@@ -48,6 +48,7 @@ type phoneLink struct {
 	noticed map[string]bool  // types told unsupported by notice on this connection
 	sess    session.Info     // the agent's session, as shown on the phone
 	manager *session.Manager // nil until serve starts the session
+	chat    chatState        // phone_chat.go
 }
 
 // maxNotices is how many unsupported types a connection is told of by notice:
@@ -271,6 +272,7 @@ func (l *phoneLink) sessionInfo(i session.Info) {
 	l.mu.Lock()
 	l.sess = i
 	l.mu.Unlock()
+	l.chat.conversation(i.Conversation)
 	if l.srv != nil {
 		_ = l.srv.Publish(bridge.TypeSessionState, l.state())
 	}
