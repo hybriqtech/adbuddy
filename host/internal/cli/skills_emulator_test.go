@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -36,8 +37,17 @@ func TestSkillsReadOnlyOnEmulator(t *testing.T) {
 			continue // a pull would write into the current folder, and what it answers depends on the sample paths
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		out, _ := exec.CommandContext(ctx, adbPath, append([]string{"-s", serial}, fields...)...).CombinedOutput()
+		out, err := exec.CommandContext(ctx, adbPath, append([]string{"-s", serial}, fields...)...).CombinedOutput()
+		timedOut := ctx.Err() != nil
 		cancel()
+		if timedOut {
+			t.Errorf("%s:%d: %q timed out", ex.file, ex.line, ex.text)
+			continue
+		}
+		var exit *exec.ExitError
+		if err != nil && !errors.As(err, &exit) {
+			t.Fatalf("%s:%d: adb did not start: %v", ex.file, ex.line, err) // a non-zero exit is normal (grep, command -v)
+		}
 		ran++
 		low := strings.ToLower(string(out))
 		for _, m := range missing {

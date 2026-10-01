@@ -139,7 +139,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 
   Falta que el usuario haga lo de `docs/releasing.md`, "User actions".
 - **Hecho en M6b** (`docs/superpowers/plans/2026-10-01-adbuddy-m6b-skills.md`): las nueve skills (`host/internal/workspace/skills/`), su instalación en `.claude/skills/` y `.agents/skills/` con la marca `<!-- adbuddy:user -->`, `.gemini/settings.json` con `context.fileName`, la guarda de ejemplos (`skills_commands_test.go`) y `TestSkillsReadOnlyOnEmulator` con su paso de CI.
-- **Pendiente de M6 (publicación):** i18n EN/ES, README completo y donaciones; `adbuddy doctor` que compruebe las skills instaladas; `adbuddy update` como comando propio.
+- **Pendiente de M6 (publicación):** i18n EN/ES, README completo y donaciones; `adbuddy update` como comando propio.
 - **Aplazados de las revisiones de M6b:**
   - la nota de entrecomillado por shell (§2.5) falta en `device-profile`, `debloat` y `battery`;
   - en `home-screen`, el arrastre con `input swipe` probablemente no arrastra en muchos lanzadores (alternativas `input draganddrop` / `input motionevent`);
@@ -147,10 +147,9 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - un fallo del test de symlink/FIFO solo se ve en la CI de Linux/macOS (no corren en el PC Windows);
   - `ensureRealDirs` no es todo-o-nada (Init ya escribió AGENTS.md y skills antes de fallar) y hay TOCTOU entre comprobar y escribir (endurecer con `os.Root`);
   - el mensaje de error de `run.go` ("Close other agents running…") no sirve para errores de enlace;
-  - `adbuddy doctor` no comprueba las skills.
 - **M6c, tras la primera release pública:** tap de Homebrew (`hybriqtech/homebrew-tap` y un token con permiso de escritura), manifiesto de winget (`hybriqtech.adbuddy`, PR a `microsoft/winget-pkgs`), IzzyOnDroid, firma de binarios de Windows con SignPath Foundation y procedencia firmada (`actions/attest-build-provenance`). IzzyOnDroid no acepta el bloque de dependencias cifrado de AGP (`0x504b4453`): antes de pedirlo, `dependenciesInfo { includeInApk = false }` en `android/app/build.gradle.kts`, coordinado con quien lleve `android/` entonces.
 - **Rotación de la clave de firma:** no está soportada (spec de M6a §11). Si hace falta, el host tiene que leer el linaje de v3 antes de que salga un APK con la clave nueva.
-- **`adbuddy doctor`** no comprueba aún el certificado de la app instalada. Podría decir "app de confianza: release / desarrollo / no" con `phoneapp.Verifier`.
+- **`adbuddy doctor`** no comprueba aún las skills instaladas ni el certificado de la app instalada. Podría decir "app de confianza: release / desarrollo / no" con `phoneapp.Verifier`.
 - **Aplazados de las revisiones de M6a:**
   - neutralizar la app por UID o PID (`appops set <uid>`, `kill`, `am kill-all`, `cmd netpolicy`) sale 🔴 no especial: valorar si debe ser especial;
   - validar en el emulador que `appops reset com.no.existe` resetea los modos por UID;
