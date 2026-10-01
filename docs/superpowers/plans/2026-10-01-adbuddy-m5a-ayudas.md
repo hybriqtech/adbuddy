@@ -4,7 +4,7 @@
 
 **Objetivo:** que el agente lea y toque la pantalla del móvil con `adbuddy screen`, `tap`, `type`, `foreground` y `screenshot`. Las hace el servicio de accesibilidad de la app (rápido y con Unicode) o, sin ella, adb. Todo bajo las mismas puertas que una orden de adb, y con una guarda que bloquea tocar o leer la pantalla con una app protegida o con ADBuddy delante. La app muestra una superposición mientras el agente actúa.
 
-**Arquitectura:** sobre la rama `m5`, que sale de `main` 9524c49, el protocolo de M5 ya integrado (PR #5).
+**Arquitectura:** sobre la rama `m5`, que sale de `main` f36e74d (protocolo de M5, PR #5, y `m3-bridge`).
 - **Host:**
   - `uidump` lee `uiautomator dump` y `dumpsys` sin la app, y `screenshot` reescala capturas;
   - el daemon gana el kind IPC `ui` (`daemon/ui.go`), con las puertas, el diario y el respaldo por adb, y la guarda (`daemon/guard.go`), que también se aplica en `exec`;
@@ -20,7 +20,7 @@
 **Spec:** `docs/superpowers/specs/2026-10-01-adbuddy-m5-ayudas-remoto-design.md` (§1-§6, §8-§13; M5b y M5c tienen sus propios planes). Contrato: `docs/superpowers/specs/2026-10-01-adbuddy-protocolo-m3-m5-design.md` §8, y `protocol/fixtures/ui.json`.
 
 **Verificación del plan:**
-- Todo el código sale de un prototipo (rama `m5a-prototipo`, sobre `main` 9524c49) que pasa:
+- Todo el código sale de un prototipo (rama `m5a-prototipo`, sobre `main` f36e74d) que pasa:
   - en el host, `go vet ./...`, `gofmt -l` y `go test ./...` (todos los paquetes);
   - en la app, `:app:testDebugUnitTest :app:assembleDebug :app:lintDebug`.
 - Entorno: Windows 11, Go 1.27.0, Gradle 9.8.0 y JDK 17.
