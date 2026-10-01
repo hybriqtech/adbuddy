@@ -14,8 +14,8 @@ data class BridgeState(
     val answering: Set<String> = emptySet(),
     /** The chat (M3, M4): ChatReducer. */
     val chat: ChatState = ChatState(),
-    /** The remote mode (M5): RemoteReducer. */
-    val remote: RemoteState = RemoteState(),
+    /** The remote mode (M5): RemoteReducer. null = unknown (never read as off). */
+    val remote: RemoteState? = null,
 ) {
     /** INCOMPATIBLE: the app or the host must be updated; the app stops reconnecting. */
     enum class Connection { WAITING, CONNECTING, CONNECTED, INCOMPATIBLE }

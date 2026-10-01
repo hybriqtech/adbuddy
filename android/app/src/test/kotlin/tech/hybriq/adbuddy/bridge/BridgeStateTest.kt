@@ -2,6 +2,7 @@ package tech.hybriq.adbuddy.bridge
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -228,7 +229,7 @@ class BridgeStateTest {
             remote = RemoteState(enabled = true, address = "192.0.2.7:5555"),
         ).apply(welcome("s_2"))
         assertEquals(ChatState(), s.chat)
-        assertEquals(RemoteState(), s.remote)
+        assertNull(s.remote)
         assertFalse(s.sessionState.paused)
         assertEquals(0L, s.lastSeq)
     }
@@ -244,7 +245,7 @@ class BridgeStateTest {
             .apply(msg(3, Protocol.SNAPSHOT, """{"pending":"nope"}"""))
         assertTrue(s.pending.isEmpty())
         assertEquals(ChatState(), s.chat)
-        assertEquals(RemoteState(), s.remote)
+        assertNull(s.remote)
         assertEquals(SessionState(state = "working", paused = true), s.sessionState)
         assertEquals(3L, s.lastSeq)
     }
@@ -276,5 +277,44 @@ class BridgeStateTest {
         assertEquals(chat, s.chat)
         assertEquals(RemoteState(enabled = true), s.remote)
         assertEquals(BridgeState.Connection.INCOMPATIBLE, s.connection)
+    }
+
+    private val active = """{"enabled":true,"address":"100.64.0.5:5555","expiresAt":"2026-10-01T10:00:00Z"}"""
+    private val activeState = RemoteState(enabled = true, address = "100.64.0.5:5555", expiresAt = "2026-10-01T10:00:00Z")
+
+    @Test fun theRemoteModeStartsUnknown() {
+        assertNull(BridgeState().remote)
+    }
+
+    @Test fun aRemoteStateEventSetsIt() {
+        val s = BridgeState(session = "s_1").apply(msg(1, Protocol.REMOTE_STATE, active))
+        assertEquals(activeState, s.remote)
+        assertEquals(1L, s.lastSeq)
+    }
+
+    @Test fun aRepeatedRemoteStateChangesNothing() {
+        val s = BridgeState(session = "s_1").apply(msg(1, Protocol.REMOTE_STATE, active))
+        val again = s.apply(msg(1, Protocol.REMOTE_STATE, """{"enabled":false}"""))
+        assertEquals(s, again)
+    }
+
+    @Test fun aSnapshotWithRemoteSetsItAndWithoutItMakesItUnknown() {
+        var s = BridgeState(session = "s_1").apply(msg(1, Protocol.SNAPSHOT, """{"remote":$active}"""))
+        assertEquals(activeState, s.remote)
+        s = s.apply(msg(2, Protocol.SNAPSHOT, """{"state":{}}"""))
+        assertNull(s.remote)
+    }
+
+    @Test fun aMalformedRemotePartOfASnapshotIsUnknownAndKeepsTheQuestions() {
+        val s = BridgeState(session = "s_1", remote = activeState)
+            .apply(msg(1, Protocol.SNAPSHOT, """{"pending":[$question],"remote":"x"}"""))
+        assertNull(s.remote)
+        assertEquals(listOf("j_1"), s.pending.map { it.id })
+    }
+
+    @Test fun anUnreadableRemoteStateIsUnknownAndDoesNotThrow() {
+        val s = BridgeState(session = "s_1", remote = activeState).apply(msg(1, Protocol.REMOTE_STATE, """{"enabled":"yes"}"""))
+        assertNull(s.remote)
+        assertEquals(1L, s.lastSeq)
     }
 }

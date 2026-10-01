@@ -67,11 +67,13 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, onClos
 
     // Images the agent sends download by themselves (up to the limit of the mode); the rest waits for a tap.
     val downloadsNow by rememberUpdatedState(downloads)
-    LaunchedEffect(state.chat.messages, state.remote.enabled) {
+    // Unknown remote mode (null) counts as remote: the tighter limit, never a false "off".
+    val remoteMode = state.remote?.enabled != false
+    LaunchedEffect(state.chat.messages, remoteMode) {
         for (m in state.chat.messages) {
             if (m.role != "assistant") continue
             for (a in m.attachments) {
-                if (downloadsNow[a.id] == null && Downloads.autoLimit(a, remote = state.remote.enabled)) app.downloads.get(a)
+                if (downloadsNow[a.id] == null && Downloads.autoLimit(a, remote = remoteMode)) app.downloads.get(a)
             }
         }
     }
