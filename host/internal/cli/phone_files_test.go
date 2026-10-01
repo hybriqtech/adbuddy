@@ -67,7 +67,7 @@ func newFilesRig(t *testing.T, shot func(ctx context.Context, stdout, stderr io.
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	app := &App{Stderr: &syncBuffer{}, Stdout: io.Discard, Getenv: func(string) string { return "" }}
-	l, err := startPhoneLink(ctx, app, e, linkStore(e), sp, "s_1", "claude", &recording{})
+	l, err := startPhoneLink(ctx, app, e, linkStore(e), nil, sp, "s_1", "claude", &recording{})
 	if err != nil {
 		t.Fatal(err)
 	}

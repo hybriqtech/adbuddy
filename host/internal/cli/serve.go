@@ -23,6 +23,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
+	"github.com/hybriqtech/adbuddy/host/internal/remote"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -134,8 +135,23 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s); the journal knows it as %s this time.\n", active, unverifiedWhy(serial), active)
 			}
 			runner.Serial = active
+			// The remote mode (M5b): what a previous serve left open is looked at
+			// before the invariant, which keeps port 5555 only while it is on.
+			ctl := remote.New(runner, store, time.Now)
+			keep := ""
+			rs, err := ctl.Reconcile(ctx)
+			if err != nil {
+				if ctx.Err() != nil {
+					return Interrupted()
+				}
+				fmt.Fprintf(app.Stderr, "⚠ Could not check the remote mode (%s).\n", classify.Printable(err.Error()))
+			}
+			if rs.Enabled {
+				keep = remote.Port
+				fmt.Fprintf(app.Stderr, "Remote mode is on until %s (port 5555 open).\n", rs.ExpiresAt.Local().Format("15:04"))
+			}
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
-			if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy serve", ""); err != nil {
+			if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy serve", keep); err != nil {
 				if ctx.Err() != nil {
 					return Interrupted()
 				}
@@ -169,10 +185,14 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			session := journal.NewID("s_", time.Now())
 			// Without the app, or if its channel fails, confirmations stay
 			// here: only Ctrl+C stops serve at this step.
-			link, err := startPhoneLink(ctx, app, &e, store, runner, session, agentName, confirmer)
+			link, err := startPhoneLink(ctx, app, &e, store, ctl, runner, session, agentName, confirmer)
 			if err != nil {
 				return err
 			}
+			// Read here, before the goroutine: a test that sets remoteTick for its
+			// own serve must not race with the goroutine of a previous one.
+			every := remoteTick
+			go watchRemote(ctx, app.Stderr, ctl, link.remote, every)
 			ui, protected := link.helpers()
 			d := daemon.New(daemon.Options{
 				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: link.Confirmer(),
@@ -223,6 +243,9 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			}
 			if err := serveUntil(ctx, stop, srv); err != nil {
 				return NewError("SOCKET_FAILED", err.Error(), "")
+			}
+			if s := ctl.State(); s.Enabled {
+				fmt.Fprintln(app.Stderr, stillOnNotice(s))
 			}
 			fmt.Fprintln(app.Stderr, "ADBuddy stopped.")
 			return nil

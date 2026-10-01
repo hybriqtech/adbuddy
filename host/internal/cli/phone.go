@@ -19,6 +19,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
+	"github.com/hybriqtech/adbuddy/host/internal/remote"
 	"github.com/hybriqtech/adbuddy/host/internal/session"
 )
 
@@ -111,10 +112,10 @@ var newToken = bridge.NewToken
 // the app, or when the channel cannot start, it returns a link that
 // confirms with fallback and never pauses, and says why: no failure of the
 // app's channel stops serve. Its only error is Interrupted (ctx ended).
-func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
+func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl *remote.Controller, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
 	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf}
 	l.ui = newUILink(protectedAppsPath(e), app.Stderr)
-	l.remote = newRemoteLink(store, a, app.Stderr)
+	l.remote = newRemoteLink(ctx, store, ctl, a, app.Stderr)
 	l.ui.deviceInfo = l.remote.onDeviceInfo
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
 	if trust := phoneapp.LoadTrust(releaseCert, e.dirs.Data); trust.DevAPK != "" {
@@ -187,7 +188,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, a ph
 	})
 	l.conf = bridge.NewConfirmer(l.srv, fallback)
 	l.remote.setServer(l.srv)
-	l.setAreas(l.confirmArea(), l.chatArea(), l.agentArea(), l.uiArea())
+	l.setAreas(l.confirmArea(), l.chatArea(), l.agentArea(), l.uiArea(), l.remote.area())
 	l.conf.Notify = func(title string, moved bool) {
 		if moved {
 			fmt.Fprintf(app.Stderr, "📱 The phone app disconnected before you answered “%s”: it no longer waits for the phone.\n", classify.Printable(title))

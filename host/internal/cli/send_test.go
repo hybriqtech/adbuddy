@@ -30,7 +30,7 @@ func bareLink(t *testing.T) (*phoneLink, string) {
 	t.Cleanup(cancel)
 	app := &App{Stderr: &syncBuffer{}, Stdout: io.Discard, Getenv: func(string) string { return "" }}
 	e := linkEnv(t)
-	l, err := startPhoneLink(ctx, app, e, linkStore(e), &appPhone{}, "s_1", "claude", &recording{})
+	l, err := startPhoneLink(ctx, app, e, linkStore(e), nil, &appPhone{}, "s_1", "claude", &recording{})
 	if err != nil {
 		t.Fatal(err)
 	}

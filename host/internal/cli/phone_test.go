@@ -171,7 +171,7 @@ func startLink(t *testing.T, e *env, f *appPhone, fallback confirm.Confirmer) (*
 	t.Cleanup(cancel)
 	var errb syncBuffer
 	app := &App{Stderr: &errb, Stdout: io.Discard, Getenv: func(string) string { return "" }}
-	l, err := startPhoneLink(ctx, app, e, linkStore(e), f, "s_1", "claude", fallback)
+	l, err := startPhoneLink(ctx, app, e, linkStore(e), nil, f, "s_1", "claude", fallback)
 	return l, &errb, err
 }
 
@@ -398,7 +398,7 @@ func TestInterruptedWhileStartingTheLink(t *testing.T) {
 			}}
 			var errb syncBuffer
 			app := &App{Stderr: &errb, Stdout: io.Discard, Getenv: func(string) string { return "" }}
-			_, err := startPhoneLink(ctx, app, e, linkStore(e), f, "s_1", "claude", confirm.DenyAll{})
+			_, err := startPhoneLink(ctx, app, e, linkStore(e), nil, f, "s_1", "claude", confirm.DenyAll{})
 			if !hasCode(err, "INTERRUPTED") {
 				t.Fatalf("err %v", err)
 			}
