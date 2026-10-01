@@ -4,12 +4,26 @@ The `adbuddy` binary: the host that sits between a coding agent and your Android
 
 This is milestone M1: ADBuddy downloads its own adb, pairs your phone over Wi-Fi and guards every command. The phone app and the chat arrive in M2-M4.
 
-## Build
+## Install
 
-```sh
-cd host
-go build -o adbuddy ./cmd/adbuddy      # adbuddy.exe on Windows
-```
+- **Linux and macOS:**
+
+  ```sh
+  curl -fsSL https://github.com/hybriqtech/adbuddy/releases/latest/download/install.sh | sh
+  ```
+
+  It installs the latest release in `~/.local/bin` after checking its SHA-256. `ADBUDDY_INSTALL_DIR` picks another folder, and `ADBUDDY_VERSION=v0.3.0` another release.
+- **Windows:** download `adbuddy_<version>_windows_amd64.zip` (or `_arm64`) from the [releases](https://github.com/hybriqtech/adbuddy/releases), check it against `checksums.txt` and put `adbuddy.exe` in a folder in your `PATH`. winget comes later.
+- **From source:**
+
+  ```sh
+  cd host
+  go build -o adbuddy ./cmd/adbuddy      # adbuddy.exe on Windows
+  ```
+
+  A build from source pins no signing certificate for the phone app. Install the app with `adbuddy setup --apk <file>`.
+
+Releases: `docs/releasing.md`. Licensed under Apache-2.0 (`LICENSE`), © 2026 hybriqtech.
 
 ## Use
 

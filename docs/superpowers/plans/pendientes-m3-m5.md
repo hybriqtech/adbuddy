@@ -102,8 +102,18 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 
 - **README, ventaja de coste frente a ARTEMIS:** ADBuddy usa el agente de código que el usuario ya tiene y funciona con su suscripción (por ejemplo, un plan de Claude Code), sin claves de API. ARTEMIS necesita su propio LLM y sus claves de API, porque el agente le delega tareas enteras. Decirlo en una línea al comparar, y en la portada entre las ventajas.
 
-- **`ADBUDDY_RELEASE_URL`** cambia a la vez el origen del APK y el de su checksum: es un gancho de test que vive en producción. Documentarlo o limitarlo junto con el certificado de firma.
-- **Fijar en el host el SHA-256 del certificado de firma del APK** (revisión de la Tarea 4 de M2): el `.sha256` de la release solo protege la integridad, no una release comprometida en la primera instalación.
+- **Hecho en M6a** (`docs/superpowers/plans/2026-10-01-adbuddy-m6a-releases.md`):
+  - el host fija el SHA-256 del certificado de firma y lo comprueba en el APK descargado y en la app instalada, antes de cada token y de cada concesión (`phoneapp.Verified`);
+  - `ADBUDDY_RELEASE_URL` queda limitado a `https://` o loopback y a `MinAppVersionCode` (spec de M6a §5-§6).
+
+  Falta que el usuario haga lo de `docs/releasing.md`, "User actions".
+- **M6c, tras la primera release pública:** tap de Homebrew (`hybriqtech/homebrew-tap` y un token con permiso de escritura), manifiesto de winget (`hybriqtech.adbuddy`, PR a `microsoft/winget-pkgs`), IzzyOnDroid, firma de binarios de Windows con SignPath Foundation y procedencia firmada (`actions/attest-build-provenance`). IzzyOnDroid no acepta el bloque de dependencias cifrado de AGP (`0x504b4453`): antes de pedirlo, `dependenciesInfo { includeInApk = false }` en `android/app/build.gradle.kts`, coordinado con quien lleve `android/` entonces.
+- **Rotación de la clave de firma:** no está soportada (spec de M6a §11). Si hace falta, el host tiene que leer el linaje de v3 antes de que salga un APK con la clave nueva.
+- **`adbuddy doctor`** no comprueba aún el certificado de la app instalada. Podría decir "app de confianza: release / desarrollo / no" con `phoneapp.Verifier`.
+- **Aplazados de las revisiones de M6a:**
+  - neutralizar la app por UID o PID (`appops set <uid>`, `kill`, `am kill-all`, `cmd netpolicy`) sale 🔴 no especial: valorar si debe ser especial;
+  - validar en el emulador que `appops reset com.no.existe` resetea los modos por UID;
+  - endurecimientos opcionales de `setup`: vaciar la caché de `Same` tras un fallo definitivo de `Verify`; exigir un fichero regular en `--apk` (un FIFO sin escritor bloquea).
 
 ## Más adelante (v1.1+)
 
