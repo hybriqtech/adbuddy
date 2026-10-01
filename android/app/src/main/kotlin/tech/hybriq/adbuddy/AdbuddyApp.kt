@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.net.Uri
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,7 +17,9 @@ import tech.hybriq.adbuddy.bridge.Channel
 import tech.hybriq.adbuddy.chat.ChatController
 import tech.hybriq.adbuddy.confirm.HostClock
 import tech.hybriq.adbuddy.files.Captures
+import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.Drafts
+import tech.hybriq.adbuddy.files.FileCache
 import tech.hybriq.adbuddy.files.UploadFailed
 import tech.hybriq.adbuddy.files.Uploader
 import tech.hybriq.adbuddy.files.UriSource
@@ -45,6 +48,10 @@ class AdbuddyApp : Application() {
     lateinit var drafts: Drafts
         private set
 
+    /** The attachments downloaded from the host. */
+    lateinit var downloads: Downloads
+        private set
+
     /** The terminal's stream, one per process (the model survives a rotation). */
     lateinit var terminal: TerminalFeed
         private set
@@ -61,6 +68,7 @@ class AdbuddyApp : Application() {
         UriSource.clearCache(this)
         captures = Captures(channel)
         drafts = Drafts(scope, Uploader(channel), captures)
+        downloads = Downloads(channel, FileCache(File(cacheDir, "downloads")), scope)
         terminal = TerminalFeed(channel)
         scope.launch { channel.connected.collect { terminal.onConnectedChanged(it) } }
         val nm = getSystemService(NotificationManager::class.java)
