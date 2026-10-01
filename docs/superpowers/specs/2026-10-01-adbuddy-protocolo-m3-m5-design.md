@@ -65,6 +65,7 @@ Hay tres clases de mensaje del host a la app:
 - **`rid` (identificador de petición).** Lo pone la app en las peticiones que esperan resultado. El host lo copia en la respuesta o en el `error` que le corresponde, y también en el evento que la confirma (el `chat.message` que confirma un `chat.send`, el `session.state` de un `session.new`).
   - **Forma:** de 1 a 64 caracteres ASCII `[A-Za-z0-9_-]`. El host descarta un mensaje con otro `rid`.
   - **Irrepetible:** el host reenvía eventos con el `rid` que confirman, así que la app no puede repetir uno, ni siquiera tras reiniciarse. Lo forma con un prefijo aleatorio por proceso y un contador.
+- **Toda petición tiene respuesta.** Cada manejador de una petición con `rid` responde por todos sus caminos (`Reply`, o el evento que la confirma con `PublishRID`). Si no lo hace, la petición queda pendiente en la app hasta que cae la conexión.
 - **Peticiones perdidas.** Si la conexión cae antes de la respuesta, la app da la petición por fallida (`Bridge.request` llama a su resultado con `null`) y la repite si tiene sentido. Las subidas se reanudan (§6.1). `chat.send` lleva un `id` propio y el host descarta un `id` repetido, así que reintentarlo nunca duplica un mensaje. Por eso las respuestas pueden ser volátiles.
 - **Envío en el host.** Cada clase tiene su método, y cada método rechaza los tipos de otra clase (`bridge.HostClasses`):
   - `Publish`, y `PublishRID` para un evento que confirma una petición;
@@ -267,7 +268,7 @@ M3.0 deja el contrato completo y estos puntos, para que cada hito añada **solo 
 - **Host:** `cli/phone.go` deja el `switch` y pasa a un `area` por hito (`phone_areas.go`), con:
   - sus manejadores por tipo;
   - su parte del `snapshot`;
-  - `attach`: cada conexión nueva, también la que reemplaza a otra, gracias a `Options.OnAttach`, que M3.0 añade al servidor; ahí empieza de cero lo que se guarda por conexión, como la suscripción a la terminal o las subidas;
+  - `attach`: cada conexión nueva, también la que reemplaza a otra, gracias a `Options.OnAttach`, que M3.0 añade al servidor; ahí empieza de cero lo que se guarda por conexión, como la suscripción a la terminal o las subidas. Un mensaje de la conexión reemplazada aún puede llegar a un manejador después: el que guarda estado por conexión comprueba antes `Server.Current(m)`;
   - `gone`: ya no hay app;
   - `frame`: tramas de la app.
 
