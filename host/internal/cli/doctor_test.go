@@ -642,6 +642,20 @@ func TestDoctorNetworkPortOpenInRemoteMode(t *testing.T) {
 		"on":      {until: time.Now().Add(5 * time.Hour), want: "remote mode on until "},
 		"expired": {until: time.Now().Add(-time.Hour), want: "remote mode expired at "},
 	}
+	// Re-review M2: an expiry edited by hand beyond 12 hours counts as
+	// expired, as the controller has it; doctor does not say "on until" it.
+	t.Run("beyond the lifetime", func(t *testing.T) {
+		far := time.Now().Add(20 * time.Hour)
+		doctorEnvWith(t, doctorRules(testutil.FakeRule{Match: `^shell getprop service\.adb\.tcp\.port$`, Stdout: "5555\n"}),
+			func(cfg *config.Config) {
+				cfg.TailscaleIP, cfg.RemoteUntil = "100.64.0.5", far.UTC().Format(time.RFC3339)
+			})
+		out, _, _ := runWithInput(t, "", "doctor", "--json")
+		ch := statusOf(doctorJSON(t, out), "network port")
+		if ch.Status != checkWarn || !strings.Contains(ch.Detail, "remote mode expired at ") || strings.Contains(ch.Detail, "on until") {
+			t.Fatalf("%+v", ch)
+		}
+	})
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			doctorEnvWith(t, doctorRules(testutil.FakeRule{Match: `^shell getprop service\.adb\.tcp\.port$`, Stdout: "5555\n"}),
