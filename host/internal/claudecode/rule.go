@@ -102,16 +102,26 @@ func ToolDetail(tool string, raw json.RawMessage) string {
 
 func fullDetail(tool string, raw json.RawMessage) string {
 	in := input(raw)
-	switch {
-	case tool == "Bash" && str(in, "command") != "":
-		return str(in, "command")
-	case str(in, "file_path") != "":
-		return str(in, "file_path")
-	case str(in, "notebook_path") != "":
-		return str(in, "notebook_path")
-	case str(in, "url") != "":
-		return str(in, "url")
+	switch tool {
+	case "Bash":
+		if str(in, "command") != "" {
+			return str(in, "command")
+		}
+	case "Read", "Edit", "MultiEdit", "Write":
+		if str(in, "file_path") != "" {
+			return str(in, "file_path")
+		}
+	case "NotebookEdit":
+		if str(in, "notebook_path") != "" {
+			return str(in, "notebook_path")
+		}
+	case "WebFetch":
+		if str(in, "url") != "" {
+			return str(in, "url")
+		}
 	}
+	// Any other tool (MCP included) shows its whole input: a path or a URL
+	// does not say what a method or a body would do.
 	return string(raw)
 }
 

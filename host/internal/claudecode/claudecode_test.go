@@ -216,6 +216,51 @@ func TestToolDetail(t *testing.T) {
 	}
 }
 
+func TestToolDetailShortcutsOnlyForFileAndFetchTools(t *testing.T) {
+	// The path or the URL stands for the whole input only where it is the
+	// whole point of the tool.
+	for tool, in := range map[string]string{
+		"Read":         `{"file_path":"/a/b.go"}`,
+		"Edit":         `{"file_path":"/a/b.go","old_string":"x"}`,
+		"MultiEdit":    `{"file_path":"/a/b.go","edits":[]}`,
+		"Write":        `{"file_path":"/a/b.go","content":"x"}`,
+		"NotebookEdit": `{"notebook_path":"/a/b.ipynb","new_source":"x"}`,
+		"WebFetch":     `{"url":"https://example.com/x","prompt":"p"}`,
+	} {
+		want := map[string]string{"Read": "/a/b.go", "Edit": "/a/b.go", "MultiEdit": "/a/b.go", "Write": "/a/b.go", "NotebookEdit": "/a/b.ipynb", "WebFetch": "https://example.com/x"}[tool]
+		if d := ToolDetail(tool, json.RawMessage(in)); d != want {
+			t.Errorf("%s: %q, want %q", tool, d, want)
+		}
+	}
+	// Any other tool shows its whole input, even with a url or a path in it.
+	for _, in := range []string{
+		`{"url":"https://example.com/x","method":"DELETE","body":"{}"}`,
+		`{"file_path":"/a/b","mode":"overwrite"}`,
+		`{"notebook_path":"/a/b.ipynb","x":1}`,
+	} {
+		if d := ToolDetail("mcp__http__request", json.RawMessage(in)); d != in {
+			t.Errorf("mcp: %q, want the whole input", d)
+		}
+	}
+}
+
+func TestCardSafeOfAToolWhoseWholeInputDoesNotFit(t *testing.T) {
+	long := `{"url":"https://example.com/x","method":"POST","body":"` + strings.Repeat("a", maxDetail) + `"}`
+	if CardSafe("mcp__http__request", json.RawMessage(long)) {
+		t.Error("a card that hides the body was offered")
+	}
+	if !CardSafe("mcp__http__request", json.RawMessage(`{"url":"https://example.com/x","method":"GET"}`)) {
+		t.Error("a short input is shown whole")
+	}
+	if CardSafe("mcp__a__b", json.RawMessage(`{"file_path":"/a","body":"‮"}`)) {
+		t.Error("bidi in the input")
+	}
+	// The file tools keep showing the path only.
+	if !CardSafe("Write", json.RawMessage(`{"file_path":"/a/b.go","content":"`+strings.Repeat("a", 3*maxDetail)+`"}`)) {
+		t.Error("the path of a Write is the detail")
+	}
+}
+
 // --- transcript: recorded from Claude Code 2.1.286 ---
 
 func feedAll(p *Parser, b []byte) []Event {
