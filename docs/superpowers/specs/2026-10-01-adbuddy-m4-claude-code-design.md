@@ -145,7 +145,7 @@ Los tipos de M4 **ya están** en `protocol_chat.go`/`Protocol.kt` y en las fixtu
 - **CI:** los tests con goroutines suben a la CI de ubuntu con `-race` (no corre en el PC).
 
 ## 11. Validaciones manuales pendientes (no las corre el agente)
-`Notification` y sus tipos; permisos de Edit/Write/WebFetch/MCP; deny con `message`; qué hace Claude Code con el hook si se responde en la terminal (§5.2); `/clear`, `/compact`, `--resume`; prompts con `/` y `!`; cómo se ve todo en el móvil real.
+`Notification` y sus tipos; permisos de Edit/Write/WebFetch/MCP; deny con `message`; qué hace Claude Code con el hook si se responde en la terminal (§5.2); `/clear`, `/compact`, `--resume`; prompts con `/` y `!`; cómo se ve todo en el móvil real; detalle largo con letra grande, giro y teclado abierto: Sí / Sí, siempre inactivos hasta desplazar al final; No disponible.
 
 ## 12. Decisiones
 - **Ruling:** hooks de solo seis eventos, sin `PreToolUse`/`PostToolUse` — cada hook es un proceso por herramienta y el transcript ya las trae — si me equivoco, una latencia de "running" mayor y se añade `PostToolUse`.
