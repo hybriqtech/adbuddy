@@ -466,3 +466,48 @@ func TestRedDeniedWhenNobodyCanConfirm(t *testing.T) {
 		t.Fatalf("entry %+v", j)
 	}
 }
+
+// The agent keeps the ANDROID_SERIAL it started with: after the phone changes
+// address, the serials used earlier in the session are still its phone.
+func TestSerialsUsedBeforeAreAccepted(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.Serial = "old"
+	e.d.o.Serials = func() []string { return []string{"old", "new"} }
+	for _, serial := range []string{"old", "new"} {
+		s := &stream{}
+		exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindExec, Argv: []string{"shell", "ls"}, Env: map[string]string{"ANDROID_SERIAL": serial}}, s)
+		if exit.Code != 0 {
+			t.Fatalf("%s: %+v %q", serial, exit, s.errOut.String())
+		}
+	}
+	if _, exit := e.exec(t, "-s", "new", "shell", "ls"); exit.Code != 0 {
+		t.Fatalf("-s new: %+v", exit)
+	}
+	ran := len(e.adb.ran())
+	s := &stream{}
+	exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindExec, Argv: []string{"shell", "ls"}, Env: map[string]string{"ANDROID_SERIAL": "other"}}, s)
+	if exit.Code != ExitDenied || !strings.Contains(s.errOut.String(), "only the active phone can be used") {
+		t.Fatalf("other: %+v %q", exit, s.errOut.String())
+	}
+	if _, exit := e.exec(t, "-s", "other", "shell", "ls"); exit.Code != ExitDenied {
+		t.Fatalf("-s other: %+v", exit)
+	}
+	if len(e.adb.ran()) != ran {
+		t.Fatalf("a blocked command reached adb: %q", e.adb.ran())
+	}
+}
+
+func TestPingReportsCurrentSerial(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.Serial = "old"
+	e.d.o.CurrentSerial = func() string { return "new" }
+	s := &stream{}
+	if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindPing}, s); exit.Code != 0 || len(s.data) != 1 {
+		t.Fatalf("%+v", exit)
+	}
+	var p ipc.Ping
+	json.Unmarshal(s.data[0], &p)
+	if p.Serial != "new" {
+		t.Fatalf("%+v", p)
+	}
+}

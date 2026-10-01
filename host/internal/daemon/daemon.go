@@ -45,6 +45,14 @@ type Options struct {
 	Journal    *journal.Store
 	Confirmer  confirm.Confirmer
 	Serial     string // active device, as adb lists it this session: every command runs with -s Serial
+	// Serials: the serials the agent may name besides Serial and the identity
+	// (every one the session used: the agent keeps the ANDROID_SERIAL it
+	// started with when the phone changes address). nil: only Serial.
+	// Called concurrently.
+	Serials func() []string
+	// CurrentSerial is the serial adb lists the phone with now, which Ping
+	// reports. nil: Serial. Called concurrently.
+	CurrentSerial func() string
 	// Identity is the phone's stable name: its mDNS name
 	// (<guid>._adb-tls-connect._tcp) even when adb lists it this session as
 	// "<guid> (2)…" or as ip:port. The journal records it, undo compares it,
@@ -301,6 +309,30 @@ func (d *Daemon) identity() string {
 	return d.o.Serial
 }
 
+// currentSerial is the serial adb lists the phone with now.
+func (d *Daemon) currentSerial() string {
+	if d.o.CurrentSerial != nil {
+		return d.o.CurrentSerial()
+	}
+	return d.o.Serial
+}
+
+// knownSerial reports whether s names the active phone for the agent: this
+// session's serial, the identity, or a serial used earlier in the session.
+func (d *Daemon) knownSerial(s string) bool {
+	if s == d.o.Serial || s == d.identity() {
+		return true
+	}
+	if d.o.Serials != nil {
+		for _, k := range d.o.Serials() {
+			if s == k {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Handle serves one request.
 func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	switch req.Kind {
@@ -311,7 +343,7 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 	case ipc.KindUI:
 		return d.ui(ctx, req, s)
 	case ipc.KindPing:
-		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.o.Serial, Identity: d.identity(), Journal: d.o.Journal.Dir()})
+		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.currentSerial(), Identity: d.identity(), Journal: d.o.Journal.Dir()})
 		return ipc.Exit{}
 	}
 	return ipc.Exit{Code: 1, ErrorCode: "UNKNOWN_REQUEST", Error: "unknown request " + req.Kind}
@@ -349,7 +381,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// The phone may be named by this session's serial or by its identity;
 	// either way adb runs with -s Serial (the -s given is not passed on).
 	for _, serial := range []string{g.Serial, req.Env["ANDROID_SERIAL"]} {
-		if serial != "" && serial != d.o.Serial && serial != d.identity() {
+		if serial != "" && !d.knownSerial(serial) {
 			return d.block(e, s, "only the active phone can be used ("+d.identity()+")")
 		}
 	}

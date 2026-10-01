@@ -124,20 +124,23 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			case err != nil:
 				return NewError("ADB_FAILED", err.Error(), "Check the adb path ("+adbPath+").")
 			}
-			active := k.Active
+			activeSerial := k.Active
 			// The journal and undo know the phone by its stable name only when
 			// its identity was checked: otherwise by the serial of this session,
 			// so undo of older changes stops at OTHER_DEVICE.
-			identity := active
+			identity := activeSerial
 			if k.Verified {
-				identity = phoneIdentity(serial, active)
+				identity = phoneIdentity(serial, activeSerial)
 			} else if _, byGuid := pairing.GuidOf(serial); byGuid || k.Used != "" {
-				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s); the journal knows it as %s this time.\n", active, unverifiedWhy(serial), active)
+				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s); the journal knows it as %s this time.\n", activeSerial, unverifiedWhy(serial), activeSerial)
 			}
-			runner.Serial = active
+			runner.Serial = activeSerial
+			// From here every command to the agent's phone asks `active` for its
+			// serial (it can change); `runner` is not used again.
+			active := newActivePhone(runner)
 			// The remote mode (M5b): what a previous serve left open is looked at
 			// before the invariant, which keeps port 5555 only while it is on.
-			ctl := remote.New(runner, store, time.Now)
+			ctl := remote.New(active, store, time.Now)
 			keep := ""
 			rs, err := ctl.Reconcile(ctx)
 			if err != nil {
@@ -151,7 +154,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				fmt.Fprintln(app.Stderr, remoteOnNotice(rs))
 			}
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
-			if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy serve", keep); err != nil {
+			if err := applyInvariant(ctx, active.Runner(), deviceWait, app.Stderr, "adbuddy serve", keep); err != nil {
 				if ctx.Err() != nil {
 					return Interrupted()
 				}
@@ -185,7 +188,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			session := journal.NewID("s_", time.Now())
 			// Without the app, or if its channel fails, confirmations stay
 			// here: only Ctrl+C stops serve at this step.
-			link, err := startPhoneLink(ctx, app, &e, store, ctl, runner, session, agentName, confirmer)
+			link, err := startPhoneLink(ctx, app, &e, store, ctl, active, session, agentName, confirmer)
 			if err != nil {
 				return err
 			}
@@ -195,10 +198,11 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			go watchRemote(ctx, app.Stderr, ctl, link.remote, every, opTimeout)
 			ui, protected := link.helpers()
 			d := daemon.New(daemon.Options{
-				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: link.Confirmer(),
+				Classifier: cls, ADB: active, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: link.Confirmer(),
 				Paused: link.Paused,
 				UI:     ui, Protected: protected,
-				Serial: active, Identity: identity, Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
+				Serials: active.Serials, CurrentSerial: active.Serial,
+				Serial: activeSerial, Identity: identity, Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
 				UndoneLog: undoneLogPath(e.dirs.Data, workspace.JournalDir(ws)),
 				OnEntry: func(j journal.Entry) {
 					outMu.Lock()
@@ -214,7 +218,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				OnNotice:  func(n string) { fmt.Fprintln(app.Stderr, "⏳ "+n) },
 			})
 			link.OnPause(d.CancelConfirmations)
-			sess := newSession(app, ws, active, link.sessionInfo)
+			sess := newSession(app, ws, activeSerial, link.sessionInfo)
 			defer sess.Stop()
 			link.useSession(sess)
 			link.useWorkspace(ws)
@@ -234,7 +238,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				return NewError("SOCKET_FAILED", err.Error(), "")
 			}
 			fmt.Fprintf(app.Stderr, "ADBuddy is serving %s (session %s).\nJournal: %s\nPress Ctrl+C to stop.\n",
-				active, session, workspace.JournalDir(ws))
+				activeSerial, session, workspace.JournalDir(ws))
 			if noAgent {
 				fmt.Fprintf(app.Stderr, "In another terminal run: adbuddy run %s\n\n", agentName)
 			} else {
