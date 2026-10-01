@@ -23,6 +23,9 @@ Copiadas de la spec; cada tarea las incluye.
 - Sin veredictos de memoria sobre el dispositivo: método y comprobaciones (`command -v`, `--help`, valor actual), nunca listas de paquetes "seguros de quitar" (§2.4).
 - Independientes del shell del PC: el trabajo va en `adb shell …` y `adbuddy …`; scripts entre comillas simples; solo construcciones que el clasificador entiende (regla 15 de `AGENTS.md`: variables en minúsculas, sin `[[ ]]`, `case`, funciones…) (§2.5).
 - Informes y resultados a `outbox/` y `adbuddy send` (§2.8).
+- **Niveles reales que las recetas deben respetar** (los comprobó la revisión opus del plan; el test de ejemplos es la autoridad y estos son avisos): `adb install` sin opciones es 🟡 (con `-r` sobre una app ya instalada no hay inverso); un `mv` cuyo **destino ya existe, carpeta incluida, lo sube el precheck a 🔴** (así que el destino se escribe siempre con el nombre completo del fichero: `mv /sdcard/Download/a.pdf /sdcard/ADBuddy-papelera/a.pdf`), y `mv` con opciones, con varias fuentes o `mv --help` es 🔴; `pm revoke`, `pm grant`, `am set-standby-bucket`, `cmd package trim-caches` y `rm` son 🔴 sin inverso con `adbuddy undo`; `dumpsys package <paquete>` es 🔴 pero `cmd appops get` y `dumpsys package` sin argumentos son 🟢; `cmd appops set … RUN_ANY_IN_BACKGROUND`, `settings put` y `pm disable-user --user 0` son 🟡 con inverso. Una receta que dice "se deshace con `adbuddy undo`" solo lo dice de pasos 🟡 con inverso; los 🔴 dicen "espera tu confirmación" y cómo se revierte a mano.
+- **Privacidad (spec §2.9):** una skill nunca manda abrir ni leer el contenido de los ficheros del usuario (fotos, documentos, descargas): trabaja con nombre, tamaño, fecha y `md5sum`. Lo que el agente lee acaba en el proveedor de su modelo.
+- **Entrecomillado en PowerShell 5.1:** pierde las comillas dobles anidadas en los argumentos de programas nativos. Los ejemplos con script usan comillas simples por fuera y **sin comillas dobles dentro** (formatos sin espacios: `stat -c %s:%Y:%n`).
 - Instalación: dos carpetas con el mismo contenido; se crea lo que falta, `Force` reescribe, `<!-- adbuddy:user -->` no se reescribe ni con `Force`; enlaces simbólicos y no-directorios en la ruta de una skill son un error sin escribir; no se borran skills antiguas (§3.2).
 - Proceso del proyecto (`CLAUDE.md`): cada tarea compila y pasa sus tests sola; commits con identidad local `hybriqtech` y el trailer exacto `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; nunca `--no-verify`; nunca modelos Haiku; el PC Windows no corre `go test -race` (solo la CI); los tests no tocan un móvil real.
 - Comandos desde `host/`: `go test ./internal/workspace/ ./internal/cli/ -count=1 -timeout 5m`, `gofmt -l .` (vacío) y `go vet ./...`.
@@ -31,10 +34,12 @@ Copiadas de la spec; cada tarea las incluye.
 
 | Tarea | Revisor |
 |---|---|
-| T1-T4 (código Go) | `adbuddy-reviewer` (límite: `go test -timeout 5m`) |
-| T5 (`debloat`, `battery`), T7 (`home-screen`, `permissions-audit`), T8 (`build-utility-apk`) | `adbuddy-reviewer-opus` (la spec §7 lo exige) |
-| T6 (`storage-cleanup`, `organize-files`, `backup-to-pc`), T9 | `adbuddy-reviewer` |
+| T1, T4, T9 | `adbuddy-reviewer` |
+| T2 (guarda de las anotaciones de nivel), T3 (escribe en disco y rechaza enlaces) | `adbuddy-reviewer-opus` (la revisión del plan los clasificó como de seguridad) |
+| T5 (`debloat`, `battery`), T6 (`storage-cleanup`, `organize-files`, `backup-to-pc`), T7 (`home-screen`, `permissions-audit`), T8 (`build-utility-apk`) | `adbuddy-reviewer-opus` |
 | Revisión final de la rama | `adbuddy-reviewer-opus` |
+
+A todos los revisores se les pasa `go test -timeout 5m` y un tope de ~40 minutos. **T5-T8 van en serie** (todas tocan `requiredSkills`).
 
 ## Estructura de ficheros
 
@@ -88,6 +93,8 @@ var (
 	ipv4Re      = regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}\b`)
 	userPathRe  = regexp.MustCompile(`C:\\Users|/home/|/Users/`)
 	otherAdbRe  = regexp.MustCompile(`\badb\s+-[A-Za-z]|platform-tools[/\\]adb`)
+	serialRe    = regexp.MustCompile(`emulator-\d+|ANDROID_SERIAL=`)
+	quotedDesc  = regexp.MustCompile(`(?m)^description: "`)
 )
 
 // frontmatter splits a SKILL.md into its YAML header and its body.
@@ -119,6 +126,16 @@ func TestSkillsAreExactlyTheRequiredOnes(t *testing.T) {
 
 func TestSkillsFormat(t *testing.T) {
 	skills := Skills()
+	// A loose file in the root would be installed as .claude/skills/<file>.
+	entries, err := fs.ReadDir(skills, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			t.Errorf("skills/%s: only skill folders go in the root", e.Name())
+		}
+	}
 	for _, name := range SkillNames() {
 		data, err := fs.ReadFile(skills, name+"/SKILL.md")
 		if err != nil {
@@ -140,6 +157,14 @@ func TestSkillsFormat(t *testing.T) {
 		if n := strings.Count(src, "\n"); n > 250 {
 			t.Errorf("%s: SKILL.md has %d lines, at most 250", name, n)
 		}
+		// An unquoted scalar breaks as YAML at the first ": " inside it, and
+		// then the agent may not load the skill at all.
+		if !quotedDesc.MatchString(src) {
+			t.Errorf("%s: write the description between double quotes: description: \"Use when …\"", name)
+		}
+		if !strings.Contains(src, "The rules in `AGENTS.md` apply") {
+			t.Errorf("%s: it must say that \"The rules in `AGENTS.md` apply\" (spec §2.1)", name)
+		}
 	}
 }
 
@@ -154,7 +179,7 @@ func TestSkillsContainNothingPrivateOrUnsafe(t *testing.T) {
 			return err
 		}
 		s := string(data)
-		for what, re := range map[string]*regexp.Regexp{"an IPv4 address": ipv4Re, "a user path": userPathRe, "another adb or a global adb option": otherAdbRe} {
+		for what, re := range map[string]*regexp.Regexp{"an IPv4 address": ipv4Re, "a user path": userPathRe, "another adb or a global adb option": otherAdbRe, "a device serial": serialRe} {
 			if m := re.FindString(s); m != "" {
 				t.Errorf("%s contains %s: %q", p, what, m)
 			}
@@ -223,7 +248,7 @@ func SkillNames() []string {
 ````markdown
 ---
 name: device-profile
-description: Use when the user asks for an overview of their phone (model, Android version, storage, battery, installed apps, key settings), or when another ADBuddy recipe needs to know the phone's state first. Read-only: it changes nothing on the phone.
+description: "Use when the user asks for an overview of their phone (model, Android version, storage, battery, installed apps, key settings), or when another ADBuddy recipe needs to know the phone's state first. Read-only: it changes nothing on the phone."
 ---
 
 # Device profile
@@ -354,6 +379,11 @@ type skillExample struct {
 
 var annotationRe = regexp.MustCompile(`^(.*\S)\s+#\s+(green|yellow|red)\s*$`)
 
+// forbiddenRecipeRe is what no recipe does, however well it is annotated
+// (spec §2.3): clear an app's data, delete recursively, wipe, reboot, or
+// install granting every permission.
+var forbiddenRecipeRe = regexp.MustCompile(`\bpm clear\b|\brm -rf\b|\bwipe\b|\breboot\b|\binstall\b.*\s-g\b`)
+
 // skillExamples extracts the examples from every Markdown file of every skill.
 func skillExamples(t *testing.T) []skillExample {
 	t.Helper()
@@ -368,11 +398,19 @@ func skillExamples(t *testing.T) []skillExample {
 			return err
 		}
 		kind := ""
+		other := false // inside a block of another language (sh, text…)
 		for i, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
 			trim := strings.TrimSpace(line)
 			switch {
-			case kind == "" && (trim == "```adb" || trim == "```adbuddy"):
+			case kind == "" && !other && (trim == "```adb" || trim == "```adbuddy"):
 				kind = strings.TrimPrefix(trim, "```")
+			case kind == "" && !other && strings.HasPrefix(trim, "```"):
+				other = true
+			case other && trim == "```":
+				other = false
+			case other && (strings.HasPrefix(trim, "adb ") || strings.HasPrefix(trim, "adbuddy ")):
+				// An unchecked command: spec §1.1 wants every example annotated.
+				t.Errorf("%s:%d: a command that starts with adb or adbuddy goes in a ```adb or ```adbuddy block, where it is checked: %q", p, i+1, trim)
 			case kind != "" && trim == "```":
 				kind = ""
 			case kind != "" && trim != "":
@@ -385,8 +423,8 @@ func skillExamples(t *testing.T) []skillExample {
 				out = append(out, ex)
 			}
 		}
-		if kind != "" {
-			t.Errorf("%s: a ```%s block is not closed", p, kind)
+		if kind != "" || other {
+			t.Errorf("%s: a code block is not closed", p)
 		}
 		return nil
 	})
@@ -444,7 +482,6 @@ func TestSkillExamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := NewRoot(&App{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard, Getenv: func(string) string { return "" }})
 	checked := 0
 	for _, ex := range skillExamples(t) {
 		where := fmt.Sprintf("%s:%d", ex.file, ex.line)
@@ -458,6 +495,10 @@ func TestSkillExamples(t *testing.T) {
 		case "adb":
 			if fields[0] == "adb" {
 				t.Errorf("%s: write the command without the adb prefix: %q", where, ex.text)
+				continue
+			}
+			if forbiddenRecipeRe.MatchString(ex.text) {
+				t.Errorf("%s: a recipe never does this (spec §2.3): %q", where, ex.text)
 				continue
 			}
 			g, argv := classify.SplitGlobal(fields)
@@ -477,25 +518,21 @@ func TestSkillExamples(t *testing.T) {
 				t.Errorf("%s: write the subcommand without the adbuddy prefix: %q", where, ex.text)
 				continue
 			}
-			cmd, _, err := root.Find(fields)
+			// A fresh tree per example: ParseFlags leaves values in the flags.
+			root := NewRoot(&App{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard, Getenv: func(string) string { return "" }})
+			cmd, rest, err := root.Find(fields)
 			if err != nil || cmd == root {
 				t.Errorf("%s: adbuddy has no subcommand %q", where, fields[0])
 				continue
 			}
-			for _, f := range fields[1:] {
-				if len(f) < 2 || f[0] != '-' || !(f[1] == '-' || f[1] >= 'A') {
-					continue // a value, a negative number or a lone dash
-				}
-				name, _, _ := strings.Cut(strings.TrimLeft(f, "-"), "=")
-				var ok bool
-				if strings.HasPrefix(f, "--") {
-					ok = cmd.Flags().Lookup(name) != nil || cmd.InheritedFlags().Lookup(name) != nil
-				} else {
-					ok = cmd.Flags().ShorthandLookup(name) != nil || cmd.InheritedFlags().ShorthandLookup(name) != nil
-				}
-				if !ok {
-					t.Errorf("%s: %q has no flag %s", where, cmd.CommandPath(), f)
-				}
+			// ParseFlags knows the persistent flags (--json), -ofile, --x=y and
+			// values that start with a dash; it fails on an unknown flag.
+			if err := cmd.ParseFlags(rest); err != nil {
+				t.Errorf("%s: %q: %v", where, ex.text, err)
+				continue
+			}
+			if err := cmd.ValidateArgs(cmd.Flags().Args()); err != nil {
+				t.Errorf("%s: %q: %v", where, ex.text, err)
 			}
 		}
 	}
@@ -516,7 +553,7 @@ Para cada fallo, pon la anotación que dice el clasificador. **Si el nivel oblig
 
 - [ ] **Step 4: Probar que el test caza lo que debe**
 
-Edita un momento una anotación (`# green` → `# red`) y comprueba que falla con el mensaje esperado; añade un ejemplo en un bloque ` ```adbuddy ` con `bogus` y otro con `screen --nope` y comprueba que fallan; deshaz los tres cambios.
+Edita un momento una anotación (`# green` → `# red`) y comprueba que falla con el mensaje esperado; añade un ejemplo en un bloque ` ```adbuddy ` con `bogus`, otro con `screen --nope`, otro con `foreground extra` y otro con `screenshot -oshot.png` (este último debe **pasar**: no hay pánico); añade un bloque ` ```sh ` con una línea `adb shell ls`, y un ejemplo ` ```adb ` `shell pm clear com.example.app   # red`; comprueba que los cinco primeros fallan salvo el que debe pasar y que el último falla por ser una receta prohibida; deshaz todos los cambios.
 
 - [ ] **Step 5: Comprobaciones y commit**
 
@@ -705,6 +742,32 @@ Y en `host/internal/workspace/workspace_test.go`, `TestInitCreatesEnvironment`: 
 
 (`TestInitIsIdempotentAndKeepsUserFiles` sigue igual: con `Force` y contenido idéntico las skills no cuentan como actualizadas.)
 
+Además, `TestClaudeSettingsWriteLeavesNoTempFiles` (en `workspace_test.go`) exige que `.claude/` contenga solo `settings.json`, y desde esta tarea contiene también `skills/`. Cámbialo para que compruebe lo que quiere comprobar: que **ninguna entrada de `.claude/` empieza por `.settings-`** (sin exigir que `settings.json` sea la única).
+
+Y añade a `skills_install_test.go` el subtest de la unión de Windows (en un directorio, `mklink /J` no pide privilegios; `Lstat` la da como `ModeIrregular`), dentro de `TestInitRefusesALinkOrAFileWhereASkillGoes`:
+
+```go
+	t.Run("junction", func(t *testing.T) {
+		if runtime.GOOS != "windows" {
+			t.Skip("junctions are a Windows thing")
+		}
+		dir, elsewhere := t.TempDir(), t.TempDir()
+		os.MkdirAll(filepath.Join(dir, ".claude", "skills"), 0o700)
+		link := filepath.Join(dir, ".claude", "skills", name)
+		if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, elsewhere).CombinedOutput(); err != nil {
+			t.Skipf("no junction: %v: %s", err, out)
+		}
+		if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "v1")}); err == nil {
+			t.Fatal("a junction where a skill folder goes must be an error")
+		}
+		if entries, _ := os.ReadDir(elsewhere); len(entries) != 0 {
+			t.Fatalf("Init wrote through the junction: %v", entries)
+		}
+	})
+```
+
+(imports `os/exec` y `runtime`).
+
 - [ ] **Step 2: Ejecutar y ver que fallan**
 
 Run: `go test ./internal/workspace/ -count=1 -timeout 5m`
@@ -768,7 +831,7 @@ func ensureRealDirs(base, rel string) error {
 			}
 		case err != nil:
 			return err
-		case st.Mode()&fs.ModeSymlink != 0:
+		case st.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0: // a link, or a Windows junction
 			return fmt.Errorf("%s is a link; delete it or move it away so ADBuddy can install its skills there", cur)
 		case !st.IsDir():
 			return fmt.Errorf("%s is not a folder; delete it or move it away so ADBuddy can install its skills there", cur)
@@ -802,7 +865,7 @@ En `Init` (`workspace.go`), tras el bucle de `files` y antes de `mergeClaudeSett
 	}
 ```
 
-`ensureRealDirs` recorre también `.claude` y `.agents`: `Init` ya creó `.claude`; `.agents` se crea aquí.
+`ensureRealDirs` recorre también `.claude` y `.agents`: `Init` ya creó `.claude` con `MkdirAll`; `.agents` se crea aquí; `ensureRealDirs` comprueba ambos (y cada nivel hasta la carpeta de la skill) al instalar.
 
 - [ ] **Step 4: Ejecutar**
 
@@ -962,6 +1025,10 @@ func TestInitConfiguresGeminiAndMentionsSkills(t *testing.T) {
 
 En `workspace_test.go`, `TestInitCreatesEnvironment`: el recuento pasa a `7 + 2*len(skillFiles(t))` (el ajuste de Gemini es un fichero más).
 
+Añade a `gemini_test.go`: que tras `Init` ninguna entrada de `.gemini/` empieza por `.settings-`, y que `Init` falla sin escribir si `.gemini` es un enlace (`os.Symlink`; se salta si no hay privilegio). Escribe la tabla de `TestGeminiSettingsKeepWhatTheUserHas` con campos en líneas separadas o pasa `gofmt -w` al fichero: `gofmt` reformatea `struct{ in string; want []any }`.
+
+En `envcmd.go`, el `Short` de `env init` y la ayuda de `--force` mencionan las skills: `Create or refresh the agent environment (AGENTS.md, CLAUDE.md, skills, permissions, adb shim)` y `rewrite AGENTS.md, CLAUDE.md and the skills (NOTES.md is never touched; a skill file with <!-- adbuddy:user --> is kept)`.
+
 En `host/internal/cli/envcmd_test.go` (crea el fichero si no existe; paquete `cli`):
 
 ```go
@@ -1096,7 +1163,7 @@ func mergeGeminiSettings(path string) (changed, created bool, err error) {
 }
 ```
 
-(Si `mergeClaudeSettings` usaba `created`/`changed` de otra forma, conserva su lógica; solo se extrae la lectura y la escritura.) En `Init`: añade `filepath.Join(o.Dir, ".gemini")` a la lista de carpetas que crea con `MkdirAll(…, 0o700)` y, después del bloque de `.claude/settings.json`:
+(Si `mergeClaudeSettings` usaba `created`/`changed` de otra forma, conserva su lógica; solo se extrae la lectura y la escritura.) En `Init`: **no** añadas `.gemini` al `MkdirAll` (seguiría un enlace); antes del bloque de `.claude/settings.json` crea la carpeta con `ensureRealDirs(o.Dir, ".gemini")` (error si es un enlace o no es una carpeta) y, después del bloque de `.claude/settings.json`:
 
 ```go
 	changed, created, err = mergeGeminiSettings(filepath.Join(o.Dir, ".gemini", "settings.json"))
@@ -1173,7 +1240,7 @@ EOF
 
 Cada tarea de contenido sigue los mismos pasos, y cada skill sigue la estructura de `device-profile` (Tarea 1):
 
-**Estructura de cada `SKILL.md`:** frontmatter (`name`, `description` en inglés que empieza por `Use when`) · `# Título` · una línea que dice que se aplican las reglas de `AGENTS.md` y que la skill no es una autorización · `## When to use` · `## Before you start` · `## Steps` (con los comandos en bloques ` ```adb ` anotados y ` ```adbuddy `) · `## Do not` · `## When you finish` (resumen con `adbuddy journal`, cómo deshacer con `adbuddy undo`, y `outbox/` + `adbuddy send` si hay informe).
+**Estructura de cada `SKILL.md`:** frontmatter (`name`, y `description` en inglés **entre comillas dobles**, `description: "Use when …"`: sin comillas el YAML se rompe en el primer `: `, y el lint lo exige) · `# Título` · una línea que contiene literalmente "The rules in `AGENTS.md` apply" y dice que la skill no es una autorización (el lint lo exige) · `## When to use` · `## Before you start` · `## Steps` (con los comandos en bloques ` ```adb ` anotados y ` ```adbuddy `) · `## Do not` · `## When you finish` (resumen con `adbuddy journal`, cómo deshacer con `adbuddy undo`, y `outbox/` + `adbuddy send` si hay informe).
 
 **Lista de comprobación (la revisión la aplica a cada skill):**
 
@@ -1205,7 +1272,7 @@ Cada tarea de contenido sigue los mismos pasos, y cada skill sigue la estructura
 **Brief `debloat`** (spec §4.2). `description`: *Use when the user wants to remove or disable pre-installed apps (bloatware) from their phone.*
 - Identificar fabricante y operador: `shell getprop ro.product.manufacturer`, `shell getprop ro.product.brand`, `shell getprop gsm.operator.alpha`; apps de sistema `shell pm list packages -s`; ya desactivadas `shell pm list packages -d`; activas `shell pm list packages -e`.
 - Evidencia por candidata, no por lista: ¿tiene icono de lanzador (`shell cmd package resolve-activity --brief -c android.intent.category.LAUNCHER com.example.app`, o `shell pm query-activities` si el móvil lo admite: comprobarlo)? ¿servicios en marcha (`shell dumpsys activity services com.example.app`)? ¿la necesita otra app (`shell dumpsys package com.example.app`, secciones de dependencias)? Los prefijos de fabricante (`com.samsung.`, `com.sec.`, `com.miui.`, `com.xiaomi.`, `com.huawei.`, `com.oppo.`/`com.coloros.`, `com.google.` en Pixel) **solo dicen de quién es** el paquete.
-- **Lista de exclusión fija** (nunca se propone): sistema Android, interfaz del sistema, teléfono y telefonía, SMS/MMS, teclado activo, lanzador activo, WebView, servicios de Google Play, instalador de paquetes, ajustes, Bluetooth, NFC, apps protegidas (bancos, pagos, contraseñas, 2FA) y `tech.hybriq.adbuddy`. Cómo averiguar el teclado y el lanzador activos: `shell settings get secure default_input_method`, `shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME`.
+- **Lista de exclusión fija** (nunca se propone): sistema Android, interfaz del sistema, teléfono y telefonía, SMS/MMS, teclado activo, lanzador activo, WebView, servicios de Google Play, instalador de paquetes, ajustes, Bluetooth, NFC, apps protegidas (bancos, pagos, contraseñas, 2FA) y `tech.hybriq.adbuddy`; **y todo lo que mantiene la conexión por Wi-Fi** (sin ella no hay adb y por tanto tampoco `undo`): Wi-Fi y la pila de red, `com.android.shell`, `com.android.providers.*`, el controlador de permisos, la pantalla de bloqueo y la biometría, los servicios del operador e IMS y el asistente de configuración. **Regla:** un nombre de esta lista sirve para excluir un paquete, nunca para proponerlo; ante la duda, se excluye. Cómo averiguar el teclado y el lanzador activos: `shell settings get secure default_input_method`, `shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME`.
 - Lote de hasta 10 en una tabla (paquete, origen, para qué parece servir, por qué es razonable desactivarla, cómo se deshace); el sí es **por lote**.
 - Desactivar: `shell pm disable-user --user 0 com.example.app`, una por llamada; comprobar `shell pm list packages -d`; comprobar que el móvil responde (`adbuddy screen`, `adbuddy foreground`). Si algo va mal: `adbuddy undo last`.
 - `pm uninstall --user 0` solo si el usuario lo pide con el nombre del paquete; nunca `uninstall` sin `--user 0`.
@@ -1213,7 +1280,7 @@ Cada tarea de contenido sigue los mismos pasos, y cada skill sigue la estructura
 
 **Brief `battery`** (spec §4.3). `description`: *Use when the user wants to improve their phone's battery life or reduce background activity.*
 - Medir antes: `shell dumpsys battery`, `shell settings get global window_animation_scale` (y `transition_animation_scale`, `animator_duration_scale`), `shell settings get global adaptive_battery_management_enabled`; apps con más uso: pedirle al usuario que abra Ajustes → Batería y leerlo con `adbuddy screen` (no hay una orden fiable entre móviles; no inventar una).
-- Cambios, uno por llamada y con el valor anterior en la tabla: `shell settings put global window_animation_scale 0.5` (y las otras dos), `shell settings put global adaptive_battery_management_enabled 1`, bucket de espera `shell am set-standby-bucket com.example.app restricted`, segundo plano `shell cmd appops set com.example.app RUN_ANY_IN_BACKGROUND ignore` (y su inverso `allow`/`default`). Los candidatos pueden salir 🔴 o 🟡: la skill dice cuál es cada uno.
+- Cambios, uno por llamada y con el valor anterior en la tabla: `shell settings put global window_animation_scale 0.5` (y las otras dos), `shell settings put global adaptive_battery_management_enabled 1`, segundo plano `shell cmd appops set com.example.app RUN_ANY_IN_BACKGROUND ignore` (🟡 con inverso; se vuelve atrás con `adbuddy undo` o con `allow`/`default`). **No** usar `am set-standby-bucket` (🔴, sin inverso en el diario): `appops` cubre lo mismo. Los candidatos pueden salir 🟡 o 🔴: la skill dice cuál es cada uno y no promete `undo` para ninguno 🔴.
 - Nunca restringe mensajería, alarmas, teléfono, la app de ADBuddy ni apps protegidas; pregunta qué apps no quiere tocar el usuario antes de proponer.
 - Medir al final con las mismas lecturas, mostrar antes/después, **no prometer porcentajes**. Resumir con `adbuddy journal` y recordar `adbuddy undo`.
 
@@ -1231,18 +1298,20 @@ Cada tarea de contenido sigue los mismos pasos, y cada skill sigue la estructura
 
 **Brief `storage-cleanup`** (spec §4.4). `description`: *Use when the user wants to free up space on their phone: large files, old downloads, duplicates, caches.*
 - Medir: `shell df /data`, `shell du -s /sdcard/Download`, `shell find /sdcard/Download -type f -size +100M`, `shell find /sdcard/Download -type f -mtime +90`; duplicados con `md5sum` solo si `shell command -v md5sum` lo encuentra, comparando los hashes **como texto en el agente**.
-- Nunca borra: **mueve** a `/sdcard/ADBuddy-papelera/` (`shell mkdir -p /sdcard/ADBuddy-papelera`, `shell mv /sdcard/Download/ejemplo.pdf /sdcard/ADBuddy-papelera/`), de una en una (o en lotes con el mismo destino si el clasificador los deja 🟡). Muestra lo que se recupera.
-- Vaciar la papelera: solo si el usuario, ya vista la papelera, lo pide; `rm` es 🔴 y lo confirma él.
-- Fuera de límites sin petición con nombre: `/sdcard/Android/`, `DCIM`, `Pictures`, `Documents`, y todo lo de apps protegidas. Nunca `pm clear`. Cachés: `shell cmd package trim-caches 1G` solo si el móvil lo admite (comprobar con `shell cmd package help`).
+- Nunca borra: **mueve** a `/sdcard/ADBuddy-papelera/` (`shell mkdir -p /sdcard/ADBuddy-papelera`, `shell mv /sdcard/Download/ejemplo.pdf /sdcard/ADBuddy-papelera/ejemplo.pdf`), **de una en una** y con el destino siempre con el nombre completo del fichero (si el destino existe, aunque sea una carpeta, ADBuddy lo sube a 🔴 y no queda inverso; `mv` con varias fuentes u opciones también es 🔴). Si el nombre ya existe en la papelera, se elige otro. Muestra lo que se recupera.
+- Vaciar la papelera: solo si el usuario, ya vista la papelera, lo pide; una única orden `shell rm -r /sdcard/ADBuddy-papelera` (🔴: la confirma él; nunca `rm -rf`).
+- No abre ni lee el contenido de ningún fichero (privacidad): nombre, tamaño, fecha y hash.
+- Fuera de límites sin petición con nombre: `/sdcard/Android/`, `DCIM`, `Pictures`, `Documents`, y todo lo de apps protegidas. Nunca `pm clear`. Cachés: `shell cmd package trim-caches 1G` solo si el móvil lo admite (comprobar con `shell cmd package help`); es 🔴, **vacía la caché de todas las apps (protegidas incluidas)** y no se deshace: la skill lo dice y lo deja a elección del usuario.
 
 **Brief `organize-files`** (spec §4.5). `description`: *Use when the user wants their phone's files (downloads, documents, media) sorted into folders by category.*
 - Listar `shell ls -l /sdcard/Download` y el primer nivel de `/sdcard`; proponer **una tabla origen → destino** por categorías (Documents, Images, Video, Audio, Archives, Installers); esperar el sí.
-- Crear con `shell mkdir -p /sdcard/Download/Documents`; mover con `shell mv -n /sdcard/Download/ejemplo.pdf /sdcard/Download/Documents/` (`-n` solo si `shell mv --help` lo muestra; si no, comprobar que el destino no existe antes de cada movimiento) **de uno en uno** para que cada movimiento tenga inverso en el diario.
+- Crear con `shell mkdir -p /sdcard/Download/Documents`; mover con `shell mv /sdcard/Download/ejemplo.pdf /sdcard/Download/Documents/ejemplo.pdf` (destino **con el nombre completo**; **sin `-n` ni `--help`**, que son 🔴) **de uno en uno** para que cada movimiento tenga inverso en el diario. ADBuddy ya sube a 🔴 un `mv` cuyo destino existe (no sobrescribe): si pasa, la skill propone otro nombre.
+- No abre ni lee el contenido de los ficheros (privacidad): nombre, extensión, tamaño y fecha.
 - No toca carpetas de apps (`Android/`, `WhatsApp/`…), ni ficheros modificados hace menos de un minuto (`shell find /sdcard/Download -type f -mmin -1`: descarga en curso). Si hay más de 50 movimientos, propone empezar por una categoría.
 
 **Brief `backup-to-pc`** (spec §4.7). `description`: *Use when the user wants to copy photos, documents or other files from their phone to their computer, and keep doing it incrementally.*
 - Explicar que `adb pull` solo escribe sin preguntar **dentro del entorno**; copia a `backup/<carpeta>/` del entorno (el usuario la mueve luego); a otro destino, cada `pull` pide su sí (una orden por carpeta).
-- Incremental con manifiesto `backup/<carpeta>/.manifest` (ruta, tamaño, fecha) hecho en el agente: listar lo remoto con `shell find /sdcard/DCIM -type f` (+ `stat` si existe: comprobar `shell command -v stat`), comparar con el manifiesto **en el agente, sin tuberías del shell del PC**, y `pull` solo de lo nuevo (ejemplo `pull /sdcard/DCIM/Camera/ejemplo.jpg backup/DCIM/Camera/ejemplo.jpg`). Verificar cada copia por tamaño (y `md5sum` si existe).
+- Incremental con manifiesto `backup/<carpeta>/.manifest` (ruta, tamaño, fecha) hecho en el agente: listar lo remoto con `shell find /sdcard/DCIM -type f` y, si `shell command -v stat` lo encuentra, `shell 'stat -c %s:%Y:%n /sdcard/DCIM/Camera/*'` (la revisión del plan comprobó que esta forma sale 🟢, y que `find … -exec stat` sale 🔴; sin comillas dobles dentro, por PowerShell). Comparar con el manifiesto **en el agente, sin tuberías del shell del PC**, y `pull` solo de lo nuevo (ejemplo `pull /sdcard/DCIM/Camera/ejemplo.jpg backup/DCIM/Camera/ejemplo.jpg`). `adb pull` no crea las carpetas intermedias del PC: el agente las crea antes. Verificar cada copia por tamaño (y `md5sum` si existe). No abre ni lee el contenido de las fotos y documentos (privacidad).
 - Antes: espacio libre en el PC y duración estimada con una carpeta pequeña. **Nunca borra del móvil** (eso es `storage-cleanup`, con otra confirmación).
 
 - [ ] Pasos de la sección "Cómo escribir cada skill" con `requiredSkills` ampliada con `"backup-to-pc"`, `"organize-files"`, `"storage-cleanup"`.
@@ -1260,14 +1329,14 @@ Cada tarea de contenido sigue los mismos pasos, y cada skill sigue la estructura
 **Brief `home-screen`** (spec §4.6). `description`: *Use when the user wants their home screen organised: apps grouped into folders by category, a cleaner layout.*
 - Flujo: ` ```adbuddy ` `foreground` (comprueba que el lanzador está delante), `screen` (lee iconos y carpetas), `tap "Nombre"`; para arrastrar, `shell input swipe 540 1200 540 400 600` (una por llamada, sin `;`, `&&` ni envoltorios) con valores de ejemplo de coordenadas.
 - Proponer el reparto (tabla: app → carpeta) y esperar el sí; agrupar solo apps de usuario; empezar con **una** app para ver cómo responde ese lanzador y verificar con `adbuddy screen`.
-- **Nunca soltar un icono sobre una zona de "Desinstalar", "Quitar", "Eliminar" o "Uninstall"**: si `adbuddy screen` la muestra durante un arrastre, se suelta en un hueco o en una carpeta.
+- **Nunca soltar un icono sobre una zona de "Desinstalar", "Quitar", "Eliminar" o "Uninstall".** Un `input swipe` es atómico: no se puede mirar la pantalla a mitad de un arrastre. Por eso la regla es: (1) antes de arrastrar, averiguar dónde están las zonas de soltar con una pulsación larga (`shell input swipe 540 1200 540 1200 800`) y `adbuddy screen`; (2) **ningún arrastre termina en la franja superior de la pantalla ni fuera de la cuadrícula que lista `adbuddy screen`**; (3) si después aparece un diálogo de desinstalar, se pulsa Cancelar (regla 5 de `AGENTS.md`).
 - Cada lanzador es distinto: la skill describe el método, admite que puede fallar y, tras **dos** intentos fallidos con la misma app, para y se lo cuenta al usuario en vez de insistir con coordenadas.
 - Apps protegidas y la de ADBuddy: no se tocan ni se mueven. Si `adbuddy` contesta `Blocked by ADBuddy: … is a protected app`, se le pide al usuario esa parte.
 
 **Brief `permissions-audit`** (spec §4.8). `description`: *Use when the user wants to review which permissions their apps have and revoke the unnecessary ones.*
-- Solo lectura hasta que el usuario decide: `shell pm list packages -3`; por app `shell dumpsys package com.example.app` (permisos concedidos en runtime) y `shell cmd appops get com.example.app`; un script de un solo `adb shell` entre comillas simples con `for pkg in $(pm list packages -3 | cut -d: -f2); do …; done` y variables en minúsculas **solo si** el clasificador lo deja 🟢 (el test lo dice); si no, una llamada por app.
+- Solo lectura hasta que el usuario decide: `shell pm list packages -3`; los permisos concedidos con **un solo** `shell dumpsys package` sin argumentos (🟢, salida grande: se lee en el agente) o, por app, `shell cmd appops get com.example.app` (🟢); `dumpsys package com.example.app` con el paquete es 🔴 y no se usa. Un bucle `for pkg in $(…)` solo si el test lo deja 🟢.
 - Agrupar por permiso (ubicación en segundo plano, micrófono, cámara, SMS, registro de llamadas, contactos, acceso a todos los ficheros, superposición, accesibilidad); marcar "poco habitual" **sin juzgar de memoria** y preguntar.
-- Revocar: `shell pm revoke com.example.app android.permission.RECORD_AUDIO` tras el sí, de uno en uno; inverso `pm grant`. No se revocan servicios de accesibilidad ni administradores de dispositivo: se enseña la ruta de Ajustes para que decida el usuario. Excluye apps protegidas y la de ADBuddy.
+- Revocar: `shell pm revoke com.example.app android.permission.RECORD_AUDIO` tras el sí del chat, de uno en uno. **Es 🔴**: además del sí del chat espera la confirmación de ADBuddy en la terminal o el móvil, y **no se deshace con `adbuddy undo`**; volver atrás es `pm grant` (también 🔴). La skill avisa de que revocar un permiso puede cerrar la app si está abierta. No se revocan servicios de accesibilidad ni administradores de dispositivo: se enseña la ruta de Ajustes para que decida el usuario. Excluye apps protegidas y la de ADBuddy.
 
 - [ ] Pasos de la sección "Cómo escribir cada skill" con `requiredSkills` ampliada con `"home-screen"`, `"permissions-audit"`.
 
@@ -1285,12 +1354,14 @@ Cada tarea de contenido sigue los mismos pasos, y cada skill sigue la estructura
 
 1. **Antes de descargar nada**, decir en el chat qué se instalará (JDK 17, `cmdline-tools`, `build-tools`, una plataforma de Android), de dónde (solo orígenes oficiales: el sitio de Android, el de Gradle, el gestor de paquetes del sistema), cuánto pesa (varios cientos de MB) y dónde irá, y **esperar el sí**. Ninguna instalación como administrador sin pedirla aparte.
 2. Instalar `cmdline-tools`, `build-tools` y `platforms`, **nunca `platform-tools`**: traería otro `adb`. Comprobar con `command -v adb` (en Windows, `where adb`) que el `adb` que se resuelve es el del entorno (`.adbuddy/bin`).
-3. **Nunca** `gradlew installDebug`, el `adb` del SDK, `flutter run` ni nada que hable con el móvil por su cuenta. Se compila y se instala solo con `adb install` del entorno (`install -r apps/utilidad/app/build/outputs/apk/debug/app-debug.apk`, anotado según el clasificador), y **antes de instalar** se pide el sí en el chat.
+3. **Nunca** `gradlew installDebug`, el `adb` del SDK, `flutter run` ni nada que hable con el móvil por su cuenta. Se compila y se instala solo con `adb install` del entorno (`install apps/utilidad/app/build/outputs/apk/debug/app-debug.apk`, anotado según el clasificador; **nunca `install -g`**, que concede todos los permisos y es 🔴), y **antes de instalar** se pide el sí en el chat. Una reinstalación con `-r` sobre una app ya instalada no tiene inverso en el diario: la skill lo dice.
 4. Las licencias del SDK las acepta el usuario: la skill le dice dónde leerlas y **no** ejecuta `sdkmanager --licenses` con `yes |` por él.
 5. Proyecto en `apps/<nombre>/` del entorno: una actividad, sin permisos salvo los que pida el usuario y se le hayan explicado, firmado con la clave de depuración. Decir que el APK no está firmado con una clave del usuario (no se actualiza desde otro equipo) y que no se publica.
 6. El `applicationId` nunca empieza por `tech.hybriq.adbuddy`.
 7. Entregar con `adbuddy send` el APK compilado si el usuario lo quiere por el chat; no se instala por otra vía.
 8. Si el equipo ya tiene JDK/SDK, usarlos tras comprobar versiones; si falta algo, ofrecer la opción más pequeña.
+9. **Una app construida no es un camino alrededor del shim** (regla 12 de `AGENTS.md`). La app nunca declara servicio de accesibilidad, administrador del dispositivo, lector de notificaciones, VPN, superposición, roles de app predeterminada, `REQUEST_INSTALL_PACKAGES`, `QUERY_ALL_PACKAGES` ni permisos de SMS o llamadas, y **nunca se construye para hacer en el móvil algo que ADBuddy bloquearía o confirmaría**. Si lo que pide el usuario lo necesita, se le dice y se para.
+10. **Nada se descarga después del sí sin que se haya anunciado:** `android.builder.sdkDownload=false` en `gradle.properties`, `distributionSha256Sum` en `gradle-wrapper.properties`, solo los repositorios `google()` y `mavenCentral()` y ningún plugin de terceros. Las dependencias que se declaren se dicen al usuario antes.
 
 - [ ] Pasos de la sección "Cómo escribir cada skill" con `requiredSkills` ampliada con `"build-utility-apk"` (con esta tarea quedan las **nueve**: comprobarlo en el lint).
 
@@ -1343,6 +1414,9 @@ func TestSkillsReadOnlyOnEmulator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s:%d: %v", ex.file, ex.line, err)
 		}
+		if fields[0] != "shell" {
+			continue // a pull would write into the current folder, and what it answers depends on the sample paths
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		out, _ := exec.CommandContext(ctx, adbPath, append([]string{"-s", serial}, fields...)...).CombinedOutput()
 		cancel()
@@ -1382,14 +1456,15 @@ Actualiza el comentario de cabecera (`# Tests that need a real Android: …`) pa
 
 - `host/README.md`: una sección corta "Skills" (qué son, dónde viven, cómo se instalan y se refrescan con `adbuddy env init [--force]`, la marca `<!-- adbuddy:user -->`, cómo añadir una: carpeta, `requiredSkills`, anotar los ejemplos) y una línea sobre `TestSkillsReadOnlyOnEmulator` junto al oráculo.
 - `docs/superpowers/plans/pendientes-m3-m5.md`, sección `## M6 · Publicación`: marcar "Hecho en M6b" (las nueve skills, instalación, Gemini, tests) y dejar como pendientes: i18n EN/ES, README completo y donaciones; `adbuddy doctor` que compruebe las skills; `adbuddy update` como comando propio.
-- Este plan: al final, la sección "Validaciones manuales pendientes" con la lista de la spec §6.
+- `host/README.md` dice también que `adbuddy setup` rehace el entorno con `Force` (y por tanto reescribe las skills que no lleven `<!-- adbuddy:user -->`), y que `adbuddy env init` imprime las rutas de las skills agrupadas por carpeta (con `/` también en Windows).
+- Este plan: revisar su sección "Validaciones manuales pendientes" frente a la spec §6 (ya existe; no crearla de nuevo).
 
 - [ ] **Step 5: Comprobaciones y commit**
 
 Run: `go test ./... -count=1 -timeout 10m` (desde `host/`), `gofmt -l .`, `go vet ./...`; `git grep -n -E "([0-9]{1,3}\.){3}[0-9]{1,3}" -- host/internal/workspace/skills` sin resultados.
 
 ```bash
-git add host .github docs
+git add host/internal/cli/skills_emulator_test.go host/README.md .github/workflows/emulator.yml docs/superpowers/plans
 git commit -F - <<'EOF'
 test(cli): ejemplos de las skills en el emulador; docs y CI de M6b
 
@@ -1430,3 +1505,6 @@ Nada de esto se prueba sin móvil ni sin permiso explícito del usuario (nunca s
 - `home-screen` en el lanzador de su Pixel (la más frágil): cuántos intentos necesita.
 - `build-utility-apk` de principio a fin en un equipo sin SDK, con el usuario eligiendo entre instalar o no.
 - Que la salida de `adbuddy env init` agrupa bien en Windows (`filepath.ToSlash`) y en Linux.
+- Un ejemplo con script de `adb shell` ejecutado desde PowerShell 5.1 y desde Codex en Windows, para ver que el entrecomillado llega entero.
+- Que Gemini CLI respeta `.gemini/settings.json` con la confianza de carpetas activada, y qué fichero usa `save_memory` cuando el primer `context.fileName` es `AGENTS.md` (no se pudo verificar en la revisión del plan).
+- Que la unión de directorios de Windows (`mklink /J`) se rechaza en una instalación real.
