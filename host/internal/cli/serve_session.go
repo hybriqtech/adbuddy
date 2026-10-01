@@ -73,8 +73,9 @@ func claudeConfig(getenv func(string) string, home string) string {
 var termVars = []string{"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "WT_SESSION", "TMUX", "VTE_VERSION", "COLORFGBG"}
 
 // termEnv replaces the terminal variables of env with the agent's terminal:
-// the emulator's TERM and truecolor. The old ones go first, as conpty does
-// not drop duplicates and on Windows the first one wins.
+// the emulator's TERM and truecolor. The old ones go first: the environment
+// block that internal/pty hands to CreateProcess keeps duplicates, and on
+// Windows the first one wins.
 func termEnv(env []string) []string {
 	out := make([]string, 0, len(env)+2)
 	for _, kv := range env {

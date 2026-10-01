@@ -52,6 +52,12 @@ func fakeAgent() {
 		switch line := strings.TrimSpace(sc.Text()); line {
 		case "exit":
 			os.Exit(7)
+		case "burst":
+			for i := 0; i < 2000; i++ {
+				fmt.Printf("line %d\r\n", i)
+			}
+			fmt.Print("LAST-WORDS\r\n")
+			os.Exit(3)
 		case "size":
 			size()
 		case "env":
@@ -241,6 +247,28 @@ func TestReadEndsWhenTheProgramEnds(t *testing.T) {
 	if code, err := p.Wait(ctx); err != nil || code != 7 {
 		t.Fatalf("Wait after Kill = %d, %v; want 7", code, err)
 	}
+}
+
+// What the program writes just before it exits comes out before the end.
+func TestLastOutputComesBeforeTheEnd(t *testing.T) {
+	p, out := startAgent(t)
+	out.waitFor(t, "ready")
+	p.Write([]byte("burst\r"))
+	select {
+	case <-out.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Read still blocked 10 s after the program asked to exit")
+	}
+	if !out.has("LAST-WORDS") {
+		t.Fatalf("the last line was lost; output ends with:\n%q", tail(out.String(), 300))
+	}
+}
+
+func tail(s string, n int) string {
+	if len(s) > n {
+		return s[len(s)-n:]
+	}
+	return s
 }
 
 // The program sees the size it was started with, and the new one after a
