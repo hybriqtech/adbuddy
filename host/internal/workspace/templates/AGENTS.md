@@ -17,6 +17,7 @@ You are working in an ADBuddy environment. From here you manage the user's Andro
 - `adbuddy journal [--session current|<id>] [--json]`: what has been done, with the inverse of each change. In `--json` each entry has `"verified"`: only `true` means ADBuddy wrote it.
 - `adbuddy undo [last|<id>|session]`: undo the last change, one journal entry, or the whole session.
 - `adbuddy doctor [--json]`: when adb or adbuddy fails in a way you do not understand, run it before guessing. Run its `Run:` lines yourself (`run` in `--json`): they are safe. Its `Guidance:` lines (`guidance`), including those that start with `Ask the user`, are for the user: relay them word for word, because only they can do them.
+- `adbuddy send <file> [--caption "…"]`: send a result to the user's phone (the chat). The file must be inside this environment and at most 200 MiB.
 
 ## Risk levels
 

@@ -194,6 +194,9 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			link.useSession(sess)
 			link.useWorkspace(ws)
 			srv, err := ipc.Listen(e.dirs.Data, secret, func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {
+				if req.Kind == ipc.KindSend {
+					return link.handleSend(ctx, ws, req, c)
+				}
 				if req.Kind == ipc.KindAttach || req.Kind == ipc.KindSession {
 					return handleSession(ctx, sess, agentName, req, c)
 				}
