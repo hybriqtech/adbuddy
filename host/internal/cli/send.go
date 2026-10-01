@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
@@ -139,6 +140,11 @@ func (l *phoneLink) sendFile(ws string, req ipc.Request) (string, ipc.Exit) {
 		os.Remove(dstPath)
 		return "", sendFail(1, "SEND_FAILED", "could not copy the file")
 	}
+	// The thumbnail and the type open the copy by name: outbox/ must still be
+	// a plain folder.
+	if _, exit := ensureOutbox(ws); exit.Code != 0 {
+		return "", exit
+	}
 	var idb [16]byte
 	if _, err := rand.Read(idb[:]); err != nil {
 		os.Remove(dstPath)
@@ -213,6 +219,14 @@ func openInEnvironment(ws, path string) (*os.File, os.FileInfo, ipc.Exit) {
 		f.Close()
 		return nil, nil, sendFail(1, "SEND_FAILED", "%s changed while it was being opened", classify.Printable(path))
 	}
+	afterOpen()
+	// SameFile does not see a folder on the way that became a link after the
+	// first resolution: resolve again, it must be the same path.
+	again, err := resolveAgain(real)
+	if err != nil || !samePath(again, real) {
+		f.Close()
+		return nil, nil, outside
+	}
 	return f, st, ipc.Exit{}
 }
 
@@ -224,12 +238,32 @@ func ensureOutbox(ws string) (string, ipc.Exit) {
 	if err := os.MkdirAll(outbox, 0o700); err != nil {
 		return "", sendFail(1, "SEND_FAILED", "could not create the outbox folder")
 	}
-	fi, err := os.Lstat(outbox)
-	if err != nil || !fi.IsDir() || fi.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+	if !plainDir(outbox) {
 		return "", sendFail(1, "SEND_FAILED", "outbox in the environment is not a plain folder")
 	}
 	return outbox, ipc.Exit{}
 }
+
+// plainDir reports whether p is a real folder: not a symlink, a junction or
+// another kind of link.
+func plainDir(p string) bool {
+	fi, err := os.Lstat(p)
+	return err == nil && fi.IsDir() && fi.Mode()&(os.ModeSymlink|os.ModeIrregular) == 0
+}
+
+func samePath(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+// afterOpen runs between opening the file and resolving its path again: a
+// hook for the tests.
+var afterOpen = func() {}
+
+// resolveAgain is the second resolution of the path, a variable for the tests.
+var resolveAgain = pathguard.ResolveLinks
 
 // mimeOf is the type of a file by its extension, else by its first bytes.
 func mimeOf(name, path string) string {

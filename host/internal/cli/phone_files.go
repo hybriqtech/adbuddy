@@ -612,6 +612,11 @@ func openStored(ws, rel string) (*os.File, error) {
 	if ws == "" || !(strings.HasPrefix(rel, "inbox/") || strings.HasPrefix(rel, "outbox/")) || !filepath.IsLocal(local) {
 		return nil, os.ErrInvalid
 	}
+	// inbox/ and outbox/ are the agent's to replace: a link there would send
+	// the download wherever it points.
+	if top, _, _ := strings.Cut(rel, "/"); !plainDir(filepath.Join(ws, top)) {
+		return nil, os.ErrInvalid
+	}
 	path := filepath.Join(ws, local)
 	// A link is never followed: Lstat says what is there, and the opened file
 	// must be that very one.

@@ -16,6 +16,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+	"github.com/hybriqtech/adbuddy/host/internal/pathguard"
 )
 
 func sendReq(path, caption string) ipc.Request {
@@ -381,5 +382,82 @@ func TestSendCommandChecksTheCaptionBeforeCalling(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "caption") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// After a send, outbox/ replaced by a link makes file.get fail: the download
+// never follows it.
+func TestDownloadFailsWhenOutboxBecomesALink(t *testing.T) {
+	r := newFilesRig(t, nil)
+	outside := t.TempDir()
+	p := writeIn(t, r.ws, "a.txt", []byte("hola"))
+	if _, e := r.l.sendFile(r.ws, sendReq(p, "")); e.Code != 0 {
+		t.Fatalf("%+v", e)
+	}
+	a := chatMessageOf(t, readApp(t, r.c)).Attachments[0]
+	// The same name in the folder the link will point to.
+	names := outboxNames(t, r.ws)
+	writeIn(t, outside, names[0], []byte("otro contenido"))
+	if err := os.RemoveAll(filepath.Join(r.ws, "outbox")); err != nil {
+		t.Fatal(err)
+	}
+	linkDir(t, filepath.Join(r.ws, "outbox"), outside)
+	sendApp(t, r.c, bridge.TypeFileGet, "r_g", bridge.FileGet{ID: a.ID})
+	wantFileError(t, readApp(t, r.c), "r_g", bridge.CodeFailed)
+}
+
+// linkDir makes link point to target: a junction on Windows (no privileges
+// needed), a symlink elsewhere.
+func linkDir(t *testing.T, link, target string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+			t.Skipf("mklink /J: %v %s", err, out)
+		}
+		return
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A folder on the way that becomes a link after the first resolution is seen
+// by the second one.
+func TestSendRechecksTheResolutionAfterOpening(t *testing.T) {
+	l, ws := bareLink(t)
+	// The second resolution that finds another path is refused (this runs
+	// everywhere; the swap below only where an open file lets its folder go).
+	p0 := writeIn(t, ws, "r.txt", []byte("x"))
+	setVar(t, &resolveAgain, func(string) (string, error) { return filepath.Join(ws, "otro.txt"), nil })
+	_, e0 := l.sendFile(ws, sendReq(p0, ""))
+	wantSendError(t, e0, "OUTSIDE_WORKSPACE", "outside")
+	resolveAgain = pathguard.ResolveLinks
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not let the folder of an open file be renamed: the swap cannot happen")
+	}
+	outside := t.TempDir()
+	writeIn(t, outside, "x.txt", []byte("secreto"))
+	p := writeIn(t, ws, "d/x.txt", []byte("x"))
+	swapped := false
+	setVar(t, &afterOpen, func() {
+		if swapped {
+			return
+		}
+		swapped = true
+		// The file is open: Windows will not remove its folder, so the folder
+		// is renamed away and a link takes its name.
+		if err := os.Rename(filepath.Join(ws, "d"), filepath.Join(ws, "d-old")); err != nil {
+			swapped = false
+			return
+		}
+		linkDir(t, filepath.Join(ws, "d"), outside)
+	})
+	_, e := l.sendFile(ws, sendReq(p, ""))
+	if !swapped {
+		t.Skip("could not swap the folder")
+	}
+	wantSendError(t, e, "OUTSIDE_WORKSPACE", "outside")
+	if len(outboxNames(t, ws)) != 0 {
+		t.Fatal("copied")
 	}
 }
