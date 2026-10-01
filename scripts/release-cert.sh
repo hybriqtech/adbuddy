@@ -30,11 +30,12 @@ main() {
 		die "$@"
 	}
 	grep -q '^Verified using v1 scheme (JAR signing): false' "$out" || fail "$1 has a v1 signature"
-	grep -q '^Verified using v2 scheme (APK Signature Scheme v2): true' "$out" || fail "$1 has no v2 signature"
-	grep -q '^Verified using v3 scheme (APK Signature Scheme v3): true' "$out" || fail "$1 has no v3 signature"
-	signers=$(grep -c '^Signer #[0-9]* certificate SHA-256 digest: ' "$out" || true)
-	[ "$signers" -eq 1 ] || die "$1 has $signers signers, not 1"
-	theirs=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$out")
+	# apksigner leaves v2 out when v3 is there and minSdk is 28 or more, so
+	# one of the two is enough; either way every signer line is the same one.
+	grep -Eq '^Verified using v[23] scheme \(APK Signature Scheme v[23]\): true' "$out" || fail "$1 has no v2 or v3 signature"
+	theirs=$(grep -E '^(Signer #[0-9]+ certificate|V3\.[0-9] Signer: certificate) SHA-256 digest: ' "$out" | sed 's/.*digest: //' | sort -u)
+	[ "$(printf '%s
+' "$theirs" | grep -c .)" -eq 1 ] || fail "$1 has not exactly 1 signing certificate"
 	ours=$(cd "$root/host" && go run ./cmd/apkcert "$apk") || die "the host refuses $1"
 	[ "$ours" = "$theirs" ] || die "apksigner says $theirs, the host says $ours"
 	if [ "${2:-}" = --pinned ]; then

@@ -582,6 +582,12 @@ func TestInboxQuotaCountsPartialFiles(t *testing.T) {
 	r.begin(t, "r_1", id, "a", data)
 	wantReady(t, readApp(t, r.c), "r_1", 0)
 	sendData(t, r.c, id, data[:800], 0, 400)
+	// The server writes the frames on its own: reconnect only once the 800 B
+	// are in .partial, or the quota of the new connection may not see them.
+	waitUntil(t, "the 800 B in .partial", func() bool {
+		fi, err := os.Stat(filepath.Join(r.ws, "inbox", ".partial", id))
+		return err == nil && fi.Size() >= 800
+	})
 	r.c = r.connect(t) // the 800 B stay in .partial
 	r.begin(t, "r_2", fileID(2), "b", testBytes(300))
 	wantFileError(t, readApp(t, r.c), "r_2", bridge.CodeTooLarge)
