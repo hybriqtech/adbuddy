@@ -178,13 +178,21 @@ func (r *remoteLink) handleSet(m bridge.Message) {
 		r.fail(srv, m, bridge.CodeUnavailable, "Remote mode is not available on this host.")
 		return
 	}
-	job := remoteJob{srv: srv, m: m, on: *req.Enabled, timeout: remoteOpTimeout}
 	// One worker, in order: a later "off" never runs before an earlier "on".
+	if !r.enqueue(remoteJob{srv: srv, m: m, on: *req.Enabled, timeout: remoteOpTimeout}) {
+		r.fail(srv, m, bridge.CodeUnavailable, "Too many remote mode requests are waiting: try again in a moment.")
+	}
+}
+
+// enqueue puts a change behind the ones waiting and starts the worker if it
+// is idle; false when the queue is full. Every change of the mode (the app's
+// and `adbuddy remote`) goes through here: the last one asked is the last one
+// that runs.
+func (r *remoteLink) enqueue(job remoteJob) bool {
 	r.mu.Lock()
 	if len(r.queue) >= maxRemoteQueue {
 		r.mu.Unlock()
-		r.fail(srv, m, bridge.CodeUnavailable, "Too many remote mode requests are waiting: try again in a moment.")
-		return
+		return false
 	}
 	r.queue = append(r.queue, job)
 	start := !r.working
@@ -194,14 +202,23 @@ func (r *remoteLink) handleSet(m bridge.Message) {
 	if start {
 		go r.work()
 	}
+	return true
 }
 
-// remoteJob is one remote.set.
+// remoteJob is one change of the mode: a remote.set (srv and m answer it) or
+// an `adbuddy remote` (reply gets the result, srv is nil).
 type remoteJob struct {
 	srv     remoteServer
 	m       bridge.Message
 	on      bool
 	timeout time.Duration
+	reply   chan<- remoteResult // buffered: the worker never waits for it
+}
+
+// remoteResult is what a change left: the state it returned and its error.
+type remoteResult struct {
+	state remote.State
+	err   error
 }
 
 func (r *remoteLink) work() {
@@ -232,6 +249,14 @@ func (r *remoteLink) run(j remoteJob) {
 		st, err = r.ctl.Disable(ctx)
 	}
 	now := r.refresh()
+	if j.reply != nil {
+		j.reply <- remoteResult{state: st, err: err}
+		// The app is told what the host has, as after a remote.set.
+		if !errors.Is(err, remote.ErrNoTailscale) {
+			r.publish(now)
+		}
+		return
+	}
 	switch {
 	case errors.Is(err, remote.ErrNoTailscale):
 		r.fail(j.srv, j.m, bridge.CodeUnavailable, err.Error())

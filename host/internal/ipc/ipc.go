@@ -58,6 +58,9 @@ const (
 	// Argv is the path and the caption.
 	KindSend = "send"
 	KindUI   = "ui" // an agent's helper: adbuddy screen, tap, type… (M5)
+	// KindRemote turns the remote mode on or off, or reads it (adbuddy remote):
+	// Argv is "on", "off" or "status". Never from the agent's session.
+	KindRemote = "remote"
 )
 
 // Request is the first frame of every connection.

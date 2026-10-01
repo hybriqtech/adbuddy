@@ -67,6 +67,10 @@ type phoneLink struct {
 	files    filesState       // phone_files.go
 	adb      phoneapp.ADB     // the phone's adb, for screenshots
 	ws       string           // the environment (useWorkspace)
+	// askLang and askTimeout are how `adbuddy remote on` asks the user
+	// (useRemoteAsk); set before the IPC server starts.
+	askLang    string
+	askTimeout time.Duration
 
 	// termEvery is termInterval as it was when the link started: read here,
 	// not from the variable, by the goroutines that outlive a test.

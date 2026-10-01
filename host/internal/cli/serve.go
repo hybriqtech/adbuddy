@@ -238,6 +238,9 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				if req.Kind == ipc.KindSend {
 					return link.handleSend(ctx, ws, req, c)
 				}
+				if req.Kind == ipc.KindRemote {
+					return link.handleRemote(ctx, req, c)
+				}
 				if req.Kind == ipc.KindAttach || req.Kind == ipc.KindSession {
 					return handleSession(ctx, sess, agentName, req, c)
 				}

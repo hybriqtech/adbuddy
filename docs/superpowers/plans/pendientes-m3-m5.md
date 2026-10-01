@@ -128,6 +128,8 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - validar en el emulador que `appops reset com.no.existe` resetea los modos por UID;
   - endurecimientos opcionales de `setup`: vaciar la caché de `Same` tras un fallo definitivo de `Verify`; exigir un fichero regular en `--apk` (un FIFO sin escritor bloquea).
 
+- **`adbuddy remote on` y la identidad del par del socket** (M5b, Tarea 8): el IPC rechaza `ADBUDDY_SOURCE=agent`, pero esa variable la declara el propio cliente, así que un agente que la borre llega al socket. La defensa real de `on` es la pregunta al usuario (app o terminal de `serve`, sin `Key` y como `Special`, una por petición). La defensa que falta es la identidad del par del socket (credenciales del proceso: SO_PEERCRED / LOCAL_PEERCRED, y en Windows el proceso que conecta): distinguir al agente (hijo de la sesión de `serve`) del usuario. Lo mismo vale para `session`, `send` y `undo`.
+
 ## Más adelante (v1.1+)
 
 - **Reescribir la orden antes de ejecutarla** (spec de M2.5, §2.3): el host regeneraría el script desde el árbol, con cada palabra literal entre comillas simples, y ejecutaría esa forma canónica en vez del texto del agente. Cierra del todo la diferencia entre el parser de Go y mksh, que hoy solo vigilan los tests diferenciales. Cambia lo que se ejecuta (el diario tendría dos textos) y toca el shim y el daemon.
