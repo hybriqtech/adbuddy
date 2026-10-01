@@ -156,6 +156,41 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 
 - **Protocolo v2: el host se autentica ante la app** (revisión de la Tarea 9 de M2): hoy una app que ocupe el puerto mientras no hay túnel puede mostrar preguntas falsas (sus respuestas no llegan al host). Un HMAC del token sobre un nonce de la app dentro del `welcome` lo cerraría.
 
-## M4 · Aviso de permiso
+## M4 · Adaptador de Claude Code
 
-- **Canal de importancia alta para el aviso "Claude Code necesita una respuesta":** hoy es silencioso (canal `conversation`, LOW). Decisión de producto pendiente: canal propio de importancia alta con versión pública genérica (spec M4 §7.4).
+Spec: `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md`. Plan (registro): `docs/superpowers/plans/2026-10-01-adbuddy-m4-claude-code.md`. Ledger y revisiones: `.superpowers/sdd/2026-10-01-adbuddy-m4/` (`progress.md`, `review-security.md`).
+
+### Validaciones manuales pendientes (nadie las ha corrido en un móvil)
+
+- **Las de la spec §11:** `Notification` y sus tipos; permisos de Edit/Write/WebFetch/MCP; deny con `message`; `/clear`, `/compact`, `--resume`; prompts con `/` y `!`; cómo se ve todo en el móvil real.
+- **Qué hace Claude Code con el hook si se responde en la terminal (la duda principal, §5.2):** hoy el daemon se entera de que un permiso se contestó en la terminal por el cierre del hook o por el fin de la herramienta en el transcript. Hay que comprobar con Claude Code real que una de las dos señales llega siempre, y cuánto tarda, para que la tarjeta del móvil no quede viva con un permiso ya contestado.
+- **Detalle largo de la tarjeta, en el móvil:** con letra grande, giro de pantalla y teclado abierto, Sí y Sí, siempre siguen inactivos hasta desplazar el detalle al final, el detalle se desplaza dentro de la tarjeta sin cortarse y No está disponible. Los composables (`MarkdownText`, `PermissionCard`, `ToolStripView`) no tienen tests: es la única comprobación que tienen.
+- **Aviso de permiso silencioso:** con la app en segundo plano y un permiso pendiente, el aviso genérico ("Claude Code necesita una respuesta") sale sin sonido ni cabecera emergente (canal `conversation`, importancia LOW). Comprobar cómo se ve con el móvil bloqueado (sin comando ni texto, solo Cortar acceso) y con la app en primer plano.
+
+### Decisión de producto pendiente
+
+- **Canal de importancia alta para el aviso "Claude Code necesita una respuesta":** hoy es silencioso (canal `conversation`, LOW; `Ruling` de la tarea E). Un permiso pendiente con la app en segundo plano puede pasar desapercibido hasta que se mire el móvil; caduca a los 600 s y vuelve a la pregunta de la terminal. Falta un canal propio de importancia alta con versión pública genérica (spec M4 §7.4). Decisión de M3/M5, no de M4.
+
+### Menores diferidos de las revisiones (no ejecutan nada sin confirmación)
+
+De la revisión opus de seguridad del host (`review-security.md`) y de su re-revisión:
+- **M1, TOCTOU del transcript:** `tail.go` reabre la ruta en cada sondeo y la validación (`ValidTranscript`) se hizo una vez; el `Lstat` de la ronda B solo mira el último componente, así que un directorio intermedio cambiado por un enlace sigue colándose. Arreglo: abrir con el descriptor ya validado o repetir `EvalSymlinks` + `Inside`. El test del enlace se salta en Windows (corre en la CI de Linux).
+- **M7, retirada de tarjeta por herramienta + resumen:** `resolvePermsOf` retira una tarjeta cuando acaba cualquier herramienta con el mismo nombre y resumen (`description`). Es seguro (devuelve la decisión a la terminal) pero puede confundir. Cerrarlo con la validación de §5.2 (id de herramienta).
+- **M-a, carrera entre `chat.send` y `PermissionRequest`:** el freno de `agentBusy` solo actúa cuando la tarjeta ya existe; un `chat.send` admitido justo antes de que llegue el `PermissionRequest` puede teclear sobre el diálogo. Ventana de milisegundos, sin arreglo barato (el host no sabe que Claude Code va a preguntar).
+- **M-c, NotebookEdit:** el resumen y el detalle usan `notebook_path` (`rule.go`) y la guarda de la tarjeta (`CardSafe`) mira otros campos de ruta; comprobar con una grabación real de `NotebookEdit` que `notebook_path` es el único y que `CardSafe` ve lo que la persona aprueba.
+- **N3, resto:** `shownRune` rechaza control, Cf, Z, Mn, Me y una lista fija de rellenos (U+3164, U+115F, U+1160, U+FFA0, U+2800, U+034F); otros caracteres que no dibujan nada (selectores de variación, etiquetas U+E0000, símbolos sin glifo) no están en la lista.
+- **`android` como subcadena y sangrías de más de 8 espacios:** el rechazo de "Sí, siempre" por la subcadena `android` y el de la tarjeta por blancos largos llevan a la terminal comandos legítimos (lado seguro, a costa de comodidad). Además `android_serial` es redundante con `android`.
+- **Límite léxico de `AlwaysRule`:** ningún filtro léxico cubre `make install`, scripts propios o alias que llamen a `adb` por dentro (spec §5.3); el "Sí, siempre" se ofrece para ellos. La lista blanca de primeras palabras es un cambio de producto mayor.
+- **`isCompactSummary`** no se trata (el resumen de `/compact` puede salir como mensaje de usuario); validar con un `/compact` real. **`<user-prompt`** está en `ignoredPrompts` aunque la spec §4.2 no lo lista (inocuo, ignora prompts internos): ponerlo en la spec o quitarlo.
+- **Sin test del adaptador que relea el transcript con otro `Tailer`** (el id estable de los prompts de la terminal solo se prueba en el parser), y una aserción débil en `TestParserCapsAMessageBeforeJoining`.
+- **`wasSent` expira a los 2 min:** un prompt del móvil que Claude Code tarda más en escribir en el transcript sale repetido como mensaje de la terminal.
+- **Ids y versión del transcript:** acotados y validados en la tarea F (`^[A-Za-z0-9._-]{1,64}$` y `^[0-9A-Za-z._+-]{1,32}$`). Efecto secundario aceptado: una versión no válida queda vacía, y una versión desconocida cuenta como soportada.
+
+De las revisiones de la app (Sonnet y opus):
+- **Color de la etiqueta "Claude Code pregunta":** `tertiary` sobre `tertiaryContainer`, contraste por comprobar (como `PaletteContrastTest`).
+- **Quitar los caracteres Cf del texto de enlace** rompe las secuencias con ZWJ/ZWNJ (emoji compuestos, escrituras que los usan): solo afecta al aspecto.
+- **`LastMessage.text` de la notificación persistente** (privada) no se sanea de bidi ni saltos (anterior a M4); el titular de "Listo" sí.
+- **Markdown:** `MAX_BLOCKS` admite un bloque más de la cuenta y una imagen anidada dentro de un enlace no está cubierta por un test propio.
+- **Herramientas atascadas en `running`:** si el transcript no trae el `tool_result` (herramienta interrumpida), el chip se queda en `running` hasta la sesión siguiente. Un tope de tiempo o un `Stop` que las cierre.
+- **`Notification` y `Stop` sin transcript:** con el transcript degradado, solo `Stop` trae el último mensaje y `Notification` no se muestra; falta decidir qué ve la persona en ese caso.
+- **Conflación de `connected` en `ChatController`** (ronda C): una tarjeta puede quedar en "contestando" hasta `permission.resolved` o los 600 s del host en el caso raro de una reconexión rápida.
