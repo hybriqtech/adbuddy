@@ -422,6 +422,10 @@ func (m *Manager) Paste(text string) error {
 	return err
 }
 
+// Clean is the cleaning Paste applies to its text: what is left of text when
+// the control characters go.
+func Clean(s string) string { return clean(s) }
+
 // clean keeps text, new lines and tabs; any other control character goes.
 func clean(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")

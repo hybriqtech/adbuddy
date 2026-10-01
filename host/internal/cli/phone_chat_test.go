@@ -24,6 +24,10 @@ type fakeAgentPTY struct {
 	typed strings.Builder
 	done  chan struct{}
 	once  sync.Once
+	// gate, if set, holds each Write until it is closed; entered says a
+	// Write is waiting.
+	gate    chan struct{}
+	entered chan struct{}
 }
 
 func newFakeAgentPTY() *fakeAgentPTY {
@@ -33,6 +37,13 @@ func newFakeAgentPTY() *fakeAgentPTY {
 
 func (f *fakeAgentPTY) Read(b []byte) (int, error) { return f.out.Read(b) }
 func (f *fakeAgentPTY) Write(b []byte) (int, error) {
+	if f.gate != nil {
+		select {
+		case f.entered <- struct{}{}:
+		default:
+		}
+		<-f.gate
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.typed.Write(b)
@@ -65,6 +76,8 @@ type chatRig struct {
 	m   *session.Manager
 	mu  sync.Mutex
 	pts []*fakeAgentPTY
+	// gate and entered are given to the agents started after they are set.
+	gate, entered chan struct{}
 }
 
 func newChatRig(t *testing.T) *chatRig {
@@ -78,6 +91,7 @@ func newChatRig(t *testing.T) *chatRig {
 		Start: func(pty.Options) (pty.PTY, error) {
 			f := newFakeAgentPTY()
 			r.mu.Lock()
+			f.gate, f.entered = r.gate, r.entered
 			r.pts = append(r.pts, f)
 			r.mu.Unlock()
 			return f, nil
@@ -171,20 +185,32 @@ func TestChatSendTypesTheMessageOnce(t *testing.T) {
 	}
 }
 
-// Two chat.send with the same id at once type the message once.
+// Two chat.send with the same id at once type the message once: the second
+// one, while the first is held in the agent's terminal, is told busy.
 func TestChatSendWithTheSameIDAtOnceTypesOnce(t *testing.T) {
 	r := newChatRig(t)
+	r.gate, r.entered = make(chan struct{}), make(chan struct{}, 1)
 	r.start(t, "claude")
 	payload, _ := json.Marshal(bridge.ChatSend{ID: "m_same", Text: "once only"})
-	var wg sync.WaitGroup
-	for i := range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			r.l.onChatSend(bridge.Message{Type: bridge.TypeChatSend, RID: "r_" + string(rune('a'+i)), Payload: payload})
-		}()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		r.l.onChatSend(bridge.Message{Type: bridge.TypeChatSend, RID: "r_a", Payload: payload})
+	}()
+	select {
+	case <-r.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the first message never reached the terminal")
 	}
-	wg.Wait()
+	// The first is stuck in Paste: the second, through the socket, is busy.
+	sendApp(t, r.c, bridge.TypeChatSend, "r_b", bridge.ChatSend{ID: "m_same", Text: "once only"})
+	r.readError(t, "r_b", bridge.CodeBusy)
+	close(r.gate)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first message never ended")
+	}
 	if n := strings.Count(r.pty(0).said(), "once only"); n != 1 {
 		t.Fatalf("typed %d times: %q", n, r.pty(0).said())
 	}
@@ -199,6 +225,52 @@ func TestChatSendWithTheSameIDAtOnceTypesOnce(t *testing.T) {
 	if n := strings.Count(r.pty(0).said(), "once only"); n != 1 {
 		t.Fatalf("typed %d times", n)
 	}
+}
+
+// A message with nothing to type once the control characters go is invalid:
+// its Enter alone could answer a question of the agent.
+func TestChatSendWithNothingToTypeIsInvalid(t *testing.T) {
+	r := newChatRig(t)
+	r.start(t, "claude")
+	for i, text := range []string{"", " ", "\x1b", "\x00 \x1b\n\t", "\u0085"} {
+		rid := "r_" + string(rune('a'+i))
+		sendApp(t, r.c, bridge.TypeChatSend, rid, bridge.ChatSend{ID: "m_" + string(rune('a'+i)), Text: text})
+		r.readError(t, rid, bridge.CodeInvalid)
+	}
+	if got := r.pty(0).said(); got != "" {
+		t.Fatalf("typed %q", got)
+	}
+}
+
+// Without a session in the host, every request is still answered.
+func TestChatWithoutASession(t *testing.T) {
+	_, c := linkedApp(t)
+	expectError := func(rid, code string) {
+		t.Helper()
+		m := readApp(t, c)
+		var er bridge.ErrorReply
+		json.Unmarshal(m.Payload, &er)
+		if m.Type != bridge.TypeError || m.RID != rid || er.Code != code {
+			t.Fatalf("got %s %q %s, want %s for %q", m.Type, m.RID, m.Payload, code, rid)
+		}
+	}
+	for _, rid := range []string{"r_1", "r_2"} {
+		// The same id twice: the first failure freed it.
+		sendApp(t, c, bridge.TypeChatSend, rid, bridge.ChatSend{ID: "m_1", Text: "x"})
+		expectError(rid, bridge.CodeNoAgent)
+	}
+	sendApp(t, c, bridge.TypeSessionNew, "r_3", bridge.SessionNew{})
+	expectError("r_3", bridge.CodeFailed)
+	sendApp(t, c, bridge.TypeSessionStop, "r_4", bridge.Empty{})
+	m := readApp(t, c)
+	var st bridge.SessionState
+	json.Unmarshal(m.Payload, &st)
+	if m.Type != bridge.TypeSessionState || m.RID != "r_4" || st.State != session.StateStopped {
+		t.Fatalf("got %s %q %s", m.Type, m.RID, m.Payload)
+	}
+	sendApp(t, c, bridge.TypeInterrupt, "", bridge.Empty{})
+	sendApp(t, c, bridge.TypeSessionNew, "r_5", bridge.SessionNew{Agent: "../x"})
+	expectError("r_5", bridge.CodeInvalid)
 }
 
 // Attachments go to the agent as paths of the environment, and into the

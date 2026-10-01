@@ -153,6 +153,16 @@ func (l *phoneLink) session() *session.Manager {
 	return l.manager
 }
 
+// stateOf is the session.state of info, the Manager's own: l.state() follows
+// it late (sessionInfo), and a reply must tell what the request did.
+func (l *phoneLink) stateOf(info session.Info) bridge.SessionState {
+	st := l.state()
+	if info.Agent != "" {
+		st.Agent, st.State, st.Conversation, st.PCAttached = info.Agent, info.State, info.Conversation, info.PCAttached
+	}
+	return st
+}
+
 // fail answers a request with an error.
 func (l *phoneLink) fail(m bridge.Message, code, text string) {
 	_ = l.srv.Reply(m, bridge.TypeError, bridge.ErrorReply{Code: code, Text: text})
@@ -184,7 +194,7 @@ func (l *phoneLink) onChatSend(m bridge.Message) {
 		l.fail(m, bridge.CodeTooLarge, "The message is too large: at most 64 KiB of text and 10 attachments.")
 		return
 	}
-	if strings.TrimSpace(cs.Text) == "" && len(cs.Attachments) == 0 {
+	if strings.TrimSpace(session.Clean(cs.Text)) == "" && len(cs.Attachments) == 0 {
 		l.fail(m, bridge.CodeInvalid, "The message is empty.")
 		return
 	}
@@ -251,10 +261,8 @@ func (l *phoneLink) onChatSend(m bridge.Message) {
 		}
 		return
 	}
-	conv := l.state().Conversation
-	if conv == "" {
-		conv = mgr.Info().Conversation
-	}
+	// From the Manager, not from l.state(), which follows it late.
+	conv := mgr.Info().Conversation
 	msg := bridge.ChatMessage{ID: cs.ID, Role: "user", Text: cs.Text, Attachments: atts, Conversation: conv}
 	l.chat.mu.Lock()
 	l.chat.upsertLocked(msg)
@@ -290,15 +298,17 @@ func (l *phoneLink) onSessionNew(m bridge.Message) {
 		l.fail(m, bridge.CodeFailed, agent.InstallHint(name))
 		return
 	}
-	_ = l.srv.PublishRID(bridge.TypeSessionState, m.RID, l.state())
+	_ = l.srv.PublishRID(bridge.TypeSessionState, m.RID, l.stateOf(mgr.Info()))
 }
 
 // onSessionStop stops the agent; the host keeps running.
 func (l *phoneLink) onSessionStop(m bridge.Message) {
+	st := l.state()
 	if mgr := l.session(); mgr != nil {
 		mgr.Stop()
+		st = l.stateOf(mgr.Info())
 	}
-	_ = l.srv.PublishRID(bridge.TypeSessionState, m.RID, l.state())
+	_ = l.srv.PublishRID(bridge.TypeSessionState, m.RID, st)
 }
 
 // onInterrupt types ESC, which interrupts the agent.
