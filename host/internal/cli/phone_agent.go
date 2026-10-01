@@ -350,8 +350,15 @@ func (l *phoneLink) pollTranscript(ctx context.Context, tl *claudecode.Tailer, s
 		l.degrade("Claude Code " + p.Version() + " is not a tested version")
 		return false
 	}
-	if n := p.Dropped(); n > a.droppedSeen {
-		a.droppedSeen = n
+	// droppedSeen belongs to a.mu like the rest of the state (pollMu is taken
+	// before a.mu, never the other way round).
+	a.mu.Lock()
+	n, fresh := p.Dropped(), false
+	if n > a.droppedSeen {
+		a.droppedSeen, fresh = n, true
+	}
+	a.mu.Unlock()
+	if fresh {
 		fmt.Fprintf(l.log, "⚠ Claude Code chat: %d answer(s) without a valid id were not shown\n", n)
 	}
 	for _, e := range events {
