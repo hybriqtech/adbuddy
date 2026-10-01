@@ -12,6 +12,7 @@ die() {
 }
 
 main() {
+	# shellcheck disable=SC2015 # die exits, so A && B || die is an if-then-else here
 	[ $# -ge 1 ] && [ $# -le 2 ] || die "usage: release-cert.sh <file.apk> [--pinned]"
 	case ${2:---} in
 	-- | --pinned) ;;
@@ -24,9 +25,13 @@ main() {
 	trap 'rm -f "$out"' EXIT INT TERM
 
 	"$APKSIGNER" verify --verbose --print-certs "$apk" >"$out" || die "apksigner does not verify $1"
-	grep -q '^Verified using v1 scheme (JAR signing): false' "$out" || die "$1 has a v1 signature"
-	grep -q '^Verified using v2 scheme (APK Signature Scheme v2): true' "$out" || die "$1 has no v2 signature"
-	grep -q '^Verified using v3 scheme (APK Signature Scheme v3): true' "$out" || die "$1 has no v3 signature"
+	fail() {
+		cat "$out" >&2
+		die "$@"
+	}
+	grep -q '^Verified using v1 scheme (JAR signing): false' "$out" || fail "$1 has a v1 signature"
+	grep -q '^Verified using v2 scheme (APK Signature Scheme v2): true' "$out" || fail "$1 has no v2 signature"
+	grep -q '^Verified using v3 scheme (APK Signature Scheme v3): true' "$out" || fail "$1 has no v3 signature"
 	signers=$(grep -c '^Signer #[0-9]* certificate SHA-256 digest: ' "$out" || true)
 	[ "$signers" -eq 1 ] || die "$1 has $signers signers, not 1"
 	theirs=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$out")

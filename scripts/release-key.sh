@@ -17,6 +17,7 @@ main() {
 	umask 077
 	keytool=keytool
 	if ! command -v keytool >/dev/null 2>&1; then
+		# shellcheck disable=SC2015 # die exits, so A && B || die is an if-then-else here
 		[ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/keytool" ] || die "keytool not found: install a JDK or set JAVA_HOME"
 		keytool=$JAVA_HOME/bin/keytool
 	fi

@@ -76,6 +76,7 @@ main() {
 	trap 'rm -rf "$tmp"' EXIT INT TERM
 	fetch "$base/checksums.txt" "$tmp/checksums.txt" || die "could not download $base/checksums.txt"
 	name=$(awk -v t="$target" '$2 ~ "^adbuddy_[^/ ]+_" t "[.]tar[.]gz$" { print $2 }' "$tmp/checksums.txt")
+	# shellcheck disable=SC2015 # die exits, so A && B || die is an if-then-else here
 	[ -n "$name" ] && [ "$(printf '%s\n' "$name" | wc -l | tr -d ' ')" -eq 1 ] ||
 		die "no adbuddy archive for $target in $base/checksums.txt"
 	want=$(awk -v f="$name" '$2 == f { print $1 }' "$tmp/checksums.txt")
