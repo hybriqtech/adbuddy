@@ -29,8 +29,8 @@ object ChatReducer : Reducer {
         Protocol.TOOL_ACTIVITY -> {
             val t = Protocol.payload<ToolActivity>(m)
             // A final state (done, error) never goes back to running: a late or repeated event cannot revive it.
-            val old = if (t == null) null else s.chat.tools.firstOrNull { it.id == t.id }
-            val revive = old != null && t!!.status == "running" && (old.status == "done" || old.status == "error")
+            val before = t?.let { n -> s.chat.tools.firstOrNull { it.id == n.id }?.status }
+            val revive = t?.status == "running" && (before == "done" || before == "error")
             if (t == null || t.id.isEmpty() || revive) s else s.copy(chat = s.chat.copy(tools = upsertBy(s.chat.tools, t, MAX_TOOLS) { it.id }))
         }
         Protocol.PERMISSION_REQUEST -> {
