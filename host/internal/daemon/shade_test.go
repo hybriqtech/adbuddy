@@ -281,3 +281,65 @@ func TestGuardBlocksAnUnknownSystemUIWindowByADB(t *testing.T) {
 		t.Errorf("screen off: %+v %q", exit, s.errOut.String())
 	}
 }
+
+// Round 1 of the review: the screen-off exception is for a wake key only.
+
+func TestScreenOffExceptionIsForWakeKeysOnly(t *testing.T) {
+	for _, power := range []string{"POWER MANAGER\n  mWakefulness=Dozing\n", powerAsleep} {
+		e := newEnv(t)
+		e.adb.shell[fixedFocusCmd] = focusShade
+		e.adb.shell["dumpsys activity activities"] = "ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n"
+		e.adb.shell["dumpsys power"] = power
+		for _, argv := range [][]string{
+			{"exec-out", "screencap", "-p"},
+			{"shell", "uiautomator", "dump"},
+			{"shell", "input", "tap", "1", "1"},
+			{"shell", "input", "keyevent", "66"},
+			{"shell", "input", "keyevent", "--longpress", "26"},
+			{"shell", "input", "keyevent", "224", "26"},
+			{"shell", "input keyevent 224 ; input tap 1 1"},
+		} {
+			if s, exit := e.exec(t, argv...); exit.Code != 126 {
+				t.Errorf("%q with the screen off: %+v %q", argv, exit, s.errOut.String())
+			}
+		}
+		for _, op := range []string{bridge.UIOpDump, OpScreenshot} {
+			var args any = bridge.UIDumpArgs{}
+			if op == OpScreenshot {
+				args = ScreenshotArgs{Scale: 1, Format: "png"}
+			}
+			if _, exit := e.helper(t, op, args); exit.Code != 126 {
+				t.Errorf("%s with the screen off: %+v", op, exit)
+			}
+		}
+		for _, key := range []string{"224", "26", "KEYCODE_WAKEUP", "KEYCODE_POWER"} {
+			if s, exit := e.exec(t, "shell", "input", "keyevent", key); exit.Code != 0 {
+				t.Errorf("%s with the screen off: %+v %q", key, exit, s.errOut.String())
+			}
+		}
+		if r := ranGuarded(e); len(r) != 4 {
+			t.Errorf("adb ran %q", r)
+		}
+	}
+}
+
+func TestScreenOffUnknownFocusStillBlocksReads(t *testing.T) {
+	e := newEnv(t)
+	e.adb.shell[fixedFocusCmd] = "Unknown command\n"
+	e.adb.shell["dumpsys activity activities"] = "ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n"
+	e.adb.shell["dumpsys power"] = powerAsleep
+	if s, exit := e.exec(t, "exec-out", "screencap", "-p"); exit.Code != 126 {
+		t.Errorf("screencap: %+v %q", exit, s.errOut.String())
+	}
+}
+
+func TestScreenOffWithANormalFocusStillWorks(t *testing.T) {
+	e := newEnv(t) // focus: an app
+	e.adb.shell["dumpsys activity activities"] = "ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n"
+	e.adb.shell["dumpsys power"] = powerAsleep
+	for _, argv := range [][]string{{"shell", "input", "keyevent", "224"}, {"shell", "input", "keyevent", "3"}, {"exec-out", "screencap", "-p"}} {
+		if s, exit := e.exec(t, argv...); exit.Code != 0 {
+			t.Errorf("%q: %+v %q", argv, exit, s.errOut.String())
+		}
+	}
+}

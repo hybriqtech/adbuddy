@@ -69,7 +69,7 @@ func (d *Daemon) guard(ctx context.Context, res classify.Result, args []string) 
 	if !runsUnwrapped(res.Findings[0], args) {
 		return aloneReason
 	}
-	return d.guardForeground(ctx, closesShade(res.Findings[0].Words))
+	return d.guardForeground(ctx, res.Findings[0].Words)
 }
 
 // runsUnwrapped reports whether the shell text of args starts with the
@@ -147,8 +147,10 @@ const (
 )
 
 // guardForeground returns why nothing may touch or read the screen now, or "".
-// closing is true for the key that closes the shade (closesShade).
-func (d *Daemon) guardForeground(ctx context.Context, closing bool) string {
+// words are those of the one command that asks (nil for a helper): the exact
+// key that closes the shade (closesShade) skips the shade rule, and the exact
+// key that wakes the screen (wakesScreen) is let through while it is off.
+func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
 	f, err := d.inFront(ctx)
 	if err != nil {
 		return "could not tell which app is in the foreground (" + err.Error() + "); ADBuddy does not touch or read the screen without knowing"
@@ -161,7 +163,7 @@ func (d *Daemon) guardForeground(ctx context.Context, closing bool) string {
 	if f.appProtected {
 		return protectedReason(f.first())
 	}
-	if why := d.systemUIReason(ctx, f.viaApp, closing); why != "" && !d.screenOff(ctx) {
+	if why := d.systemUIReason(ctx, f.viaApp, closesShade(words)); why != "" && !(wakesScreen(words) && d.screenOff(ctx)) {
 		return why
 	}
 	return ""
@@ -172,7 +174,7 @@ func (d *Daemon) guardForeground(ctx context.Context, closing bool) string {
 // open (a 2FA code can be on them), and, when the app does not tell, a window
 // of systemui that is not a fixed one (a heads-up notification, with no app
 // name here). It fails closed: what it cannot read blocks. The caller lifts
-// the block when the screen is off (the lock screen is the shade then).
+// the block only for a wake key with the screen off (the lock screen is the shade then).
 func (d *Daemon) systemUIReason(ctx context.Context, viaApp, closing bool) string {
 	const unknown = "; ADBuddy does not touch or read the screen without knowing"
 	out, code, err := d.o.ADB.Shell(ctx, focusCmd)
@@ -302,3 +304,14 @@ var (
 	errForegroundUnknown = errors.New("neither the ADBuddy app nor dumpsys answered")
 	errNothingResumed    = errors.New("no app is resumed and the screen is not off: maybe the lock screen")
 )
+
+// wakeKeys are the keys that turn the screen on.
+var wakeKeys = map[string]bool{"224": true, "26": true, "KEYCODE_WAKEUP": true, "KEYCODE_POWER": true}
+
+// wakesScreen reports whether words are exactly `input keyevent <key>` with
+// one of wakeKeys and no option. With the screen off (the lock screen lives
+// in the shade then) only this may pass what would block: anything else is
+// judged as with the screen on.
+func wakesScreen(words []string) bool {
+	return len(words) == 3 && path.Base(words[0]) == "input" && words[1] == "keyevent" && wakeKeys[words[2]]
+}

@@ -42,7 +42,8 @@ func IsShade(focus string) bool {
 }
 
 var (
-	windowHeaderRE = regexp.MustCompile(`^\s*Window #\d+ Window\{\S+ u\d+ (.+)\}:\s*$`)
+	windowHeaderRE = regexp.MustCompile(`^\s*Window #\d+ Window\{\S+ u\d+ ([^}]+)\}:\s*$`)
+	windowLineRE   = regexp.MustCompile(`^\s*Window #\d+`)
 	windowPkgRE    = regexp.MustCompile(`\bpackage=(\S+)`)
 	windowVisRE    = regexp.MustCompile(`\bmViewVisibility=(0x[0-9a-fA-F]+)\b`)
 )
@@ -56,6 +57,10 @@ const SystemUIPackage = "com.android.systemui"
 var fixedSystemUI = map[string]bool{
 	"StatusBar": true, "NavigationBar0": true, "NavigationBar1": true,
 	"ScreenDecorOverlay": true, "ScreenDecorOverlayBottom": true,
+	// Always visible on many phones: the wallpaper, the gesture-navigation
+	// edge panels and the rounded-corner overlays drawn by hardware.
+	"ImageWallpaper": true, "NavigationBarEdgePanel": true,
+	"ScreenDecorHwcOverlay": true, "ScreenDecorHwcOverlayBottom": true,
 }
 
 // ParseSystemUIWindows reads `dumpsys window windows` and returns the titles
@@ -70,6 +75,11 @@ func ParseSystemUIWindows(out string) (unknown []string, ok bool) {
 		if m := windowHeaderRE.FindStringSubmatch(line); m != nil {
 			all = append(all, window{title: strings.TrimSpace(m[1])})
 			continue
+		}
+		if windowLineRE.MatchString(line) {
+			// A window that is not understood must not merge into the
+			// one before it: it would vanish.
+			return nil, false
 		}
 		if len(all) == 0 {
 			continue

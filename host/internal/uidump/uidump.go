@@ -308,12 +308,26 @@ func Resumed(dumpsys string) []Activity {
 	return all
 }
 
-var asleepRE = regexp.MustCompile(`(?m)^\s*mWakefulness=(Asleep|Dozing)\s*$`)
-
-// Asleep reports whether `dumpsys power` says the screen is off
-// (mWakefulness=Asleep or Dozing): the only case where no resumed activity
-// means nothing is in front.
-func Asleep(dumpsysPower string) bool { return asleepRE.MatchString(dumpsysPower) }
+// Asleep reports whether `dumpsys power` says the screen is off: there is a
+// mWakefulness line and every one says Asleep or Dozing. The only case where
+// no resumed activity means nothing is in front. Every line must say it, so
+// that a line injected by text in the output (a wakelock label with a line
+// break) cannot hide the real Awake.
+func Asleep(dumpsysPower string) bool {
+	n := 0
+	for _, line := range strings.Split(dumpsysPower, "\n") {
+		line = strings.TrimSpace(line)
+		v, found := strings.CutPrefix(line, "mWakefulness=")
+		if !found {
+			continue
+		}
+		if v != "Asleep" && v != "Dozing" {
+			return false
+		}
+		n++
+	}
+	return n > 0
+}
 
 // ServiceOn reports whether `dumpsys accessibility` lists ADBuddy's service
 // (enabled or bound): uiautomator would then disconnect it.

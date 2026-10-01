@@ -198,3 +198,19 @@ func TestServiceOn(t *testing.T) {
 		t.Fatal("ServiceOn")
 	}
 }
+
+// An injected line (a wakelock label with a line break, say) cannot hide the
+// real Awake.
+func TestAsleepNeedsEveryWakefulnessLineToSayIt(t *testing.T) {
+	for out, want := range map[string]bool{
+		"mWakefulness=Awake\n  mWakefulness=Asleep\n":  false,
+		"mWakefulness=Asleep\n  mWakefulness=Awake\n":  false,
+		"mWakefulness=Asleep\n  mWakefulness=Dozing\n": true,
+		"mWakefulness=Asleep\r\n":                      true,
+		"mWakefulness=Asleep extra\n":                  false,
+	} {
+		if Asleep(out) != want {
+			t.Errorf("%q: %v", out, !want)
+		}
+	}
+}

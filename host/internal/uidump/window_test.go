@@ -3,6 +3,7 @@ package uidump
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +77,49 @@ func TestParseSystemUIWindows(t *testing.T) {
 		if ok != c.ok || !reflect.DeepEqual(got, c.unknown) {
 			t.Errorf("%s: got %q %v, want %q %v", c.name, got, ok, c.unknown, c.ok)
 		}
+	}
+}
+
+func TestWindowFormatVariations(t *testing.T) {
+	crlf := strings.ReplaceAll(sample(t, "windows_systemui_unknown.txt"), "\n", "\r\n")
+	if got, ok := ParseSystemUIWindows(crlf); !ok || !reflect.DeepEqual(got, []string{"NotificationShade"}) {
+		t.Errorf("CRLF windows: %q %v", got, ok)
+	}
+	if got, ok := ParseFocus("  mCurrentFocus=Window{4b0f3a2 u0 NotificationShade}\r\n"); !ok || !reflect.DeepEqual(got, []string{"NotificationShade"}) {
+		t.Errorf("CRLF focus: %q %v", got, ok)
+	}
+	// A work profile: u10.
+	if got, ok := ParseFocus("  mCurrentFocus=Window{4b0f3a2 u10 NotificationShade}\n"); !ok || !IsShade(got[0]) {
+		t.Errorf("u10 focus: %q %v", got, ok)
+	}
+	work := strings.ReplaceAll(sample(t, "windows_systemui_unknown.txt"), "Window{dd33ee u0 NotificationShade}", "Window{dd33ee u10 NotificationShade}")
+	if got, ok := ParseSystemUIWindows(work); !ok || !reflect.DeepEqual(got, []string{"NotificationShade"}) {
+		t.Errorf("u10 windows: %q %v", got, ok)
+	}
+	// A title with } is not understood: not ok, so the guard fails closed.
+	if _, ok := ParseFocus("  mCurrentFocus=Window{1 u0 a}b}\n"); ok {
+		t.Error("focus with } in the title is ok")
+	}
+	if _, ok := ParseSystemUIWindows("  Window #0 Window{1 u0 a}b}:\n    package=com.android.systemui\n    mViewVisibility=0x0\n"); ok {
+		t.Error("window with } in the title is ok")
+	}
+}
+
+// A window line that is not understood must not merge into the block before
+// it (that window would vanish).
+func TestAWindowHeaderNotUnderstoodIsNotOK(t *testing.T) {
+	out := sample(t, "windows_systemui_fixed.txt") + "  Window #9 Window{zz u0 HeadsUp\n    mOwnerUid=1 package=com.android.systemui\n    mViewVisibility=0x0\n"
+	if _, ok := ParseSystemUIWindows(out); ok {
+		t.Error("broken header is ok")
+	}
+}
+
+func TestFixedSystemUIWindowsOfARealPhone(t *testing.T) {
+	out := ""
+	for _, title := range []string{"StatusBar", "NavigationBar0", "ImageWallpaper", "NavigationBarEdgePanel", "ScreenDecorHwcOverlay", "ScreenDecorHwcOverlayBottom"} {
+		out += "  Window #0 Window{1 u0 " + title + "}:\n    mOwnerUid=1 package=com.android.systemui appop=NONE\n    mViewVisibility=0x0\n"
+	}
+	if got, ok := ParseSystemUIWindows(out); !ok || len(got) != 0 {
+		t.Errorf("%q %v", got, ok)
 	}
 }

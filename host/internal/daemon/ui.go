@@ -128,7 +128,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 	defer release()
 	if req.UIOp != bridge.UIOpForeground {
-		if why := d.guardForeground(ctx, false); why != "" {
+		if why := d.guardForeground(ctx, nil); why != "" {
 			if ctx.Err() != nil { // the agent or serve went away meanwhile
 				code := ExitDenied
 				e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
