@@ -2688,6 +2688,7 @@ Avisa al controlador para que se lo diga a tern-51 y a nautilus-19: `server.go` 
 - Modify: `host/cmd/adbuddy/e2e_test.go` (solo `startWithData`: **commit propio**, ruling del supervisor)
 - Modify: `host/internal/cli/phone_test.go` (`appPhone`, `linkEnv`, `TestServeInterruptedDuringTheHandshake` y tests nuevos)
 - Modify: `host/cmd/adbuddy/phone_e2e_test.go` (`phoneAppRules` y la confianza de desarrollo)
+- Modify: `host/cmd/adbuddy/chat_e2e_test.go` (el arnés `startChat` de M3a también usa `phoneAppRules`: solo añade `trustE2EApp`)
 
 **Interfaces:**
 - Consumes: `Verifier` (con `Same`), `Verified`, `LoadTrust`, `DevTrustPath` y `TrustDevAPK` (Task 2); `bridge.Options.Admit` (Task 4); `releaseCert`, `testCert`, `otherCert`, `testAPK`, `pinTestCert`, `testAppPath` y `appReadRules` (Tasks 2-3).
@@ -2747,7 +2748,7 @@ Todo esto va en `host/internal/cli/phone.go`, en el mismo commit que el cambio d
 	l.recheck = make(chan struct{}, 1)
 ```
 
-4. En las `bridge.Options` de `bridge.New`, justo antes de `OnConnect: func(on bool) {`, el gancho `Admit` (Task 4). Toda app que llegue con el token ha de ser la instalación verificada. Si no lo es, se rechaza y se vuelve a verificar enseguida, con un token nuevo:
+4. En las `bridge.Options` de `bridge.New`, justo antes de `OnConnect: func(on bool) {` (tras `OnReject` y el comentario de `OnFrame`), el gancho `Admit` (Task 4). Toda app que llegue con el token ha de ser la instalación verificada. Si no lo es, se rechaza y se vuelve a verificar enseguida, con un token nuevo:
 
 ```go
 		Admit: func(ctx context.Context, _ bridge.Hello) bool {
@@ -3023,7 +3024,8 @@ func trustE2EApp(t *testing.T, dataDir string) {
 ```
 
 - añade los imports que falten (`crypto/sha256`, `encoding/base64`, `encoding/hex`, `phoneapp` y `phoneapp/apktest`; `strconv` ya está);
-- en cada test que use `phoneAppRules`, cambia `startWith(t, cfg, rules…)` por `startWithData(t, cfg, func(data string) { trustE2EApp(t, data) }, rules…)`. Por ejemplo:
+- en `startChat` (`chat_e2e_test.go`, M3a; no pasa por `startWith` y arranca serve sin `--no-agent` a propósito), justo después de `t.Cleanup(func() { os.RemoveAll(dataDir) })`, añade `trustE2EApp(t, dataDir)`; sin eso `TestChatEndToEndWithAFakeAgent` no recibe token;
+- en cada test que use `phoneAppRules` con `startWith`, cambia `startWith(t, cfg, rules…)` por `startWithData(t, cfg, func(data string) { trustE2EApp(t, data) }, rules…)`. Por ejemplo:
 
 ```go
 	h := startWithData(t, "chat_port = "+port+"\n", func(data string) { trustE2EApp(t, data) }, phoneAppRules(port)...)
@@ -3063,7 +3065,7 @@ git add host/cmd/adbuddy/e2e_test.go
 git commit -m "test(host): startWithData prepara el directorio de datos antes de arrancar serve
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-git add host/internal/cli/phone_test.go host/cmd/adbuddy/phone_e2e_test.go
+git add host/internal/cli/phone_test.go host/cmd/adbuddy/phone_e2e_test.go host/cmd/adbuddy/chat_e2e_test.go
 git commit -m "test(host): el adb falso de serve sirve la app y su certificado
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
