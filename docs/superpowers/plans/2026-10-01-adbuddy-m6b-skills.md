@@ -1502,7 +1502,7 @@ Nada de esto se prueba sin móvil ni sin permiso explícito del usuario (nunca s
 - Que `claude`, `codex`, `gemini` y `opencode` listan las nueve skills desde un entorno recién creado (`/skills` o equivalente; solo lectura), y que Gemini CLI carga `AGENTS.md` por `.gemini/settings.json`.
 - Una pasada de solo lectura de `device-profile`, de `permissions-audit` (hasta la propuesta), de `storage-cleanup` (hasta la tabla) y de `debloat` (hasta el lote propuesto) en el Pixel del usuario.
 - Un cambio real y deshecho con `battery` (animaciones) y con `organize-files` (una carpeta de prueba), con el usuario delante.
-- `home-screen` en el lanzador de su Pixel (la más frágil): cuántos intentos necesita.
+- `home-screen` en el lanzador de su Pixel (la más frágil): cuántos intentos necesita y si `input swipe` arrastra de verdad; alternativas `input draganddrop` o `input motionevent DOWN/MOVE/UP`.
 - `build-utility-apk` de principio a fin en un equipo sin SDK, con el usuario eligiendo entre instalar o no.
 - Que la salida de `adbuddy env init` agrupa bien en Windows (`filepath.ToSlash`) y en Linux.
 - Un ejemplo con script de `adb shell` ejecutado desde PowerShell 5.1 y desde Codex en Windows, para ver que el entrecomillado llega entero.

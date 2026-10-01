@@ -81,3 +81,10 @@ Pendiente final: nota de §2.5 (el agente adapta el entrecomillado a su shell) e
 Task 6: re-revisión ronda 1 (rereviewer Sonnet): 18/18 ADDRESSED, sin rotura Critical/Important
 Task 6: complete (commits a4c29a4..f754605, 1 ronda de arreglos)
 Task 6: minor (deferred): backup-to-pc: `find` recursivo vs `stat` de un nivel (decir "primer nivel"); un fichero normal dentro de una carpeta oculta (`.thumbnails/`) sale 🔴 por tramo oculto: decir "o dentro de una carpeta que empieza por punto"; `NOTES.md` "where they keep the copies" roza con "siempre dentro del entorno"; mensaje del commit dice que quitó casos de `bad` y solo movió uno.
+
+Task 7: Ruling: el filtro `wipe` de la guarda pasa de subcadena a `(^|[^a-z])wipe` (no casa `swipe`) y `input swipe` vuelve a bloques ```adb (🟡, sin inverso en el diario) — el filtro ancho dejaba los ejemplos de arrastre fuera de la comprobación — cuesta que `datawipe`/`rewipe` (con letra delante) ya no se rechacen (no existen comandos así).
+Task 7: Ruling: `input swipe` probablemente no arrastra en muchos lanzadores (no tiene la pausa de una pulsación larga); se mantiene la skill con "tras UN intento sin movimiento = fallo; dos ⇒ parar" y se apunta en validaciones manuales (alternativas `input draganddrop` y `input motionevent DOWN/MOVE/UP`) — decidirlo con el Pixel — cuesta que home-screen falle en algunos lanzadores (para y avisa).
+Task 7: review opus (810e547): guarda correcta; 2 Importantes de texto (menú del icono tras la pulsación larga; accesos especiales no revocables con pm revoke) + minores; ronda 1 (4fc005f): re-revisión (Sonnet) 13/13 ADDRESSED.
+Task 7: complete (commits 0178bf0..4fc005f, 1 ronda de arreglos)
+Task 7: minor (deferred): home-screen: línea suelta con espacio tras el bloque `tap "Cancel"`; "Do not insist after two failed tries" vs "one try = fallo"; permissions-audit línea 19 "Revoking is red" sin la excepción yellow de appops; regla 3 del paso 4 "or that is on the screen" vaga; sin bloque `screen` tras Atrás.
+Task 7: nota: `TestRemoteOnClientGoneWhileAsking` (internal/cli) falló una vez por temporización en la máquina Windows y pasó a la segunda; no es de M6b — mirar en la CI.
