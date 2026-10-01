@@ -29,6 +29,13 @@ class ConversationViewTest {
         assertEquals(Headline(R.string.notif_stopped), ConversationView.of(state("stopped"), cut = false).headline())
     }
 
+    @Test fun theLockScreenNeverShowsTheActivityNorTheHostName() {
+        assertEquals(Headline(R.string.notif_working), ConversationView.of(state(), cut = false).publicHeadline())
+        assertEquals(Headline(R.string.notif_public_connected), ConversationView.of(state("idle"), cut = false).publicHeadline())
+        assertEquals(Headline(R.string.notif_waiting), ConversationView.of(state("waiting"), cut = false).publicHeadline())
+        assertEquals(Headline(R.string.status_waiting), ConversationView.of(state(conn = BridgeState.Connection.WAITING), cut = false).publicHeadline())
+    }
+
     @Test fun withoutAConnectionTheLinkStatusSpeaks() {
         val v = ConversationView.of(state(conn = BridgeState.Connection.WAITING), cut = false)
         assertEquals(Headline(R.string.status_waiting), v.headline())

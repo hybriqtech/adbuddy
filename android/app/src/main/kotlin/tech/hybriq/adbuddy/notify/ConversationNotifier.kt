@@ -33,6 +33,8 @@ object ConversationNotifier {
 
     fun build(ctx: Context, v: ConversationView, ts: Long): Notification {
         val h = v.headline()
+        val p = v.publicHeadline()
+        val publicLine = if (p.arg != null) ctx.getString(p.res, p.arg) else ctx.getString(p.res)
         val headline = if (h.arg != null) ctx.getString(h.res, h.arg) else ctx.getString(h.res)
         val agentName = v.agent.ifEmpty { ctx.getString(R.string.app_name) }
         val me = Person.Builder().setName(ctx.getString(R.string.notif_you)).build()
@@ -54,7 +56,7 @@ object ConversationNotifier {
         val public = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_CONVERSATION)
             .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
             .setContentTitle(ctx.getString(R.string.app_name))
-            .setContentText(headline)
+            .setContentText(publicLine)
             .build()
 
         val b = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_CONVERSATION)

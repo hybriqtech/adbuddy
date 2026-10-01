@@ -32,6 +32,15 @@ data class ConversationView(
         else -> Headline(R.string.status_connected, status.host)
     }
 
+    /**
+     * What the lock screen may show: no activity (it says what the agent touches on the phone) and no PC name.
+     */
+    fun publicHeadline(): Headline = when (val h = headline()) {
+        Headline(R.string.notif_working_on, h.arg) -> Headline(R.string.notif_working)
+        Headline(R.string.status_connected, h.arg) -> Headline(R.string.notif_public_connected)
+        else -> h
+    }
+
     companion object {
         const val MAX_TEXT = 300
 

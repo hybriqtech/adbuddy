@@ -9,6 +9,7 @@
     <string name="notif_working_on">Trabajando: %1$s</string>
     <string name="notif_waiting">Esperándote</string>
     <string name="notif_stopped">El agente se ha detenido</string>
+    <string name="notif_public_connected">Conectado</string>
     <string name="notif_you">Tú</string>
     <string name="notif_reply">Responder</string>
     <string name="notif_reply_hint">Escribe al agente</string>

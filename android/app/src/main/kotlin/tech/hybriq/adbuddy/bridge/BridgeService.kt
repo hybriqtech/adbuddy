@@ -106,10 +106,12 @@ class BridgeService : LifecycleService() {
             ACTION_RESUME -> app.bridge.pause(false)
             // Reply and capture put something in the agent's hands: never with the phone locked (API 30 has no
             // setAuthenticationRequired, and the lock screen must not be a way in on any version).
-            ACTION_REPLY -> if (!locked()) {
-                val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(ConversationNotifier.KEY_REPLY)?.toString()
-                if (!text.isNullOrBlank()) app.chat.send(text)
-                // The "sending" wheel of the direct reply stays until the notification is posted again.
+            ACTION_REPLY -> {
+                if (!locked()) {
+                    val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(ConversationNotifier.KEY_REPLY)?.toString()
+                    if (!text.isNullOrBlank()) app.chat.send(text)
+                }
+                // The "sending" wheel of the direct reply stays until the notification is posted again (also when it was ignored).
                 shown?.let { post(it) }
             }
             ACTION_CAPTURE -> if (!locked()) {
