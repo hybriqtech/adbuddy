@@ -219,4 +219,48 @@ class BridgeStateTest {
         val next = s.apply(msg(1, Protocol.CHAT_MESSAGE, """{"id":"m_1","role":"user","text":"hi"}"""))
         assertEquals(s.copy(lastSeq = 1), next)
     }
+
+    /** A new session makes every reducer forget its part (Reducer.reset), the chat and the remote mode included. */
+    @Test fun aNewSessionResetsEveryArea() {
+        val s = BridgeState(
+            session = "s_1", lastSeq = 4, sessionState = SessionState(paused = true),
+            chat = ChatState(messages = listOf(ChatMessage(id = "m_1", role = "user"))),
+            remote = RemoteState(enabled = true, address = "192.0.2.7:5555"),
+        ).apply(welcome("s_2"))
+        assertEquals(ChatState(), s.chat)
+        assertEquals(RemoteState(), s.remote)
+        assertFalse(s.sessionState.paused)
+        assertEquals(0L, s.lastSeq)
+    }
+
+    /** An unreadable snapshot drops what it should have replaced, but keeps the session's state (as in M2). */
+    @Test fun anUnreadableSnapshotResetsEveryArea() {
+        val s = BridgeState(session = "s_1", remote = RemoteState(enabled = true))
+            .apply(msg(1, Protocol.SESSION_STATE, """{"state":"working","paused":true}"""))
+            .apply(msg(2, Protocol.CONFIRM_REQUEST, question))
+            .apply(msg(3, Protocol.SNAPSHOT, """{"pending":"nope"}"""))
+        assertTrue(s.pending.isEmpty())
+        assertEquals(RemoteState(), s.remote)
+        assertEquals(SessionState(state = "working", paused = true), s.sessionState)
+        assertEquals(3L, s.lastSeq)
+    }
+
+    /** A dropped connection only forgets what was being sent; the chat and the remote mode stay. */
+    @Test fun aDisconnectionKeepsTheAreas() {
+        val chat = ChatState(messages = listOf(ChatMessage(id = "m_1", role = "user")))
+        val s = BridgeState(session = "s_1", chat = chat, remote = RemoteState(enabled = true))
+            .apply(msg(1, Protocol.CONFIRM_REQUEST, question)).answered("j_1").disconnected()
+        assertEquals(chat, s.chat)
+        assertEquals(RemoteState(enabled = true), s.remote)
+        assertEquals(listOf("j_1"), s.pending.map { it.id })
+        assertTrue(s.answering.isEmpty())
+    }
+
+    /** Every reducer has its own reset: the same session keeps its state. */
+    @Test fun theSameSessionKeepsEveryArea() {
+        val chat = ChatState(messages = listOf(ChatMessage(id = "m_1", role = "user")))
+        val s = BridgeState(session = "s_1", lastSeq = 4, chat = chat).apply(welcome("s_1"))
+        assertEquals(chat, s.chat)
+        assertEquals(4L, s.lastSeq)
+    }
 }

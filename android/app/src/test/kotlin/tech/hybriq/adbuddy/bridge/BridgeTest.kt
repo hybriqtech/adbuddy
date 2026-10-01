@@ -407,4 +407,71 @@ class BridgeTest {
         assertEquals(null, frames.poll(200, TimeUnit.MILLISECONDS))
         bridge.stop()
     }
+
+    /** A listener or an onResult that throws does not cut the channel nor keep the others from being called. */
+    @Test fun aThrowingCallbackDoesNotCutTheChannel() {
+        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
+        val others = LinkedBlockingQueue<Message>()
+        bridge.listen(Protocol.ERROR) { throw IllegalStateException("a bug in a listener") }
+        bridge.listen(Protocol.ERROR) { others.add(it) }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+
+        val rid = bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { throw IllegalStateException("a bug in onResult") }
+        assertEquals(rid, hosts[0].next().rid)
+        hosts[0].send("""{"v":1,"rid":"$rid","type":"error","ts":"x","payload":{"code":"failed","text":"x"}}""")
+        assertEquals("the other listener still hears it", rid, others.poll(5, TimeUnit.SECONDS)!!.rid)
+
+        hosts[0].send("""{"v":1,"seq":1,"type":"session.state","ts":"x","payload":{"state":"working"}}""")
+        waitFor("the socket is still alive") { bridge.state.value.sessionState.state == "working" }
+        assertEquals(BridgeState.Connection.CONNECTED, bridge.state.value.connection)
+        assertEquals("no reconnection", 1, server.requestCount)
+        bridge.stop()
+    }
+
+    /**
+     * stop() fails the requests still waiting, and an onResult that throws there
+     * does not keep the others from failing. Both throw: whatever the order of
+     * the pending map, one that throws comes before another.
+     */
+    @Test fun stopFailsThePendingRequests() {
+        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        val first = CompletableFuture<Message?>()
+        val second = CompletableFuture<Message?>()
+        assertNotNull(bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { first.complete(it); throw IllegalStateException("bug") })
+        assertNotNull(bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { second.complete(it); throw IllegalStateException("bug") })
+        hosts[0].next()
+        hosts[0].next()
+        bridge.stop()
+        assertEquals(null, first.get(5, TimeUnit.SECONDS))
+        assertEquals(null, second.get(5, TimeUnit.SECONDS))
+    }
+
+    /** When the host drops the socket, an onResult that throws in failPending does not stop the reconnection loop. */
+    @Test fun aThrowingOnResultDoesNotStopTheReconnection() {
+        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        val failed = CompletableFuture<Message?>()
+        assertNotNull(bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { failed.complete(it); throw IllegalStateException("bug") })
+        hosts[0].next()
+        hosts[0].ws!!.close(1000, "restart")
+        assertEquals(null, failed.get(5, TimeUnit.SECONDS))
+        assertEquals("the app connects again", Protocol.HELLO, hosts[1].next().type)
+        bridge.stop()
+    }
+
+    /** Before the welcome nothing is sent: the host reads the hello first. */
+    @Test fun nothingIsSentBeforeTheWelcome() {
+        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
+        bridge.start(link())
+        assertEquals(Protocol.HELLO, hosts[0].next().type) // the socket is open, but no welcome yet
+        assertEquals(null, bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { })
+        assertFalse(bridge.send(Protocol.TERMINAL_UNWATCH, JsonObject(emptyMap())))
+        assertFalse(bridge.sendFrame("00112233445566778899aabbccddeeff", 0, "x".toByteArray()))
+        assertEquals("nothing reached the host", null, hosts[0].received.poll(300, TimeUnit.MILLISECONDS))
+        bridge.stop()
+    }
 }

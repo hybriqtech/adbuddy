@@ -14,4 +14,22 @@ interface Reducer {
 
     /** Takes its part of a readable snapshot. s already has the snapshot's lastSeq. */
     fun snapshot(s: BridgeState, snap: Snapshot): BridgeState
+
+    /** Forgets what of its part can no longer be trusted, for the reason why. */
+    fun reset(s: BridgeState, why: Reset): BridgeState
+}
+
+/** Why BridgeState asks every reducer to forget part of what it knows. */
+enum class Reset {
+    /** The host restarted: nothing of the old session holds. */
+    NEW_SESSION,
+
+    /** A snapshot could not be read: what it should have replaced may be stale. */
+    UNREADABLE_SNAPSHOT,
+
+    /** The socket is gone: what was sent on it may never have reached the host. */
+    DISCONNECTED,
+
+    /** The host or the app is too old: nothing more comes until a new welcome. */
+    INCOMPATIBLE,
 }

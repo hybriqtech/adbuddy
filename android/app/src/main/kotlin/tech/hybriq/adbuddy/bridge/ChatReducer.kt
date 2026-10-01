@@ -15,4 +15,9 @@ object ChatReducer : Reducer {
     override fun event(s: BridgeState, m: Message): BridgeState = s
 
     override fun snapshot(s: BridgeState, snap: Snapshot): BridgeState = s
+
+    override fun reset(s: BridgeState, why: Reset): BridgeState = when (why) {
+        Reset.NEW_SESSION, Reset.UNREADABLE_SNAPSHOT -> s.copy(chat = ChatState())
+        Reset.DISCONNECTED, Reset.INCOMPATIBLE -> s
+    }
 }

@@ -48,34 +48,34 @@ data class BridgeState(
         val w = Protocol.payload<Welcome>(m)
         // A welcome this app cannot read comes from a host too old (or too odd) to talk to.
         if (w == null || w.protocol < Protocol.MIN_HOST_PROTOCOL) {
-            return copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.HOST, pending = emptyList(), answering = emptySet())
+            return reset(Reset.INCOMPATIBLE).copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.HOST)
         }
         // A new session (the host restarted) starts over: nothing of the old one holds.
         if (w.session != session) {
-            return copy(
-                session = w.session, lastSeq = 0, sessionState = SessionState(), pending = emptyList(), answering = emptySet(),
-                connection = Connection.CONNECTED, outdated = Outdated.NONE,
-            )
+            return reset(Reset.NEW_SESSION).copy(session = w.session, lastSeq = 0, connection = Connection.CONNECTED, outdated = Outdated.NONE)
         }
         return copy(connection = Connection.CONNECTED, outdated = Outdated.NONE)
     }
 
     private fun snapshot(m: Message): BridgeState {
         val seq = if (m.seq > 0) m.seq else lastSeq
-        // Unreadable: the old questions may be answered already, so none is kept.
-        val snap = Protocol.payload<Snapshot>(m) ?: return copy(lastSeq = seq, pending = emptyList(), answering = emptySet())
+        // Unreadable: what it should have replaced may be stale.
+        val snap = Protocol.payload<Snapshot>(m) ?: return copy(lastSeq = seq).reset(Reset.UNREADABLE_SNAPSHOT)
         return REDUCERS.fold(copy(lastSeq = seq)) { s, r -> r.snapshot(s, snap) }
     }
 
+    /** Every reducer forgets what of its part can no longer be trusted (Reducer.reset). */
+    private fun reset(why: Reset): BridgeState = REDUCERS.fold(this) { s, r -> r.reset(s, why) }
+
     /** The host closed the channel because this app is too old. */
     fun appOutdated(): BridgeState =
-        copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.APP, pending = emptyList(), answering = emptySet())
+        reset(Reset.INCOMPATIBLE).copy(connection = Connection.INCOMPATIBLE, outdated = Outdated.APP)
 
     /**
      * The socket is gone. An answer sent on it may never have reached the host,
      * so its question can be answered again (the host ignores a repeat).
      */
-    fun disconnected(): BridgeState = copy(connection = Connection.WAITING, answering = emptySet())
+    fun disconnected(): BridgeState = reset(Reset.DISCONNECTED).copy(connection = Connection.WAITING)
 
     /**
      * Marks a question the person just answered here. It stays in pending until

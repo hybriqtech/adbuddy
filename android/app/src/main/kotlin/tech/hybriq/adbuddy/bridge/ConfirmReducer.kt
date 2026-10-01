@@ -30,6 +30,15 @@ object ConfirmReducer : Reducer {
         else -> s
     }
 
+    override fun reset(s: BridgeState, why: Reset): BridgeState = when (why) {
+        // Nothing of the old session holds.
+        Reset.NEW_SESSION -> s.copy(sessionState = SessionState(), pending = emptyList(), answering = emptySet())
+        // The old questions may be answered already, so none is kept.
+        Reset.UNREADABLE_SNAPSHOT, Reset.INCOMPATIBLE -> s.copy(pending = emptyList(), answering = emptySet())
+        // An answer sent on the socket may never have reached the host: its question can be answered again.
+        Reset.DISCONNECTED -> s.copy(answering = emptySet())
+    }
+
     override fun snapshot(s: BridgeState, snap: Snapshot): BridgeState {
         val entries = snap.journal.mapNotNull {
             try {

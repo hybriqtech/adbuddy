@@ -157,7 +157,23 @@ class Bridge internal constructor(
             val ids = pending.filterValues { it.socket === ws }.keys
             ids.mapNotNull { pending.remove(it) }
         }
-        failed.forEach { it.onResult(null) }
+        failed.forEach { p -> safely { p.onResult(null) } }
+    }
+
+    /**
+     * Runs a callback of another part of the app (a listener, onResult). Its
+     * exception stays there: it must not cut the socket (OkHttp's reader),
+     * stop the reconnection loop (failPending runs in it) nor leave the other
+     * callbacks uncalled. It is not logged: the logs of this process must
+     * never risk carrying a message's content. An Error (TODO(), out of
+     * memory) still ends the process.
+     */
+    private inline fun safely(f: () -> Unit) {
+        try {
+            f()
+        } catch (e: Exception) {
+            // A bug of that callback; the channel goes on.
+        }
     }
 
     /** Callbacks of one socket. Only the current socket changes the state; any socket completes its own attempt. */
@@ -175,17 +191,19 @@ class Bridge internal constructor(
             val m = Protocol.decode(text) ?: return
             val (next, answered) = synchronized(lock) {
                 if (webSocket !== socket) return
-                _state.updateAndGet { it.apply(m) } to m.rid?.let { pending.remove(it) }
+                // Only a request sent on this socket: one of an older socket already failed or is failing.
+                val waiting = m.rid?.let { rid -> pending[rid]?.takeIf { it.socket === webSocket }?.let { pending.remove(rid) } }
+                _state.updateAndGet { it.apply(m) } to waiting
             }
             if (next.connection == BridgeState.Connection.INCOMPATIBLE) {
                 webSocket.close(1000, "host too old")
-                answered?.onResult?.invoke(null)
+                answered?.let { p -> safely { p.onResult(null) } }
                 return
             }
             if (m.type == Protocol.WELCOME) attempt.welcomed = true
-            onMessage(m, next)
-            answered?.onResult?.invoke(m)
-            listeners[m.type]?.forEach { it(m) }
+            safely { onMessage(m, next) }
+            answered?.let { p -> safely { p.onResult(m) } }
+            listeners[m.type]?.forEach { l -> safely { l(m) } }
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
@@ -194,7 +212,7 @@ class Bridge internal constructor(
             synchronized(lock) {
                 if (webSocket !== socket || _state.value.connection != BridgeState.Connection.CONNECTED) return
             }
-            frameListeners.forEach { it(chunk) }
+            frameListeners.forEach { l -> safely { l(chunk) } }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
