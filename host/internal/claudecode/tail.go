@@ -25,10 +25,11 @@ const (
 type Tailer struct {
 	path    string
 	parser  *Parser
-	off     int64 // where the next read starts: after the last newline read
+	off     int64 // where the next read starts: after the last byte read (a partial line waits in partial)
 	partial []byte
-	skip    bool // inside a line longer than MaxLine, up to its newline
-	started bool // the first Poll found the file
+	skip    bool        // inside a line longer than MaxLine, up to its newline
+	started bool        // the first Poll found the file
+	info    os.FileInfo // identity of the file the first Poll opened
 	fromEnd bool
 	seen    bool // some line has been read
 }
@@ -52,6 +53,15 @@ func (t *Tailer) Seen() bool { return t.seen }
 // Poll reads what was written since the last call. A missing file is not an
 // error (it may not exist yet): it returns nothing.
 func (t *Tailer) Poll() ([]Event, error) {
+	// The path is validated once when the owner gets it, but it can change
+	// afterwards: it is checked at every open that it is no link.
+	if li, err := os.Lstat(t.path); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	} else if !li.Mode().IsRegular() {
+		return nil, errors.New("the transcript is not a regular file")
+	}
 	f, err := os.Open(t.path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -70,11 +80,23 @@ func (t *Tailer) Poll() ([]Event, error) {
 	size := fi.Size()
 	if !t.started {
 		t.started = true
+		t.info = fi
 		if t.fromEnd {
 			t.off = size
+			if size > 0 {
+				// The file may end in the middle of a line: what is left
+				// of it is not a line of its own.
+				var last [1]byte
+				if _, err := f.ReadAt(last[:], size-1); err == nil && last[0] != '\n' {
+					t.skip = true
+				}
+			}
 		}
 	}
-	if size < t.off { // truncated or rewritten: start again
+	if !os.SameFile(t.info, fi) { // replaced by another file: start again
+		t.info = fi
+		t.off, t.partial, t.skip = 0, nil, false
+	} else if size < t.off { // truncated or rewritten: start again
 		t.off, t.partial, t.skip = 0, nil, false
 	}
 	if size == t.off {
