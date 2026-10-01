@@ -78,4 +78,47 @@ class TerminalFeedTest {
         assertEquals("the host caps at 200x100 and the app asks for what fits", 200, r.cols)
         assertEquals(5, r.rows)
     }
+
+    private fun lastWatch() = Protocol.json.decodeFromJsonElement(tech.hybriq.adbuddy.bridge.TerminalWatch.serializer(), ch.sent.last().payload)
+    private fun snapshot(offset: Long = 5) = ch.emit(Protocol.TERMINAL_SNAPSHOT, """{"epoch":"e1","offset":$offset,"cols":80,"rows":24,"data":"${b64("S")}"}""")
+    private fun gap() = ch.emit(Protocol.TERMINAL_OUTPUT, """{"epoch":"e1","offset":99,"data":"${b64("x")}"}""")
+
+    @Test fun theSecondWatchCarriesWhatTheModelHas() {
+        feed.attach { }
+        gap()
+        assertEquals("", lastWatch().epoch); assertEquals(0L, lastWatch().offset)
+        snapshot(5)
+        gap()
+        assertEquals("e1", lastWatch().epoch); assertEquals(5L, lastWatch().offset)
+    }
+
+    @Test fun aResyncAnsweredWithOutputInOrderCanAskAgain() {
+        feed.attach { got += it }
+        snapshot(5)
+        gap() // resync #1
+        ch.emit(Protocol.TERMINAL_OUTPUT, """{"epoch":"e1","offset":5,"data":"${b64("ab")}"}""") // the host answered with output, not a snapshot
+        gap()
+        assertEquals(3, types().count { it == Protocol.TERMINAL_WATCH })
+    }
+
+    @Test fun aReconnectWithAResyncPendingCanAskAgain() {
+        feed.attach { }
+        snapshot(5)
+        gap()
+        feed.onConnectedChanged(true)
+        gap()
+        assertEquals(4, types().count { it == Protocol.TERMINAL_WATCH })
+    }
+
+    @Test fun aReconnectWithoutAViewSendsNothing() {
+        feed.onConnectedChanged(true)
+        assertTrue(ch.sent.isEmpty())
+    }
+
+    @Test fun aSizeFromTheHostReachesTheSink() {
+        feed.attach { got += it }
+        snapshot(5)
+        ch.emit(Protocol.TERMINAL_SIZE, """{"epoch":"e1","offset":5,"cols":100,"rows":30}""")
+        assertEquals(listOf("Reset", "Resize"), got.map { it::class.simpleName })
+    }
 }

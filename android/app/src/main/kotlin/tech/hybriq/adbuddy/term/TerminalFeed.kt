@@ -27,7 +27,7 @@ class TerminalFeed(private val channel: Channel) {
     private var resyncing = false
 
     init {
-        channel.listen(Protocol.TERMINAL_SNAPSHOT) { m -> Protocol.payload<TerminalSnapshot>(m)?.let { s -> feed { resyncing = false; model.onSnapshot(s) } } }
+        channel.listen(Protocol.TERMINAL_SNAPSHOT) { m -> Protocol.payload<TerminalSnapshot>(m)?.let { s -> feed { model.onSnapshot(s) } } }
         channel.listen(Protocol.TERMINAL_OUTPUT) { m -> Protocol.payload<TerminalOutput>(m)?.let { o -> feed { model.onOutput(o) } } }
         channel.listen(Protocol.TERMINAL_SIZE) { m -> Protocol.payload<TerminalSize>(m)?.let { s -> feed { model.onSize(s) } } }
     }
@@ -35,12 +35,13 @@ class TerminalFeed(private val channel: Channel) {
     /**
      * Runs a model step and hands its effects to the view, under the lock: attach() replays under it too, so a
      * Write can never overtake the Reset it belongs after (the sink only posts to the main thread, so it is cheap).
-     * A Resync becomes a new watch, once until the snapshot it asks for arrives.
+     * A Resync becomes a new watch, once until the stream is back in order.
      */
     private fun feed(step: () -> List<TermEffect>) {
         val watch = synchronized(lock) {
             val fx = step()
             val target = sink
+            if (fx.any { it !is TermEffect.Resync }) resyncing = false // the stream is in order again
             if (target != null) fx.forEach { if (it !is TermEffect.Resync) target.apply(it) }
             if (target != null && !resyncing && fx.any { it is TermEffect.Resync }) {
                 resyncing = true
@@ -74,7 +75,7 @@ class TerminalFeed(private val channel: Channel) {
 
     /** The channel is back (or gone): a view on screen watches again, from what it has. */
     fun onConnectedChanged(connected: Boolean) {
-        val watch = synchronized(lock) { if (connected && sink != null) model.watch() else null }
+        val watch = synchronized(lock) { if (connected && sink != null) { resyncing = false; model.watch() } else null }
         if (watch != null) sendWatch(watch)
     }
 

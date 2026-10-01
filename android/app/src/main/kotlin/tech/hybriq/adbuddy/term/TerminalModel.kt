@@ -47,16 +47,19 @@ class TerminalModel {
     }
 
     fun onSnapshot(s: TerminalSnapshot): List<TermEffect> {
+        if (!validSize(s.cols, s.rows)) return listOf(TermEffect.Resync)
         val bytes = decode(s.data) ?: return listOf(TermEffect.Resync)
         epoch = s.epoch; offset = s.offset
         haveScreen = true; replayable = true
         val reset = TermEffect.Reset(s.cols, s.rows, bytes)
-        base = reset; tail.clear(); tailBytes = 0; sizes.clear()
+        base = reset; tail.clear(); tailBytes = 0
+        // Sizes of this epoch still ahead of the snapshot stay; the rest belong to a stream that is gone.
+        sizes.removeAll { it.epoch != s.epoch || it.offset <= s.offset }
         return listOf(reset)
     }
 
     fun onOutput(o: TerminalOutput): List<TermEffect> {
-        if (!haveScreen || o.epoch != epoch || o.offset < 0 || o.offset > offset) return listOf(TermEffect.Resync)
+        if (!haveScreen || !replayable || o.epoch != epoch || o.offset < 0 || o.offset > offset) return listOf(TermEffect.Resync)
         val all = decode(o.data) ?: return listOf(TermEffect.Resync)
         val skip = offset - o.offset
         if (skip >= all.size) return emptyList() // everything was seen already
@@ -64,8 +67,9 @@ class TerminalModel {
     }
 
     fun onSize(s: TerminalSize): List<TermEffect> {
-        if (!haveScreen || s.epoch != epoch) return emptyList()
+        if (!haveScreen || s.epoch != epoch || !validSize(s.cols, s.rows)) return emptyList()
         if (s.offset > offset) {
+            if (sizes.size >= MAX_SIZES) { forget(); return listOf(TermEffect.Resync) }
             sizes.addLast(s)
             return emptyList()
         }
@@ -82,7 +86,7 @@ class TerminalModel {
 
     private fun resize(s: TerminalSize): TermEffect {
         val e = TermEffect.Resize(s.cols, s.rows)
-        keep(e, 0)
+        keep(e, RESIZE_COST)
         return e
     }
 
@@ -119,10 +123,17 @@ class TerminalModel {
         if (tailBytes > MAX_TAIL) { replayable = false; tail.clear(); tailBytes = 0 }
     }
 
+    private fun validSize(cols: Int, rows: Int) = cols in 1..MAX_DIM && rows in 1..MAX_DIM
+
     private fun decode(b64: String): ByteArray? = try { Base64.getDecoder().decode(b64) } catch (e: IllegalArgumentException) { null }
 
     companion object {
         /** Output kept after the snapshot to redraw a new view (spec M3 §7.3). */
         const val MAX_TAIL = 1024 * 1024
+
+        /** A Resize in the tail counts as this many bytes, and no more than MAX_SIZES wait for their byte. */
+        const val RESIZE_COST = 16
+        const val MAX_SIZES = 256
+        const val MAX_DIM = 1000
     }
 }

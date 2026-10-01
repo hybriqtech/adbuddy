@@ -102,4 +102,74 @@ class TerminalModelTest {
         m.forget()
         assertEquals("", m.watch().epoch); assertEquals(0L, m.watch().offset)
     }
+
+    @Test fun aSnapshotKeepsTheQueuedSizesThatAreStillAhead() {
+        val m = TerminalModel(); m.onSnapshot(snap(offset = 10))
+        m.onSize(TerminalSize("e1", 20, 100, 30)); m.onSize(TerminalSize("e1", 12, 90, 20))
+        m.onSnapshot(snap(offset = 15))
+        val fx = m.onOutput(out(15, "abcdefghij"))
+        assertEquals("the one at 12 is behind the snapshot and dropped; the one at 20 stays", listOf("Write", "Resize", "Write"), fx.map { it::class.simpleName })
+        assertEquals(100, (fx[1] as TermEffect.Resize).cols)
+        assertEquals("abcde", text(fx[0]))
+    }
+
+    @Test fun aSizeOfAnotherEpochIsDroppedBySnapshot() {
+        val m = TerminalModel(); m.onSnapshot(snap(epoch = "e1", offset = 10))
+        m.onSize(TerminalSize("e1", 20, 100, 30))
+        m.onSnapshot(snap(epoch = "e2", offset = 0))
+        val fx = m.onOutput(out(0, "abcdefghijklmnopqrstuvwxyz", epoch = "e2"))
+        assertEquals(listOf("Write"), fx.map { it::class.simpleName })
+    }
+
+    @Test fun resizesCountInTheTailAndStartOverWhenItIsFull() {
+        val m = TerminalModel(); m.onSnapshot(snap(offset = 10))
+        repeat(TerminalModel.MAX_TAIL / 16 + 1) { m.onSize(TerminalSize("e1", 10, 100, 30)) }
+        assertTrue(m.replay().isEmpty())
+        assertEquals("", m.watch().epoch)
+    }
+
+    @Test fun tooManyQueuedSizesAsksForTheScreenAgain() {
+        val m = TerminalModel(); m.onSnapshot(snap(offset = 10))
+        repeat(256) { assertTrue(m.onSize(TerminalSize("e1", 1000L + it, 100, 30)).isEmpty()) }
+        assertEquals(listOf(TermEffect.Resync), m.onSize(TerminalSize("e1", 5000, 100, 30)))
+        assertEquals("", m.watch().epoch)
+    }
+
+    @Test fun absurdSizesAreIgnored() {
+        val m = TerminalModel()
+        for ((c, r) in listOf(0 to 24, 80 to 0, -1 to 24, 1001 to 24, 80 to 1001)) {
+            assertEquals(listOf(TermEffect.Resync), m.onSnapshot(TerminalSnapshot("e1", 0, c, r, b64("S"))))
+        }
+        m.onSnapshot(snap(offset = 10))
+        for ((c, r) in listOf(0 to 24, 80 to 0, 1001 to 24, 80 to 1001)) {
+            assertTrue(m.onSize(TerminalSize("e1", 10, c, r)).isEmpty())
+        }
+        assertTrue(m.replay().drop(1).isEmpty())
+        val big = m.onSnapshot(TerminalSnapshot("e1", 0, 300, 150, b64("S"))).single() as TermEffect.Reset
+        assertEquals("a PC terminal may be bigger than 200x100", 300, big.cols)
+        assertEquals(1000, (m.onSize(TerminalSize("e1", 0, 1000, 1000)).single() as TermEffect.Resize).rows)
+    }
+
+    @Test fun whileNotReplayableOutputAsksForTheScreenAndIsNotWritten() {
+        val m = TerminalModel(); m.onSnapshot(snap(offset = 0, text = "S"))
+        var off = 0L
+        val chunk = "x".repeat(64 * 1024)
+        repeat(17) { m.onOutput(out(off, chunk)); off += chunk.length }
+        assertTrue(m.replay().isEmpty())
+        assertEquals(listOf(TermEffect.Resync), m.onOutput(out(off, "more")))
+        m.onSnapshot(snap(offset = off + 1))
+        assertEquals("abc", text(m.onOutput(out(off + 1, "abc")).single()))
+    }
+
+    @Test fun aSnapshotWithBadBase64AsksAgain() {
+        val m = TerminalModel()
+        assertEquals(listOf(TermEffect.Resync), m.onSnapshot(TerminalSnapshot("e1", 0, 80, 24, "***")))
+        assertEquals("", m.watch().epoch)
+    }
+
+    @Test fun replayKeepsTheResizesOfTheTail() {
+        val m = TerminalModel(); m.onSnapshot(snap(offset = 10, text = "S"))
+        m.onOutput(out(10, "ab")); m.onSize(TerminalSize("e1", 12, 100, 30)); m.onOutput(out(12, "cd"))
+        assertEquals(listOf("Reset", "Write", "Resize", "Write"), m.replay().map { it::class.simpleName })
+    }
 }
