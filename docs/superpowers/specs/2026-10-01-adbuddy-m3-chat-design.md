@@ -97,7 +97,14 @@ Cumple el protocolo §7: la salida se agrupa cada 50 ms en `terminal.output` (ha
 El host alimenta un emulador de terminal en memoria con toda la salida del PTY. Lo usan `terminal.snapshot`, el enganche del PC (§3.4) y la detección del diálogo de confianza (§3.3).
 
 - **Biblioteca:** `github.com/charmbracelet/x/vt` (MIT, Go puro), fijada a un commit concreto porque el módulo no tiene versiones etiquetadas. Da `Write`, `Resize`, `Render()` (la pantalla con estilos como ANSI) y modo alternativo de pantalla.
-- **La primera tarea de M3a es un spike** que valida la biblioteca con la salida real de Claude Code: graba una sesión de Claude Code en el PTY del host (en el PC del usuario, carpeta temporal), la pasa por el emulador y compara `Render()` escrito en una terminal limpia con la pantalla final. Si no la reproduce bien, el plan cambia al respaldo antes de seguir.
+- **Validado (spike S4, 2026-10-01, Claude Code 2.1.286 en ConPTY, commit de la biblioteca 7be62f4c612f):**
+  - el emulador reconstruye bien la pantalla viva de Claude Code (cabecera, prompt, respuesta con Unicode y barra de estado), también tras redimensionar;
+  - `Render()` separa las líneas con `
+` sin ``, así que el host forma el `terminal.snapshot` como borrado (`ESC[2J ESC[H`), `Render()` con `
+` cambiado a `
+` y el cursor colocado en su posición (`CursorPosition`). Así redibujado en un emulador limpio sale idéntico;
+  - Claude Code no hizo ninguna consulta a la terminal (posición del cursor, atributos). Las respuestas que genere el emulador del host se descartan: contestan las terminales de verdad (PC o xterm.js). Si un agente se queda esperando una respuesta sin ninguna terminal enganchada, se apunta como caso límite;
+  - en una carpeta temporal nueva, Claude Code no mostró el diálogo de confianza, así que la detección (§3.3) queda como red de seguridad.
 - **Respaldo** (si la biblioteca falla): cola de los últimos 256 KiB cortada en un salto de línea, precedida de un borrado de pantalla, y un cambio de tamaño de ida y vuelta para que la TUI se repinte (S3: Claude Code repinta la pantalla entera al redimensionar). No cambia el protocolo.
 - **Reanudación:** con `terminal.watch {epoch, offset}`, el host manda lo que falta si `epoch` es el actual y los bytes siguen en su cola de 256 KiB; si no, `terminal.snapshot`.
 
