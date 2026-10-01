@@ -47,8 +47,9 @@ class UiExecutorTest {
     private val sent = mutableListOf<UiResponse>()
     private var question = false
     private var paused = false
+    private var notification = false
     private val protected = mutableSetOf("com.example.bank")
-    private val x = UiExecutor({ screen }, { sent += it }, { now }, { it in protected }, { question }, { paused }, { it.run() })
+    private val x = UiExecutor({ screen }, { sent += it }, { now }, { it in protected }, { question }, { paused }, { notification }, { it.run() })
 
     private fun req(op: String, args: JsonElement = JsonObject(emptyMap()), id: String = "u_1", expires: String = "2026-10-01T10:00:10Z") =
         UiRequest(id, op, args, expires)
@@ -153,6 +154,24 @@ class UiExecutorTest {
         assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.SET_TEXT, obj("text" to "1234")))))
         assertEquals(ErrorCode.INVALID, error(x.run(req(UiOp.SET_TEXT, obj("text" to "")))))
         assertEquals(ErrorCode.INVALID, error(x.run(req(UiOp.SET_TEXT, obj("text" to "😀".repeat(4097))))))
+    }
+
+    @Test fun aRecentNotificationIsAProtectedScreen() {
+        notification = true
+        screen!!.focused = UiNode(pkg = "com.android.settings", cls = "android.widget.EditText", bounds = Box(0, 0, 10, 10), editable = true, focused = true)
+        assertEquals("true", x.run(req(UiOp.FOREGROUND)).result!!.jsonObject["protected"]!!.jsonPrimitive.content)
+        val d = x.run(req(UiOp.DUMP))
+        assertEquals(ErrorCode.PROTECTED, error(d))
+        assertEquals("A notification is on screen: ask the user to do this part.", d.error!!.text)
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.CLICK, obj("x" to 540, "y" to 1200)))))
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.CLICK, obj("text" to "Network & internet")))))
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.SET_TEXT, obj("text" to "hi")))))
+        assertTrue(screen!!.did.isEmpty())
+        notification = false
+        assertEquals("false", x.run(req(UiOp.FOREGROUND)).result!!.jsonObject["protected"]!!.jsonPrimitive.content)
+        assertTrue(x.run(req(UiOp.DUMP)).ok)
+        assertTrue(x.run(req(UiOp.CLICK, obj("x" to 540, "y" to 1200))).ok)
+        assertTrue(x.run(req(UiOp.SET_TEXT, obj("text" to "hi"))).ok)
     }
 
     @Test fun pausedNoTapsNorTyping() {

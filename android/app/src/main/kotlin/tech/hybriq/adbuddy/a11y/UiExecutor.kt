@@ -50,7 +50,8 @@ interface Screen {
 /**
  * Runs the host's ui.request (M5 spec §2-§4): one at a time, never twice the
  * same id, never once expired (in the host's clock), and never on ADBuddy, a
- * protected app or, while a 🔴 question waits, the system UI. It answers each
+ * protected app or, while a 🔴 question waits, the system UI, nor while a
+ * notification may be on screen (a heads-up). It answers each
  * one with send.
  */
 class UiExecutor(
@@ -60,6 +61,7 @@ class UiExecutor(
     private val isProtected: (String) -> Boolean,
     private val questionWaiting: () -> Boolean,
     private val paused: () -> Boolean,
+    private val notificationOnScreen: () -> Boolean,
     private val executor: Executor,
 ) {
     private val seen = object : LinkedHashMap<String, Boolean>() {
@@ -123,6 +125,7 @@ class UiExecutor(
     private fun pausedNow(r: UiRequest) = fail(r, ErrorCode.PROTECTED, "The agent is paused from the phone.")
 
     private fun dump(r: UiRequest, s: Screen, a: UiDumpArgs): UiResponse {
+        if (notificationOnScreen()) return notificationBlocked(r)
         val locked = s.locked()
         // Locked: there is no active app window, so the "last app seen" would be stale.
         val (pkg, activity) = if (locked) "" to "" else s.foreground()
@@ -136,6 +139,7 @@ class UiExecutor(
         val n = listOf(a.id != null, a.text != null, a.x != null || a.y != null).count { it }
         if (n != 1 || (a.x == null) != (a.y == null) || (a.x ?: 0) < 0 || (a.y ?: 0) < 0) return invalid(r)
         if (paused()) return pausedNow(r)
+        if (notificationOnScreen()) return notificationBlocked(r)
         if (s.locked()) return fail(r, ErrorCode.PROTECTED, "The phone is locked: ask the user to unlock it.")
         val fg = s.foreground().first
         if (guarded(fg)) return protectedApp(r, fg)
@@ -190,6 +194,7 @@ class UiExecutor(
         val n = a.text.codePointCount(0, a.text.length)
         if (n == 0 || n > UiLimits.MAX_SET_TEXT) return invalid(r)
         if (paused()) return pausedNow(r)
+        if (notificationOnScreen()) return notificationBlocked(r)
         if (s.locked()) return fail(r, ErrorCode.PROTECTED, "The phone is locked: ask the user to unlock it.")
         val fg = s.foreground().first
         if (guarded(fg)) return protectedApp(r, fg)
@@ -206,9 +211,11 @@ class UiExecutor(
         // Locked: unknown (empty), so the host falls back to dumpsys instead of trusting a stale app.
         if (s.locked()) return ok(r, UiForeground("", "", false), UiForeground.serializer())
         val (pkg, activity) = s.foreground()
-        val protected = pkg.isNotEmpty() && (guarded(pkg) || guardedOnScreen(s.windows()))
+        val protected = notificationOnScreen() || (pkg.isNotEmpty() && (guarded(pkg) || guardedOnScreen(s.windows())))
         return ok(r, UiForeground(pkg, activity, protected), UiForeground.serializer())
     }
+
+    private fun notificationBlocked(r: UiRequest) = fail(r, ErrorCode.PROTECTED, "A notification is on screen: ask the user to do this part.")
 
     private fun protectedApp(r: UiRequest, pkg: String) = fail(
         r, ErrorCode.PROTECTED,

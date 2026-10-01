@@ -3,9 +3,11 @@ package tech.hybriq.adbuddy.a11y
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.app.KeyguardManager
+import android.app.Notification
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.Display
 import android.view.Surface
@@ -45,6 +47,10 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
+            notifications.accept(event.className, event.packageName?.toString().orEmpty(), event.parcelableData is Notification)
+            return
+        }
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
         val cls = event.className?.toString().orEmpty()
@@ -180,6 +186,9 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
         private const val TAG = "ADBuddyA11y"
         private const val MAX_NODES = 8000
         private const val TAP_MS = 50L
+
+        /** Heads-up window shared with UiHelpers: a fresh service starts with none (the host covers that gap with the shade). */
+        val notifications = NotificationWindow(SystemClock::elapsedRealtime)
 
         /** The service while it is bound, or null. */
         @Volatile var current: AgentAccessibilityService? = null

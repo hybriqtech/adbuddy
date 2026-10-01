@@ -25,6 +25,7 @@ object UiHelpers {
             isProtected = protected::isProtected,
             questionWaiting = { app.bridge.state.value.pending.isNotEmpty() },
             paused = { app.bridge.state.value.sessionState.paused },
+            notificationOnScreen = AgentAccessibilityService.notifications::active,
             executor = work,
         )
         fun sendList() {
