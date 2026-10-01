@@ -3,11 +3,20 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/daemon"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+	"github.com/hybriqtech/adbuddy/host/internal/journal"
 )
 
 type permOut struct {
@@ -332,5 +341,92 @@ func TestChatSendIsBusyWithAnAttentionAndNoActiveAdapter(t *testing.T) {
 	r.l.raiseAttention()
 	if r.l.agentBusy() == "" {
 		t.Fatal("not busy with a dialog on the screen")
+	}
+}
+
+// recordingADB is an adb that records what ran; nothing here may reach it.
+type recordingADB struct {
+	mu   sync.Mutex
+	runs []string
+}
+
+func (a *recordingADB) Shell(context.Context, string) (string, int, error) { return "", 1, nil }
+func (a *recordingADB) Pull(context.Context, string, string) error         { return errors.New("no pull") }
+func (a *recordingADB) Run(_ context.Context, _ string, args []string, _ io.Reader, _, _ io.Writer) (int, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.runs = append(a.runs, strings.Join(args, " "))
+	return 0, nil
+}
+
+// countConfirmer counts the 🔴 confirmations asked and denies them.
+type countConfirmer struct {
+	mu    sync.Mutex
+	asked []confirm.Request
+}
+
+func (c *countConfirmer) Confirm(_ context.Context, r confirm.Request) confirm.Decision {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.asked = append(c.asked, r)
+	return confirm.Deny
+}
+
+// Review M6 (spec M4 §5.3 and §10): a "yes" (and a "yes, always") of the phone
+// to the agent's own question about `adb shell rm …` does not skip the shim:
+// the same command that reaches the daemon is still a 🔴 that asks.
+func TestPermissionYesDoesNotSkipTheShim(t *testing.T) {
+	data := shortDir(t)
+	secret, err := ipc.EnsureSecret(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cls, err := classify.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adb, conf := &recordingADB{}, &countConfirmer{}
+	ws := t.TempDir()
+	d := daemon.New(daemon.Options{
+		Classifier: cls, ADB: adb, Journal: journal.OpenSigned(filepath.Join(ws, "journal"), []byte("test key")), Confirmer: conf,
+		Serial: "dev1", Session: "s_1", Lang: "en", Workspace: ws,
+	})
+	srv, err := ipc.Listen(data, secret, func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit { return d.Handle(ctx, req, c) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve()
+	t.Cleanup(func() { srv.Close() })
+
+	r := newAgentRig(t)
+	const cmd = "adb shell rm -rf /sdcard/DCIM"
+	for _, decision := range []string{"allow", "allow_always"} {
+		req, out := r.ask(t, cmd)
+		if req.AllowAlways {
+			t.Fatal("offered for good")
+		}
+		r.answer(t, req.ID, decision)
+		if o := parsePerm(t, wait(t, out)); o.H.D.Behavior != "allow" || len(o.H.D.Updated) != 0 {
+			t.Fatalf("%s: %+v", decision, o)
+		}
+		before := len(conf.asked)
+		call := ipc.Request{Kind: ipc.KindExec, Argv: []string{"shell", "rm", "-rf", "/sdcard/DCIM"}, Cwd: ws, Env: map[string]string{"ADBUDDY_SOURCE": "agent"}}
+		exit, err := ipc.Call(context.Background(), data, call, nil, io.Discard, io.Discard, nil)
+		if err != nil || exit.Code == 0 {
+			t.Fatalf("%s: the shim ran it after a yes: %+v %v", decision, exit, err)
+		}
+		conf.mu.Lock()
+		asked := len(conf.asked)
+		conf.mu.Unlock()
+		if asked != before+1 {
+			t.Fatalf("%s: the 🔴 was not asked (%d -> %d)", decision, before, asked)
+		}
+	}
+	adb.mu.Lock()
+	defer adb.mu.Unlock()
+	for _, run := range adb.runs {
+		if strings.Contains(run, "rm") {
+			t.Fatalf("adb ran it: %q", run)
+		}
 	}
 }
