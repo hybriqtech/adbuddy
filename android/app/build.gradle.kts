@@ -13,8 +13,9 @@ android {
         applicationId = "tech.hybriq.adbuddy"
         minSdk = 30
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.2.0"
+        // Releases pass both from the tag (scripts/release-version.sh, spec M6a §3).
+        versionCode = providers.gradleProperty("adbuddy.versionCode").map(String::toInt).getOrElse(1)
+        versionName = providers.gradleProperty("adbuddy.versionName").getOrElse("0.2.0")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
