@@ -188,7 +188,7 @@ La app manda la lista al host en `device.info` (campo nuevo `protectedApps`, §1
 **La guarda.** El daemon la aplica después de las puertas (pausa, pregunta 🔴, admisión) y justo antes de ejecutar; si llega una pausa mientras mira, la orden se bloquea igualmente. La aplica a:
 
 - las órdenes con un hallazgo de interfaz (`Finding.UI`: `input`, `am start` y `monkey`) y `cmd input`;
-- las de leer la pantalla (`screencap`, `screenrecord` y `uiautomator dump`);
+- las de leer la pantalla (`screencap` y `uiautomator dump`) y `dumpsys activity top` (y cualquier `dumpsys activity` con argumento fuera de una lista corta: `activities`, `a`, `services`, `providers`, `broadcasts`, `processes`), porque vuelca el árbol de vistas con su texto;
 - las ayudas, salvo `foreground` y `notifications`.
 
 Con eso:
@@ -199,12 +199,13 @@ Con eso:
 3. Con `am start -n <paquete>/…`, `am start -p <paquete>` o `monkey -p <paquete>` sobre un paquete protegido, bloquea igual. Un intent implícito (`am start -a VIEW -d https://…`) puede abrir una app protegida: entonces se bloquea lo siguiente que intente leer o tocar.
 4. **Si no puede saber el primer plano** (la app no responde y `dumpsys` falla o no se puede leer), bloquea: falla cerrada, tanto para tocar como para leer la pantalla (ruling del supervisor). Sin actividad reanudada, solo cuenta como "nada delante" si `dumpsys power` dice `mWakefulness=Asleep` o `Dozing` (pantalla apagada): así el agente puede encender la pantalla (`input keyevent 224`). Con la pantalla encendida y sin actividad reanudada (la pantalla de bloqueo, o un `dumpsys` que no se entiende) bloquea, y eso también evita capturar las notificaciones de la pantalla de bloqueo.
 5. **Sin lista** (el host nunca ha recibido una), solo protege a ADBuddy. Lo dice una vez por sesión en la terminal de `serve`.
+6. **Persiana.** Con la persiana de notificaciones o los ajustes rápidos desplegados (`dumpsys window`: la ventana con foco es `NotificationShade`), la guarda bloquea como con una app protegida, y falla cerrada si no entiende `dumpsys window`. Se exceptúan `input keyevent` con `3`, `4`, `KEYCODE_HOME` o `KEYCODE_BACK`, que sirven para cerrarla. Las notificaciones emergentes (heads-up) cuentan igual: son una ventana de `systemui` sobre cualquier app y no tienen el foco, así que `mCurrentFocus` no las ve. La app las señala 8 s: el servicio de accesibilidad escucha `typeNotificationStateChanged` y, durante 8 s tras cualquier notificación que no sea de ADBuddy, `foreground` y `dump` dan `protected` (ruling 7 del plan de M5b). Sin app, el host las busca en `dumpsys window windows` (ventanas visibles de `com.android.systemui` que no estén en una lista corta de las fijas: barra de estado, navegación y decoración de pantalla) y, si no lo entiende, falla cerrado. Así un código 2FA de una app protegida no sale en `screen` ni en `screenshot`. Por lo mismo, `screenrecord` es 🔴 especial (regla `screen.record`: graba mucho después de que la guarda mirase), `dumpsys notification --noredact` es 🔴 (da el texto de todas las notificaciones), `adb bugreport` es 🔴 (vuelca notificaciones y pantalla) y `dumpsys window` queda 🟢 (solo títulos de ventana, sin contenido de pantalla).
 
-**Coste.** Cada orden guardada añade una consulta de primer plano: unos 120-165 ms con la app (el transporte medido en S1) y unos 300 ms por `dumpsys`. Solo la pagan las órdenes de interfaz y de captura.
+**Coste.** Cada orden guardada añade una consulta de primer plano: unos 120-165 ms con la app (el transporte medido en S1) y unos 300 ms por `dumpsys`. Solo la pagan las órdenes de interfaz y de captura. Cada orden guardada suma además un `dumpsys window` (la persiana y las notificaciones emergentes), otros 300 ms.
 
 **Lo que la app no enseña.** `dump` omite los nodos de las apps protegidas y `click` los rechaza, aunque estén en la otra mitad de una pantalla dividida; y el respaldo por adb hace lo mismo (`uidump.Parse`/`Find` con la lista).
 
-**Límite honesto.** La guarda mira el primer plano un instante antes de ejecutar. Una app que pase a primer plano entre esa consulta y el toque (por ejemplo, abierta por una notificación) no se detecta. En la app, `click` vuelve a comprobar el paquete del nodo o de la ventana justo antes de actuar, y eso cierra el hueco para las ayudas. Para `input`, el hueco queda documentado.
+**Límite honesto.** La guarda mira el primer plano un instante antes de ejecutar. Una app que pase a primer plano entre esa consulta y el toque (por ejemplo, abierta por una notificación) no se detecta. En la app, `click` vuelve a comprobar el paquete del nodo o de la ventana justo antes de actuar, y eso cierra el hueco para las ayudas. Para `input`, el hueco queda documentado. Queda también el texto que una app protegida ponga en pantalla en el instante entre la consulta de primer plano y la lectura. Un `screenrecord` ya iniciado no se puede cortar a media grabación, pero solo arranca con confirmación del usuario.
 
 ### 4.4 Texto que viene del móvil
 
@@ -244,6 +245,7 @@ Precisa §3.3 de la v1 sobre el contrato de §8.2 del protocolo.
 ### 7.1 Llegar al móvil fuera de casa con depuración inalámbrica (Wi-Fi + Tailscale)
 
 - **La app** manda `device.info` al conectar y cuando cambia la red (`ConnectivityManager.NetworkCallback`). Pone `tailscaleIp` si hay una red VPN con una IPv4 de `100.64.0.0/10`, la de CGNAT que usa Tailscale. `wifiAdbPort` va vacío salvo que pueda leerlo: no hay API pública para el puerto de la depuración inalámbrica (validación manual pendiente).
+- **`device.info` sin `tailscaleIp`** (vacío o ausente) no cambia la IP guardada: al salir de casa la app deja de ver la VPN, y el host necesita la última IP conocida para alcanzar el móvil.
 - **El host,** con el móvil conectado, lee el puerto él mismo (`getprop service.adb.tls.port`). Guarda `tailscale_ip` y `tailscale_port` en `config.toml`, como `address`. `findKnownPhone` prueba `tailscale_ip:tailscale_port` después de `address` y antes de esperar por mDNS. La comprobación de identidad (guid contra `ro.serialno`) no cambia.
 
 ### 7.2 Solo con datos móviles (`adb tcpip 5555`)
@@ -254,12 +256,14 @@ Precisa §3.3 de la v1 sobre el contrato de §8.2 del protocolo.
   3. responde con `remote.state {enabled, address: "<tailscaleIp>:5555", expiresAt}` y lo publica como evento.
 
   Sin `tailscaleIp` conocida, contesta `error` `unavailable` ("Turn on Tailscale on the phone first").
+  La respuesta puede perderse: `adb tcpip` reinicia adbd y cae el túnel de la app. La app trata la falta de respuesta como "desconocido" y el host republica `remote.state` en cada `attach`.
+  `adbuddy remote on` por IPC pide confirmación al usuario (plan de M5b, Task 8): el agente no puede abrir el 5555.
 - **`remote.set {enabled: false}`,** al caducar `remote_until` o con `adbuddy remote off`: el host ejecuta `adb usb` y borra `remote_until`.
 - **Invariante** (`invariant.go`): con `remote_until` en el futuro, el puerto abierto es el esperado y `applyInvariant` no ejecuta `adb usb`. Sin `remote_until`, o ya pasado, se comporta como hoy.
-- **Reconexión:** si se pierde el móvil durante la sesión, `serve` prueba, en orden, el serial de siempre (mDNS), `tailscale_ip:tailscale_port` y, con el modo remoto activo, `tailscale_ip:5555`. Como el serial con el que adb lista el móvil cambia, el ejecutor del daemon tiene que tomar el serial activo de un sitio que se pueda cambiar, no de `Options.Serial`, fijado al arrancar. Eso toca `serve.go` y `daemon.go`, que son de M3: el plan de M5b se escribe sobre el `serve` de M3 y se acuerda con tern-51.
+- **Reconexión:** si se pierde el móvil durante la sesión, `serve` prueba, en orden, el serial de siempre (mDNS), `tailscale_ip:tailscale_port` y, con el modo remoto activo, `tailscale_ip:5555`. Ese es el único candidato de red con el 5555: no se prueba la IP de casa con el 5555, sería probar a ciegas en cualquier red. Como el serial con el que adb lista el móvil cambia, el ejecutor del daemon tiene que tomar el serial activo de un sitio que se pueda cambiar, no de `Options.Serial`, fijado al arrancar. Eso toca `serve.go` y `daemon.go`, que son de M3: el plan de M5b se escribe sobre el `serve` de M3 y se acuerda con tern-51.
 - **App:** interruptor en Ajustes con el aviso de §3.3 de la v1 (el puerto 5555 queda abierto en redes públicas) y la caducidad visible. Lo pinta `RemoteReducer`, que pasa a guardar `remote.state` en `BridgeState`.
 - **Estado de tres valores (ruling de adbuddy-e5):** activo, apagado o desconocido. Tras un reset del estado de la app (`Reducer.reset` con una sesión nueva o un snapshot ilegible, de `m3-bridge`), el modo remoto es "desconocido", nunca `enabled=false`. Un falso "apagado" engañaría al usuario mientras el puerto 5555 sigue abierto. La app muestra "desconocido" como aviso, y el host vuelve a publicar `remote.state` al reconectar.
-- **Concesiones solo a una app verificada (M6a):** toda concesión de M5 (accesibilidad, superposición, acceso a notificaciones, modo remoto) pasa por `phoneapp.Verified`, que solo da `phoneapp.VerifyInstalled` tras comprobar el certificado de la app instalada. No hay caminos alternativos.
+- **Concesiones solo a una app verificada (M6a):** toda concesión de M5 (accesibilidad, superposición, acceso a notificaciones, modo remoto) pasa por `phoneapp.Verified`, que solo da `phoneapp.VerifyInstalled` tras comprobar el certificado de la app instalada. No hay caminos alternativos. El modo remoto es una concesión más: M6a debe pasarlo por `phoneapp.Verified`.
 - **`adbuddy remote [on|off|status]`** en el PC, para el usuario: desde la sesión del agente se rechaza (`AGENT_SESSION`, como `serve`).
 
 ## 8. Errores de la CLI
@@ -274,6 +278,7 @@ Precisa §3.3 de la v1 sobre el contrato de §8.2 del protocolo.
 | `UI_PROTECTED` | 126 | `protected` de la app (contraseña, bloqueado, ADBuddy, app protegida) |
 | `UI_UNAVAILABLE` | 75 | Sin app, sin servicio y sin respaldo posible |
 | `UI_TIMEOUT` | 75 | Sin respuesta a tiempo (§2) |
+| `REMOTE_UNAVAILABLE` | 1 | `adbuddy remote on` sin móvil conectado o sin IP de Tailscale conocida |
 
 ## 9. Ficheros
 
@@ -308,7 +313,7 @@ Precisa §3.3 de la v1 sobre el contrato de §8.2 del protocolo.
 ## 10. Lo que el servicio de accesibilidad declara
 
 ```xml
-android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged|typeNotificationStateChanged"
 android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds"
 android:canRetrieveWindowContent="true"
 android:canPerformGestures="true"
@@ -373,3 +378,5 @@ Van en un solo commit (Go, Kotlin y fixtures), como pide §10 del protocolo, y s
 - **Ruling: en la app, `dump` y `click` sobre un modelo propio de nodo.** **Por qué:** tests en la JVM sin emulador, que hoy no sirve para la app (pendientes, M2.5b). **Coste si me equivoco:** una copia del árbol por operación; con el tope de 2000 nodos es despreciable.
 - **Ruling: M5 en tres sub-hitos, empezando por M5a.** **Por qué:** M5a solo necesita `m3-bridge`; el modo remoto toca `serve.go` y `daemon.go` (de M3) y las pantallas necesitan la base de diseño. **Coste si me equivoco:** tres planes en vez de uno.
 - **Ruling: el texto de las ayudas en `AGENTS.md` lo integra el dueño de la plantilla.** **Por qué:** `workspace/templates` es de skimmer-32 en M6b (`COORDINACION.md`). **Coste si me equivoco:** si M6b se retrasa, el agente no conoce las ayudas aunque existan; entonces lo cambio yo, avisando al supervisor.
+- **Ruling (M5b): las capturas por defecto en modo remoto pasan a 0,5 en JPEG, decidido por el daemon (que sabe si el modo remoto está activo), no por la CLI.** **Por qué:** la CLI corre en la sesión del agente y no conoce el estado; con datos móviles ahorra transporte. **Coste si me equivoco:** el agente pide `--format png` y lo tiene.
+- **Ruling (M5b): la persiana, los ajustes rápidos y las notificaciones emergentes cuentan como app protegida en la guarda; nada que lea la pantalla queda fuera de ella en v1.** **Por qué:** cierra el hueco de los códigos 2FA en `com.android.systemui` sin depender del paquete de cada notificación (§4.3, punto 6). **Coste si me equivoco:** el agente no puede usar los ajustes rápidos mientras están abiertos (puede usar `cmd`/`settings`); lo valida el usuario en el Pixel.
