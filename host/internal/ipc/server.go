@@ -91,9 +91,28 @@ func (b *stdinBuffer) Read(p []byte) (int, error) {
 
 // Conn is the server side of one request.
 type Conn struct {
-	stdin *stdinBuffer
-	mu    sync.Mutex
-	nc    net.Conn
+	stdin  *stdinBuffer
+	resize chan [2]int
+	mu     sync.Mutex
+	nc     net.Conn
+}
+
+// Resizes delivers the sizes a terminal sends with FrameResize (KindAttach).
+// When they come faster than they are taken, only the newest count.
+func (c *Conn) Resizes() <-chan [2]int { return c.resize }
+
+func (c *Conn) pushResize(cols, rows int) {
+	for {
+		select {
+		case c.resize <- [2]int{cols, rows}:
+			return
+		default:
+			select { // full: drop the oldest
+			case <-c.resize:
+			default:
+			}
+		}
+	}
 }
 
 // Stdin streams what the client sends as stdin.
@@ -240,7 +259,7 @@ func (s *Server) handle(nc net.Conn) {
 	if json.Unmarshal(payload, &req) != nil {
 		return
 	}
-	c := &Conn{nc: nc}
+	c := &Conn{nc: nc, resize: make(chan [2]int, 4)}
 	if subtle.ConstantTimeCompare([]byte(req.Secret), []byte(s.secret)) != 1 {
 		writeExit(c, Exit{Code: 1, Error: "unauthorized"})
 		finish(nc, nil)
@@ -273,6 +292,10 @@ func (s *Server) handle(nc net.Conn) {
 				}
 			case FrameStdinEOF:
 				stdin.close(nil)
+			case FrameResize:
+				if cols, rows, ok := DecodeResize(payload); ok {
+					c.pushResize(cols, rows)
+				}
 			}
 		}
 	}()

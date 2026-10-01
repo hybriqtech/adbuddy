@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -14,6 +15,16 @@ import (
 // frames go to the given writers and data frames to onData (may be nil).
 // stdin may be nil. It returns ErrNotRunning when no daemon answers.
 func Call(ctx context.Context, dataDir string, req Request, stdin io.Reader, stdout, stderr io.Writer, onData func([]byte) error) (Exit, error) {
+	return call(ctx, dataDir, req, stdin, stdout, stderr, onData, nil)
+}
+
+// Attach is Call for a terminal (KindAttach): it also sends each size that
+// comes on resizes as a FrameResize.
+func Attach(ctx context.Context, dataDir string, req Request, stdin io.Reader, stdout io.Writer, resizes <-chan [2]int) (Exit, error) {
+	return call(ctx, dataDir, req, stdin, stdout, io.Discard, nil, resizes)
+}
+
+func call(ctx context.Context, dataDir string, req Request, stdin io.Reader, stdout, stderr io.Writer, onData func([]byte) error, resizes <-chan [2]int) (Exit, error) {
 	secret, err := ReadSecret(dataDir)
 	if err != nil {
 		return Exit{}, ErrNotRunning
@@ -35,7 +46,20 @@ func Call(ctx context.Context, dataDir string, req Request, stdin io.Reader, std
 	if err := WriteFrame(nc, FrameRequest, b); err != nil {
 		return Exit{}, ErrNotRunning
 	}
-	go sendStdin(nc, stdin)
+	var wmu sync.Mutex // stdin and resize frames are written from two goroutines
+	go sendStdin(nc, &wmu, stdin)
+	if resizes != nil {
+		go func() {
+			for size := range resizes {
+				wmu.Lock()
+				err := WriteFrame(nc, FrameResize, EncodeResize(size[0], size[1]))
+				wmu.Unlock()
+				if err != nil {
+					return
+				}
+			}
+		}()
+	}
 
 	for {
 		typ, payload, err := ReadFrame(nc)
@@ -72,13 +96,16 @@ func Call(ctx context.Context, dataDir string, req Request, stdin io.Reader, std
 	}
 }
 
-func sendStdin(nc net.Conn, stdin io.Reader) {
+func sendStdin(nc net.Conn, wmu *sync.Mutex, stdin io.Reader) {
 	if stdin != nil {
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := stdin.Read(buf)
 			if n > 0 {
-				if WriteFrame(nc, FrameStdin, buf[:n]) != nil {
+				wmu.Lock()
+				werr := WriteFrame(nc, FrameStdin, buf[:n])
+				wmu.Unlock()
+				if werr != nil {
 					return
 				}
 			}
@@ -87,7 +114,9 @@ func sendStdin(nc net.Conn, stdin io.Reader) {
 			}
 		}
 	}
+	wmu.Lock()
 	_ = WriteFrame(nc, FrameStdinEOF, nil)
+	wmu.Unlock()
 }
 
 // PingDaemon asks the daemon for its status.

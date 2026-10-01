@@ -31,6 +31,9 @@ const (
 	FrameStderr   byte = '2'
 	FrameData     byte = 'D'
 	FrameExit     byte = 'X'
+	// FrameResize (client → server) is a terminal's new size for an attach:
+	// 2 bytes of columns and 2 of rows, big-endian.
+	FrameResize byte = 'W'
 )
 
 // MaxFrame bounds a frame payload.
@@ -44,6 +47,15 @@ const (
 	KindExec = "exec" // run an adb command (the shim)
 	KindUndo = "undo" // adbuddy undo
 	KindPing = "ping" // is the daemon up? which device and session?
+	// KindAttach connects a terminal to the agent's session (adbuddy attach):
+	// stdin is what is typed, stdout the PTY's output, FrameResize its size.
+	KindAttach = "attach"
+	// KindSession starts (Argv: "new", agent) or stops (Argv: "stop") the
+	// agent's session.
+	KindSession = "session"
+	// KindSend sends a file of the environment to the phone (adbuddy send):
+	// Argv is the path and the caption.
+	KindSend = "send"
 )
 
 // Request is the first frame of every connection.
@@ -173,4 +185,21 @@ func ReadFrame(r io.Reader) (byte, []byte, error) {
 		return 0, nil, err
 	}
 	return hdr[0], payload, nil
+}
+
+// EncodeResize is the payload of FrameResize.
+func EncodeResize(cols, rows int) []byte {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint16(b, uint16(cols))
+	binary.BigEndian.PutUint16(b[2:], uint16(rows))
+	return b
+}
+
+// DecodeResize reads a FrameResize payload. A size out of 1..1000 is refused.
+func DecodeResize(b []byte) (cols, rows int, ok bool) {
+	if len(b) != 4 {
+		return 0, 0, false
+	}
+	cols, rows = int(binary.BigEndian.Uint16(b)), int(binary.BigEndian.Uint16(b[2:]))
+	return cols, rows, cols >= 1 && cols <= 1000 && rows >= 1 && rows <= 1000
 }
