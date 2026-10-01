@@ -73,7 +73,7 @@ Hay tres clases de mensaje del host a la app:
   - `Send`, para flujos.
 
   Así, un `ui.request` publicado por error como evento falla en vez de repetirse tras reconectar.
-- **Lo que no se entiende.** La app ignora los tipos desconocidos, como en M2. El host responde a un tipo desconocido o no manejado con `error {code: "unsupported"}` si lleva `rid`, y con el `notice` de M2 si no lo lleva (así sigue funcionando una app de M2). El `notice` es un evento y ocupa sitio en el búfer: va una sola vez por tipo y conexión, con el tipo cortado a 64 caracteres.
+- **Lo que no se entiende.** La app ignora los tipos desconocidos, como en M2. El host responde a un tipo desconocido o no manejado con `error {code: "unsupported"}` si lleva `rid`, y con el `notice` de M2 si no lo lleva (así sigue funcionando una app de M2). El `notice` es un evento y ocupa sitio en el búfer: va una sola vez por tipo, como mucho 16 por conexión, con el tipo cortado a 64 caracteres.
 
 ## 4. Tipos comunes
 
@@ -260,6 +260,7 @@ La salida del PTY es un flujo con posición propia, fuera del búfer de eventos:
 | `terminal.input.data` | 64 KiB | Se descarta (no lleva `rid`) |
 | `rid` | `[A-Za-z0-9_-]{1,64}` | El mensaje se descarta |
 | `snapshot` | 1 MiB | El host recorta `chat` (§4.3) |
+| `notice` de tipos no manejados | 16 por conexión, uno por tipo | No se envían más (el `error` con `rid` no tiene tope) |
 
 ## 10. Puntos de extensión (para trabajar en paralelo)
 

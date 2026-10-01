@@ -39,7 +39,15 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - el test de que se descartan las tramas de ids no aceptados (§12);
   - todo manejador de una petición con `rid` responde por todos sus caminos (§3), también en M4 y M5;
   - los manejadores que guardan estado por conexión comprueban `Server.Current(m)` (§10);
-  - el área de tramas (subidas) protege su estado con su propio mutex y tolera una trama de la conexión anterior tras un reemplazo: `OnFrame` no dice de qué conexión viene (pasarle la conexión es un cambio de API interna que M3 puede hacer).
+  - el área de tramas (subidas) protege su estado con su propio mutex y tolera una trama de la conexión anterior tras un reemplazo: `OnFrame` no dice de qué conexión viene (pasarle la conexión es un cambio de API interna que M3 puede hacer);
+  - el host pone `[]` en `ChatMessage.Attachments` al construir un `chat.message` (`host/internal/bridge/protocol_chat.go`): un slice nil sale como `null` y §4.3 promete listas. La app lo tolera (fixture `chat.message@noattachments`);
+  - `Server.Send` va a la conexión actual, no a la que se suscribió: para la terminal y las descargas, un envío atado a la petición (`SendTo(req, …)` o equivalente), como `Reply`;
+  - tests del servidor que llegan con el primer área que publique en `attach`: `OnAttach` llega después de `OnConnect(true)`, `Publish`/`Send` desde `OnAttach` no se bloquean, y `filled()` por el camino de `PublishSnapshot`;
+  - `Options.OnAttach` (y por tanto `area.attach`) corre con el lock de conexiones del servidor tomado: tiene que ser rápido y sin E/S bloqueante, o bloquea la conexión y desconexión de cualquier app. Decirlo en su comentario cuando M3 rellene `attach`;
+  - en `Bridge.kt`, antes del primer oyente: aislar las excepciones de `onResult` y de los oyentes (`try/catch` por llamada); si no, una en `failPending` puede tumbar el bucle de reconexión o el proceso, y una en el lector corta el socket;
+  - en `Bridge.kt`, `onMessage` resuelve `pending[rid]` sin comprobar que la petición sea de ese socket: `pending[rid]?.takeIf { it.socket === webSocket }`;
+  - antes de que M4 y M5 vayan en paralelo: un gancho de reinicio en `Reducer` (por ejemplo `reset(s)`, llamado con un welcome de sesión nueva y con un snapshot ilegible) o la regla de que cada reductor reemplaza su parte en `snapshot()` en vez de mezclarla; si no, los dos tocarían `BridgeState.welcome`;
+  - tests de `Bridge` que faltan: `stop()` con peticiones pendientes, `request`/`send`/`sendFrame` entre `onOpen` y el welcome, mensajes y tramas de un socket viejo, y reentrada `onResult → request`.
 
 - **Lista de variables de entorno permitidas** para lanzar el agente (§5.1). En M1a, `host/internal/agent.Env` solo quita variables (`CLAUDECODE*`, `CLAUDE_CODE_*`, `CLAUDE_EFFORT`, `CLAUDE_PID`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT`, `ADBUDDY_SOURCE`). M3 debe pasar a una lista de permitidas: las de sistema, autenticación y proxy del usuario (`PATH`, `HOME`/`USERPROFILE`, `APPDATA`, `ANTHROPIC_*`, `HTTP(S)_PROXY`/`NO_PROXY`, `CLAUDE_CONFIG_DIR`…), verificando la lista en Windows, macOS y Linux.
 - **Confianza previa de la carpeta del entorno** en Claude Code (§5.1, S3): averiguar dónde y con qué clave guarda Claude Code la confianza de una carpeta y preconfiar el entorno antes de lanzar el agente en el PTY; si no es posible, detectar el diálogo y elegir "Yes" de forma explícita (un Enter a ciegas elige "No, exit").
@@ -50,6 +58,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 
 ## M5 · Ayudas al agente
 
+- `UIRequest.Args` no lleva `omitempty`: un `Args` nil sale como `"args":null`. El host manda siempre `{}` en las operaciones sin argumentos (o la app trata `JsonNull` como `{}`).
 - **`adbuddy screen` con el servicio de accesibilidad vinculado y la app desconectada:** devolver un error claro en lugar de usar `uiautomator dump`, que desconectaría el servicio (§6). Mensaje propuesto: `ADBuddy's accessibility service is running but the app is not connected: open the ADBuddy app and try again`.
 - **Revisar ARTEMIS de Google antes de escribir las ayudas** (`github.com/google/artemis`, Apache-2.0; revisado en el commit 351ca84 del 2026-09-28). Su app auxiliar (`packages/artemis-accessibility-helper`) resuelve lo mismo que `AgentAccessibilityService` y se puede reutilizar con atribución. Ideas concretas:
   - `HierarchyDumper`: sin `waitForIdle` (no se cuelga), todas las ventanas (app, diálogos, System UI, teclado, pantalla partida), nodos invisibles fuera y límites recortados a la pantalla, a la ventana y a los ancestros con scroll (paridad con UIAutomator), campos semánticos (`error`, `is_heading`, `editable`, `pane_title`, `hint`), captura de pantalla y árbol en el mismo instante (API 30+), IPC por lotes en API 33+ y saneado estricto de XML.
