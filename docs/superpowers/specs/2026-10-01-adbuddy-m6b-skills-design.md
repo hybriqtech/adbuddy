@@ -71,7 +71,7 @@ Una sección `## Skills` corta, después de `## The screen`: las recetas están 
 
 ### 3.4 Gemini CLI y `AGENTS.md`
 
-Gemini CLI lee `GEMINI.md` por defecto; Codex y OpenCode leen `AGENTS.md` y Claude Code lee `CLAUDE.md` (que importa `AGENTS.md`). `Init` crea `.gemini/settings.json` con la clave que Gemini CLI documente para `AGENTS.md` como nombre del fichero de contexto, y la mezcla (como `mergeClaudeSettings`) sin tocar lo demás del usuario. **El plan verifica la clave exacta (`context.fileName` o `contextFileName` según versión) en la documentación de Gemini CLI antes de escribir código**; si no se puede confirmar, se crea `GEMINI.md` con `@AGENTS.md`, como `CLAUDE.md`, y no se toca `settings.json`.
+Gemini CLI lee `GEMINI.md` por defecto; Codex y OpenCode leen `AGENTS.md` y Claude Code lee `CLAUDE.md` (que importa `AGENTS.md`). `Init` crea `.gemini/settings.json` con la clave que Gemini CLI documente para `AGENTS.md` como nombre del fichero de contexto, y la mezcla (como `mergeClaudeSettings`) sin tocar lo demás del usuario. La clave es `context.fileName` (cadena o lista; verificada en la documentación de Gemini CLI el 2026-10-01; la plana `contextFileName` es de versiones antiguas). Si el usuario ya tiene `context.fileName`, se añade `AGENTS.md` a la lista si falta y se respeta el resto. Si `settings.json` no es JSON válido o `context` no es un objeto, `Init` falla sin tocarlo, como con `.claude/settings.json`.
 
 ## 4. Las skills
 
@@ -120,7 +120,7 @@ La más delicada, porque instala software **en el PC**, fuera del alcance del sh
 
 1. **Antes de descargar nada**, dice en el chat qué instalará (JDK 17, `cmdline-tools` de Android, `build-tools`, una plataforma), de dónde (solo orígenes oficiales: el sitio de Android, el de Gradle, el gestor de paquetes del sistema), cuánto pesa (varios cientos de MB) y dónde irá, y **espera el sí**. Sin instalaciones como administrador sin pedirlo aparte.
 2. **Instalar `cmdline-tools`, `build-tools` y `platforms` pero nunca `platform-tools`**: traería otro `adb` y el agente no debe usar otro (regla 12). Comprueba con `command -v adb` (o `where adb`) que el `adb` que se resuelve es el del entorno.
-3. **Nunca `gradlew installDebug`, `adb` del SDK, `flutter run` ni nada que hable con el móvil por su cuenta.** Se compila con Gradle y se instala solo con `adb install` del entorno (🔴: la confirma el usuario, y el móvil puede pedirle permiso de instalación).
+3. **Nunca `gradlew installDebug`, `adb` del SDK, `flutter run` ni nada que hable con el móvil por su cuenta.** Se compila con Gradle y se instala solo con `adb install` del entorno (el clasificador lo deja 🟡 con inverso; aun así la skill pide el sí en el chat antes de instalar, y el móvil puede pedirle permiso de instalación).
 4. Las licencias del SDK las acepta el usuario: la skill le enseña dónde leerlas y no ejecuta `sdkmanager --licenses` con `yes |` por él.
 5. Proyecto en `apps/<nombre>/` del entorno, con una sola actividad y sin permisos salvo los que pida el usuario y el agente le haya explicado; firmado con la clave de depuración. Dice que el APK no está firmado con una clave del usuario (no se actualiza luego desde otro equipo) y que no se publica.
 6. Su `applicationId` nunca empieza por `tech.hybriq.adbuddy` (el clasificador trata eso como la app de ADBuddy).
@@ -153,7 +153,7 @@ Los bloques con lenguaje `adbuddy` (`screen --json`, `tap "Ajustes"`, `send outb
 
 ### 5.5 Instalación (`workspace`)
 
-Pruebas de `Init`: crea en las dos carpetas con el mismo contenido; es idempotente; sin `Force` no reescribe un fichero editado; con `Force` lo reescribe; con `<!-- adbuddy:user -->` no lo reescribe ni con `Force`; falla (sin escribir) si `.claude/skills/<nombre>` es un enlace simbólico; deja intacta una skill del usuario que no es nuestra (`.claude/skills/mi-skill/`); mezcla `.gemini/settings.json` sin tocar el resto (o crea `GEMINI.md`, según §3.4).
+Pruebas de `Init`: crea en las dos carpetas con el mismo contenido; es idempotente; sin `Force` no reescribe un fichero editado; con `Force` lo reescribe; con `<!-- adbuddy:user -->` no lo reescribe ni con `Force`; falla (sin escribir) si `.claude/skills/<nombre>` es un enlace simbólico; deja intacta una skill del usuario que no es nuestra (`.claude/skills/mi-skill/`); mezcla `.gemini/settings.json` sin tocar el resto (§3.4).
 
 ## 6. Validaciones manuales pendientes
 
