@@ -13,6 +13,7 @@
 | 3 | a7878ce | `host/internal/ipc`: `KindAttach`, `KindSession`, `KindSend`, `FrameResize`, `Conn.Resizes()`, `ipc.Attach` |
 | 4 | 20baeea | `host/internal/session`: `Manager` (estado, `--continue` con vuelta atrás, tamaño, `Paste`, `Busy`, `Subscribe`); `agent.TrustFolder` |
 | 5 | feb66ae | `session.ServeAttach`; `adbuddy attach`, `new` y `stop`; `serve` lanza al agente (`--no-agent` para no hacerlo); los tests nunca lanzan un agente real |
+| 3-5 | df3ac6d | Ronda de arreglos de la revisión opus: `Start`/`Stop` en serie con generación; el agente no controla su sesión y solo se aceptan nombres de `agent.IsKnown`; aviso en attach cuando el agente sale; modos de terminal en `Screen.Modes()` y `Snapshot()`; `Busy` también con los permisos de Claude Code; `Stop` amable (`PTY.Hangup`, 5 s o 2 s en Windows, después `Kill`) |
 
 Este plan describe las tareas 6-10: requisitos, interfaces y tests. El código lo escribe el implementador con TDD. **Si un requisito no se puede cumplir tal cual, detente y explícalo.**
 
@@ -45,6 +46,10 @@ Las tareas son secuenciales: todas tocan `internal/cli`.
 
 **Contexto:** `phoneLink` ya tiene `manager *session.Manager` (`useSession`) y publica `session.state` con `sessionInfo`. `chatArea()` (en `phone_chat.go`) devuelve hoy `area{}`. Las áreas se describen en `phone_areas.go`.
 
+**Ojo con la API de la sesión (ronda df3ac6d):**
+- `Subscribe` entrega también dos `Output` sin datos por proceso: uno al arrancar (época nueva) y otro con `End` al acabar.
+- El nombre que llega en `session.new {agent}` se valida con `agent.IsKnown`.
+
 **Requisitos** (spec M3 §5.1 y §5.3; spec del protocolo §5.2 y §9):
 1. **`chatArea()`:** registra los manejadores de `chat.send`, `session.new`, `session.stop` y `agent.interrupt`, y aporta su parte del `snapshot` (`chat`).
 2. **`chat.send` (lleva `rid`):**
@@ -61,7 +66,7 @@ Las tareas son secuenciales: todas tocan `internal/cli`.
    - Un `chat.message` con un `id` existente lo sustituye (upsert).
    - `chatSnapshot` copia el historial con `Attachments` nunca `nil` y sin `thumb` (spec M3 §4.3; pendiente de M3.0).
    - El historial se vacía cuando cambia `Conversation` (se lanza otro proceso del agente).
-4. **`session.new {agent?}` (`rid`):** `manager.Start(agent o el actual o el configurado, false)`. Si va bien, `PublishRID(session.state)` con el estado nuevo; si no, `error` `failed` con el texto de `agent.InstallHint`. **`session.stop` (`rid`):** `manager.Stop()` y `PublishRID(session.state)`.
+4. **`session.new {agent?}` (`rid`):** si trae `agent` y no cumple `agent.IsKnown`, `error` `invalid`. Si no, `manager.Start(agent o el actual o el configurado, false)`. Si va bien, `PublishRID(session.state)` con el estado nuevo; si no, `error` `failed` con el texto de `agent.InstallHint`. **`session.stop` (`rid`):** `manager.Stop()` y `PublishRID(session.state)`.
 5. **`agent.interrupt` (sin `rid`):** `manager.Input([]byte{0x1b})`. Sin agente no hace nada.
 6. **Todo manejador con `rid` responde por todos sus caminos** (spec del protocolo §3).
 
@@ -84,7 +89,7 @@ Las tareas son secuenciales: todas tocan `internal/cli`.
    - Si `screen.Since(epoch, offset)` da bytes, se mandan como `terminal.output` desde ese `offset`.
    - Si no, se manda `terminal.snapshot` (`screen.Snapshot()`).
    - Sin agente, nada.
-3. **Salida en vivo:** una sola suscripción (`manager.Subscribe`) para el área. La salida se acumula y se manda cada 50 ms en trozos de como mucho 64 KiB.
+3. **Salida en vivo:** una sola suscripción (`manager.Subscribe`) para el área. Los `Output` sin datos (inicio de proceso) y los de `End` no generan `terminal.output`. El de inicio provoca el `snapshot` del proceso nuevo. `terminal.snapshot` usa `Screen.Snapshot()`, que ya incluye los modos. La salida se acumula y se manda cada 50 ms en trozos de como mucho 64 KiB.
    - Si `Backlog()` pasa de 128, se marca la pantalla como pendiente y se descarta lo acumulado. Cuando baja, se manda un `terminal.snapshot`.
    - Un cambio de `epoch` manda el `snapshot` del proceso nuevo.
    - Si cambia el tamaño de la pantalla, se manda `terminal.size {epoch, offset, cols, rows}`.
