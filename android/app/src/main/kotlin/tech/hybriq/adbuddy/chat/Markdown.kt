@@ -137,12 +137,32 @@ object Markdown {
     private class Finder(private val s: String) {
         private var from = -1
         private var at = -1
+        private var urlClose = -1
+        private var urlEnd = -1
 
         fun close(start: Int): Int {
             if (from in 0..start && (at < 0 || start <= at)) return at
             from = start
             at = s.indexOf(']', start)
             return at
+        }
+
+        /**
+         * Where the url that follows the ']' at [close] ends (its ')'), or -1 when it is not a url. It depends only on
+         * [close], and many '[' share one, so the last answer is kept. The scan stops at the first char that cannot be in a url.
+         */
+        fun url(close: Int): Int {
+            if (close == urlClose) return urlEnd
+            val start = close + 2
+            var end = start
+            while (end < s.length && s[end] != ')') {
+                val c = s[end]
+                if (c.isWhitespace() || c == '(' || c == '<' || c == '>') break
+                end++
+            }
+            urlClose = close
+            urlEnd = if (end >= s.length || s[end] != ')' || end == start) -1 else end
+            return urlEnd
         }
     }
 
@@ -155,13 +175,8 @@ object Markdown {
         val close = find.close(open + 1)
         if (close < 0 || close + 1 >= s.length || s[close + 1] != '(') return null
         val start = close + 2
-        var end = start
-        while (end < s.length && s[end] != ')') {
-            val c = s[end]
-            if (c.isWhitespace() || c == '(' || c == '<' || c == '>') return null
-            end++
-        }
-        if (end >= s.length || end == start) return null
+        val end = find.url(close)
+        if (end < 0) return null
         return Link(s.substring(open + 1, close), s.substring(start, end), end + 1)
     }
 }

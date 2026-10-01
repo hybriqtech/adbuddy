@@ -106,6 +106,8 @@ class MarkdownTest {
             "open links" to "[a](".repeat(n / 4),
             "brackets and a late close" to "[".repeat(n - 1) + "]",
             "links and a late close" to "[a](".repeat(n / 4 - 1) + "[a](b)",
+            "shared close, url with no end" to "[".repeat(n / 2) + "](" + "x".repeat(n / 2 - 2),
+            "shared close, url of brackets" to "[".repeat(n / 2) + "](" + "]".repeat(n / 2 - 2),
             "links and a closing paren" to "[a](".repeat(n / 4 - 1) + ")",
             "images" to "![a](".repeat(n / 5),
         )
@@ -124,5 +126,19 @@ class MarkdownTest {
         val flat = (b.single() as Block.Paragraph).inlines
         assertTrue(flat.toString(), flat.contains(Inline.Link("x [y", "https://example.com")))
         assertEquals(" [z](", (flat.last() as Inline.Text).text)
+    }
+}
+
+class MarkdownRealSizeTest {
+    @Test fun aSharedCloseWithNoEndOfUrlTakesLinearTimeAtTheRealLimit() {
+        val k = Markdown.MAX_INPUT / 2
+        for (filler in listOf("x", "]", "[")) {
+            val text = "[".repeat(k - 1) + "](" + filler.repeat(k - 1)
+            val t0 = System.nanoTime()
+            val blocks = Markdown.parse(text)
+            val ms = (System.nanoTime() - t0) / 1_000_000
+            assertTrue("filler $filler took $ms ms", ms < 1_500)
+            assertTrue(blocks.isNotEmpty())
+        }
     }
 }
