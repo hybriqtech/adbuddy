@@ -232,6 +232,7 @@ object ErrorCode {
     const val UNAVAILABLE = "unavailable"
     const val PROTECTED = "protected"
     const val EXPIRED = "expired"
+    const val AMBIGUOUS = "ambiguous"
 }
 
 /** The payload of the messages that carry nothing: {}. */

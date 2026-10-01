@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "ui.request",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "u_3",
+    "op": "dump",
+    "args": {
+      "all": true
+    },
+    "expiresAt": "2026-10-01T10:00:10Z"
+  }
+}

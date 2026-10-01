@@ -233,6 +233,7 @@ const (
 	CodeUnavailable = "unavailable" // ui.response: the accessibility service is off
 	CodeProtected   = "protected"   // ui.response: a protected app, or ADBuddy itself
 	CodeExpired     = "expired"     // ui.response
+	CodeAmbiguous   = "ambiguous"   // ui.response: click matched several elements
 )
 
 // Empty is the payload of the messages that carry nothing: {}.

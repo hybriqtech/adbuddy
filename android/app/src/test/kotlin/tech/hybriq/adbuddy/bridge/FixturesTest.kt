@@ -71,7 +71,7 @@ class FixturesTest {
     }
 
     /** The JSON paths of a descriptor's fields ("attachment.thumb"): lists are transparent; JsonElement is a leaf. */
-    private fun descriptorPaths(d: SerialDescriptor, prefix: String, out: MutableSet<String>) {
+    internal fun descriptorPaths(d: SerialDescriptor, prefix: String, out: MutableSet<String>) {
         if (d.kind != StructureKind.CLASS) return
         for (i in 0 until d.elementsCount) {
             val path = prefix + d.getElementName(i)
@@ -83,7 +83,7 @@ class FixturesTest {
     }
 
     /** The paths of the keys in a JSON value. */
-    private fun jsonPaths(e: JsonElement, prefix: String, out: MutableSet<String>) {
+    internal fun jsonPaths(e: JsonElement, prefix: String, out: MutableSet<String>) {
         when (e) {
             is JsonObject -> e.forEach { (k, v) -> out += prefix + k; jsonPaths(v, "$prefix$k.", out) }
             is JsonArray -> e.forEach { jsonPaths(it, prefix, out) }
