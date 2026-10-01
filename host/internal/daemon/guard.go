@@ -31,7 +31,7 @@ var foregroundWait = 3 * time.Second
 var screenReads = map[string]bool{"screencap": true, "screenrecord": true, "uiautomator": true}
 
 // aloneReason is why a guarded command must run alone.
-const aloneReason = "a command that touches or reads the screen must run alone: one simple command per adb call, without ;, &&, ||, |, &, loops or $(…), and one key per input keyevent"
+const aloneReason = "a command that touches or reads the screen must run alone: one simple command per adb call, without ;, &&, ||, |, &, loops or $(…), without wrappers (watch, flock, sh -c…), and one key per input keyevent"
 
 // guard returns why the command res (args, as the agent gave them after the
 // global options) must not run, or "".
@@ -66,7 +66,33 @@ func (d *Daemon) guard(ctx context.Context, res classify.Result, args []string) 
 	if len(res.Findings) > 1 || strings.ContainsAny(line, ";&|`\n") || strings.Contains(line, "$(") {
 		return aloneReason
 	}
+	if !runsUnwrapped(res.Findings[0], args) {
+		return aloneReason
+	}
 	return d.guardForeground(ctx)
+}
+
+// runsUnwrapped reports whether the shell text of args starts with the
+// guarded command f itself: an allowlist, because a wrapper (watch, flock,
+// sh -c, env, nice, timeout, nohup, busybox, VAR=x…) would let it act after
+// the guard looked, and again in whatever app is then in front.
+func runsUnwrapped(f classify.Finding, args []string) bool {
+	if len(f.Words) == 0 {
+		return false
+	}
+	i := 0
+	for i < len(args) && args[i] != "shell" && args[i] != "exec-out" {
+		i++
+	}
+	if i == len(args) {
+		return false
+	}
+	i++
+	for i < len(args) && strings.HasPrefix(args[i], "-") {
+		i++
+	}
+	fields := strings.Fields(strings.Join(args[i:], " "))
+	return len(fields) > 0 && path.Base(fields[0]) == path.Base(f.Words[0])
 }
 
 // screenAction reports whether f acts on the screen (input, cmd input, am

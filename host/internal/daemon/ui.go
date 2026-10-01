@@ -28,7 +28,7 @@ import (
 
 // Errors of Options.UI besides a *UIError and the context's.
 var (
-	// ErrNoApp: no app is connected, or its connection dropped while waiting.
+	// ErrNoApp: no app is connected; nothing was sent.
 	ErrNoApp = errors.New("the ADBuddy app is not connected")
 	// ErrUITimeout: the app did not answer before the request expired.
 	ErrUITimeout = errors.New("the ADBuddy app did not answer in time")

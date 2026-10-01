@@ -499,6 +499,42 @@ func TestGuardWantsScreenCommandsAlone(t *testing.T) {
 	}
 }
 
+// A guarded command runs unwrapped: watch, flock, sh -c or env would act
+// after the guard looked, in whatever app is then in front.
+func TestGuardWantsScreenCommandsUnwrapped(t *testing.T) {
+	e := newEnv(t)
+	for _, line := range []string{
+		"watch -n 1 input tap 540 1800",
+		"watch -x -n 1 input keyevent 3",
+		"flock /dev/null input tap 540 1800",
+		"flock -w 60 /dev/null input tap 540 1800",
+		"flock /dev/null screencap -p",
+		"sh -c 'input tap 1 1'",
+		"env input tap 1 1",
+	} {
+		s, exit := e.exec(t, "shell", line)
+		if exit.Code != 126 || !strings.Contains(s.errOut.String(), "without wrappers") {
+			t.Errorf("%q: %+v %q", line, exit, s.errOut.String())
+		}
+	}
+	for _, r := range e.adb.ran() {
+		if strings.Contains(r, "input") || strings.Contains(r, "screencap") {
+			t.Fatalf("adb ran %q", r)
+		}
+	}
+	for _, argv := range [][]string{
+		{"shell", "input", "tap", "1", "1"},
+		{"shell", "input tap 1 1"},
+		{"exec-out", "screencap", "-p"},
+		{"shell", "/system/bin/input tap 1 1"},
+	} {
+		s, exit := e.exec(t, argv...)
+		if strings.Contains(s.errOut.String(), "must run alone") {
+			t.Errorf("%q: %+v %q", argv, exit, s.errOut.String())
+		}
+	}
+}
+
 // screenrecord and cmd input are guarded too, once the user allows them.
 func TestGuardCoversScreenrecordAndCmdInput(t *testing.T) {
 	e := newEnv(t)
