@@ -110,6 +110,13 @@ jobs:
           "$bt/apksigner" sign --ks "$RUNNER_TEMP/test.p12" --ks-type PKCS12 --ks-pass env:KS_PASS --ks-key-alias adbuddy \
             --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
             --out "$RUNNER_TEMP/adbuddy.apk" "$RUNNER_TEMP/aligned.apk"
+      - name: Which go runs here
+        run: |
+          command -v go
+          go version
+          printf '%s
+' "$PATH" | tr : '
+'
       - name: The host reads the same certificate as apksigner
         run: APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" sh scripts/release-cert.sh "$RUNNER_TEMP/adbuddy.apk"
       - name: The APK has the test version
