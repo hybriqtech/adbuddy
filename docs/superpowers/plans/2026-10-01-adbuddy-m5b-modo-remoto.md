@@ -217,7 +217,9 @@ Con su comentario: "keep is a port that must stay open (remote mode's 5555); ano
 func TestEnableSavesUntilThenRunsTcpip(t *testing.T)       // orden: SetUntil(now+12h) antes de `tcpip 5555`; State{Enabled, Address "100.64.0.5:5555"}
 func TestEnableTwiceRunsTcpipOnce(t *testing.T)            // ya activo y vigente → ninguna orden y el mismo State
 func TestEnableNeedsTailscaleIP(t *testing.T)              // store sin IP → ErrNoTailscale, ninguna orden, nada guardado
-func TestEnableTcpipFailsClearsUntil(t *testing.T)         // adb falla → error y Until vuelve a cero
+func TestEnableTcpipFailsPortClosedClearsUntil(t *testing.T) // tcpip falla y getprop da "" o "37123" → error y Until vuelve a cero
+func TestEnableTcpipFailsPortOpenKeepsUntil(t *testing.T)    // tcpip falla pero getprop da "5555" → Until intacto (State activo)
+func TestEnableTcpipFailsPortUnreadableKeepsUntil(t *testing.T) // tcpip y getprop fallan → Until intacto
 func TestEnableSaveFailsRunsNothing(t *testing.T)          // SetUntil falla → error y NINGUNA orden de adb
 func TestDisableRunsUsbThenClears(t *testing.T)            // orden: usb antes de SetUntil(zero)
 func TestDisableUsbFailsKeepsEnabled(t *testing.T)         // usb falla → Until intacto, State.Enabled true, error
@@ -349,7 +351,14 @@ func (c *Controller) Enable(ctx context.Context) (State, error) {
 		return c.State(), err
 	}
 	if _, err := c.adbCmd(ctx, "tcpip", Port); err != nil {
-		_ = c.st.SetUntil(time.Time{})
+		// adbd may have got the order and the failure be the cut connection or
+		// the timeout: the expiry is cleared only when the port is seen NOT to
+		// be open. If it cannot be read, the expiry stays (a false "on" is
+		// better than a false "off" with the port open); Reconcile clears it
+		// at the next start if the port turns out closed.
+		if port, perr := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); perr == nil && port != Port {
+			_ = c.st.SetUntil(time.Time{})
+		}
 		return c.State(), err
 	}
 	return c.State(), nil
@@ -433,11 +442,11 @@ func (c *Controller) Reconcile(ctx context.Context) (State, error) {
 
 **Files:**
 - Create: `host/internal/cli/hostconfig.go`, `host/internal/cli/phone_remote.go`, `host/internal/cli/phone_remote_test.go`
-- Modify: `host/internal/cli/phone.go` (registrar la zona: `l.setAreas(..., l.remoteArea())` y el campo `remote *remoteLink`), `host/internal/cli/uilink.go:192` (`onDeviceInfo` deja de ser el único que lee `device.info`: ver paso 3)
+- Modify: `host/internal/cli/phone.go` (registrar la zona: `l.setAreas(..., l.remote.area())`; `l.remote` se crea siempre), `host/internal/cli/serve.go` (crear el `cfgStore` y pasarlo), `host/internal/cli/uilink.go:192` (`onDeviceInfo` deja de ser el único que lee `device.info`: ver paso 3)
 
 **Interfaces:**
 - Consumes: `config.Config`, `config.Save`, `config.ValidTailscaleIP` (Task 2), `bridge.DeviceInfo`.
-- Produces: `cfgStore` con `newCfgStore(path string, cfg *config.Config) *cfgStore`, `Update(func(*config.Config)) error` (guarda en disco con el mutex tomado y deshace el cambio en memoria si falla), `TailscaleIP() string`, `Until() time.Time`, `SetUntil(time.Time) error` (implementa `remote.Store`), `Config() config.Config` (copia). `remoteLink` con `newRemoteLink(store *cfgStore, a phoneapp.ADB, log io.Writer) *remoteLink` y `(*remoteLink).area() area`.
+- Produces: `cfgStore` con `newCfgStore(path string, cfg config.Config) *cfgStore` (guarda su propia copia), `Update(func(*config.Config)) error` (guarda en disco con el mutex tomado y deshace el cambio en memoria si falla), `TailscaleIP() string`, `Until() time.Time`, `SetUntil(time.Time) error` (implementa `remote.Store`), `Config() config.Config` (copia). `remoteLink` con `newRemoteLink(store *cfgStore, a phoneapp.ADB, log io.Writer) *remoteLink` (el controlador y el servidor se le dan en la Task 5) y `(*remoteLink).area() area`.
 
 - [ ] **Step 1: Tests** (`phone_remote_test.go`; usar el servidor del `phone_ui_test.go` como patrón de cómo enviar `device.info` desde una app falsa y esperar):
   - `device.info` con `tailscaleIp: "100.101.102.103"` y el adb falso respondiendo `getprop service.adb.tls.port` → `41234`: `config.toml` queda con `tailscale_ip` y `tailscale_port = 41234`.
@@ -454,27 +463,27 @@ func (c *Controller) Reconcile(ctx context.Context) (State, error) {
 type cfgStore struct {
 	mu   sync.Mutex
 	path string
-	cfg  *config.Config // the env's, shared
+	cfg  config.Config // its own copy: nobody else writes the env's config while serve runs
 }
 
-func newCfgStore(path string, cfg *config.Config) *cfgStore { return &cfgStore{path: path, cfg: cfg} }
+func newCfgStore(path string, cfg config.Config) *cfgStore { return &cfgStore{path: path, cfg: cfg} }
 
 func (s *cfgStore) Config() config.Config {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return *s.cfg
+	return s.cfg
 }
 
 // Update applies f and saves; if saving fails the change is undone.
 func (s *cfgStore) Update(f func(*config.Config)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	old := *s.cfg
-	f(s.cfg)
-	if err := config.Save(s.path, *s.cfg); err != nil {
-		*s.cfg = old
+	next := s.cfg
+	f(&next)
+	if err := config.Save(s.path, next); err != nil {
 		return err
 	}
+	s.cfg = next
 	return nil
 }
 
@@ -515,8 +524,8 @@ func (s *cfgStore) SetUntil(t time.Time) error {
 - Modify: `host/internal/cli/phone_remote.go`, `host/internal/cli/phone_remote_test.go`, `host/internal/cli/serve.go`, `host/internal/cli/phone.go`
 
 **Interfaces:**
-- Consumes: `remote.Controller` (Task 3), `cfgStore` (Task 4), `bridge.RemoteSet`, `bridge.RemoteState`, `bridge.TypeRemoteState`, `Server.Reply`/`Server.Publish` (mirar cómo contesta `phone_chat.go` a un `rid` y copiar la forma).
-- Produces: `(*phoneLink).useRemote(c *remote.Controller)`; `(*remoteLink).publish(remote.State)`; `remoteTick` (variable, 30 s) y la gorrutina `watchRemote(ctx, c, link)` en `serve`; `bridge.RemoteState` en el snapshot.
+- Consumes: `remote.Controller` (Task 3), `cfgStore` (Task 4), `bridge.RemoteSet`, `bridge.RemoteState`, `bridge.TypeRemoteState`, `Server.PublishRID` (éxito) y `Server.Reply(m, bridge.TypeError, bridge.ErrorReply{...})` (errores), como `phone_chat.go:168,283,313`.
+- Produces: `remoteLink.ctl *remote.Controller` (por constructor: `startPhoneLink(ctx, app, e, store, ctl, a, session, agentName, fallback)`); `(*remoteLink).publish(remote.State)`; `remoteTick` (variable, 30 s) y la gorrutina `watchRemote(ctx, c, link)` en `serve`; `bridge.RemoteState` en el snapshot.
 
 - [ ] **Step 1: Tests** (con un `remote.Controller` sobre el adb falso):
   - `remote.set {enabled:true}` con IP de Tailscale conocida: responde con `rid` un `remote.state {enabled:true, address:"100.x:5555", expiresAt}` y publica el evento; el adb falso vio `tcpip 5555`.
@@ -524,22 +533,20 @@ func (s *cfgStore) SetUntil(t time.Time) error {
   - `enabled:false`: `usb`, responde `enabled:false`.
   - `usb` falla: responde `error` (`failed`) y el siguiente `snapshot` sigue diciendo `enabled:true` (ruling 4).
   - Mensaje de una conexión reemplazada: se ignora (sin respuesta: no es la actual).
-  - Sin `rid` (mensaje suelto): se ejecuta y se publica, sin `Reply`.
+  - Sin `rid` (mensaje suelto): se descarta con un aviso y no se ejecuta nada.
   - El snapshot lleva `Remote` (activo, apagado) y `attach` publica `remote.state` (ruling 3).
   - `Expire` desde el tic: pasa a apagado, publica `remote.state{enabled:false}`.
-  - Dos `remote.set` seguidos: el segundo espera (el controlador tiene mutex) y no hay dos `tcpip`.
+  - Dos `remote.set {enabled:true}` seguidos: el segundo no ejecuta otro `tcpip` (`Enable` es idempotente) y contesta con el mismo estado.
   - **Todos los caminos responden** (tabla: payload ilegible → `error` `invalid`; sin controlador → `unavailable`; éxito; fallo).
 - [ ] **Step 2:** `go test ./internal/cli -run Remote -timeout 5m` → FALLA.
-- [ ] **Step 3: Implementar.** `remoteLink` gana `ctl *remote.Controller` (nil hasta `useRemote`). `handleSet(m)`: decodifica `bridge.RemoteSet` (error → `Reply` de error `invalid`); `Current(m)` falso → sale; `ctl == nil` → `unavailable`. Ejecuta en una gorrutina (la petición no debe bloquear el lector del bridge: pendientes de M3) con `ctx` de `serve` y un tope de 30 s: `Enable`/`Disable`; con `ErrNoTailscale` → `unavailable` con ese texto; otro error → `failed` con `classify.Printable(err.Error())`; éxito → `Reply(m, TypeRemoteState, toBridge(state))` y `Publish`. `snapshot`: `s.Remote = toBridge(ctl.State())` (el `State()` solo lee el store: no llama a `Publish` ni toma el lock del servidor; cumple el contrato de `area.snapshot`). `attach: func(){ publish(ctl.State()) }` en una gorrutina (el comentario de `area.attach` dice que corre con el lock del servidor: no publicar en línea). `toBridge` pone `ExpiresAt` solo si activo.
+- [ ] **Step 3: Implementar.** `remoteLink` recibe `ctl *remote.Controller` por constructor (nil solo en tests: entonces `unavailable`). `handleSet(m)`: decodifica `bridge.RemoteSet` (error → `Reply` de error `invalid`); sin `rid` → descarta; `Current(m)` falso → sale. Ejecuta en una gorrutina (la petición no debe bloquear el lector del bridge: pendientes de M3) con `ctx` de `serve` y un tope de 30 s: `Enable`/`Disable`; con `ErrNoTailscale` → `unavailable` con ese texto; otro error → `failed` con `classify.Printable(err.Error())`; éxito → `PublishRID(bridge.TypeRemoteState, m.RID, toBridge(state))` (una sola llamada: responde y publica). `snapshot`: `s.Remote = toBridge(ctl.State())` (el `State()` solo lee el store: no llama a `Publish` ni toma el lock del servidor; cumple el contrato de `area.snapshot`). `attach: func(){ publish(ctl.State()) }` en una gorrutina (el comentario de `area.attach` dice que corre con el lock del servidor: no publicar en línea). `toBridge` pone `ExpiresAt` solo si activo.
 
-En `serve.go`, tras `link := startPhoneLink(...)` y antes de crear el daemon:
+En `serve.go`, el orden es: `store` (Task 4) → `findKnownPhone` → `runner.Serial = activeSerial` → `ctl` → `Reconcile` → invariante → `startPhoneLink`. El controlador se crea **después** de `runner.Serial = ...` (`remote.New` copia el `adb.Runner`, que es un valor; en la Task 6 recibe `active`):
 
 ```go
-store := newCfgStore(e.dirs.ConfigFile(), &e.cfg)
-ctl := remote.New(active, store, time.Now)   // `active` es el activePhone de la Task 6; hasta entonces `runner`
-link.useRemote(store, ctl)
+ctl := remote.New(runner, store, time.Now)   // en la Task 6: remote.New(active, store, time.Now)
 ```
-y justo **antes** de `applyInvariant`: `state, err := ctl.Reconcile(ctx)` (un error solo avisa en stderr), y `keep := ""; if state.Enabled { keep = remote.Port }` que se pasa a `applyInvariant`. Si `state.Enabled`, `serve` imprime "Remote mode is on until HH:MM (port 5555 open)". La gorrutina:
+y justo **antes** de `applyInvariant` y de `startPhoneLink`: `state, err := ctl.Reconcile(ctx)` (un error solo avisa en stderr), y `keep := ""; if state.Enabled { keep = remote.Port }` que se pasa a `applyInvariant`. Si `state.Enabled`, `serve` imprime "Remote mode is on until HH:MM (port 5555 open)". La gorrutina:
 
 ```go
 go func() {
@@ -560,7 +567,7 @@ go func() {
 	}
 }()
 ```
-Ojo (orden): `startPhoneLink` hoy va después de `applyInvariant`; `Reconcile` e `invariant` van antes, y `useRemote` después de `startPhoneLink`: el controlador se crea antes (con el `store`) y `useRemote` solo se lo da al enlace. Reordenar en `serve.go` sin cambiar nada más.
+Orden en `serve.go` (ver arriba): `store` → `findKnownPhone` → `runner.Serial` → `ctl` → `Reconcile` → invariante → `startPhoneLink(…, store, ctl, …)`. Hoy `startPhoneLink` ya va después del invariante: solo se añaden `ctl` y `Reconcile` antes.
 - [ ] **Step 4:** `go test ./internal/cli -timeout 5m` → PASA.
 - [ ] **Step 5: Revisión 🔒 de la tarea** (opus, con `-timeout`): que `remote.set` no pueda llegar de otro origen que la app autenticada y actual, que el 5555 nunca quede abierto sin `remote_until` ni al revés más de un tic, y que ningún camino deje sin responder.
 - [ ] **Step 6: Commit** `feat(host): remote.set, remote.state y caducidad del modo remoto en serve`.
@@ -661,22 +668,23 @@ func (p *activePhone) Output(ctx context.Context, args ...string) (string, strin
 **Interfaces:**
 - Consumes: `activePhone` (Task 6), `cfgStore.Config()` (Task 4), `remote.Controller.State()` (Task 3), `pairing.GuidOf`, `connectAddr`, `verifyAt`.
 - Produces:
-  - `candidateAddrs(cfg config.Config, remoteOn bool) []string` (puro): en orden, `cfg.Address` si no vacío; `tailscale_ip:tailscale_port` si ambos; con `remoteOn`: `tailscale_ip:5555` y `<host de cfg.Address>:5555` (la IP de casa); sin duplicados.
+  - `candidateAddrs(cfg config.Config, remoteOn bool) []string` (puro): en orden, `cfg.Address` si no vacío; `tailscale_ip:tailscale_port` si ambos; con `remoteOn`: `tailscale_ip:5555`; sin duplicados.
   - `findKnownPhone(ctx, runner, serial string, addrs []string, wait time.Duration, log io.Writer) (knownPhone, error)` (antes recibía un `addr string`).
-  - `watchPhone(ctx, w phoneWatch)` con `phoneWatch{Active *activePhone; Runner adb.Runner; Serial string; Cfg func() config.Config; RemoteOn func() bool; Log io.Writer; OnSwitch func(newSerial string)}`; variables `watchEvery = 10 * time.Second`, `watchMisses = 2`, `watchTryWait = 8 * time.Second`.
+  - `watchPhone(ctx, w phoneWatch)` con `phoneWatch{Active *activePhone; Runner adb.Runner; Serial string; Cfg func() config.Config; RemoteOn func() bool; Log io.Writer}` (sin `OnSwitch`); variables `watchEvery = 10 * time.Second`, `watchMisses = 2`, `watchTryWait = 8 * time.Second`.
 
-- [ ] **Step 1: Tests puros de `candidateAddrs`** (tabla): sin nada → vacío; solo `address`; `address` + tailscale; remoto activo añade `ts:5555` y `lan:5555`; duplicados (`address` = `ts:port`) se quitan; remoto apagado no añade 5555; un `address` ilegible no rompe.
+- [ ] **Step 1: Tests puros de `candidateAddrs`** (tabla): sin nada → vacío; solo `address`; `address` + tailscale; remoto activo añade solo `ts:5555`; duplicados (`address` = `ts:port`) se quitan; remoto apagado no añade 5555; un `address` ilegible no rompe.
 - [ ] **Step 2: Tests de `findKnownPhone` con varias direcciones** (reutilizar `addrRules`/`remoteRules` de `remote_test.go`): la primera falla por `connect` y la segunda funciona → `Used` es la segunda; una dirección con otro móvil (`WRONG_PHONE`) se salta con aviso y se prueba la siguiente; ninguna sirve → cae a mDNS y `AddrErr` lleva el último error; `addrs` vacío = comportamiento de hoy. Actualizar los tests existentes a `[]string{addr}`.
 - [ ] **Step 3: Tests del vigilante** (adb falso con `devices` programable por llamadas y reloj de espera corto):
   - el serial sigue en `adb devices`: nunca prueba nada;
   - un fallo aislado (1 < `watchMisses`): no hace nada;
-  - 2 fallos seguidos y la dirección `ts:5555` responde con la identidad correcta: `Switch(ts:5555)`, `OnSwitch` llamado una vez, aviso en el log;
+  - 2 fallos seguidos y la dirección `ts:5555` responde con la identidad verificada: `Switch(ts:5555)` una vez y aviso en el log;
   - una candidata con otro móvil (`WRONG_PHONE`) no se usa y se avisa una vez;
   - ninguna candidata sirve: reintenta en el siguiente tic, sin avisar más de una vez hasta que vuelva;
   - `ctx` cancelado termina la gorrutina sin dejar `adb connect` colgado (el `adb connect` se hace con `context.WithTimeout(ctx, watchTryWait)`);
   - el móvil vuelve por el mismo serial (mDNS): no cambia nada y el contador de fallos se reinicia.
 - [ ] **Step 4:** `go test ./internal/cli -run 'Candidate|KnownPhone|Watch' -timeout 5m` → FALLA.
-- [ ] **Step 5: Implementar `findKnownPhone` con `addrs`.** Extraer los pasos 2-3 del cuerpo actual a `tryAddr(ctx, runner, online []adb.Device, addr, guid string, byGuid bool, log io.Writer) (kp knownPhone, ok bool, addrErr error)` y recorrer `addrs` con él; la `AddrErr` que devuelve es la del último intento fallido. `serve.go`: `addrs := candidateAddrs(store.Config(), ctl.State().Enabled)` si `serial == e.cfg.Serial` y `findKnownPhone(ctx, runner, serial, addrs, ...)`; `setup.go` pasa `known` como `[]string{known}` si no está vacío. Nota: `serve` crea `store` y `ctl` **antes** de `findKnownPhone` (su `ctl.State()` solo lee config, no necesita el móvil): mover esa construcción aquí y dejar `useRemote` (Task 5) donde estaba. El `Reconcile` sigue después de encontrar el móvil.
+- [ ] **Step 5: Implementar `findKnownPhone` con `addrs`.** Extraer los pasos 2-3 del cuerpo actual a `tryAddr(ctx, runner, online []adb.Device, addr, guid string, byGuid bool, log io.Writer) (kp knownPhone, ok bool, addrErr error)` y recorrer `addrs` con él; la `AddrErr` que devuelve es la del último intento fallido. `serve.go`: `addrs := candidateAddrs(store.Config(), !store.Until().IsZero())` si `serial == e.cfg.Serial` y `findKnownPhone(ctx, runner, serial, addrs, ...)`; `setup.go` pasa `known` como `[]string{known}` si no está vacío. Nota: `serve` solo necesita `store` (Task 4) antes de `findKnownPhone`; el controlador se crea después (Task 5), así que `candidateAddrs` usa `!store.Until().IsZero()` como "remoto activo" (aunque haya caducado: `Closing` cuenta como activo). El `Reconcile` sigue después de encontrar el móvil.
+
 - [ ] **Step 6: Implementar `phone_watch.go`.**
 
 ```go
@@ -696,15 +704,12 @@ func candidateAddrs(cfg config.Config, remoteOn bool) []string {
 		if cfg.TailscaleIP != "" {
 			add(net.JoinHostPort(cfg.TailscaleIP, remote.Port))
 		}
-		if h, _, err := net.SplitHostPort(cfg.Address); err == nil {
-			add(net.JoinHostPort(h, remote.Port))
-		}
 	}
 	return out
 }
 ```
-`watchPhone`: ticker `watchEvery`; en cada tic `Runner.Online(ctx)` (host command: el `Runner` del watcher no lleva serial); si `hasSerial(online, Active.Serial())` → `misses = 0`, continuar; si no, `misses++`; con `misses >= watchMisses`: buscar por guid en `online` (`pairing.IsGuidSerial`: mDNS lo trajo con otro nombre) → `Switch`; si no, `for addr in candidateAddrs(Cfg(), RemoteOn())` → `connectAddr(tctx, Runner, addr, guid, watchTryWait)` (verifica identidad); el primero que sirva → `Switch(active)`, `misses = 0`, log "📱 The phone is now at <addr>.", `OnSwitch`. `WRONG_PHONE` avisa una vez por dirección. Nunca llama a `applyInvariant` (no tocar el 5555 mientras se reconecta). Fallo de todas: `warned` una sola vez ("The phone is not reachable (tried …): waiting"), y un aviso de "reachable again" cuando vuelve.
-`serve.go`: `go watchPhone(ctx, phoneWatch{Active: active, Runner: hostRunner, Serial: serial, Cfg: store.Config, RemoteOn: func() bool { return ctl.State().Enabled }, Log: app.Stderr})` arrancado después del daemon.
+`watchPhone`: ticker `watchEvery`; en cada tic `Runner.Online(ctx)` (host command: el `Runner` del watcher no lleva serial); si `hasSerial(online, Active.Serial())` → `misses = 0`, continuar; si no, `misses++`; con `misses >= watchMisses`: buscar por guid en `online` (`pairing.IsGuidSerial`: mDNS lo trajo con otro nombre) → `verifyAt` y solo con `verified == true`, `Switch`; si no, `for addr in candidateAddrs(Cfg(), RemoteOn())` → `connectAddr(tctx, Runner, addr, guid, watchTryWait)`; el primero que devuelva `verified == true` → `Switch(active)`, `misses = 0`, log "📱 The phone is now at <addr>."; un candidato con `verified == false` se desconecta (`adb disconnect`) y no se usa. `WRONG_PHONE` avisa una vez por dirección. Nunca llama a `applyInvariant` (no tocar el 5555 mientras se reconecta). Fallo de todas: `warned` una sola vez ("The phone is not reachable (tried …): waiting"), y un aviso de "reachable again" cuando vuelve.
+`serve.go`: `go watchPhone(ctx, phoneWatch{Active: active, Runner: hostRunner, Serial: serial, Cfg: store.Config, RemoteOn: func() bool { return !store.Until().IsZero() }, Log: app.Stderr})` arrancado después del daemon.
 - [ ] **Step 7:** `go build ./... && go test ./internal/cli -timeout 5m` → PASA.
 - [ ] **Step 8: Revisión 🔒** (opus): identidad verificada antes de `Switch` en todos los caminos (nunca se cambia a un móvil sin comprobar su guid cuando hay guid), `Switch` no deja órdenes del agente ejecutándose contra otro móvil, y el vigilante no abre ni cierra ningún puerto.
 - [ ] **Step 9: Commit** `feat(host): serve reconecta con el móvil por Tailscale o el 5555 si cambia su dirección`.
@@ -714,7 +719,7 @@ func candidateAddrs(cfg config.Config, remoteOn bool) []string {
 ### Task 8: `adbuddy remote on|off|status`
 
 **Correcciones de la revisión opus (obligatorias; mandan sobre el texto de esta tarea):**
-- **`on` por IPC pide confirmación (I11):** abrir el 5555 12 h en redes públicas no puede decidirlo un agente que borre `ADBUDDY_SOURCE`. `handleRemote("on")` pregunta al usuario con el mismo `confirm.Confirmer` que usan las 🔴 (el del enlace: móvil o terminal de `serve`), con título propio "Open adb's network port 5555 for 12 hours" / "Abrir el puerto de red 5555 de adb durante 12 horas"; denegar o caducar da `REMOTE_DENIED` (salida 126) y no ejecuta nada. Leer `confirm.Confirmer` y cómo lo usa `daemon.exec` para la forma exacta; test con un confirmador falso (acepta, deniega, caduca). `off` y `status` no preguntan. El interruptor de la app (`remote.set`) NO pasa por esta confirmación: es el propio usuario con la app autenticada, y el diálogo de la app ya lleva el aviso. Apuntar en `pendientes` que la defensa real es la identidad del par del socket.
+- **`on` por IPC pide confirmación (I11):** abrir el 5555 12 h en redes públicas no puede decidirlo un agente que borre `ADBUDDY_SOURCE`. `handleRemote("on")` pregunta al usuario con el mismo `confirm.Confirmer` que usan las 🔴 (el del enlace: móvil o terminal de `serve`), con título propio "Open adb's network port 5555 for 12 hours" / "Abrir el puerto de red 5555 de adb durante 12 horas"; denegar o caducar da `REMOTE_DENIED` (salida 126) y no ejecuta nada. La petición al `confirm.Confirmer` (`confirm/confirm.go:58`, el del enlace: `link.Confirmer()`) lleva **exactamente**: `Key: ""` y `Special: true` (si no, la `Key` de regla+cwd+argv activaría "permitir durante la sesión", `bridge/confirm.go:57-62`, y un agente reabriría el 5555 sin preguntar después de que el usuario lo cierre); `ID: journal.NewID("r_", now)` (con `ID` vacío el confirmador deniega); un `context.WithTimeout(ctx, ConfirmTimeout)` con su `ExpiresAt`; el título en el idioma del usuario (`Lang`); y `l.Paused()` verdadero deniega sin preguntar. Test con un confirmador falso: acepta, deniega, caduca, en pausa, y que la segunda petición vuelve a preguntar aunque la primera se aceptase. `off` y `status` no preguntan. El interruptor de la app (`remote.set`) NO pasa por esta confirmación: es el propio usuario con la app autenticada, y el diálogo de la app ya lleva el aviso. Apuntar en `pendientes` que la defensa real es la identidad del par del socket.
 - **`off` sin `serve`:** ejecuta `adb usb` directamente con el adb configurado y borra `remote_until` (si `usb` falla, lo dice y no borra). `on` sin `serve` sigue siendo `DAEMON_NOT_RUNNING`.
 - El texto para `AGENTS.md` (Task 15) avisa de que una orden guardada va sola: `dumpsys activity top | grep …` se bloquea con "must run alone" (M16).
 
@@ -788,12 +793,13 @@ func candidateAddrs(cfg config.Config, remoteOn bool) []string {
 
 **Correcciones de la revisión opus (obligatorias; mandan sobre el texto de esta tarea):**
 - **Opciones de `dumpsys` (I7):** `checkDumpsys` busca `--noredact` en **cualquier** posición de un `dumpsys` con `notification` (`dumpsys -t 10 notification --noredact` → 🔴). Para saber el servicio se saltan las opciones propias de `dumpsys` (`-t N`, `--pri`/`--priority X`, `--proto`, `--pid`, `--skip X`, `--help`). Si el primer argumento empieza por `-` y no se reconoce, `screenAction` lo trata como lectura guardada (lista blanca). Tests: `dumpsys -t 10 activity top` bloqueado en app protegida, `dumpsys -t 10 notification --noredact` 🔴, `dumpsys --proto activity top` bloqueado.
-- **`adb bugreport` (I8):** pasa a 🔴 especial: su informe incluye `dumpsys activity` con árbol de vistas y texto, y `notification`. Cambiar el nivel en `rules/adb.yaml:22` y añadir su test. Sin verificarlo en el emulador: se hace 🔴 por prudencia y la spec lo dice (Task 1).
+- **`adb bugreport` (I8):** 🔴 **especial** (en `special.go`, no en `adb.yaml`: una regla del yaml la puede bajar el usuario, `pcwrite_test.go:167`): su informe incluye `dumpsys activity` con árbol de vistas y texto, y `notification`. Sin verificarlo en el emulador: 🔴 por prudencia y la spec lo dice (Task 1). Su `PCWrite` se sigue rellenando.
+- **`dumpsys` sin servicio o con `--skip`:** vuelca todos los servicios (también `activity top` y `notification`): `checkDumpsys` lo marca 🔴 si no hay servicio (`dumpsys` solo, o solo opciones) salvo `dumpsys -l`/`--help`; con `--skip X` y sin servicio, igual. Tests: `dumpsys` → 🔴; `dumpsys -l` → 🟢; `dumpsys --skip meminfo` → 🔴; `dumpsys battery` → 🟢. Comprobar que `habitual.jsonl` no tiene un `dumpsys` solo (sus líneas 5-12 no lo tienen).
 - Si `testdata/habitual.jsonl` contiene `bugreport` o `dumpsys notification --noredact` entre lo que "no puede subir", parar y avisar a e5.
 
 
 **Files:**
-- Modify: `host/internal/classify/checks_read.go` (`checkDumpsys`), `host/internal/classify/rules.go` (regla `screen.record`), `host/internal/daemon/guard.go` (`screenAction`), sus tests
+- Modify: `host/internal/classify/checks_read.go` (`checkDumpsys`), `host/internal/classify/special.go` y `rules.go` (reglas `screen.record` y `adb.bugreport`), `host/internal/daemon/guard.go` (`screenAction`), sus tests, y los que cambian de resultado: `classify/hardening_test.go:94` (`bugreport` pasa de 🟢 a 🔴) y `daemon/pcwrite_test.go:49-50,72,74,95` (los `bugreport` ya no se ejecutan sin preguntar: ajustar o pasar a un caso que no use `bugreport`, y cubrir `pull` por separado); `rules/adb.yaml:22` no se toca
 
 **Interfaces:**
 - Consumes: `classify.Finding`, `screenAction`.
@@ -857,11 +863,11 @@ class NotificationWindow(private val clock: () -> Long, private val windowMs: Lo
 
 
 **Files:**
-- Modify: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/BridgeState.kt:18`, `.../bridge/RemoteReducer.kt`, `.../bridge/Protocol.kt:214`, `.../bridge/ProtocolUi.kt` (solo si `RemoteState` hace falta anulable en `Snapshot`; el tipo no cambia)
+- Modify: `android/app/src/main/kotlin/tech/hybriq/adbuddy/bridge/BridgeState.kt:18`, `.../bridge/RemoteReducer.kt`, (`Protocol.kt` y `ProtocolUi.kt` NO se tocan)
 - Test: `android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/BridgeStateTest.kt` (casos nuevos), `ProtocolTest.kt` si el cambio de `Snapshot` lo exige
 
 **Interfaces:**
-- Produces: `BridgeState.remote: RemoteState?` (`null` = desconocido), `Snapshot.remote: RemoteState? = null`.
+- Produces: `BridgeState.remote: RemoteState?` (`null` = desconocido). `Snapshot.remote` sigue siendo `JsonElement? = null`.
 
 - [ ] **Step 1: Tests que fallan** (en `BridgeStateTest.kt`, con los helpers de mensajes que ya usa):
   - estado inicial: `remote == null`;
@@ -883,7 +889,12 @@ object RemoteReducer : Reducer {
     override fun event(s: BridgeState, m: Message): BridgeState =
         s.copy(remote = Protocol.payload<RemoteState>(m))
 
-    override fun snapshot(s: BridgeState, snap: Snapshot): BridgeState = s.copy(remote = snap.remote)
+    // Per area (protocol §4.3): a malformed remote part must not make the whole snapshot unreadable.
+    override fun snapshot(s: BridgeState, snap: Snapshot): BridgeState = s.copy(
+        remote = snap.remote?.let {
+            runCatching { Protocol.json.decodeFromJsonElement(RemoteState.serializer(), it) }.getOrNull()
+        },
+    )
 
     override fun reset(s: BridgeState, why: Reset): BridgeState = when (why) {
         Reset.NEW_SESSION, Reset.UNREADABLE_SNAPSHOT -> s.copy(remote = null)
@@ -891,7 +902,7 @@ object RemoteReducer : Reducer {
     }
 }
 ```
-`BridgeState`: `val remote: RemoteState? = null` (cambiar el comentario: "null = unknown"). `Protocol.kt`: `Snapshot.remote: RemoteState? = null` (comprobar que `ignoreUnknownKeys`/`explicitNulls` ya lo permiten; los fixtures de snapshot deben seguir pasando: el host de Go siempre manda `remote`). Buscar todos los usos de `state.remote` (`grep -rn "\.remote" android/app/src`) y adaptarlos.
+`BridgeState`: `val remote: RemoteState? = null` (cambiar el comentario: "null = unknown"). Buscar todos los usos de `state.remote` (`grep -rn "\.remote" android/app/src`) y adaptarlos.
 - [ ] **Step 4:** `./gradlew :app:testDebugUnitTest` → PASA.
 - [ ] **Step 5: Commit** `feat(app): RemoteReducer con estado de tres valores`.
 
@@ -946,9 +957,9 @@ object TailscaleIp {
 
 **Interfaces:**
 - Consumes: `BridgeState.remote: RemoteState?` (Task 11), `Bridge.request(type, payload, onResult)`, `HostClock`.
-- Produces: `RemoteUi.view(state: BridgeState, pending: Boolean, now: Instant): RemoteView` con `RemoteView(kind: Kind, address: String, expiresAt: Instant?, canToggle: Boolean)` y `enum Kind { UNKNOWN, OFF, ON, PENDING, DISCONNECTED }`; `RemoteUi.request(enabled: Boolean): JsonElement`.
+- Produces: `RemoteUi.view(state: BridgeState, pending: Boolean, unknownSince: Boolean, now: Instant): RemoteView` con `RemoteView(kind: Kind, address: String, expiresAt: Instant?, canToggle: Boolean)` y `enum Kind { UNKNOWN, OFF, ON, CLOSING, PENDING, DISCONNECTED }`; `RemoteUi.request(enabled: Boolean): JsonElement`.
 
-- [ ] **Step 1: Tests de `RemoteUi.view`:** desconectado del host (`connection != CONNECTED`) → `DISCONNECTED`, `canToggle = false` (el interruptor solo se usa con el móvil conectado al host); conectado y `remote == null` → `UNKNOWN` (con aviso) y `canToggle = false`; `enabled=false` → `OFF`, `canToggle = true`; `enabled=true` y `expiresAt` futuro → `ON` con dirección y caducidad; `enabled=true` con `expiresAt` ya pasado (usar `HostClock`, no el del móvil) → `OFF`; `pending = true` → `PENDING` y `canToggle = false`; `expiresAt` ilegible → `ON` sin caducidad mostrada, no lanza. `request(true)` es `{"enabled":true}`.
+- [ ] **Step 1: Tests de `RemoteUi.view`:** desconectado del host (`connection != CONNECTED`) → `DISCONNECTED`, `canToggle = false` (el interruptor solo se usa con el móvil conectado al host); conectado y `remote == null` → `UNKNOWN` (con aviso) y `canToggle = false`; `enabled=false` → `OFF`, `canToggle = true`; `enabled=true` y `expiresAt` futuro → `ON` con dirección y caducidad; `enabled=true` con `expiresAt` ya pasado (usar `HostClock`, no el del móvil) → `CLOSING` (nunca `OFF`); `unknownSince = true` → `UNKNOWN` aunque `remote` tenga valor; `pending = true` → `PENDING` y `canToggle = false`; `expiresAt` ilegible → `ON` sin caducidad mostrada, no lanza. `request(true)` es `{"enabled":true}`.
 - [ ] **Step 2:** FALLA.
 - [ ] **Step 3: Implementar** `RemoteUi` (puro) y la tarjeta: título "Remote mode" / "Modo remoto"; un `Switch` (`checked = kind in ON/PENDING`, `enabled = canToggle`); al activar, **antes** de enviar, un `AlertDialog` con el aviso de §3.3 de la v1 ("Port 5555 stays open on any network, including public ones, for up to 12 hours. Your PC's key is still required. Turn it off when you are back home." / "El puerto 5555 queda abierto en cualquier red, también en las públicas, hasta 12 horas. Sigue haciendo falta la clave de tu PC. Desactívalo al volver a casa."); al confirmar, `pending = true` y `bridge.request(Protocol.REMOTE_SET, RemoteUi.request(true)) { reply -> pending = false }` (una respuesta `error` muestra su texto, p. ej. "Turn on Tailscale on the phone first"; un `null` —el túnel cayó por el reinicio de adbd, ruling 3— deja `pending = false` y el estado lo da el snapshot de la reconexión). Desactivar no pide diálogo. La caducidad se muestra como hora local ("Until 21:14"/"Hasta las 21:14"); `UNKNOWN` muestra "Unknown: the host will tell when it reconnects" / "Desconocido: el host lo dirá al reconectar"; el estado `ON` muestra también la dirección. Todos los textos en `strings.xml` EN y ES. Colores del tema, nada fijo (pendientes: base de diseño de M3); si M3 ya cambió `HomeScreen`, adaptar a su estructura.
 - [ ] **Step 4:** `./gradlew :app:testDebugUnitTest` → PASA.
@@ -1008,5 +1019,5 @@ Solo con el móvil del usuario y su permiso explícito.
 
 - **Cobertura de la spec §7:** 7.1 → T4 (`device.info`, puerto por `getprop`, `findKnownPhone` con `tailscale_ip:tailscale_port` tras `address`, antes de mDNS: T7); 7.2 → T3 (`tcpip`/`usb`, 12 h, invariante), T5 (`remote.set`, `remote.state` de tres valores), T6-T7 (serial activo y reconexión con `ts:5555`), T8 (`adbuddy remote`, `AGENT_SESSION`), T11-T13 (reductor, aviso, caducidad visible); "concesiones solo a una app verificada" (`phoneapp.Verified`) no cambia: M5b no añade concesiones; §3.6 (captura en modo remoto) → T9. Arrastres de M5a → T10 (I7), T14 (`ignoreUnknownKeys`, menores).
 - **Tipos coherentes:** `remote.Port` (T3) lo usan T5, T7; `cfgStore` (T4) lo usan T5, T7; `activePhone` (T6) lo usan T5 (tras T6), T7; `RemoteState?` (T11) lo usa T13; `ScreenshotArgs` con ceros (T9). `applyInvariant` con `keep` (T3) se llama desde `serve` (T3 con `""`, T5 con el valor real).
-- **Orden de tareas:** T3 deja `serve` pasando `""`; T5 usa `runner` hasta T6, donde se cambia por `active` (T6 actualiza la línea de T5: está dicho en su Step 5); T7 mueve la construcción de `store`/`ctl` antes de `findKnownPhone` (dicho en su Step 5).
+- **Orden de tareas:** T3 deja `serve` pasando `""`; T5 crea `remote.New(runner, ...)` y T6 lo cambia por `active` (dicho en su Step 5); T4 crea `store` antes de `findKnownPhone`; el controlador se crea después de `runner.Serial = ...` (T5), y `candidateAddrs` usa `store.Until()` para saber si el modo está activo (T7).
 - **Riesgos abiertos para el revisor:** (a) formato de `dumpsys window` en Android 17 no verificado (validación 14, falla cerrado); (b) `adb tcpip` desde una conexión inalámbrica depende de S1 (validado con matices); (c) `ANDROID_SERIAL` del agente queda viejo tras un `Switch` (cubierto por `Serials`); (d) el `device.info` de la app y el de `UiHelpers` comparten manejador en el host (T4).
