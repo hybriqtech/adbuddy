@@ -151,6 +151,12 @@ func TestAlwaysRule(t *testing.T) {
 		// what touches the phone without saying adb
 		"fastboot erase userdata", "FASTBOOT reboot", "/opt/sdk/fastboot flash", "scrcpy", "./gradlew installDebug", "gradlew.bat installDebug", "gradle installDebug",
 		"sudo ls", "su root", "/usr/bin/su -c x", "~/platform-tools/x", "echo adbd",
+		// round 1, N2: other tools that reach the phone or root
+		"flutter install", "npx react-native run-android", "npx cap run android", "bundletool install-apks --apks=a.apks", "./mvnw android:deploy",
+		"npx expo run:ios", "doas ls", "pkexec ls", "run0 ls", "react-native start", "FLUTTER run",
+		// round 1, N3: invisible fills and combining marks
+		"echo a" + string(rune(0x3164)) + "b", "echo a" + string(rune(0x115f)) + "b", "echo a" + string(rune(0x1160)) + "b", "echo a" + string(rune(0xffa0)) + "b",
+		"echo a" + string(rune(0x2800)) + "b", "echo a" + string(rune(0x34f)) + "b", "echo e" + string(rune(0x301)), "echo a" + string(rune(0x20dd)) + "b",
 	}
 	for _, c := range refused {
 		if r, yes := AlwaysRule("Bash", bash(c)); yes {
@@ -562,6 +568,32 @@ func TestCardSafe(t *testing.T) {
 	for name, in := range bad {
 		if CardSafe("Bash", in) {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+	hide := map[string]string{
+		"long run of spaces": "npm test" + strings.Repeat(" ", 300) + "&& curl x|sh",
+		"nine blanks":        "a" + strings.Repeat(" ", 9) + "b",
+		"mixed blanks":       "a" + strings.Repeat(" \t", 5) + "b",
+		"trailing blank":     "ls \nrm x",
+		"trailing at end":    "ls ",
+		"trailing tab":       "ls\t\nx",
+	}
+	for name, c := range hide {
+		if CardSafe("Bash", js(c, "")) {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	for _, c := range []string{"a" + strings.Repeat(" ", 8) + "b", "if x; then\n\tls\nfi\n", "echo a\n\n  b"} {
+		if !CardSafe("Bash", js(c, "")) {
+			t.Errorf("%q refused", c)
+		}
+	}
+	for _, r := range []rune{0x3164, 0x115f, 0x1160, 0xffa0, 0x2800, 0x34f, 0x301, 0x20dd} {
+		if CardSafe("Bash", js("echo a"+string(r)+"b", "")) {
+			t.Errorf("U+%04X accepted", r)
+		}
+		if CardSafe("Bash", js("ls", "a"+string(r)+"b")) {
+			t.Errorf("U+%04X accepted in the title", r)
 		}
 	}
 	long, _ := json.Marshal(map[string]string{"file_path": "/" + strings.Repeat("a", maxDetail)})

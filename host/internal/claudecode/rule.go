@@ -122,7 +122,10 @@ func shownRune(r rune) bool {
 	switch {
 	case r == '\n' || r == '\t' || r == ' ':
 		return true
-	case r == utf8.RuneError, unicode.IsControl(r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Z, r):
+	case r == utf8.RuneError, unicode.IsControl(r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Z, r),
+		unicode.Is(unicode.Mn, r), unicode.Is(unicode.Me, r):
+		return false
+	case r == 0x3164, r == 0x115f, r == 0x1160, r == 0xffa0, r == 0x2800, r == 0x034f: // fillers that draw nothing
 		return false
 	}
 	return true
@@ -137,6 +140,33 @@ func shown(s string) bool {
 	return true
 }
 
+// maxBlanks is the longest run of spaces and tabs the card's detail may hold:
+// more would push text out of view.
+const maxBlanks = 8
+
+// detailShown is shown plus what hides text with plain blanks: a long run of
+// spaces or tabs, or blanks at the end of a line.
+func detailShown(s string) bool {
+	if !shown(s) {
+		return false
+	}
+	run := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == ' ' || s[i] == '\t' {
+			run++
+			if run > maxBlanks {
+				return false
+			}
+			continue
+		}
+		if run > 0 && s[i] == '\n' {
+			return false
+		}
+		run = 0
+	}
+	return run == 0
+}
+
 // CardSafe reports whether the phone's card shows what a "yes" would approve
 // (spec M4 §5.1, review I3): the detail must fit whole (the card cuts it and a
 // "yes" approves all of it) and neither it nor what the title is made of may
@@ -144,7 +174,7 @@ func shown(s string) bool {
 // not ask the phone: the question stays on the terminal.
 func CardSafe(tool string, raw json.RawMessage) bool {
 	d := fullDetail(tool, raw)
-	if len(d) > maxDetail || !shown(d) {
+	if len(d) > maxDetail || !detailShown(d) {
 		return false
 	}
 	in := input(raw)
@@ -172,10 +202,12 @@ func ruleRune(r rune) bool {
 // phoneWords are names of tools that reach the phone (or root) by a way the
 // shim does not see: a rule that mentions one is never offered. They are
 // searched as a substring, in any case, so a path or a suffix does not hide
-// them; su and sudo are too short for that and are searched as words.
+// them; su, sudo, doas, pkexec, run0 and expo are short or common inside other words and are
+// searched as words. No lexical filter covers `make install`, a script of the
+// project or an alias made before with `ln -s …/adb /tmp/x` (spec M4 §5.3).
 var (
-	phoneSubstrings = []string{"adb", "adbuddy", "fastboot", "scrcpy", "gradle", "platform-tools", "android_serial"}
-	phoneWords      = []string{"su", "sudo"}
+	phoneSubstrings = []string{"adb", "adbuddy", "fastboot", "scrcpy", "gradle", "platform-tools", "android_serial", "android", "flutter", "bundletool", "react-native"}
+	phoneWords      = []string{"su", "sudo", "doas", "pkexec", "run0", "expo"}
 )
 
 func mentionsPhone(cmd string) bool {
