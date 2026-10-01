@@ -40,6 +40,8 @@ type phoneLink struct {
 	// their message handlers by type; set before the server starts.
 	areas    []area
 	handlers map[string]func(bridge.Message)
+	// ui is the helpers' channel and the protected apps (phone_ui.go).
+	ui *uiLink
 
 	mu      sync.Mutex
 	paused  bool
@@ -101,6 +103,7 @@ var newToken = bridge.NewToken
 // app's channel stops serve. Its only error is Interrupted (ctx ended).
 func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
 	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf}
+	l.ui = newUILink(protectedAppsPath(e), app.Stderr)
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
 	without := func(why string) (*phoneLink, error) {
 		fmt.Fprintf(app.Stderr, "⚠ %s. 🔴 confirmations happen here, without the phone app.\n", why)

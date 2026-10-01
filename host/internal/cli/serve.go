@@ -170,9 +170,11 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			if err != nil {
 				return err
 			}
+			ui, protected := link.helpers()
 			d := daemon.New(daemon.Options{
 				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: link.Confirmer(),
 				Paused: link.Paused,
+				UI:     ui, Protected: protected,
 				Serial: active, Identity: identity, Workspace: ws, Session: session, Lang: e.cfg.Lang(app.Getenv), ConfirmTimeout: e.cfg.ConfirmTimeout.Duration, Version: Version,
 				UndoneLog: undoneLogPath(e.dirs.Data, workspace.JournalDir(ws)),
 				OnEntry: func(j journal.Entry) {
