@@ -160,3 +160,46 @@
 {"argv":["kill-server"],"level":"red","special":true}
 {"argv":["tcpip","5555"],"level":"red","special":true}
 {"argv":["exec-out","screencap","-p"],"level":"green"}
+# ADBuddy's own app: removing, wiping, disabling, stopping or weakening it leaves the phone without its trusted app (spec M6a §7)
+{"sh":"pm uninstall tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm uninstall -k tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm uninstall --user 0 tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm uninstall -k --user 0 tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"cmd package uninstall tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"cmd package uninstall -k --user 0 tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm clear tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm clear --user 0 tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm disable tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm disable-user tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm suspend tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm hide tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"pm revoke tech.hybriq.adbuddy android.permission.WRITE_SECURE_SETTINGS","level":"red","special":true}
+{"sh":"cmd package disable-user tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"am force-stop tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"am kill tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"am stop-app tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"cmd activity force-stop tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"cmd appops set tech.hybriq.adbuddy RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
+{"sh":"cmd deviceidle whitelist -tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"dumpsys deviceidle whitelist -tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"p=tech.hybriq.adbuddy; pm uninstall $p","level":"red","special":true}
+{"sh":"p=tech.hybriq.adbuddy; cmd deviceidle whitelist -$p","level":"red","special":true}
+{"sh":"cmd package uninstall $(getprop foo)","level":"red","special":true}
+{"sh":"cmd appops set $PKG RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
+{"sh":"pm list packages | grep hybriq | cut -d: -f2 | xargs pm uninstall","level":"red","special":true}
+{"sh":"cmd package uninstall $(pm list packages | grep hybr | cut -c9-)","level":"red","special":true}
+{"sh":"pm uninstall tech.hybriq.adbudd*","level":"red","special":true}
+{"sh":"pm uninstall tech.hybriq.adbu\"\"ddy","level":"red","special":true}
+{"sh":"pm uninstall tech.hybriq.adbu''ddy","level":"red","special":true}
+{"sh":"sh -c 'pm uninstall tech.hybriq.adbuddy'","level":"red","special":true}
+{"argv":["uninstall","tech.hybriq.adbuddy"],"level":"red","special":true}
+{"argv":["uninstall","-k","tech.hybriq.adbuddy"],"level":"red","special":true}
+{"argv":["shell","pm","uninstall","tech.hybriq.adbuddy"],"level":"red","special":true}
+{"sh":"pm reset-permissions","level":"red","special":true}
+{"sh":"cmd package reset-permissions","level":"red","special":true}
+{"sh":"dumpsys deviceidle whitelist reset","level":"red","special":true}
+{"sh":"cmd deviceidle whitelist reset","level":"red","special":true}
+{"sh":"cmd appops reset","level":"red","special":true}
+{"sh":"cmd appops reset --user 0","level":"red","special":true}
+{"sh":"appops reset","level":"red","special":true}
+{"sh":"appops reset --user 0","level":"red","special":true}
