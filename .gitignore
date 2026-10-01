@@ -19,6 +19,8 @@ build/
 *.aab
 *.keystore
 *.jks
+*.p12
+*.pfx
 captures/
 .externalNativeBuild/
 .cxx/
