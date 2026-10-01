@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,18 +44,19 @@ type phoneLink struct {
 	// ui is the helpers' channel and the protected apps (phone_ui.go).
 	ui *uiLink
 
-	mu      sync.Mutex
-	paused  bool
-	onPause func() // withdraws the question waiting for an answer (daemon.CancelConfirmations)
-	entries []json.RawMessage
-	noticed map[string]bool  // types told unsupported by notice on this connection
-	sess    session.Info     // the agent's session, as shown on the phone
-	manager *session.Manager // nil until serve starts the session
-	chat    chatState        // phone_chat.go
-	term    termState        // phone_term.go
-	files   filesState       // phone_files.go
-	adb     phoneapp.ADB     // the phone's adb, for screenshots
-	ws      string           // the environment (useWorkspace)
+	mu       sync.Mutex
+	paused   bool
+	onPause  func() // withdraws the question waiting for an answer (daemon.CancelConfirmations)
+	entries  []json.RawMessage
+	noticed  map[string]bool  // types told unsupported by notice on this connection
+	sess     session.Info     // the agent's session, as shown on the phone
+	activity string           // the agent's last adb command as the journal describes it (session.state.activity)
+	manager  *session.Manager // nil until serve starts the session
+	chat     chatState        // phone_chat.go
+	term     termState        // phone_term.go
+	files    filesState       // phone_files.go
+	adb      phoneapp.ADB     // the phone's adb, for screenshots
+	ws       string           // the environment (useWorkspace)
 
 	// termEvery is termInterval as it was when the link started: read here,
 	// not from the variable, by the goroutines that outlive a test.
@@ -270,14 +272,48 @@ func (l *phoneLink) Entry(j journal.Entry) {
 	if l.srv != nil {
 		_ = l.srv.Publish(bridge.TypeJournalEntry, json.RawMessage(raw))
 	}
+	if j.Source == journal.SourceAgent {
+		l.noteActivity(j)
+	}
+}
+
+// maxActivity is the longest activity, in runes: it travels in every
+// session.state.
+const maxActivity = 120
+
+// noteActivity records what the agent last did on the phone and publishes the
+// state when it changes: a repeated description publishes nothing. Commands
+// that did not run (denied, blocked, timed out) are not what the agent is doing.
+func (l *phoneLink) noteActivity(j journal.Entry) {
+	switch j.Status {
+	case journal.StatusDenied, journal.StatusBlocked, journal.StatusTimeout:
+		return
+	}
+	desc := strings.TrimSpace(j.Description)
+	if desc == "" {
+		return
+	}
+	if r := []rune(desc); len(r) > maxActivity {
+		desc = string(r[:maxActivity-1]) + "…"
+	}
+	l.mu.Lock()
+	changed := l.activity != desc
+	l.activity = desc
+	l.mu.Unlock()
+	if changed && l.srv != nil {
+		_ = l.srv.Publish(bridge.TypeSessionState, l.state())
+	}
 }
 
 func (l *phoneLink) state() bridge.SessionState {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	st := bridge.SessionState{Agent: l.agent, State: session.StateStopped, Paused: l.paused, View: "terminal"}
+	st := bridge.SessionState{Agent: l.agent, State: session.StateStopped, Activity: l.activity, Paused: l.paused, View: "terminal"}
 	if i := l.sess; i.Agent != "" {
 		st.Agent, st.State, st.Conversation, st.PCAttached = i.Agent, i.State, i.Conversation, i.PCAttached
+	}
+	if st.State == session.StateStopped {
+		st.Activity = ""
 	}
 	return st
 }
@@ -286,6 +322,9 @@ func (l *phoneLink) state() bridge.SessionState {
 // shows it on the phone.
 func (l *phoneLink) sessionInfo(i session.Info) {
 	l.mu.Lock()
+	if i.Conversation != l.sess.Conversation || i.State == session.StateStopped {
+		l.activity = ""
+	}
 	l.sess = i
 	l.mu.Unlock()
 	l.chat.conversation(i.Conversation)

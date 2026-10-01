@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
+	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/pty"
 	"github.com/hybriqtech/adbuddy/host/internal/session"
 )
@@ -502,5 +503,65 @@ func TestSnapshotChatStaysUnderTheLimit(t *testing.T) {
 	// Both snapshots in the welcome and after it are under the app's limit.
 	if data, _ := json.Marshal(s); len(data) >= 1<<20 {
 		t.Fatalf("snapshot %d bytes", len(data))
+	}
+}
+
+// nextState reads app messages until the next session.state, skipping the
+// journal.entry events that Entry publishes next to it.
+func nextState(t *testing.T, r *chatRig) bridge.SessionState {
+	t.Helper()
+	for range 20 {
+		m := readApp(t, r.c)
+		if m.Type != bridge.TypeSessionState {
+			continue
+		}
+		var st bridge.SessionState
+		if err := json.Unmarshal(m.Payload, &st); err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	t.Fatal("no session.state")
+	return bridge.SessionState{}
+}
+
+// The state carries what the agent last did on the phone (spec M3 §3.5):
+// only the agent's commands, once per change, cut to 120 runes.
+func TestSessionStateCarriesTheAgentsLastCommand(t *testing.T) {
+	r := newChatRig(t)
+	r.start(t, "claude")
+	// A command of the person is not the agent's activity, nor one that did not run.
+	r.l.Entry(journal.Entry{Source: journal.SourceUser, Description: "Reboot the phone"})
+	r.l.Entry(journal.Entry{Source: journal.SourceAgent, Description: "Wipe the phone", Status: journal.StatusDenied})
+	r.l.Entry(journal.Entry{Source: journal.SourceAgent, Description: "Open the Wi-Fi settings"})
+	if st := nextState(t, r); st.Activity != "Open the Wi-Fi settings" {
+		t.Fatalf("activity %q", st.Activity)
+	}
+	// The same description again publishes nothing:
+	// the next state is the new command's.
+	r.l.Entry(journal.Entry{Source: journal.SourceAgent, Description: "Open the Wi-Fi settings", Status: "ok"})
+	r.l.Entry(journal.Entry{Source: journal.SourceAgent, Description: strings.Repeat("é", 300)})
+	st := nextState(t, r)
+	if n := len([]rune(st.Activity)); n != 120 || !strings.HasSuffix(st.Activity, "…") {
+		t.Fatalf("activity of %d runes: %q", n, st.Activity)
+	}
+	// A snapshot says it too.
+	if got := r.l.snapshot().State.Activity; got != st.Activity {
+		t.Fatalf("snapshot %q", got)
+	}
+}
+
+// A new conversation starts without activity.
+func TestActivityEndsWithTheConversation(t *testing.T) {
+	r := newChatRig(t)
+	r.start(t, "claude")
+	r.l.Entry(journal.Entry{Source: journal.SourceAgent, Description: "Take a screenshot"})
+	if st := nextState(t, r); st.Activity != "Take a screenshot" {
+		t.Fatalf("activity %q", st.Activity)
+	}
+	// What the Manager publishes when session.new starts another conversation.
+	r.l.sessionInfo(session.Info{Agent: "claude", State: session.StateIdle, Conversation: "c_other"})
+	if st := nextState(t, r); st.Activity != "" || st.Conversation != "c_other" {
+		t.Fatalf("state %+v", st)
 	}
 }
