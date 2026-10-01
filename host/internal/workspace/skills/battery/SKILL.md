@@ -59,7 +59,7 @@ Adaptive battery, only if the setting exists on this phone (the value in step 1 
 shell settings put global adaptive_battery_management_enabled 1   # yellow
 ```
 
-5. Background restriction for one app the user agreed to, never for the exclusions above. Read the current value first, then change it:
+5. Background restriction for one app the user agreed to, never for the exclusions above. Choose candidates from the user apps (`shell pm list packages -3`), not from system components. Read the current value first: if the read fails because `RUN_ANY_IN_BACKGROUND` does not exist on this phone, skip this step and say so (the change would come out red and could not be undone with `adbuddy undo`). Otherwise change it:
 
 ```adb
 shell cmd appops get com.example.app RUN_ANY_IN_BACKGROUND   # green
@@ -70,11 +70,14 @@ To go back by hand, use `allow` or `default` as the last argument. The usual way
 
 6. Do not use `am set-standby-bucket`: it is red and has no inverse in the journal, and `cmd appops` covers the same ground. If any other step you consider turns out red, it waits for the user's confirmation, and you do not promise `adbuddy undo` for it: tell the user how to revert it by hand.
 
-7. Measure at the end with the same readings as in step 1, and show a before and after table. Battery effects take days to show: say what changed, not how much battery it saves.
+7. Measure at the end by repeating every reading of step 1, and show a before and after table. Battery effects take days to show: say what changed, not how much battery it saves.
 
 ```adb
 shell dumpsys battery   # green
 shell settings get global window_animation_scale   # green
+shell settings get global transition_animation_scale   # green
+shell settings get global animator_duration_scale   # green
+shell settings get global adaptive_battery_management_enabled   # green
 ```
 
 ## Do not
