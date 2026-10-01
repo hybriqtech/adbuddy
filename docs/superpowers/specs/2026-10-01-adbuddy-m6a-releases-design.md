@@ -444,8 +444,9 @@ Están en `docs/releasing.md`, en "User actions", y en "Validaciones manuales pe
 | `host/internal/phoneapp/**`, `host/cmd/apkcert` | M6a | todo | sí |
 | `host/internal/cli/appsetup.go` y su test | M6a | todo | sí |
 | `host/internal/cli/setup.go` | — | la ayuda de `--apk` | sí |
-| `host/internal/cli/phone.go` y `phone_test.go` | compartido | `connect()` (`Verify` + `Handshake` con `Verified`, y el aviso de `trusted-dev-apk`) y el adb falso de los tests | sí, en un commit propio |
+| `host/internal/cli/phone.go` y `phone_test.go` | compartido | `connect()` (`Verify` + `Handshake` con `Verified`), el `Verifier` y el canal `recheck` de `phoneLink`, el gancho `Admit` (`Same`), el `select` del ticker, el aviso de arranque de `trusted-dev-apk` y el adb falso de los tests | sí, en un commit propio |
 | `host/cmd/adbuddy/phone_e2e_test.go` | compartido | reglas `pm path`, `stat` y `base64`, y el APK de desarrollo de confianza en el directorio de datos | sí |
+| `host/cmd/adbuddy/e2e_test.go` | tern (M3) | solo `startWithData(t, cfg, prepare, rules...)`: `startWith` delega en él con `prepare` nil; solo prepara el arnés (la confianza de desarrollo, antes de arrancar serve) y no cambia ninguna aserción | sí (ruling del supervisor), en un commit propio |
 | `host/internal/bridge/server.go` | tern (M3) | `Options.Admit`, `admitTimeout` y su llamada en `handle`, en un commit propio tras m3-bridge | sí |
 | `host/internal/classify/special.go` y `testdata/habitual.jsonl` | — | §7 | sí (ruling) |
 | `android/app/build.gradle.kts` | tern (dependencias) | las 2 líneas de versión, en su propio commit | sí |
