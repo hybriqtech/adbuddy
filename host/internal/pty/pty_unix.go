@@ -67,6 +67,11 @@ func (p *unixPTY) Wait(ctx context.Context) (int, error) {
 	}
 }
 
+// Hangup sends SIGHUP to the process group, as a closing terminal does.
+func (p *unixPTY) Hangup() error {
+	return syscall.Kill(-p.cmd.Process.Pid, syscall.SIGHUP)
+}
+
 // Kill ends the process group (creack/pty starts the program with Setsid, so
 // its group id is its pid) and closes the terminal.
 func (p *unixPTY) Kill() error {

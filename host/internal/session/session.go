@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,16 @@ const (
 
 // ErrNoAgent means there is no agent process to type into.
 var ErrNoAgent = errors.New("the agent is not running")
+
+// stopWait is how long Stop waits after the hangup before it kills the
+// agent's process tree (spec M3 §3.2: 5 s). On Windows the hangup does
+// nothing (pty.PTY.Hangup), so it waits less.
+var stopWait = func() time.Duration {
+	if runtime.GOOS == "windows" {
+		return 2 * time.Second
+	}
+	return 5 * time.Second
+}()
 
 // Info is what the phone shows of the session.
 type Info struct {
@@ -60,21 +71,31 @@ type Options struct {
 	// again without resuming (claude --continue with nothing to continue).
 	Retry time.Duration
 	// OnInfo gets the session's info each time it changes. It is called from
-	// the session's goroutines, one call at a time, and must not call back
-	// into the Manager while holding its own locks.
+	// the session's goroutines, one call at a time, always with the info as
+	// it is at the time of the call, and must not call back into the Manager
+	// while holding its own locks.
 	OnInfo func(Info)
 }
 
-// Output is a piece of the PTY's output, already in its screen.
+// Output is a piece of the PTY's output, already in its screen. Two pieces
+// carry no data: the first of each process (Data empty, a new Epoch: draw
+// its screen) and its last (End: the process ended).
 type Output struct {
 	Epoch  string
 	Offset int64
 	Data   []byte
+	End    bool
 }
 
 // Manager owns the agent's session. It is safe for concurrent use.
 type Manager struct {
 	o Options
+
+	// life puts Start and Stop in a row, so there is never more than one
+	// process of the agent. gen counts them: a retry from pump only starts
+	// the agent when no Start or Stop came after the process that failed.
+	life sync.Mutex
+	gen  uint64
 
 	mu      sync.Mutex
 	cur     *proc
@@ -97,8 +118,11 @@ type proc struct {
 	agent   string
 	resumed bool
 	started time.Time
+	gen     uint64
 	quiet   *time.Timer
 	done    chan struct{}
+	// wmu keeps a paste (text, pause, Enter) and other typing apart.
+	wmu sync.Mutex
 }
 
 // New returns a Manager with no session.
@@ -124,7 +148,14 @@ func newID(prefix string) string {
 // Start ends the current process, if any, and starts the agent. resume asks
 // it to continue its last conversation (claude --continue).
 func (m *Manager) Start(agent string, resume bool) error {
-	m.Stop()
+	m.life.Lock()
+	defer m.life.Unlock()
+	return m.startLocked(agent, resume)
+}
+
+// startLocked is Start with life held.
+func (m *Manager) startLocked(agent string, resume bool) error {
+	m.stopLocked()
 	path, err := m.o.Look(agent)
 	if err != nil {
 		return err
@@ -143,16 +174,16 @@ func (m *Manager) Start(agent string, resume bool) error {
 	if err != nil {
 		return err
 	}
-	pr := &proc{p: p, agent: agent, resumed: len(args) > 0, started: time.Now(), done: make(chan struct{})}
+	pr := &proc{p: p, agent: agent, resumed: len(args) > 0, started: time.Now(), gen: m.gen, done: make(chan struct{})}
 	pr.screen = term.New(newID("e_"), cols, rows)
+	pr.quiet = time.AfterFunc(time.Hour, func() { m.quietFor(pr) })
+	pr.quiet.Stop()
 	m.mu.Lock()
 	m.cur = pr
 	m.info = Info{Agent: agent, State: StateIdle, Conversation: newID("c_"), Epoch: pr.screen.Epoch(), PCAttached: len(m.pcs) > 0}
-	pr.quiet = time.AfterFunc(time.Hour, func() { m.quietFor(pr) })
-	pr.quiet.Stop()
-	info := m.info
-	m.mu.Unlock()
-	m.emitInfo(info)
+	m.applyLocked() // a terminal may have changed the size meanwhile
+	m.publish(Output{Epoch: pr.screen.Epoch()})
+	m.emitInfo()
 	go m.pump(pr)
 	return nil
 }
@@ -165,12 +196,7 @@ func (m *Manager) pump(pr *proc) {
 		if n > 0 {
 			data := append([]byte(nil), buf[:n]...)
 			off := pr.screen.Write(data)
-			out := Output{Epoch: pr.screen.Epoch(), Offset: off, Data: data}
-			m.notify.Lock()
-			for _, f := range m.subscribers() {
-				f(out)
-			}
-			m.notify.Unlock()
+			m.publish(Output{Epoch: pr.screen.Epoch(), Offset: off, Data: data})
 			m.active(pr)
 		}
 		if err != nil {
@@ -183,23 +209,30 @@ func (m *Manager) pump(pr *proc) {
 	pr.p.Kill()
 	pr.quiet.Stop()
 	m.mu.Lock()
-	if m.cur != pr { // replaced or stopped on purpose
-		m.mu.Unlock()
-		close(pr.done)
+	mine := m.cur == pr // else replaced or stopped on purpose
+	retry := false
+	if mine {
+		retry = pr.resumed && code != 0 && time.Since(pr.started) < m.o.Retry
+		m.cur = nil
+		m.info.State = StateStopped
+	}
+	m.mu.Unlock()
+	m.publish(Output{Epoch: pr.screen.Epoch(), Offset: pr.screen.Offset(), End: true})
+	pr.screen.Close()
+	// Stop waits for done with life held: close it before taking life.
+	close(pr.done)
+	if !mine {
 		return
 	}
-	retry := pr.resumed && code != 0 && time.Since(pr.started) < m.o.Retry
-	m.cur = nil
-	m.info.State = StateStopped
-	info := m.info
-	m.mu.Unlock()
-	close(pr.done)
 	if retry {
-		if m.Start(pr.agent, false) == nil {
+		m.life.Lock()
+		restarted := m.gen == pr.gen && m.startLocked(pr.agent, false) == nil
+		m.life.Unlock()
+		if restarted {
 			return
 		}
 	}
-	m.emitInfo(info)
+	m.emitInfo()
 }
 
 // active marks output: working until Quiet passes without more.
@@ -212,10 +245,9 @@ func (m *Manager) active(pr *proc) {
 	pr.quiet.Reset(m.o.Quiet)
 	changed := m.info.State != StateWorking
 	m.info.State = StateWorking
-	info := m.info
 	m.mu.Unlock()
 	if changed {
-		m.emitInfo(info)
+		m.emitInfo()
 	}
 }
 
@@ -226,9 +258,8 @@ func (m *Manager) quietFor(pr *proc) {
 		return
 	}
 	m.info.State = StateWaiting
-	info := m.info
 	m.mu.Unlock()
-	m.emitInfo(info)
+	m.emitInfo()
 }
 
 // Subscribe calls f with each piece of output from now on, until the returned
@@ -247,39 +278,63 @@ func (m *Manager) Subscribe(f func(Output)) (cancel func()) {
 	}
 }
 
-func (m *Manager) subscribers() []func(Output) {
+// publish gives o to the subscribers. Call it without mu.
+func (m *Manager) publish(o Output) {
+	m.notify.Lock()
+	defer m.notify.Unlock()
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	fs := make([]func(Output), 0, len(m.subs))
 	for _, f := range m.subs {
 		fs = append(fs, f)
 	}
-	return fs
+	m.mu.Unlock()
+	for _, f := range fs {
+		f(o)
+	}
 }
 
-func (m *Manager) emitInfo(i Info) {
+// emitInfo publishes the info as it is now: an older change can never be
+// published after a newer one. Call it without mu.
+func (m *Manager) emitInfo() {
 	m.notify.Lock()
 	defer m.notify.Unlock()
+	m.mu.Lock()
+	i := m.info
+	m.mu.Unlock()
 	m.o.OnInfo(i)
 }
 
-// Stop ends the agent's process, if any, and waits for it.
+// Stop ends the agent's process, if any, and waits for it: a hangup first,
+// then, after stopWait, its process tree is killed (spec M3 §3.2).
 func (m *Manager) Stop() {
+	m.life.Lock()
+	defer m.life.Unlock()
+	m.stopLocked()
+}
+
+// stopLocked is Stop with life held.
+func (m *Manager) stopLocked() {
+	m.gen++
 	m.mu.Lock()
 	pr := m.cur
 	m.cur = nil
 	if pr != nil {
 		m.info.State = StateStopped
 	}
-	info := m.info
 	m.mu.Unlock()
 	if pr == nil {
 		return
 	}
-	pr.p.Kill()
-	<-pr.done
-	pr.screen.Close()
-	m.emitInfo(info)
+	_ = pr.p.Hangup()
+	t := time.NewTimer(stopWait)
+	select {
+	case <-pr.done:
+	case <-t.C:
+		pr.p.Kill()
+		<-pr.done
+	}
+	t.Stop()
+	m.emitInfo()
 }
 
 // Info is the session's current info.
@@ -311,6 +366,8 @@ func (m *Manager) Input(p []byte) error {
 	if pr == nil {
 		return ErrNoAgent
 	}
+	pr.wmu.Lock()
+	defer pr.wmu.Unlock()
 	_, err := pr.p.Write(p)
 	return err
 }
@@ -321,13 +378,15 @@ var pasteGap = 100 * time.Millisecond
 // Paste sends text as one message (spec M3 §5.1): bracketed paste when the
 // agent turned it on, else one line; then Enter. Control characters are
 // dropped first, so the text cannot end the paste early (ESC[201~) and type
-// the rest as keys.
+// the rest as keys. Nothing else is typed between the text and its Enter.
 func (m *Manager) Paste(text string) error {
 	pr := m.current()
 	if pr == nil {
 		return ErrNoAgent
 	}
 	text = clean(text)
+	pr.wmu.Lock()
+	defer pr.wmu.Unlock()
 	var msg string
 	if pr.screen.BracketedPaste() {
 		msg = "\x1b[200~" + text + "\x1b[201~"
@@ -356,18 +415,26 @@ func clean(s string) string {
 	}, s)
 }
 
-// trustPrompts are what Claude Code's folder trust dialog shows.
-var trustPrompts = []string{"Do you trust the files in this folder", "Is this a project you created or one you trust"}
+// busyPrompts are questions of Claude Code that a blind Enter from the chat
+// would answer: the folder trust dialog (its default exits, spec M3 §3.3)
+// and the permission dialogs (their default approves).
+var busyPrompts = []string{
+	"Do you trust the files in this folder",
+	"Is this a project you created or one you trust",
+	"Do you want to proceed?",
+	"Do you want to make this edit",
+	"Do you want to create",
+}
 
-// Busy reports why a chat message must not be typed now: the agent shows its
-// folder trust dialog, which an Enter would answer "No, exit" (spec M3 §3.3).
+// Busy reports why a chat message must not be typed now: the agent shows a
+// question that the message's Enter would answer.
 func (m *Manager) Busy() string {
 	pr := m.current()
 	if pr == nil {
 		return ""
 	}
 	text := pr.screen.Text()
-	for _, p := range trustPrompts {
+	for _, p := range busyPrompts {
 		if strings.Contains(text, p) {
 			return "Answer the question in the agent's terminal first."
 		}

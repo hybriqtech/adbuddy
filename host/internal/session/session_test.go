@@ -23,6 +23,10 @@ type fakePTY struct {
 	code  int
 	done  chan struct{}
 	once  sync.Once
+	// deaf: the agent ignores the hangup and only a Kill ends it.
+	deaf    bool
+	hangups int
+	kills   int
 }
 
 func newFake() *fakePTY {
@@ -52,7 +56,23 @@ func (f *fakePTY) Wait(ctx context.Context) (int, error) {
 		return 0, ctx.Err()
 	}
 }
-func (f *fakePTY) Kill() error { f.exit(137); return nil }
+func (f *fakePTY) Hangup() error {
+	f.mu.Lock()
+	f.hangups++
+	deaf := f.deaf
+	f.mu.Unlock()
+	if !deaf {
+		f.exit(129)
+	}
+	return nil
+}
+func (f *fakePTY) Kill() error {
+	f.mu.Lock()
+	f.kills++
+	f.mu.Unlock()
+	f.exit(137)
+	return nil
+}
 func (f *fakePTY) exit(code int) {
 	f.once.Do(func() { f.code = code; f.outW.Close(); close(f.done) })
 }
@@ -70,13 +90,23 @@ type rig struct {
 	starts []pty.Options
 	infos  []Info
 	output strings.Builder
+	// onLook, if set, runs each time the Manager looks for the agent.
+	onLook func(name string)
 }
 
 func newRig(t *testing.T) *rig {
 	r := &rig{}
 	r.m = New(Options{
-		Dir:   t.TempDir(),
-		Look:  func(name string) (string, error) { return "/bin/" + name, nil },
+		Dir: t.TempDir(),
+		Look: func(name string) (string, error) {
+			r.mu.Lock()
+			hook := r.onLook
+			r.mu.Unlock()
+			if hook != nil {
+				hook(name)
+			}
+			return "/bin/" + name, nil
+		},
 		Env:   func(string) []string { return []string{"A=1"} },
 		Quiet: 50 * time.Millisecond,
 		Retry: time.Second,
@@ -261,5 +291,50 @@ func TestStartReplaces(t *testing.T) {
 	}
 	if i := r.m.Info(); i.Epoch == first || i.Agent != "gemini" || i.State != StateIdle {
 		t.Fatalf("info %+v", i)
+	}
+}
+
+// Busy also reports Claude Code's permission dialogs: an Enter would approve.
+func TestBusyWithAPermissionDialog(t *testing.T) {
+	for _, q := range []string{"Do you want to proceed?", "Do you want to make this edit to main.go?", "Do you want to create notes.md?"} {
+		r := newRig(t)
+		r.m.Start("claude", false)
+		r.fake(0).outW.Write([]byte("Bash command\r\n  rm -rf build\r\n" + q + "\r\n❯ 1. Yes\r\n  2. No"))
+		r.waitState(t, StateWorking)
+		if got := r.m.Busy(); got != "Answer the question in the agent's terminal first." {
+			t.Fatalf("%q: Busy() = %q", q, got)
+		}
+	}
+}
+
+// Nothing typed gets between a pasted text and its Enter.
+func TestPasteIsNotInterleaved(t *testing.T) {
+	old := pasteGap
+	pasteGap = 50 * time.Millisecond
+	defer func() { pasteGap = old }()
+	r := newRig(t)
+	r.m.Start("codex", false)
+	done := make(chan error, 1)
+	go func() { done <- r.m.Paste("hello") }()
+	waitFor(t, func() bool { return r.fake(0).said() != "" })
+	if err := r.m.Input([]byte("X")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := r.fake(0).said(); got != "hello\rX" {
+		t.Fatalf("typed %q, want %q", got, "hello\rX")
+	}
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

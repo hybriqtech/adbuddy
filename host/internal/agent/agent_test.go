@@ -115,3 +115,17 @@ func mustEval(t *testing.T, p string) string {
 	}
 	return r
 }
+
+// IsKnown admits only the agents ADBuddy knows, by their bare name.
+func TestIsKnown(t *testing.T) {
+	for _, name := range Known {
+		if !IsKnown(name) {
+			t.Errorf("%q not known", name)
+		}
+	}
+	for _, name := range []string{"", "sh", "cmd", "../claude", "claude/..", "./claude", `..\claude`, "/usr/bin/claude", `C:\tools\claude`, "Claude", "claude ", ".."} {
+		if IsKnown(name) {
+			t.Errorf("%q known", name)
+		}
+	}
+}

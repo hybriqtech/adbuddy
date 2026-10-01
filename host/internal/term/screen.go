@@ -30,6 +30,7 @@ type Screen struct {
 	offset int64  // bytes written so far: the position of the next one
 	tail   []byte // the last TailSize bytes, ending at offset
 	paste  bool   // the program turned bracketed paste on
+	hidden bool   // the program hid the cursor
 	carry  []byte // the end of the last write, for a mode sequence split in two
 	cols   int
 	rows   int
@@ -42,11 +43,18 @@ func New(epoch string, cols, rows int) *Screen {
 	// read side: the host drops them, the real terminals answer (spec M3
 	// §4.2). Unread, they would block the emulator.
 	go io.Copy(io.Discard, em)
-	return &Screen{em: em, epoch: epoch, cols: cols, rows: rows}
+	s := &Screen{em: em, epoch: epoch, cols: cols, rows: rows}
+	// Called from em.Write, with mu held.
+	em.SetCallbacks(vt.Callbacks{CursorVisibility: func(visible bool) { s.hidden = !visible }})
+	return s
 }
 
 // Close releases the emulator.
-func (s *Screen) Close() error { return s.em.Close() }
+func (s *Screen) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.em.Close()
+}
 
 // Write feeds output of the PTY and returns the offset of its first byte.
 func (s *Screen) Write(p []byte) int64 {
@@ -121,16 +129,44 @@ func (s *Screen) Since(epoch string, offset int64) (data []byte, ok bool) {
 	return append([]byte(nil), s.tail[offset-start:]...), true
 }
 
-// Snapshot is the current screen as bytes that, written to a clean terminal
-// of its size, draw it, at the offset it corresponds to (spike S4: Render
-// separates lines with a bare \n, which a terminal does not take as a new
-// line at column 0).
+// Modes are the terminal modes the program set, each one on or off, as the
+// sequences that set them in a terminal: the alternate screen, the cursor's
+// visibility and bracketed paste.
+func (s *Screen) Modes() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return []byte(s.altMode() + s.inputModes())
+}
+
+func (s *Screen) altMode() string {
+	if s.em.IsAltScreen() {
+		return "\x1b[?1049h"
+	}
+	return "\x1b[?1049l"
+}
+
+func (s *Screen) inputModes() string {
+	m := "\x1b[?25h"
+	if s.hidden {
+		m = "\x1b[?25l"
+	}
+	if s.paste {
+		return m + "\x1b[?2004h"
+	}
+	return m + "\x1b[?2004l"
+}
+
+// Snapshot is the current screen as bytes that, written to a terminal of its
+// size, draw it and set its modes (Modes), at the offset it corresponds to
+// (spike S4: Render separates lines with a bare \n, which a terminal does not
+// take as a new line at column 0). The alternate screen comes first: it
+// changes the screen that is drawn on.
 func (s *Screen) Snapshot() (data []byte, offset int64, cols, rows int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := strings.ReplaceAll(s.em.Render(), "\n", "\r\n")
 	pos := s.em.CursorPosition()
-	snap := "\x1b[0m\x1b[2J\x1b[H" + r + fmt.Sprintf("\x1b[0m\x1b[%d;%dH", pos.Y+1, pos.X+1)
+	snap := s.altMode() + "\x1b[0m\x1b[2J\x1b[H" + r + fmt.Sprintf("\x1b[0m\x1b[%d;%dH", pos.Y+1, pos.X+1) + s.inputModes()
 	return []byte(snap), s.offset, s.cols, s.rows
 }
 

@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/hybriqtech/adbuddy/host/internal/agent"
@@ -26,25 +29,68 @@ var lookAgent = exec.LookPath
 // the agent runs in a PTY with the environment of `adbuddy run`, and Claude
 // Code finds the environment already trusted.
 func newSession(app *App, ws, serial string, onInfo func(session.Info)) *session.Manager {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
 	return session.New(session.Options{
 		Dir:  ws,
 		Look: lookAgent,
 		Env: func(string) []string {
-			env := agent.Env(os.Environ(), workspace.BinDir(ws), serial)
-			return append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+			return termEnv(agent.Env(os.Environ(), workspace.BinDir(ws), serial))
 		},
 		Start: startPTY,
 		PreTrust: func(name, dir string) {
 			if name != "claude" {
 				return
 			}
-			if _, err := agent.TrustFolder(agent.ClaudeConfigFile(app.Getenv, home), dir); err != nil {
+			cfg := claudeConfig(app.Getenv, home)
+			if cfg == "" {
+				fmt.Fprintf(app.Stderr, "⚠ Could not find Claude Code's configuration to mark %s as trusted: answer its question in the terminal.\n", dir)
+				return
+			}
+			if _, err := agent.TrustFolder(cfg, dir); err != nil {
 				fmt.Fprintf(app.Stderr, "⚠ Could not mark %s as trusted for Claude Code (%s): answer its question in the terminal.\n", dir, classify.Printable(err.Error()))
 			}
 		},
 		OnInfo: onInfo,
 	})
+}
+
+// claudeConfig is Claude Code's configuration file, or "" when it has no
+// absolute path (no home folder, a relative CLAUDE_CONFIG_DIR): a relative
+// one would be written in serve's working folder.
+func claudeConfig(getenv func(string) string, home string) string {
+	cfg := agent.ClaudeConfigFile(getenv, home)
+	if !filepath.IsAbs(cfg) {
+		return ""
+	}
+	return cfg
+}
+
+// termVars are the variables of the terminal that started serve, which say
+// nothing true about the agent's terminal.
+var termVars = []string{"TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "WT_SESSION", "TMUX", "VTE_VERSION", "COLORFGBG"}
+
+// termEnv replaces the terminal variables of env with the agent's terminal:
+// the emulator's TERM and truecolor. The old ones go first, as conpty does
+// not drop duplicates and on Windows the first one wins.
+func termEnv(env []string) []string {
+	out := make([]string, 0, len(env)+2)
+	for _, kv := range env {
+		key, _, _ := strings.Cut(kv, "=")
+		drop := false
+		for _, v := range termVars {
+			if key == v || (runtime.GOOS == "windows" && strings.EqualFold(key, v)) {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out = append(out, kv)
+		}
+	}
+	return append(out, "TERM=xterm-256color", "COLORTERM=truecolor")
 }
 
 // startAgent starts the agent when serve starts: Claude Code continues its
@@ -79,6 +125,12 @@ func handleSession(ctx context.Context, sess *session.Manager, defaultAgent stri
 				name = i.Agent
 			}
 			if len(req.Argv) > 1 {
+				// Only the agents ADBuddy knows, never a program or a path
+				// the request names. The default comes from the user's own
+				// configuration.
+				if !agent.IsKnown(req.Argv[1]) {
+					return ipc.Exit{Code: 2, ErrorCode: "UNKNOWN_AGENT", Error: fmt.Sprintf("unknown agent %q: use one of %s", classify.Printable(req.Argv[1]), strings.Join(agent.Known, ", "))}
+				}
 				name = req.Argv[1]
 			}
 			if err := sess.Start(name, false); err != nil {

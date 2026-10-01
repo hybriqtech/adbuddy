@@ -66,7 +66,6 @@ func (m *Manager) applyLocked() {
 	pr := m.cur
 	pcChanged := m.info.PCAttached != (len(m.pcs) > 0)
 	m.info.PCAttached = len(m.pcs) > 0
-	info := m.info
 	m.mu.Unlock()
 	if pr != nil {
 		if c, r := pr.screen.Size(); c != cols || r != rows {
@@ -75,6 +74,6 @@ func (m *Manager) applyLocked() {
 		}
 	}
 	if pcChanged {
-		m.emitInfo(info)
+		m.emitInfo()
 	}
 }

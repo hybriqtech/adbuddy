@@ -80,3 +80,47 @@ func TestClaudeConfigFile(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Anything but spaces after the JSON object: not what Claude Code writes,
+// the file is left alone.
+func TestTrustFolderLeavesTrailingDataAlone(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, ".claude.json")
+	for _, content := range []string{`{"a": 1} {"b": 2}`, `{"a": 1}x`, `{"a": 1}]`, "{\"a\": 1}\n\n,"} {
+		os.WriteFile(cfg, []byte(content), 0o600)
+		if wrote, err := TrustFolder(cfg, dir); err != nil || wrote {
+			t.Fatalf("%q: %v %v", content, wrote, err)
+		}
+		if got, _ := os.ReadFile(cfg); string(got) != content {
+			t.Fatalf("%q changed to %q", content, got)
+		}
+	}
+	// Spaces and new lines after it are fine.
+	os.WriteFile(cfg, []byte("{\"a\": 1}\r\n \t\n"), 0o600)
+	if wrote, err := TrustFolder(cfg, dir); err != nil || !wrote {
+		t.Fatalf("trailing spaces: %v %v", wrote, err)
+	}
+}
+
+// A configuration file that is a symbolic link stays one: its target gets
+// the trust.
+func TestTrustFolderThroughASymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real", "claude.json")
+	os.MkdirAll(filepath.Dir(target), 0o700)
+	os.WriteFile(target, []byte(`{"userID": "u"}`), 0o600)
+	link := filepath.Join(dir, ".claude.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot make symbolic links here: %v", err)
+	}
+	if wrote, err := TrustFolder(link, dir); err != nil || !wrote {
+		t.Fatalf("TrustFolder = %v, %v", wrote, err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link was replaced: %v %v", fi.Mode(), err)
+	}
+	m := readJSON(t, target)
+	if p := m["projects"].(map[string]any)[filepath.ToSlash(dir)].(map[string]any); p["hasTrustDialogAccepted"] != true || m["userID"] != "u" {
+		t.Fatalf("target %v", m)
+	}
+}

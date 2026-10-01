@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"runtime"
@@ -331,5 +332,52 @@ func TestClientDisconnectIsNotErrClosed(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("handler context was not cancelled")
+	}
+}
+
+// A resize payload keeps the size; out of 1..1000 or of the wrong length it
+// is refused.
+func TestResizePayload(t *testing.T) {
+	for _, c := range []struct {
+		cols, rows int
+		ok         bool
+	}{{80, 24, true}, {1, 1, true}, {1000, 1000, true}, {0, 24, false}, {80, 0, false}, {1001, 24, false}, {80, 1001, false}} {
+		cols, rows, ok := DecodeResize(EncodeResize(c.cols, c.rows))
+		if ok != c.ok || (ok && (cols != c.cols || rows != c.rows)) {
+			t.Errorf("%dx%d: got %dx%d %v", c.cols, c.rows, cols, rows, ok)
+		}
+	}
+	for _, b := range [][]byte{nil, {0, 80, 0}, {0, 80, 0, 24, 0}} {
+		if _, _, ok := DecodeResize(b); ok {
+			t.Errorf("%v accepted", b)
+		}
+	}
+}
+
+// The sizes an attach sends reach the handler's Resizes; refused ones do not.
+func TestAttachResizesReachTheHandler(t *testing.T) {
+	dir := shortDir(t)
+	startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit {
+		for i := 0; i < 2; i++ {
+			select {
+			case size := <-c.Resizes():
+				fmt.Fprintf(c.Stdout(), "%dx%d;", size[0], size[1])
+			case <-time.After(5 * time.Second):
+				return Exit{Code: 1}
+			}
+		}
+		return Exit{}
+	})
+	resizes := make(chan [2]int, 4)
+	resizes <- [2]int{0, 24}
+	resizes <- [2]int{1001, 24}
+	resizes <- [2]int{80, 24}
+	resizes <- [2]int{100, 30}
+	var out bytes.Buffer
+	stdinR, stdinW := io.Pipe()
+	defer stdinW.Close()
+	exit, err := Attach(context.Background(), dir, Request{Kind: KindAttach}, stdinR, &out, resizes)
+	if err != nil || exit.Code != 0 || out.String() != "80x24;100x30;" {
+		t.Fatalf("exit %+v, %v, got %q", exit, err, out.String())
 	}
 }

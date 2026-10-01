@@ -26,7 +26,14 @@ var (
 func TestMain(m *testing.M) {
 	// serve starts the agent: never a real one from the tests.
 	lookAgent = func(string) (string, error) { return "", exec.ErrNotFound }
+	// Nor Claude Code's real configuration: trusting a folder writes it.
+	claudeDir, err := os.MkdirTemp("", "cliclaude")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("CLAUDE_CONFIG_DIR", claudeDir)
 	code := m.Run()
+	os.RemoveAll(claudeDir)
 	if fakeDir != "" {
 		os.RemoveAll(fakeDir)
 	}

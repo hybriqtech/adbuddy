@@ -15,6 +15,11 @@ type PTY interface {
 	Resize(cols, rows int) error
 	// Wait waits for the process to end and returns its exit code.
 	Wait(ctx context.Context) (int, error)
+	// Hangup asks the program to end, as when its terminal closes: SIGHUP
+	// to its process group on Unix. It does not wait. On Windows it does
+	// nothing: conpty only closes the pseudo console together with the
+	// process handles, which is Kill's job.
+	Hangup() error
 	// Kill ends the process and its children, and releases the terminal.
 	Kill() error
 	// Pid is the process id of the program.

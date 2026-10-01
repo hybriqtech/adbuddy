@@ -17,6 +17,21 @@ import (
 // Known lists the agents ADBuddy knows, recommended first (spec §3.1 step 9).
 var Known = []string{"claude", "codex", "gemini", "opencode"}
 
+// IsKnown reports whether name is one of Known, by its bare name: what the
+// session may start when a request (adbuddy new, the phone's session.new)
+// names an agent. A path, or a program ADBuddy does not know, is refused.
+func IsKnown(name string) bool {
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+		return false
+	}
+	for _, k := range Known {
+		if name == k {
+			return true
+		}
+	}
+	return false
+}
+
 // InstallHint tells how to install a known agent.
 func InstallHint(name string) string {
 	switch name {

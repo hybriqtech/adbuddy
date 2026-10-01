@@ -45,7 +45,7 @@ While attached, this terminal's size is the agent's.`,
 				return NewError("TERMINAL_FAILED", err.Error(), "")
 			}
 			restoreOut := enableVT(out)
-			restore := func() { term.Restore(int(in.Fd()), old); restoreOut() }
+			restore := leaveTerminal(out, func() { term.Restore(int(in.Fd()), old) }, restoreOut)
 			defer restore()
 
 			ctx, cancel := context.WithCancel(cmd.Context())
@@ -56,7 +56,8 @@ While attached, this terminal's size is the agent's.`,
 			restore()
 			switch {
 			case keys.detached():
-				fmt.Fprintln(app.Stderr, "\r\nDetached: the agent keeps running in adbuddy serve.")
+				// Whether the agent still runs, serve said on the screen.
+				fmt.Fprintln(app.Stderr, "\r\nDetached. `adbuddy attach` connects again.")
 				return nil
 			case err != nil:
 				return NewError("ATTACH_FAILED", err.Error(), "Check that `adbuddy serve` is still running.")
@@ -65,9 +66,29 @@ While attached, this terminal's size is the agent's.`,
 			case exit.Code != 0:
 				return NewError("ATTACH_FAILED", exit.Error, "")
 			}
-			fmt.Fprintln(app.Stderr, "\r\nThe session ended.")
+			fmt.Fprintln(app.Stderr, "\r\nadbuddy serve closed the connection.")
 			return nil
 		},
+	}
+}
+
+// termReset turns off what the agent may have left on in the terminal:
+// attributes, hidden cursor, bracketed paste, focus and mouse reports, the
+// alternate screen.
+const termReset = "\x1b[0m\x1b[?25h\x1b[?2004l\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1049l"
+
+// leaveTerminal returns the function that gives the terminal back, by any
+// way out of attach and only once: termReset first, while escape sequences
+// still work, then each restore in order.
+func leaveTerminal(out io.Writer, restores ...func()) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			_, _ = io.WriteString(out, termReset)
+			for _, r := range restores {
+				r()
+			}
+		})
 	}
 }
 
@@ -137,12 +158,18 @@ func newStopCmd(app *App) *cobra.Command {
 	}
 }
 
+// sessionRequest asks serve to start or stop the agent. The agent may not:
+// it would control its own session (spec M3 §3.4); serve checks it too.
 func sessionRequest(ctx context.Context, app *App, argv []string) error {
+	if app.Getenv("ADBUDDY_SOURCE") == "agent" {
+		return NewError("AGENT_SESSION", fmt.Sprintf("`adbuddy %s` cannot be run from the agent's session", argv[0]), "Run it yourself in a terminal.")
+	}
 	e, err := loadEnv(app)
 	if err != nil {
 		return err
 	}
-	exit, err := ipc.Call(ctx, e.dirs.Data, ipc.Request{Kind: ipc.KindSession, Argv: argv}, nil, app.Stdout, app.Stderr, nil)
+	req := ipc.Request{Kind: ipc.KindSession, Argv: argv, Env: map[string]string{"ADBUDDY_SOURCE": app.Getenv("ADBUDDY_SOURCE")}}
+	exit, err := ipc.Call(ctx, e.dirs.Data, req, nil, app.Stdout, app.Stderr, nil)
 	if errors.Is(err, ipc.ErrNotRunning) {
 		return notRunning
 	}

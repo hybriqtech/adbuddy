@@ -2,14 +2,19 @@ package session
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 )
 
 // attachBacklog is how many pieces of output wait for a slow PC terminal
-// before it gets the whole screen again instead.
-const attachBacklog = 256
+// before it gets the whole screen again instead (a variable for the tests).
+var attachBacklog = 256
+
+// AgentEnded is what an attached terminal shows when the agent's process
+// ends; it stays attached.
+const AgentEnded = "\r\n[ADBuddy] The agent ended. Start it again with adbuddy new, or detach with Ctrl+].\r\n"
 
 // firstSize is how long attach waits for the terminal's size.
 var firstSize = 2 * time.Second
@@ -18,6 +23,8 @@ var firstSize = 2 * time.Second
 // session until the terminal leaves (stdin ends) or ctx ends (spec M3 §3.4).
 // The terminal first gets the current screen, then the live output; what it
 // types goes to the agent, and its size rules while it is the last attached.
+// When the agent ends, the terminal gets AgentEnded and stays attached, what
+// it types goes nowhere, and the next process's screen replaces the notice.
 func (m *Manager) ServeAttach(ctx context.Context, c *ipc.Conn, id string) ipc.Exit {
 	cols, rows := DefaultCols, DefaultRows
 	select {
@@ -62,12 +69,24 @@ func (m *Manager) ServeAttach(ctx context.Context, c *ipc.Conn, id string) ipc.E
 		}
 	}()
 
-	epoch, next := "", int64(0)
+	// epoch is the process whose screen the terminal shows; "" when it shows
+	// the notice that the agent ended.
+	epoch, next, ended := "", int64(0), false
+	sayEnded := func() error {
+		epoch = ""
+		if ended {
+			return nil
+		}
+		ended = true
+		_, err := io.WriteString(c.Stdout(), AgentEnded)
+		return err
+	}
 	redraw := func() error {
 		s := m.Screen()
 		if s == nil {
-			return nil
+			return sayEnded()
 		}
+		ended = false
 		data, off, _, _ := s.Snapshot()
 		epoch, next = s.Epoch(), off
 		_, err := c.Stdout().Write(data)
@@ -90,6 +109,14 @@ func (m *Manager) ServeAttach(ctx context.Context, c *ipc.Conn, id string) ipc.E
 				return ipc.Exit{Code: 1}
 			}
 		case o := <-out:
+			if o.End {
+				// The terminal stays attached: a new process draws its
+				// screen; Ctrl+] detaches.
+				if o.Epoch == epoch && sayEnded() != nil {
+					return ipc.Exit{Code: 1}
+				}
+				continue
+			}
 			if o.Epoch != epoch {
 				// A new process of the agent: its whole screen first.
 				if redraw() != nil {

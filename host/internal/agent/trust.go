@@ -29,6 +29,15 @@ func TrustFolder(configFile, dir string) (bool, error) {
 		return false, err
 	}
 	key := filepath.ToSlash(abs)
+	// A symbolic link stays one: its target is the file to replace.
+	real, err := filepath.EvalSymlinks(configFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	configFile = real
 	data, err := os.ReadFile(configFile)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -40,6 +49,10 @@ func TrustFolder(configFile, dir string) (bool, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber() // numbers come back as written
 	if err := dec.Decode(&cfg); err != nil || cfg == nil {
+		return false, nil
+	}
+	// One object and nothing else but spaces, or it is not Claude Code's.
+	if len(bytes.Trim(data[dec.InputOffset():], " \t\r\n")) > 0 {
 		return false, nil
 	}
 	projects, ok := cfg["projects"].(map[string]any)

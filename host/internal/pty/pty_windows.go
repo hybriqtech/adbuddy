@@ -51,6 +51,11 @@ func (p *winPTY) Wait(ctx context.Context) (int, error) {
 	return int(code), nil
 }
 
+// Hangup does nothing: conpty closes the pseudo console only together with
+// the process and pipe handles (ConPty.Close), which would leave Wait
+// without its handle. Stop waits a little and then kills the tree.
+func (p *winPTY) Hangup() error { return nil }
+
 // Kill ends the whole process tree (the agent starts node, shells…) and
 // closes the console, which ends the output.
 func (p *winPTY) Kill() error {

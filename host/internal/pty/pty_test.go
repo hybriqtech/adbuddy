@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -114,5 +115,27 @@ func TestKill(t *testing.T) {
 	defer cancel()
 	if _, err := p.Wait(ctx); ctx.Err() != nil {
 		t.Fatalf("still running after Kill: %v", err)
+	}
+}
+
+// Hangup ends a program that keeps the default SIGHUP action (Unix); on
+// Windows it does nothing and the program keeps running.
+func TestHangup(t *testing.T) {
+	p, out := startAgent(t)
+	out.waitFor(t, "ready")
+	if err := p.Hangup(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := p.Wait(ctx)
+	if runtime.GOOS == "windows" {
+		if ctx.Err() == nil {
+			t.Fatalf("ended after a Hangup that does nothing: %v", err)
+		}
+		return
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("still running after Hangup: %v", err)
 	}
 }

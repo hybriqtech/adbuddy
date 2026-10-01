@@ -111,3 +111,38 @@ func TestBracketedPaste(t *testing.T) {
 		t.Fatal("the last sequence of a write rules")
 	}
 }
+
+// The snapshot carries the modes the program set (bracketed paste, hidden
+// cursor, alternate screen), on or off, so a terminal that attaches gets them.
+func TestSnapshotCarriesTheModes(t *testing.T) {
+	s := New("e_1", 40, 10)
+	defer s.Close()
+	off := "\x1b[?1049l\x1b[?25h\x1b[?2004l"
+	if got := string(s.Modes()); got != off {
+		t.Fatalf("modes at start %q, want %q", got, off)
+	}
+	s.Write([]byte("main screen\x1b[?2004h\x1b[?25l\x1b[?1049h\x1b[Hin the alternate screen"))
+	on := "\x1b[?1049h\x1b[?25l\x1b[?2004h"
+	if got := string(s.Modes()); got != on {
+		t.Fatalf("modes %q, want %q", got, on)
+	}
+	data, _, cols, rows := s.Snapshot()
+	snap := string(data)
+	if !strings.HasPrefix(snap, "\x1b[?1049h") {
+		t.Fatalf("the snapshot does not enter the alternate screen first: %q", snap)
+	}
+	if !strings.HasSuffix(snap, "\x1b[?25l\x1b[?2004h") {
+		t.Fatalf("the snapshot does not end with the modes: %q", snap)
+	}
+	em := vt.NewEmulator(cols, rows)
+	go io.Copy(io.Discard, em)
+	defer em.Close()
+	em.Write(data)
+	if !em.IsAltScreen() || em.String() != s.Text() {
+		t.Fatalf("redrawn (alt %v):\n%s\nwant:\n%s", em.IsAltScreen(), em.String(), s.Text())
+	}
+	s.Write([]byte("\x1b[?1049l\x1b[?25h\x1b[?2004l"))
+	if got := string(s.Modes()); got != off {
+		t.Fatalf("modes after turning them off %q, want %q", got, off)
+	}
+}
