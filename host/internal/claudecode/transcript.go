@@ -86,6 +86,9 @@ type Parser struct {
 	version string
 	badRun  int
 
+	badVersion bool
+	dropped    int
+
 	texts     map[string][]string // message id → the text blocks seen, in order
 	textOrder []string
 	tools     map[string]toolInfo // tool_use id → its summary
@@ -103,6 +106,14 @@ func NewParser() *Parser {
 
 // Version is the Claude Code version of the last line that said one.
 func (p *Parser) Version() string { return p.version }
+
+// BadVersion is true when lines said a version that is not a plain token and
+// none said a valid one: the adapter treats it as not tested (spec M4 §4.4).
+func (p *Parser) BadVersion() bool { return p.badVersion }
+
+// Dropped is how many assistant lines had neither a valid message.id nor a
+// valid uuid, so they could not be shown.
+func (p *Parser) Dropped() int { return p.dropped }
 
 // BadRun is how many lines in a row were not JSON.
 func (p *Parser) BadRun() int { return p.badRun }
@@ -161,9 +172,12 @@ func (p *Parser) Feed(line []byte) []Event {
 		l.UUID = "" // not trusted as an id, and no use to tell lines apart
 	}
 	if l.Version != "" {
-		p.version = ""
+		// A version that does not look like one is never kept or shown, and
+		// does not erase a valid one seen before.
 		if versionRe.MatchString(l.Version) {
-			p.version = l.Version
+			p.version, p.badVersion = l.Version, false
+		} else if p.version == "" {
+			p.badVersion = true
 		}
 	}
 	if l.IsSidechain || l.IsMeta || (l.Type != "assistant" && l.Type != "user") {
@@ -200,6 +214,7 @@ func (p *Parser) assistant(l rawLine, m rawMessage) []Event {
 		id = l.UUID
 	}
 	if id == "" {
+		p.dropped++
 		return nil
 	}
 	var out []Event
@@ -215,7 +230,7 @@ func (p *Parser) assistant(l rawLine, m rawMessage) []Event {
 			}
 			grew = true
 		case "tool_use":
-			if b.ID == "" {
+			if !ValidID(b.ID) {
 				continue
 			}
 			sum := ToolSummary(b.Name, b.Input)
@@ -250,7 +265,7 @@ func (p *Parser) user(l rawLine, m rawMessage) []Event {
 	}
 	var out []Event
 	for _, b := range blocks {
-		if b.Type != "tool_result" || b.ToolUseID == "" {
+		if b.Type != "tool_result" || !ValidID(b.ToolUseID) {
 			continue // the result's own text is never read (spec M4 §4.2)
 		}
 		st := "done"

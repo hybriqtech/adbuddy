@@ -811,12 +811,66 @@ func TestParserVersionIsKeptOnlyIfItLooksLikeOne(t *testing.T) {
 			t.Errorf("version %q -> %q, want %q", in, p.Version(), want)
 		}
 	}
-	// A later bad version does not leave the earlier one in place.
+	// A later bad version does not erase the earlier valid one.
 	p := NewParser()
 	p.Feed(line("assistant", "u1", asst("msg_1", map[string]any{"type": "text", "text": "x"}), map[string]any{"version": "2.1.286"}))
 	p.Feed(line("assistant", "u2", asst("msg_2", map[string]any{"type": "text", "text": "y"}), map[string]any{"version": "bad version"}))
-	if p.Version() != "" {
-		t.Errorf("version %q", p.Version())
+	if p.Version() != "2.1.286" || p.BadVersion() {
+		t.Errorf("version %q bad %v", p.Version(), p.BadVersion())
+	}
+	// With no valid version yet, a bad one is remembered as bad; a valid one clears it.
+	p = NewParser()
+	p.Feed(line("assistant", "u1", asst("msg_1", map[string]any{"type": "text", "text": "x"}), map[string]any{"version": "bad version"}))
+	if p.Version() != "" || !p.BadVersion() {
+		t.Errorf("version %q bad %v", p.Version(), p.BadVersion())
+	}
+	p.Feed(line("assistant", "u2", asst("msg_2", map[string]any{"type": "text", "text": "y"}), map[string]any{"version": "2.1.9"}))
+	if p.Version() != "2.1.9" || p.BadVersion() {
+		t.Errorf("version %q bad %v", p.Version(), p.BadVersion())
+	}
+}
+
+func TestParserVersionLengthLimit(t *testing.T) {
+	for n, ok := range map[int]bool{32: true, 33: false} {
+		v := strings.Repeat("1", n)
+		p := NewParser()
+		p.Feed(line("assistant", "u1", asst("msg_1", map[string]any{"type": "text", "text": "x"}), map[string]any{"version": v}))
+		if (p.Version() == v) != ok || p.BadVersion() == ok {
+			t.Errorf("%d chars: version %q bad %v", n, p.Version(), p.BadVersion())
+		}
+	}
+}
+
+func TestParserToolIdsMustBePlain(t *testing.T) {
+	bad := "tool use\n\u202e"
+	p := NewParser()
+	ev := p.Feed(line("assistant", "u1", asst("msg_1",
+		map[string]any{"type": "text", "text": "hola"},
+		map[string]any{"type": "tool_use", "id": bad, "name": "Bash", "input": map[string]any{"command": "ls"}},
+		map[string]any{"type": "tool_use", "id": "toolu_ok", "name": "Read", "input": map[string]any{"file_path": "/a/b.go"}}), nil))
+	if len(ev) != 2 || ev[0].Kind != KindMessage || ev[1].ToolID != "toolu_ok" {
+		t.Fatalf("a tool with a bad id is ignored, the rest of the line is not: %+v", ev)
+	}
+	res := func(uuid, id string) []byte {
+		return line("user", uuid, map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": id}}}, nil)
+	}
+	if ev := p.Feed(res("r1", bad)); len(ev) != 0 {
+		t.Errorf("a result with a bad tool_use_id is ignored: %+v", ev)
+	}
+	if ev := p.Feed(res("r2", "toolu_ok")); len(ev) != 1 || ev[0].Status != "done" {
+		t.Errorf("%+v", ev)
+	}
+}
+
+func TestParserCountsAssistantMessagesWithoutAnId(t *testing.T) {
+	p := NewParser()
+	if ev := p.Feed(line("assistant", "bad id", asst("bad id", map[string]any{"type": "text", "text": "x"}), nil)); len(ev) != 0 || p.Dropped() != 1 {
+		t.Errorf("%+v dropped %d", ev, p.Dropped())
+	}
+	// message.id bad, uuid good: one id for all the blocks of the line.
+	ev := p.Feed(line("assistant", "u-ok", asst("bad id", map[string]any{"type": "text", "text": "a"}, map[string]any{"type": "text", "text": "b"}), nil))
+	if len(ev) != 1 || ev[0].MessageID != "u-ok" || ev[0].Text != "a\n\nb" || p.Dropped() != 1 {
+		t.Errorf("%+v dropped %d", ev, p.Dropped())
 	}
 }
 

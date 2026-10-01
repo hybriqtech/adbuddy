@@ -158,7 +158,7 @@ func TestAdapterShowsTheTranscript(t *testing.T) {
 		atext("u4", "msg_3", "Listo."),
 	)
 	m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage))
-	if m.ID != "msg_1" || m.Role != "assistant" || m.Text != "Voy a mirar." || m.Conversation == "" {
+	if m.ID != "a_msg_1" || m.Role != "assistant" || m.Text != "Voy a mirar." || m.Conversation == "" {
 		t.Fatalf("first message %+v", m)
 	}
 	var ta []bridge.ToolActivity
@@ -173,18 +173,18 @@ func TestAdapterShowsTheTranscript(t *testing.T) {
 		}
 		ta = append(ta, a)
 	}
-	if ta[0] != (bridge.ToolActivity{ID: "toolu_1", MessageID: "msg_2", Summary: "List files", Status: "running"}) ||
-		ta[1] != (bridge.ToolActivity{ID: "toolu_1", MessageID: "msg_2", Summary: "List files", Status: "done"}) {
+	if ta[0] != (bridge.ToolActivity{ID: "toolu_1", MessageID: "a_msg_2", Summary: "List files", Status: "running"}) ||
+		ta[1] != (bridge.ToolActivity{ID: "toolu_1", MessageID: "a_msg_2", Summary: "List files", Status: "done"}) {
 		t.Fatalf("activity %+v", ta)
 	}
-	if m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage)); m.ID != "msg_3" || m.Text != "Listo." {
+	if m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage)); m.ID != "a_msg_3" || m.Text != "Listo." {
 		t.Fatalf("last message %+v", m)
 	}
 	// One message over several lines is one message, upserted.
 	r.append(t, atext("u5", "msg_4", "uno"), atext("u6", "msg_4", "dos"))
 	a := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage))
 	b := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage))
-	if a.ID != "msg_4" || b.ID != "msg_4" || b.Text != "uno\n\ndos" {
+	if a.ID != "a_msg_4" || b.ID != "a_msg_4" || b.Text != "uno\n\ndos" {
 		t.Fatalf("%+v %+v", a, b)
 	}
 	if snap := r.l.snapshot(); len(snap.Chat) != 3 || snap.Chat[2].Text != "uno\n\ndos" {
@@ -217,7 +217,7 @@ func TestAdapterStopFallsBackToLastAssistantMessage(t *testing.T) {
 	}
 	// The transcript catching up later does not say it twice.
 	r.append(t, atext("u1", "msg_9", "Respuesta  final"), atext("u2", "msg_10", "otra cosa"))
-	if m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage)); m.ID != "msg_10" {
+	if m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage)); m.ID != "a_msg_10" {
 		t.Fatalf("a repeat of the fallback was shown: %+v", m)
 	}
 }
@@ -226,7 +226,7 @@ func TestAdapterStopWithTheTextInTheTranscriptDoesNotRepeat(t *testing.T) {
 	r := newAgentRig(t)
 	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
 	r.append(t, atext("u1", "msg_1", "Hecho"))
-	if m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage)); m.ID != "msg_1" {
+	if m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage)); m.ID != "a_msg_1" {
 		t.Fatal(m)
 	}
 	r.hook(t, "Stop", map[string]any{"prompt_id": "pr1", "last_assistant_message": "Hecho"})
@@ -343,4 +343,34 @@ func TestAdapterStopIgnoresAPromptIDThatIsNotPlain(t *testing.T) {
 	if !regexp.MustCompile(`^last_[0-9a-f]{16}$`).MatchString(m.ID) {
 		t.Fatalf("%+v", m)
 	}
+}
+
+func TestAdapterAssistantIdsHaveTheirOwnNamespace(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	r.append(t, atool("u1", "msg_1", "toolu_1", "Bash", map[string]any{"command": "ls", "description": "List"}))
+	var a bridge.ToolActivity
+	msg := r.readType(t, bridge.TypeToolActivity)
+	if err := json.Unmarshal(msg.Payload, &a); err != nil {
+		t.Fatal(err)
+	}
+	if a.MessageID != "a_msg_1" {
+		t.Fatalf("%+v", a)
+	}
+	r.append(t, atext("u2", "msg_1", "Hola"))
+	if m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage)); m.ID != "a_msg_1" {
+		t.Fatalf("%+v", m)
+	}
+}
+
+func TestAdapterDegradesOnAGarbageVersionWithoutCopyingIt(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	r.viewIs(t, "chat")
+	r.append(t, strings.Replace(atext("u1", "msg_1", "x"), `"2.1.286"`, `"9 <script>‮"`, 1))
+	n := r.readType(t, bridge.TypeNotice)
+	if strings.Contains(string(n.Payload), "script") || strings.Contains(string(n.Payload), "202e") || !strings.Contains(string(n.Payload), "not a tested version") {
+		t.Fatalf("notice %s", n.Payload)
+	}
+	r.viewIs(t, "terminal")
 }

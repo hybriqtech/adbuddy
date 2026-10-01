@@ -50,20 +50,21 @@ const keepSent = 16
 // adapter is the state of the Claude Code adapter for the current
 // conversation.
 type adapter struct {
-	mu        sync.Mutex
-	conv      string
-	active    bool // a SessionStart arrived in this conversation
-	degraded  bool
-	hookState string // working, idle or waiting; "" until a hook says
-	cancel    context.CancelFunc
-	lastText  string          // claudecode.Normalize of the assistant's latest message
-	fallbacks map[string]bool // normalized texts emitted as the Stop fallback
-	sent      []sentText
-	attention time.Time // a dialog may be on the terminal's screen until then
-	perms     map[string]*pendingPerm
-	order     []string
-	lastPerm  time.Time
-	cfgDir    string // Claude Code's configuration directory; "" = the user's
+	mu          sync.Mutex
+	conv        string
+	active      bool // a SessionStart arrived in this conversation
+	degraded    bool
+	hookState   string // working, idle or waiting; "" until a hook says
+	cancel      context.CancelFunc
+	lastText    string          // claudecode.Normalize of the assistant's latest message
+	droppedSeen int             // parser.Dropped already logged
+	fallbacks   map[string]bool // normalized texts emitted as the Stop fallback
+	sent        []sentText
+	attention   time.Time // a dialog may be on the terminal's screen until then
+	perms       map[string]*pendingPerm
+	order       []string
+	lastPerm    time.Time
+	cfgDir      string // Claude Code's configuration directory; "" = the user's
 	// pollMu serializes reads of the transcript (the loop and a Stop's).
 	pollMu sync.Mutex
 	tail   *claudecode.Tailer
@@ -104,7 +105,7 @@ func (l *phoneLink) adapterConversation(conv string, stopped bool) {
 	cancel := a.cancel
 	a.cancel, a.tail = nil, nil
 	a.active, a.degraded, a.hookState = false, false, ""
-	a.lastText, a.fallbacks, a.attention = "", nil, time.Time{}
+	a.lastText, a.fallbacks, a.attention, a.droppedSeen = "", nil, time.Time{}, 0
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -342,9 +343,16 @@ func (l *phoneLink) pollTranscript(ctx context.Context, tl *claudecode.Tailer, s
 	case p.BadRun() >= badLines:
 		l.degrade("the transcript is not in a format this host understands")
 		return false
+	case p.BadVersion():
+		l.degrade("the Claude Code version is not a tested version") // never the text of the transcript
+		return false
 	case !claudecode.Supported(p.Version()):
 		l.degrade("Claude Code " + p.Version() + " is not a tested version")
 		return false
+	}
+	if n := p.Dropped(); n > a.droppedSeen {
+		a.droppedSeen = n
+		fmt.Fprintf(l.log, "⚠ Claude Code chat: %d answer(s) without a valid id were not shown\n", n)
 	}
 	for _, e := range events {
 		l.apply(e)
@@ -404,9 +412,13 @@ func (l *phoneLink) apply(e claudecode.Event) {
 		}
 		a.lastText = norm
 		a.mu.Unlock()
-		l.addMessage(bridge.ChatMessage{ID: e.MessageID, Role: "assistant", Text: e.Text, Conversation: conv})
+		l.addMessage(bridge.ChatMessage{ID: "a_" + e.MessageID, Role: "assistant", Text: e.Text, Conversation: conv})
 	case claudecode.KindTool:
-		l.publishEvent(bridge.TypeToolActivity, bridge.ToolActivity{ID: e.ToolID, MessageID: e.MessageOf, Summary: e.Summary, Status: e.Status})
+		of := ""
+		if e.MessageOf != "" {
+			of = "a_" + e.MessageOf // the same namespace as the message it hangs from
+		}
+		l.publishEvent(bridge.TypeToolActivity, bridge.ToolActivity{ID: e.ToolID, MessageID: of, Summary: e.Summary, Status: e.Status})
 		if e.Status != "running" {
 			// The tool that asked ended: it was answered on the terminal
 			// (spec M4 §5.2).
