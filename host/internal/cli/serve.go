@@ -279,7 +279,7 @@ func serveHandler(link *phoneLink, cfg config.Config, getenv func(string) string
 			return link.handleSend(ctx, ws, req, c)
 		}
 		if req.Kind == ipc.KindRemote {
-			return link.handleRemote(ctx, req, c)
+			return link.handleRemote(ctx, req, c, d)
 		}
 		if req.Kind == ipc.KindAttach || req.Kind == ipc.KindSession {
 			return handleSession(ctx, sess, agentName, req, c)

@@ -265,6 +265,61 @@ func (d *Daemon) CancelConfirmations() {
 	}
 }
 
+// ErrAskBusy is AskUser's error when another question is waiting for an
+// answer (the 🔴 of a command, or another of serve's own).
+var ErrAskBusy = errors.New("another question is open")
+
+// ErrAskPaused is AskUser's error when the agent is paused from the phone,
+// before the question or while it was asked: whatever the answer, it counts
+// for nothing.
+var ErrAskPaused = errors.New(PausedMessage)
+
+// AskUser asks the user a question of serve's own (`adbuddy remote on`)
+// through the same door as a 🔴 one: while it waits for its answer, and
+// while it waits for the changes in flight to end before it shows up, every
+// command and undo of the agent is refused (an `input tap` could press Allow
+// on the phone). One question at a time: if another one is waiting it
+// returns ErrAskBusy without asking. A pause withdraws it
+// (CancelConfirmations) and ends it with ErrAskPaused. The question expires
+// timeout after it shows up (r.ExpiresAt is set then); timeout <= 0 means
+// the daemon's ConfirmTimeout. On an error the decision is Deny.
+func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Duration) (confirm.Decision, error) {
+	if timeout <= 0 {
+		timeout = d.o.ConfirmTimeout
+	}
+	qctx, withdraw := context.WithCancelCause(ctx)
+	defer withdraw(nil)
+	q := &question{title: r.Title, withdraw: withdraw}
+	if busy := d.ask(q); busy != "" {
+		return confirm.Deny, fmt.Errorf("%w: %s", ErrAskBusy, busy)
+	}
+	// A pause that came before the question was registered did not
+	// withdraw it: look again now that it is.
+	if d.o.Paused() {
+		d.answered(q, false)
+		return confirm.Deny, ErrAskPaused
+	}
+	if err := d.waitChanges(qctx, q); err != nil {
+		d.answered(q, false)
+		if d.o.Paused() || withdrawnByPause(qctx) {
+			return confirm.Deny, ErrAskPaused
+		}
+		return confirm.Deny, err
+	}
+	d.show(q)
+	cctx, cancel := context.WithTimeout(qctx, timeout)
+	r.ExpiresAt = d.o.Now().UTC().Add(timeout)
+	decision := d.o.Confirmer.Confirm(cctx, r)
+	cancel()
+	// Nothing of serve's own runs as a change in flight: the caller acts
+	// after this returns.
+	d.answered(q, false)
+	if d.o.Paused() || withdrawnByPause(qctx) {
+		return confirm.Deny, ErrAskPaused
+	}
+	return decision, nil
+}
+
 // withdrawnByPause reports whether a pause withdrew the question of qctx
 // (see CancelConfirmations).
 func withdrawnByPause(qctx context.Context) bool {

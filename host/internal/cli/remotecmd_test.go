@@ -77,11 +77,12 @@ func newRemoteHost(t *testing.T, cfg config.Config, answer confirm.Decision) *re
 	if err != nil {
 		t.Fatal(err)
 	}
+	d := remoteDaemon(t, l, nil)
 	srv, err := ipc.Listen(data, secret, func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {
 		if req.Kind != ipc.KindRemote {
 			return ipc.Exit{Code: 1, ErrorCode: "UNKNOWN_REQUEST"}
 		}
-		return l.handleRemote(ctx, req, c)
+		return l.handleRemote(ctx, req, c, d)
 	})
 	if err != nil {
 		t.Skipf("no socket: %v", err)
@@ -538,7 +539,7 @@ func TestServeHandlerWiresTheRemoteQuestion(t *testing.T) {
 		}
 		return ""
 	}
-	h := serveHandler(l, cfg, getenv, t.TempDir(), "claude", nil, nil)
+	h := serveHandler(l, cfg, getenv, t.TempDir(), "claude", nil, remoteDaemon(t, l, nil))
 	secret, err := ipc.EnsureSecret(data)
 	if err != nil {
 		t.Fatal(err)
@@ -671,9 +672,11 @@ func TestPauseWithdrawsTheRemoteQuestion(t *testing.T) {
 	g := newRemoteRig(t, withTailscale(), "41234")
 	r.l.remote = g.r
 	r.l.useRemoteAsk("en", time.Minute)
+	d := remoteDaemon(t, r.l, nil)
+	r.l.OnPause(d.CancelConfirmations) // as serve wires it
 	done := make(chan ipc.Exit, 1)
 	go func() {
-		done <- r.l.handleRemote(context.Background(), ipc.Request{Kind: ipc.KindRemote, Argv: []string{"on"}}, nil)
+		done <- r.l.handleRemote(context.Background(), ipc.Request{Kind: ipc.KindRemote, Argv: []string{"on"}}, nil, d)
 	}()
 	for {
 		if m := readApp(t, r.c); m.Type == bridge.TypeConfirmReq {

@@ -12,6 +12,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
@@ -282,10 +283,12 @@ func remoteExit(code int, errCode, format string, a ...any) ipc.Exit {
 // handleRemote answers `adbuddy remote`. The agent is refused, but it declares
 // where it comes from itself, so the real defence of `on` is the question: the
 // user answers it (app or terminal), every time, and only for this request.
-// The change goes through serve's controller and its queue, behind the changes
+// It is asked through d, serve's daemon, so that while it is open every
+// command of the agent is refused (an `input tap` could press Allow). The
+// change goes through serve's controller and its queue, behind the changes
 // asked before (the app's included); config.toml is only written by serve's
 // own store.
-func (l *phoneLink) handleRemote(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {
+func (l *phoneLink) handleRemote(ctx context.Context, req ipc.Request, c *ipc.Conn, d *daemon.Daemon) ipc.Exit {
 	if req.Env["ADBUDDY_SOURCE"] == "agent" {
 		return remoteExit(1, "AGENT_SESSION", "the agent cannot change the remote mode")
 	}
@@ -312,7 +315,7 @@ func (l *phoneLink) handleRemote(ctx context.Context, req ipc.Request, c *ipc.Co
 		if r.store.TailscaleIP() == "" {
 			return remoteExit(1, "REMOTE_UNAVAILABLE", "%s", remote.ErrNoTailscale.Error())
 		}
-		if exit := l.confirmRemoteOn(ctx); exit.Code != 0 {
+		if exit := l.confirmRemoteOn(ctx, d); exit.Code != 0 {
 			return exit
 		}
 		return l.changeRemote(ctx, true, reply)
@@ -320,12 +323,18 @@ func (l *phoneLink) handleRemote(ctx context.Context, req ipc.Request, c *ipc.Co
 	return l.changeRemote(ctx, false, reply)
 }
 
-// confirmRemoteOn asks the user to open the port. The request has no Key and
-// is Special so that "allow during the session" never covers it, and a fresh
-// ID so that the answer is for this question only.
-func (l *phoneLink) confirmRemoteOn(ctx context.Context) ipc.Exit {
+// confirmRemoteOn asks the user to open the port, through the daemon's door
+// for questions (Daemon.AskUser): one question at a time with the 🔴 ones,
+// and the agent blocked while it is open. The request has no Key and is
+// Special so that "allow during the session" never covers it, and a fresh
+// ID so that the answer is for this question only. Without a daemon nobody
+// can block the agent: it is not asked, and nothing opens.
+func (l *phoneLink) confirmRemoteOn(ctx context.Context, d *daemon.Daemon) ipc.Exit {
 	denied := func(why string) ipc.Exit {
 		return remoteExit(exitRemoteDenied, "REMOTE_DENIED", "%s: the remote mode was not turned on", why)
+	}
+	if d == nil {
+		return remoteExit(1, "REMOTE_UNAVAILABLE", "the remote mode is not available on this host")
 	}
 	if l.Paused() {
 		return denied("the agent is paused from the phone")
@@ -334,9 +343,10 @@ func (l *phoneLink) confirmRemoteOn(ctx context.Context) ipc.Exit {
 	if timeout <= 0 {
 		timeout = config.DefaultConfirmTimeout
 	}
-	qctx, cancel := context.WithTimeout(ctx, timeout)
+	qctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	// One question at a time; a pause from the phone withdraws it.
+	// One question of `on` at a time (the daemon also refuses one while any
+	// other question is open); a pause from the phone withdraws it.
 	l.mu.Lock()
 	if l.askBusy {
 		l.mu.Unlock()
@@ -350,18 +360,25 @@ func (l *phoneLink) confirmRemoteOn(ctx context.Context) ipc.Exit {
 		l.mu.Unlock()
 	}()
 	offs := l.remote.offCount()
-	now := time.Now()
-	d := l.Confirmer().Confirm(qctx, confirm.Request{
-		ID: journal.NewID("r_", now), Title: remoteConfirmTitle(l.askLang), Detail: remoteConfirmDetail(l.askLang),
-		RawCommand: "adbuddy remote on", ExpiresAt: now.UTC().Add(timeout), Special: true, Key: "",
-	})
+	dec, err := d.AskUser(qctx, confirm.Request{
+		ID: journal.NewID("r_", time.Now()), Title: remoteConfirmTitle(l.askLang), Detail: remoteConfirmDetail(l.askLang),
+		RawCommand: "adbuddy remote on", Special: true, Key: "",
+	}, timeout)
+	switch {
+	case errors.Is(err, daemon.ErrAskBusy):
+		return remoteExit(1, "REMOTE_BUSY", "%s", classify.Printable(err.Error()))
+	case errors.Is(err, daemon.ErrAskPaused) || err != nil && l.Paused():
+		return denied("the agent was paused from the phone")
+	case err != nil:
+		return denied("the question was abandoned before it was asked")
+	}
 	if l.Paused() { // an answer that comes after a pause counts for nothing
 		return denied("the agent was paused from the phone")
 	}
-	if d == confirm.Allow && l.remote.offCount() != offs {
+	if dec == confirm.Allow && l.remote.offCount() != offs {
 		return denied("the remote mode was turned off while asking; run it again")
 	}
-	switch d {
+	switch dec {
 	case confirm.Allow:
 		return ipc.Exit{}
 	case confirm.Timeout:
