@@ -19,6 +19,9 @@ import (
 // test can shorten it; New copies it into the Server.
 var helloTimeout = 5 * time.Second
 
+// admitTimeout bounds Options.Admit (a variable for the tests).
+var admitTimeout = 20 * time.Second
+
 // beforeDispatch runs in the reader for each message about to reach
 // OnMessage. A var so a test can hold a message there; New copies it.
 var beforeDispatch = func(Message) {}
@@ -57,6 +60,14 @@ type Options struct {
 	OnConnect func(bool)
 	// OnReject is called when an authenticated app is too old to talk to.
 	OnReject func(Hello)
+	// Admit, when set, decides whether an app that has the token may
+	// attach: serve checks there that it is still the installation it
+	// verified (spec M6a §6.3). It runs in the connection's own goroutine,
+	// after the token and the version checks and before OnConnect or
+	// OnAttach, so it may do I/O; false, a cancelled ctx or more than
+	// admitTimeout reject the app as one without the token. nil admits
+	// every app with the token.
+	Admit func(ctx context.Context, h Hello) bool
 	// OnFrame receives the app's binary frames that DecodeFrame accepts, one
 	// at a time and in order with OnMessage within a connection. After a
 	// replacement, a frame can still come from the previous connection (it
@@ -490,6 +501,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.admit(ctx, hello) {
+		c.Close(websocket.StatusPolicyViolation, "unauthorized")
+		return
+	}
+
 	cl := &client{send: make(chan outItem, sendQueue), cancel: cancel, done: ctx.Done(), token: hello.Token, conn: c}
 	backlog, first, ok := s.attach(cl, hello)
 	if !ok { // the token changed since it was checked
@@ -709,4 +725,22 @@ func write(ctx context.Context, c *websocket.Conn, m Message) error {
 	wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	return c.Write(wctx, websocket.MessageText, data)
+}
+
+// admit asks Options.Admit, failing closed: false, a cancelled ctx or no
+// answer within admitTimeout reject the app.
+func (s *Server) admit(ctx context.Context, h Hello) bool {
+	if s.o.Admit == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(ctx, admitTimeout)
+	defer cancel()
+	done := make(chan bool, 1)
+	go func() { done <- s.o.Admit(ctx, h) }()
+	select {
+	case ok := <-done:
+		return ok && ctx.Err() == nil
+	case <-ctx.Done():
+		return false
+	}
 }
