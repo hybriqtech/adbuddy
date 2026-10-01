@@ -41,7 +41,7 @@ func TestInitCreatesEnvironment(t *testing.T) {
 			t.Errorf("%s: %v", f, err)
 		}
 	}
-	if want := 6 + 2*len(skillFiles(t)); len(res.Created) != want {
+	if want := 7 + 2*len(skillFiles(t)); len(res.Created) != want {
 		t.Fatalf("created %q", res.Created)
 	}
 	if st, err := os.Stat(JournalDir(dir)); err != nil || !st.IsDir() {

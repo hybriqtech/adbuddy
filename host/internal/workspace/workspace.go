@@ -94,11 +94,19 @@ func Init(o Options) (Result, error) {
 	if err := installSkills(o.Dir, o.Force, &res); err != nil {
 		return res, err
 	}
+	if err := ensureRealDirs(o.Dir, ".gemini"); err != nil {
+		return res, err
+	}
 	changed, created, err := mergeClaudeSettings(filepath.Join(o.Dir, ".claude", "settings.json"), filepath.Join(BinDir(o.Dir), exe("adbuddy")))
 	if err != nil {
 		return res, err
 	}
 	res.note(filepath.Join(".claude", "settings.json"), changed, created)
+	changed, created, err = mergeGeminiSettings(filepath.Join(o.Dir, ".gemini", "settings.json"))
+	if err != nil {
+		return res, err
+	}
+	res.note(filepath.Join(".gemini", "settings.json"), changed, created)
 
 	for _, name := range []string{exe("adb"), exe("adbuddy")} {
 		changed, created, err := copyIfDifferent(o.Exe, filepath.Join(BinDir(o.Dir), name))
@@ -252,20 +260,9 @@ func mergeHooks(settings map[string]any, path, exePath string) (bool, error) {
 // (spec M4 §3.2, when hookExe is not empty), keeping every other setting the
 // user has.
 func mergeClaudeSettings(path, hookExe string) (changed, created bool, err error) {
-	settings := map[string]any{}
-	data, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		created = true
-	case err != nil:
+	settings, created, err := loadSettings(path)
+	if err != nil {
 		return false, false, err
-	default:
-		if err := json.Unmarshal(bytes.TrimPrefix(data, utf8BOM), &settings); err != nil {
-			return false, false, fmt.Errorf("%s is not valid JSON (%v); fix it or delete it", path, err)
-		}
-		if settings == nil {
-			return false, false, fmt.Errorf("%s is not a JSON object; fix it or delete it", path)
-		}
 	}
 	perms, _ := settings["permissions"].(map[string]any)
 	if perms == nil {
@@ -304,27 +301,96 @@ func mergeClaudeSettings(path, hookExe string) (changed, created bool, err error
 	}
 	perms["allow"] = allow
 	settings["permissions"] = perms
+	if err := saveSettings(path, settings); err != nil {
+		return false, false, err
+	}
+	return true, created, nil
+}
+
+// loadSettings reads a JSON settings file that must hold an object. A missing
+// file is an empty object and created is true. Anything else that is not a
+// JSON object is an error that tells the user to fix or delete the file.
+func loadSettings(path string) (settings map[string]any, created bool, err error) {
+	settings = map[string]any{}
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		created = true
+	case err != nil:
+		return nil, false, err
+	default:
+		if err := json.Unmarshal(bytes.TrimPrefix(data, utf8BOM), &settings); err != nil {
+			return nil, false, fmt.Errorf("%s is not valid JSON (%v); fix it or delete it", path, err)
+		}
+		if settings == nil {
+			return nil, false, fmt.Errorf("%s is not a JSON object; fix it or delete it", path)
+		}
+	}
+	return settings, created, nil
+}
+
+// saveSettings writes settings as indented JSON, readable only by the user,
+// through a temporary file and a rename.
+func saveSettings(path string, settings map[string]any) error {
 	out, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		return false, false, err
+		return err
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*")
 	if err != nil {
-		return false, false, err
+		return err
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(append(out, '\n')); err != nil {
 		tmp.Close()
-		return false, false, err
+		return err
 	}
 	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
-		return false, false, err
+		return err
 	}
 	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// mergeGeminiSettings makes Gemini CLI read AGENTS.md (spec M6b §3.4): it adds
+// "AGENTS.md" to context.fileName and keeps everything else the user has.
+func mergeGeminiSettings(path string) (changed, created bool, err error) {
+	settings, created, err := loadSettings(path)
+	if err != nil {
 		return false, false, err
 	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	ctx, _ := settings["context"].(map[string]any)
+	if ctx == nil {
+		if v, exists := settings["context"]; exists && v != nil {
+			return false, false, fmt.Errorf("%s: \"context\" is not an object", path)
+		}
+		ctx = map[string]any{}
+	}
+	var names []any
+	switch v := ctx["fileName"].(type) {
+	case nil:
+	case string:
+		names = []any{v}
+	case []any:
+		names = v
+	default:
+		return false, false, fmt.Errorf("%s: \"context.fileName\" is not a string or a list", path)
+	}
+	for _, n := range names {
+		s, ok := n.(string)
+		if !ok {
+			return false, false, fmt.Errorf("%s: \"context.fileName\" has an entry that is not a string", path)
+		}
+		if s == "AGENTS.md" {
+			return false, false, nil
+		}
+	}
+	ctx["fileName"] = append(names, "AGENTS.md")
+	settings["context"] = ctx
+	if err := saveSettings(path, settings); err != nil {
 		return false, false, err
 	}
 	return true, created, nil

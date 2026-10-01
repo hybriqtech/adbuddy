@@ -33,6 +33,10 @@ Some apps are protected (banking, payments, passwords, 2FA, and ADBuddy itself):
 
 Raw adb commands that touch or read the screen (`input`, `screencap`, `screenrecord`, `am start`, `monkey`, `uiautomator`) must go one per call, one key per `input keyevent`, without `;`, `&&`, `|`, `$(…)` or wrappers such as `watch`, `flock` or `sh -c`; otherwise ADBuddy blocks them.
 
+## Skills
+
+Recipes for common jobs are in `.agents/skills/` (the same ones are in `.claude/skills/`). When what the user asks matches a skill's description, read the whole skill before you start. A skill is a recipe, not an authorization: everything in this file still applies, and a skill never lets you skip a confirmation.
+
 ## Risk levels
 
 - 🟢 Read-only: runs at once.
