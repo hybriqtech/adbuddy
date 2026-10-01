@@ -52,6 +52,8 @@
   | `actions/download-artifact` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | v8.0.1 |
   | `goreleaser/goreleaser-action` | `f06c13b6b1a9625abc9e6e439d9c05a8f2190e94` | v7.2.3 |
 
+  El goreleaser que ejecuta la acción también va fijado a una versión exacta, `version: "v2.18.2"` (la última v2, resuelta el 2026-10-01 con `git ls-remote --tags`), nunca `~> v2` ni `latest`: una release no cambia de herramienta sin un commit.
+
 - **Estilo:** mensajes al usuario en inglés, como el resto del host. Comentarios en el estilo del paquete: frases cortas en inglés.
 - **Tests de Go con límite:** `go test -timeout 10m ./...`, desde `host/`.
 - **Sin herramientas locales:** en este PC no hay JDK, goreleaser, `shellcheck` ni `actionlint`. Lo que los necesita se prueba en la CI (ver "Validaciones manuales pendientes").
@@ -3083,7 +3085,7 @@ Avisa al controlador para que se lo diga a tern-51: `phone.go` ha cambiado más 
 
 - [ ] **Step 1: Añadir los casos al corpus**
 
-Al final de `host/internal/classify/testdata/habitual.jsonl`, añade:
+Al final de `host/internal/classify/testdata/habitual.jsonl`, añade (`pm disable-user --user 0 tech.hybriq.adbuddy` ya está en la línea 145: no lo repitas):
 
 ```json
 # ADBuddy's own app: removing, wiping, disabling, stopping or weakening it leaves the phone without its trusted app (spec M6a §7)
@@ -3097,7 +3099,6 @@ Al final de `host/internal/classify/testdata/habitual.jsonl`, añade:
 {"sh":"pm clear --user 0 tech.hybriq.adbuddy","level":"red","special":true}
 {"sh":"pm disable tech.hybriq.adbuddy","level":"red","special":true}
 {"sh":"pm disable-user tech.hybriq.adbuddy","level":"red","special":true}
-{"sh":"pm disable-user --user 0 tech.hybriq.adbuddy","level":"red","special":true}
 {"sh":"pm suspend tech.hybriq.adbuddy","level":"red","special":true}
 {"sh":"pm hide tech.hybriq.adbuddy","level":"red","special":true}
 {"sh":"pm revoke tech.hybriq.adbuddy android.permission.WRITE_SECURE_SETTINGS","level":"red","special":true}
@@ -3105,41 +3106,45 @@ Al final de `host/internal/classify/testdata/habitual.jsonl`, añade:
 {"sh":"am force-stop tech.hybriq.adbuddy","level":"red","special":true}
 {"sh":"am kill tech.hybriq.adbuddy","level":"red","special":true}
 {"sh":"am stop-app tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"cmd activity force-stop tech.hybriq.adbuddy","level":"red","special":true}
 {"sh":"cmd appops set tech.hybriq.adbuddy RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
+{"sh":"cmd deviceidle whitelist -tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"dumpsys deviceidle whitelist -tech.hybriq.adbuddy","level":"red","special":true}
 {"sh":"p=tech.hybriq.adbuddy; pm uninstall $p","level":"red","special":true}
+{"sh":"p=tech.hybriq.adbuddy; cmd deviceidle whitelist -$p","level":"red","special":true}
+{"sh":"cmd package uninstall $(getprop foo)","level":"red","special":true}
+{"sh":"cmd appops set $PKG RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
 {"sh":"pm list packages | grep hybriq | cut -d: -f2 | xargs pm uninstall","level":"red","special":true}
+{"sh":"cmd package uninstall $(pm list packages | grep hybr | cut -c9-)","level":"red","special":true}
+{"sh":"pm uninstall tech.hybriq.adbudd*","level":"red","special":true}
+{"sh":"pm uninstall tech.hybriq.adbu\"\"ddy","level":"red","special":true}
+{"sh":"pm uninstall tech.hybriq.adbu''ddy","level":"red","special":true}
+{"sh":"sh -c 'pm uninstall tech.hybriq.adbuddy'","level":"red","special":true}
 {"argv":["uninstall","tech.hybriq.adbuddy"],"level":"red","special":true}
 {"argv":["uninstall","-k","tech.hybriq.adbuddy"],"level":"red","special":true}
 {"argv":["shell","pm","uninstall","tech.hybriq.adbuddy"],"level":"red","special":true}
-{"sh":"cmd package uninstall $(pm list packages | grep hybr | cut -c9-)","level":"red","special":true}
 {"sh":"pm reset-permissions","level":"red","special":true}
+{"sh":"cmd package reset-permissions","level":"red","special":true}
 {"sh":"dumpsys deviceidle whitelist reset","level":"red","special":true}
 {"sh":"cmd deviceidle whitelist reset","level":"red","special":true}
 {"sh":"cmd appops reset","level":"red","special":true}
-{"sh":"cmd package reset-permissions","level":"red","special":true}
+{"sh":"cmd appops reset --user 0","level":"red","special":true}
 {"sh":"appops reset","level":"red","special":true}
+{"sh":"appops reset --user 0","level":"red","special":true}
 ```
 
 Comprueba antes que `readJSONL` admite líneas `#` en medio del fichero: su comentario dice "lines starting with # are comments".
 
 - [ ] **Step 2: Ejecutar el corpus**
 
-Run (desde `host/`): `go test -timeout 10m ./internal/classify/ -run 'Corpus|Habitual'`. Si ningún test se llama así, ejecuta `go test -timeout 10m ./internal/classify/` y busca en la salida las líneas nuevas.
-Expected: o PASS, o FAIL con las líneas que hoy no salen 🔴 especiales. **Apunta en el ledger cuáles fallaron.**
+Run (desde `host/`): `go test -timeout 10m ./internal/classify/ -run Habitual`.
+Expected: FAIL de `TestHabitualKeepsItsLevels` solo con las 8 líneas de *reset* (`pm reset-permissions`, `cmd package reset-permissions`, `deviceidle whitelist reset` con `dumpsys` y con `cmd`, `appops reset` y `cmd appops reset`, con y sin `--user 0`), que salen 🔴 pero no especiales. Si falla alguna más, anótala. **Apunta en el ledger cuáles fallaron.**
 
 - [ ] **Step 3: Arreglar lo que no salga**
 
-`specialReason` ya tiene la regla general `if level != Green && mentionsADBuddy(v)` (special.go, al final del `switch` de shell), así que las órdenes que nombran el paquete deberían salir ya. Se espera que fallen dos grupos. En `host/internal/classify/special.go`:
+`specialReason` ya tiene la regla general `if level != Green && mentionsADBuddy(v)` (special.go, al final del `switch` de shell), así que las órdenes que nombran el paquete (también con comillas vacías, con `$p`, con `*`, dentro de `sh -c '…'` o con `$(…)`) deberían salir ya. Los casos con `cmd` y un argumento que solo se conoce en el móvil también salen ya, por las reglas de `pm` y `appops`: no toques la regla de argumentos dinámicos. Se espera que solo fallen las órdenes de *reset*, que neutralizan la app sin nombrarla (`pm reset-permissions`, `cmd package reset-permissions`, `deviceidle whitelist reset`, `appops reset` y `cmd appops reset`, con o sin `--user 0`).
 
-1. **`cmd` con argumentos dinámicos.** En la regla de argumentos dinámicos, añade `cmd`:
-
-```go
-	if level != Green && (name == "pm" || name == "appops" || name == "am" || name == "cmd") && hasDynamic(ws[1:]) {
-		return "arguments only known on the phone could name ADBuddy or a critical app"
-	}
-```
-
-2. **Órdenes de *reset* que neutralizan la app sin nombrarla.** Justo antes de esa regla:
+En `host/internal/classify/special.go`, añade `"slices"` a los imports (antes de `"strconv"`), justo antes de la regla de argumentos dinámicos (`if level != Green && (name == "pm" || name == "appops" || name == "am") && hasDynamic(ws[1:])`) esta regla:
 
 ```go
 	if level != Green && resetsEveryApp(name, v) {
@@ -3147,11 +3152,11 @@ Expected: o PASS, o FAIL con las líneas que hoy no salen 🔴 especiales. **Apu
 	}
 ```
 
-con:
+y al final del fichero:
 
 ```go
 // resetsEveryApp: pm reset-permissions without -p, `deviceidle whitelist
-// reset` and `cmd appops reset` without a package strip ADBuddy's app of
+// reset` and `appops reset` without a package strip ADBuddy's app of
 // WRITE_SECURE_SETTINGS (Cut access), its battery exemption or its app ops
 // without naming it (spec M6a §7).
 func resetsEveryApp(name string, v []string) bool {
@@ -3162,27 +3167,30 @@ func resetsEveryApp(name string, v []string) bool {
 	case name == "cmd" && has(1, "package") && has(2, "reset-permissions"):
 		return !slices.Contains(v[3:], "-p")
 	case name == "appops" && has(1, "reset"):
-		for _, w := range v[2:] {
-			if !strings.HasPrefix(w, "-") && w != "0" {
-				return false
-			}
-		}
-		return true
-	case (name == "dumpsys" || name == "cmd") && has(1, "deviceidle") && has(2, "whitelist") && has(3, "reset"):
-		return true
+		return noPackage(v[2:])
 	case name == "cmd" && has(1, "appops") && has(2, "reset"):
-		for _, w := range v[3:] {
-			if !strings.HasPrefix(w, "-") && w != "0" { // a package: only that one
-				return false
-			}
-		}
+		return noPackage(v[3:])
+	case (name == "dumpsys" || name == "cmd") && has(1, "deviceidle") && has(2, "whitelist") && has(3, "reset"):
 		return true
 	}
 	return false
 }
-```
 
-(Añade `"slices"` a los imports si falta. `cmd appops reset --user 0` sigue siendo de todas las apps: el `0` es el valor de `--user`.)
+// noPackage reports whether the words are only options, `--user` and its
+// value included: `appops reset --user 0` still resets every app.
+func noPackage(ws []string) bool {
+	for i := 0; i < len(ws); i++ {
+		switch w := ws[i]; {
+		case w == "--user" || w == "-u":
+			i++ // its value
+		case strings.HasPrefix(w, "-"):
+		default:
+			return false // a package: only that one
+		}
+	}
+	return true
+}
+```
 
 Si otra línea nueva sigue sin salir 🔴 especial, sigue el mismo patrón: una condición estrecha sobre `name` y sus subórdenes. No admitas nada nuevo en la lista blanca del evaluador.
 
@@ -3420,6 +3428,7 @@ ok v0.0.0-rc.1 0.0.0-rc.1 1 true
 ok v20.999.999 20.999.999 2099999999 false
 ok v10.0.0-rc.98 10.0.0-rc.98 1000000098 true
 
+# shellcheck disable=SC2016 # the $(id) is a literal on purpose: it must be refused, not run
 for t in 0.3.0 v1.2 v1.2.3.4 v01.2.3 v1.02.3 v1.2.03 v1000.0.0 v21.0.0 \
 	v1.2.3-rc.0 v1.2.3-rc.99 v1.2.3-rc.01 v1.2.3-beta.1 v1.2.3-rc.1x v1.2.3-rc \
 	'v1.2.3 ' '' 'v1.2.3$(id)' "v1.2.3${nl}v1.2.4"; do
@@ -3493,6 +3502,7 @@ main() {
 	case $v in
 	*-rc.*)
 		s=${v##*-rc.}
+		[ "$s" -le 98 ] || bad "$tag" "rc numbers go from 1 to 98"
 		pre=true
 		;;
 	*)
@@ -3501,7 +3511,6 @@ main() {
 		;;
 	esac
 	[ "$x" -le 20 ] || bad "$tag" "the major version is over 20, so the versionCode would not fit"
-	[ "$s" -le 98 ] || bad "$tag" "rc numbers go from 1 to 98"
 	code=$((((x * 1000 + y) * 1000 + z) * 100 + s))
 	printf 'name=%s\ncode=%s\nprerelease=%s\n' "$v" "$code" "$pre"
 }
@@ -3583,7 +3592,8 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 fail=0
 
-sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+# sha prints "<hex>  <file>" like goreleaser (Git Bash marks binary files with " *").
+sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi | sed 's/^\([0-9a-f]*\) [ *]/\1  /'; }
 
 # url turns a folder into a file:// URL that this system's curl understands.
 url() {
@@ -3611,6 +3621,7 @@ printf 'zip\n' >"$rel/adbuddy_9.9.9_windows_amd64.zip"
 fakeuname() {
 	d=$work/uname-$1-$2
 	mkdir -p "$d"
+	# shellcheck disable=SC2016 # the $1 is for the fake uname to expand, not for this shell
 	printf '#!/bin/sh\ncase "$1" in -s) echo %s ;; -m) echo %s ;; esac\n' "$1" "$2" >"$d/uname"
 	chmod 755 "$d/uname"
 	printf '%s' "$d"
@@ -3642,6 +3653,7 @@ says() { # name text
 }
 
 for c in "Linux x86_64 linux_amd64" "Linux aarch64 linux_arm64" "Darwin arm64 darwin_all" "Darwin x86_64 darwin_all"; do
+	# shellcheck disable=SC2086 # $c is split on purpose: os, arch and target
 	set -- $c
 	dir=$work/bin-$1-$2
 	if ! try "$1" "$2" "$(url "$rel")" "$dir"; then
@@ -3714,6 +3726,9 @@ die() {
 }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# sum file: the SHA-256 and the name, as sha256sum prints them.
+sum() { if have sha256sum; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+
 # fetch url file: HTTPS only, unless the URL is a test's.
 fetch() {
 	if have curl; then
@@ -3733,13 +3748,7 @@ main() {
 	have curl || have wget || die "needs curl or wget"
 	have tar || die "needs tar"
 	have awk || die "needs awk"
-	if have sha256sum; then
-		sum="sha256sum"
-	elif have shasum; then
-		sum="shasum -a 256"
-	else
-		die "needs sha256sum or shasum"
-	fi
+	have sha256sum || have shasum || die "needs sha256sum or shasum"
 
 	os=$(uname -s)
 	arch=$(uname -m)
@@ -3773,12 +3782,12 @@ main() {
 	tmp=$(mktemp -d)
 	trap 'rm -rf "$tmp"' EXIT INT TERM
 	fetch "$base/checksums.txt" "$tmp/checksums.txt" || die "could not download $base/checksums.txt"
-	name=$(awk -v t="$target" '$2 ~ "^adbuddy_[^/ ]+_" t "\\.tar\\.gz$" { print $2 }' "$tmp/checksums.txt")
+	name=$(awk -v t="$target" '$2 ~ "^adbuddy_[^/ ]+_" t "[.]tar[.]gz$" { print $2 }' "$tmp/checksums.txt")
 	[ -n "$name" ] && [ "$(printf '%s\n' "$name" | wc -l | tr -d ' ')" -eq 1 ] ||
 		die "no adbuddy archive for $target in $base/checksums.txt"
 	want=$(awk -v f="$name" '$2 == f { print $1 }' "$tmp/checksums.txt")
 	fetch "$base/$name" "$tmp/$name" || die "could not download $base/$name"
-	got=$(cd "$tmp" && $sum "$name")
+	got=$(cd "$tmp" && sum "$name")
 	got=${got%% *}
 	[ "$got" = "$want" ] || die "$name does not match its SHA-256 in checksums.txt: not installing it"
 
@@ -3929,10 +3938,9 @@ snapshot:
 changelog:
   sort: asc
 
+# No release.github: goreleaser takes owner and name from the git remote,
+# so the pipeline also works in a fork.
 release:
-  github:
-    owner: hybriqtech
-    name: adbuddy
   draft: true
   prerelease: auto
   mode: keep-existing
@@ -4040,7 +4048,7 @@ jobs:
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: "v2.18.2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -4218,12 +4226,12 @@ jobs:
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: "v2.18.2"
           args: check
       - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: "~> v2"
+          version: "v2.18.2"
           args: release --snapshot --clean
       - name: The snapshot has every archive
         run: |
@@ -4284,19 +4292,20 @@ En este PC no hay goreleaser, `actionlint`, `shellcheck` ni JDK. Comprueba lo qu
 Run: `sh -n scripts/release-cert.sh && sh scripts/release-version_test.sh && sh scripts/install_test.sh && APKSIGNER=x sh scripts/release-cert.sh a.apk --bad; echo "exit $?"`
 Expected: sin errores de sintaxis, los dos tests pasan, y la última orden sale con 1 diciendo "unknown option --bad".
 
-Run (desde `host/`): `go run github.com/goreleaser/goreleaser/v2@latest check -f ../.goreleaser.yaml`
+Run (desde `host/`): `go run github.com/goreleaser/goreleaser/v2@v2.18.2 check -f ../.goreleaser.yaml`
 Expected: `config is valid` (un aviso por `LICENSE` es aceptable hasta la Task 11). Si `go run` no puede descargar goreleaser, apúntalo en el ledger y sigue: lo comprueba la CI.
+Si funciona, tras la Task 11 (que trae el `LICENSE`) prueba también el snapshot entero: `go install github.com/goreleaser/goreleaser/v2@v2.18.2` (con `GOBIN` en una carpeta temporal) y, desde la raíz del worktree, `goreleaser release --snapshot --clean`. Debe dejar en `host/dist` los 5 archivos y `checksums.txt`; `rm -rf host/dist` después (no se commitea).
 
 Run: `uv run --with pyyaml python -c "import yaml,sys; [yaml.safe_load(open(f)) for f in sys.argv[1:]]" .goreleaser.yaml .github/workflows/release.yml .github/workflows/release-check.yml`
 Expected: sin salida (YAML válido).
 
-Run: `grep -n 'uses:' .github/workflows/release*.yml | grep -v '@[0-9a-f]\{40\} # v'`
-Expected: sin salida: todas las acciones están fijadas por SHA.
+Run: `grep -n 'uses:' .github/workflows/release*.yml | grep -v '@[0-9a-f]\{40\} # v'; grep -n 'version:' .github/workflows/release*.yml | grep -i 'goreleaser\|~>\|latest'`
+Expected: sin salida: todas las acciones están fijadas por SHA y goreleaser tiene una versión exacta.
 
 Run: `grep -n 'secrets\.' .github/workflows/release.yml`
 Expected: solo `GITHUB_TOKEN`, en el job `host`, y las dos líneas del paso `Sign` del job `sign`.
 
-Run: `grep -n 'cache' .github/workflows/release.yml`
+Run: `grep -nE 'cache[:-]' .github/workflows/release.yml`
 Expected: solo `cache: false` y `cache-disabled: true`.
 
 - [ ] **Step 6: Commit**
@@ -4351,12 +4360,9 @@ main() {
 	dir=${ADBUDDY_RELEASE_KEY_DIR:-$HOME/.adbuddy-release}
 	mkdir -p "$dir"
 	dir=$(cd "$dir" && pwd)
-	root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null || true)
-	if [ -n "$root" ]; then
-		root=$(cd "$root" && pwd)
-		case $dir/ in
-		"$root"/*) die "$dir is inside the repo: pick a folder outside it (ADBUDDY_RELEASE_KEY_DIR)" ;;
-		esac
+	# git itself answers, so the path spellings of Git Bash and Windows do not matter.
+	if [ "$(git -C "$dir" rev-parse --is-inside-work-tree 2>/dev/null || true)" = true ]; then
+		die "$dir is inside a git repository: pick a folder outside it (ADBUDDY_RELEASE_KEY_DIR)"
 	fi
 	ks=$dir/release.p12
 	[ ! -e "$ks" ] || die "$ks already exists: never replace a release key (installed apps could not update)"
@@ -4374,7 +4380,7 @@ main() {
 	echo
 	echo "Secrets of the \"release\" environment (create it first, see docs/releasing.md);"
 	echo "gh reads each value from stdin or asks for it, and prints nothing:"
-	echo "  base64 < \"$ks\" | tr -d '\\n' | gh secret set ADBUDDY_KEYSTORE_B64 --env release --repo hybriqtech/adbuddy"
+	printf '%s\n' "  base64 < \"$ks\" | tr -d '\\n' | gh secret set ADBUDDY_KEYSTORE_B64 --env release --repo hybriqtech/adbuddy"
 	echo "  gh secret set ADBUDDY_KEYSTORE_PASSWORD --env release --repo hybriqtech/adbuddy"
 }
 
@@ -4382,7 +4388,7 @@ main "$@"
 ```
 
 Run: `sh -n scripts/release-key.sh && ADBUDDY_RELEASE_KEY_DIR="$PWD/tmp-key" sh scripts/release-key.sh; echo "exit $?"; rm -rf tmp-key`
-Expected: sin errores de sintaxis. La segunda orden sale con 1, con "keytool not found" (no hay JDK) o con "inside the repo". **No** generes ninguna clave real: eso lo hace el usuario.
+Expected: sin errores de sintaxis. La segunda orden sale con 1, con "keytool not found" (no hay JDK) o con "inside a git repository". **No** generes ninguna clave real: eso lo hace el usuario.
 
 - [ ] **Step 2: `LICENSE`**
 
