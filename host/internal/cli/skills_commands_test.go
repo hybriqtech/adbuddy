@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -42,10 +43,22 @@ var skillAdbuddySubcommands = map[string]bool{
 	"screenshot": true, "send": true, "journal": true, "undo": true,
 }
 
+// allowedRecursiveRm is the one recursive delete a recipe may carry: storage-cleanup
+// empties its own trash folder with it (red: the user confirms it). The match is
+// the exact command, field by field: no patterns, no prefixes.
+var allowedRecursiveRm = [][]string{
+	{"shell", "rm", "-r", "/sdcard/ADBuddy-papelera"},
+}
+
 // forbiddenRecipe says whether a command does what no recipe does, however
 // well it is annotated (spec §2.3): clear an app's data, delete recursively,
 // wipe, reboot, or install granting every permission.
 func forbiddenRecipe(fields []string) bool {
+	for _, ok := range allowedRecursiveRm {
+		if slices.Equal(fields, ok) {
+			return false
+		}
+	}
 	var toks []string
 	for _, f := range fields {
 		toks = append(toks, strings.Fields(strings.ToLower(f))...)
@@ -369,14 +382,15 @@ func TestSkillExamplesCatches(t *testing.T) {
 		})
 	}
 	good := map[string]string{
-		"getprop":        adbBlock("shell getprop ro.product.model   # green"),
-		"packages":       adbBlock("shell pm list packages -3   # green"),
-		"settings":       adbBlock("shell settings get global window_animation_scale   # green"),
-		"screenshot -o":  adbuddyBlock("screenshot -oshot.png"),
-		"screen":         adbuddyBlock("screen"),
-		"send":           adbuddyBlock(`send outbox/device-profile.md --caption "Device profile"`),
-		"foreground":     adbuddyBlock("foreground"),
-		"other language": "```text\nsome output\n```\n\nPlain prose about the phone.\n",
+		"getprop":         adbBlock("shell getprop ro.product.model   # green"),
+		"packages":        adbBlock("shell pm list packages -3   # green"),
+		"settings":        adbBlock("shell settings get global window_animation_scale   # green"),
+		"screenshot -o":   adbuddyBlock("screenshot -oshot.png"),
+		"screen":          adbuddyBlock("screen"),
+		"send":            adbuddyBlock(`send outbox/device-profile.md --caption "Device profile"`),
+		"foreground":      adbuddyBlock("foreground"),
+		"empty own trash": adbBlock("shell rm -r /sdcard/ADBuddy-papelera   # red"),
+		"other language":  "```text\nsome output\n```\n\nPlain prose about the phone.\n",
 	}
 	for name, md := range good {
 		t.Run("good/"+name, func(t *testing.T) {

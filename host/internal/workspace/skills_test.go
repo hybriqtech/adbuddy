@@ -12,7 +12,7 @@ import (
 
 // requiredSkills lists the skills the spec asks for (M6b §1). Each task of the
 // plan adds its own until the nine are here.
-var requiredSkills = []string{"battery", "debloat", "device-profile"}
+var requiredSkills = []string{"backup-to-pc", "battery", "debloat", "device-profile", "organize-files", "storage-cleanup"}
 
 var (
 	skillNameRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
