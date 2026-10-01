@@ -68,13 +68,13 @@ shell mv /sdcard/Download/ejemplo.pdf /sdcard/ADBuddy-papelera/ejemplo.pdf   # y
 
 The move is yellow and `adbuddy undo` reverses it. Check each result with `shell ls -l /sdcard/ADBuddy-papelera` (green) and go on with the next file.
 
-File names are data. If a name has anything other than letters, digits and `._-`, escape it for the phone's shell and put the whole script in single quotes: adb joins the arguments with spaces, so an unquoted `Factura (1).pdf` reaches the phone split in pieces. The move stays yellow: ADBuddy reads the escaped name as the real file name and keeps the inverse, so `adbuddy undo` works; check in `adbuddy journal` that the name it shows is the real one. If the move comes out red, it waits for the user's confirmation: say so and do not promise `adbuddy undo`. If a name has a single quote, a double quote, `$`, a backtick or a line break, leave that file out and tell the user.
+File names are data. If a name has anything other than letters, digits and `._-`, escape it for the phone's shell and put the whole script in single quotes: adb joins the arguments with spaces, so an unquoted `Factura (1).pdf` reaches the phone split in pieces. The move stays yellow: ADBuddy reads the escaped name as the real file name and keeps the inverse, so `adbuddy undo` works; check in `adbuddy journal` that the name it shows is the real one. If the move comes out red, it waits for the user's confirmation: say so and do not promise `adbuddy undo`. If a name has a quote (single or double), `$`, a backtick, `&`, `|`, `<`, `>`, `^`, `%`, `!` or a line break, leave that file out and tell the user. The shell of the PC expands the command before adb starts, so ADBuddy cannot protect it: never paste a name read from the phone into a PC command without this check.
 
 ```adb
 shell 'mv /sdcard/Download/Factura\ \(1\).pdf /sdcard/ADBuddy-papelera/Factura\ \(1\).pdf'   # yellow
 ```
 
-Scripts and escaped names go between single quotes, with no double quotes inside. The examples are written for adb itself; adapt the quoting to the shell you run on the PC (PowerShell, cmd or bash) without adding double quotes inside the script.
+Scripts and escaped names go between single quotes, with no double quotes inside. The examples are written for adb itself; adapt the quoting to the shell you run on the PC (PowerShell or bash; in cmd single quotes protect nothing, so be stricter with the names) without adding double quotes inside the script.
 
 7. Show the user what is in the trash and how to get each file back:
 
@@ -84,7 +84,14 @@ shell ls -l /sdcard/ADBuddy-papelera   # green
 
 To recover a file, move it back with the full original path as destination, or use `adbuddy undo` right after the move.
 
-8. Emptying the trash happens only if the user, having seen the trash list, asks for it. It is one command, it is red (it waits for the user's confirmation) and nothing brings the files back. Say so in the chat before you send it. Never use `rm -rf`.
+8. Emptying the trash happens only if the user, having seen the trash list, asks for it. Before the command, show what it would delete, so the confirmation on the phone does not hide it:
+
+```adb
+shell du -s /sdcard/ADBuddy-papelera   # green
+shell ls -lR /sdcard/ADBuddy-papelera   # green
+```
+
+Emptying is one command, it is red (it waits for the user's confirmation) and nothing brings the files back. Say so in the chat before you send it. Never use `rm -rf`.
 
 ```adb
 shell rm -r /sdcard/ADBuddy-papelera   # red

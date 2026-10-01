@@ -54,7 +54,7 @@ jobs:
       - name: The skills' read-only examples run on the emulator
         working-directory: host
         # Without the variables the test would skip and the step would pass.
-        run: test -n "$ADBUDDY_MKSH_SERIAL" && go test -timeout 20m -count=1 -run TestSkillsReadOnlyOnEmulator ./internal/cli
+        run: test -n "$ADBUDDY_MKSH_SERIAL" && test -n "$ADBUDDY_MKSH_ADB" && go test -timeout 20m -count=1 -run TestSkillsReadOnlyOnEmulator ./internal/cli
       # Evidence for a failed start or recording: why the emulator did not
       # boot. The emulator has its own adb server (scripts/emulator.sh).
       - name: Emulator diagnostics

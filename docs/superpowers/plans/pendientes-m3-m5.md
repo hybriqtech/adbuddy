@@ -141,10 +141,15 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 - **Hecho en M6b** (`docs/superpowers/plans/2026-10-01-adbuddy-m6b-skills.md`): las nueve skills (`host/internal/workspace/skills/`), su instalación en `.claude/skills/` y `.agents/skills/` con la marca `<!-- adbuddy:user -->`, `.gemini/settings.json` con `context.fileName`, la guarda de ejemplos (`skills_commands_test.go`) y `TestSkillsReadOnlyOnEmulator` con su paso de CI.
 - **Pendiente de M6 (publicación):** i18n EN/ES, README completo y donaciones; `adbuddy update` como comando propio.
 - **Aplazados de las revisiones de M6b:**
-  - la nota de entrecomillado por shell (§2.5) falta en `device-profile`, `debloat` y `battery`;
+  - la guarda de ejemplos deja sin comprobar un bloque ```adb que sigue a una valla de 4 backticks o con info string `adb{.x}` (guardar la longitud de la valla y marcar como error cualquier info string que empiece por `adb` y no sea exactamente `adb`/`adbuddy`);
+  - `forbiddenRecipe` no detecta `rm -r` dentro de `$(...)` o tras `;` en un script entre comillas, ni `find ... -delete`, ni `pm uninstall` sin `--user` (el clasificador los da 🔴: tokenizar también por `;&|()$` y añadirlos);
+  - `loadSettings` lee `.claude/settings.json` y `.gemini/settings.json` con `os.ReadFile`: un enlace a `/dev/zero` o un FIFO cuelga `Init` (Lstat + fichero regular + lectura con límite);
+  - `mergeGeminiSettings` sin `context.fileName` escribe `["AGENTS.md"]` y Gemini deja de cargar `GEMINI.md` (también el global): decidir;
+  - los tests de symlink y FIFO y el del emulador solo corren en CI Linux/macOS: mirar en la CI del primer PR;
+  - `TestRemoteOnClientGoneWhileAsking` (internal/cli, de M5) falló una vez por temporización en Windows: vigilar en la CI;
+  - la nota de entrecomillado por shell NO hace falta en `device-profile`, `debloat` ni `battery` (no tienen scripts con texto del móvil);
   - en `home-screen`, el arrastre con `input swipe` probablemente no arrastra en muchos lanzadores (alternativas `input draganddrop` / `input motionevent`);
   - `forbiddenRecipe` no caza `MASTER_CLEAR` ni `FACTORY_RESET` (el clasificador los da 🔴);
-  - un fallo del test de symlink/FIFO solo se ve en la CI de Linux/macOS (no corren en el PC Windows);
   - `ensureRealDirs` no es todo-o-nada (Init ya escribió AGENTS.md y skills antes de fallar) y hay TOCTOU entre comprobar y escribir (endurecer con `os.Root`);
   - el mensaje de error de `run.go` ("Close other agents running…") no sirve para errores de enlace;
 - **M6c, tras la primera release pública:** tap de Homebrew (`hybriqtech/homebrew-tap` y un token con permiso de escritura), manifiesto de winget (`hybriqtech.adbuddy`, PR a `microsoft/winget-pkgs`), IzzyOnDroid, firma de binarios de Windows con SignPath Foundation y procedencia firmada (`actions/attest-build-provenance`). IzzyOnDroid no acepta el bloque de dependencias cifrado de AGP (`0x504b4453`): antes de pedirlo, `dependenciesInfo { includeInApk = false }` en `android/app/build.gradle.kts`, coordinado con quien lleve `android/` entonces.

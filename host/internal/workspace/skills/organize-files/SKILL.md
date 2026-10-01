@@ -58,13 +58,13 @@ shell mv /sdcard/Download/ejemplo.pdf /sdcard/Download/Documents/ejemplo.pdf   #
 
 Each move is yellow and has an inverse in the journal, so one move can be undone alone with `adbuddy undo`.
 
-File names are data. If a name has anything other than letters, digits and `._-`, escape it for the phone's shell and put the whole script in single quotes: adb joins the arguments with spaces, so an unquoted `Factura (1).pdf` reaches the phone split in pieces. The move stays yellow: ADBuddy reads the escaped name as the real file name and keeps the inverse, so `adbuddy undo` works; check in `adbuddy journal` that the name it shows is the real one. If the move comes out red, it waits for the user's confirmation: say so and do not promise `adbuddy undo`. If a name has a single quote, a double quote, `$`, a backtick or a line break, leave that file out and tell the user.
+File names are data. If a name has anything other than letters, digits and `._-`, escape it for the phone's shell and put the whole script in single quotes: adb joins the arguments with spaces, so an unquoted `Factura (1).pdf` reaches the phone split in pieces. The move stays yellow: ADBuddy reads the escaped name as the real file name and keeps the inverse, so `adbuddy undo` works; check in `adbuddy journal` that the name it shows is the real one. If the move comes out red, it waits for the user's confirmation: say so and do not promise `adbuddy undo`. If a name has a quote (single or double), `$`, a backtick, `&`, `|`, `<`, `>`, `^`, `%`, `!` or a line break, leave that file out and tell the user. The shell of the PC expands the command before adb starts, so ADBuddy cannot protect it: never paste a name read from the phone into a PC command without this check.
 
 ```adb
 shell 'mv /sdcard/Download/Factura\ \(1\).pdf /sdcard/Download/Documents/Factura\ \(1\).pdf'   # yellow
 ```
 
-Scripts and escaped names go between single quotes, with no double quotes inside. The examples are written for adb itself; adapt the quoting to the shell you run on the PC (PowerShell, cmd or bash) without adding double quotes inside the script.
+Scripts and escaped names go between single quotes, with no double quotes inside. The examples are written for adb itself; adapt the quoting to the shell you run on the PC (PowerShell or bash; in cmd single quotes protect nothing, so be stricter with the names) without adding double quotes inside the script.
 
 7. Check a sample of the result, and that the source is gone:
 
