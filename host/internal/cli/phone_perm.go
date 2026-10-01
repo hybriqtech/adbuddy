@@ -40,6 +40,9 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	if l.srv == nil || !l.srv.Connected() {
 		return nil // the person is at the PC
 	}
+	if !claudecode.CardSafe(in.ToolName, in.ToolInput) {
+		return nil // the card could not show what a "yes" would approve: the terminal asks
+	}
 	rule, always := claudecode.AlwaysRule(in.ToolName, in.ToolInput)
 	now := time.Now()
 	req := bridge.PermissionRequest{

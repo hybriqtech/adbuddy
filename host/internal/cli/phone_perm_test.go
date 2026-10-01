@@ -275,3 +275,62 @@ func TestPermissionWithNoAppConnectedIsLeftToTheTerminal(t *testing.T) {
 		t.Fatalf("%s", b)
 	}
 }
+
+// Review I3: the card must show what a "yes" approves. What does not fit whole
+// or holds controls, bidi or invisible characters is left to the terminal: no
+// card, nothing pending.
+func TestPermissionIsNotAskedWhenTheCardCannotShowIt(t *testing.T) {
+	r := newAgentRig(t)
+	for name, c := range map[string]struct{ cmd, desc string }{
+		"does not fit":  {strings.Repeat("a", 2000) + "; rm -rf ~", "do it"},
+		"bidi":          {"echo \u202eevil", "do it"},
+		"escape":        {"echo \x1b[2J", "do it"},
+		"zero width":    {"echo a\u200bb", "do it"},
+		"bidi in title": {"ls", "harmless \u202e"},
+	} {
+		p := r.payload("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": c.cmd, "description": c.desc}})
+		got := make(chan []byte, 1)
+		go func() { got <- r.l.hookCall(context.Background(), r.ws, "PermissionRequest", p) }()
+		select {
+		case out := <-got:
+			if out != nil {
+				t.Errorf("%s: the hook decided: %s", name, out)
+			}
+		case <-time.After(500 * time.Millisecond):
+			r.l.resolveAllPerms("test")
+			t.Fatalf("%s: the hook waits for the phone", name)
+		}
+		if snap := r.l.snapshot(); len(snap.Permissions) != 0 {
+			t.Fatalf("%s: a card was raised: %+v", name, snap.Permissions)
+		}
+	}
+	// What does fit and is clean still asks.
+	req, out := r.ask(t, "echo a\n\tb")
+	r.answer(t, req.ID, "deny")
+	_ = wait(t, out)
+}
+
+// Review I2: with the adapter not active (a SessionStart it could not follow)
+// a pending question still stops chat.send: Enter must not land on the dialog.
+func TestChatSendIsBusyWithAPendingPermissionAndNoActiveAdapter(t *testing.T) {
+	r := newAgentRig(t)
+	req, out := r.ask(t, "touch x") // no SessionStart: the adapter is not active
+	if r.l.agentBusy() == "" {
+		t.Fatal("not busy with a permission pending")
+	}
+	sendApp(t, r.c, bridge.TypeChatSend, "r_1", bridge.ChatSend{ID: "c1", Text: "hola"})
+	r.readError(t, "r_1", bridge.CodeBusy)
+	if said := r.pty(0).said(); said != "" {
+		t.Fatalf("something was typed into the dialog: %q", said)
+	}
+	r.answer(t, req.ID, "deny")
+	_ = wait(t, out)
+}
+
+func TestChatSendIsBusyWithAnAttentionAndNoActiveAdapter(t *testing.T) {
+	r := newAgentRig(t)
+	r.l.raiseAttention()
+	if r.l.agentBusy() == "" {
+		t.Fatal("not busy with a dialog on the screen")
+	}
+}

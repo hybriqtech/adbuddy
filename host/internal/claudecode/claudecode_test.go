@@ -147,7 +147,7 @@ func TestAlwaysRule(t *testing.T) {
 		// review I1: globs and expansions of bash that hide a word
 		"a?b shell rm -rf /sdcard/DCIM", "a[d]b shell ls", ".a?buddy/bin/a?b shell ls", "a{d,e}b devices", "~/x", "echo !x", "echo #x", "ls {a,b}",
 		// bidi, zero width, no-break and other non-ASCII spaces, controls
-		"echo ‮evil", "echo a⁦b", "echo a​b", "echo a b", "echo a　b", "echo a\x00b", "echo a\x1bb", "echo a\x7fb", "café",
+		"echo \u202eevil", "echo a\u2066b", "echo a\u200bb", "echo a\u00a0b", "echo a\u3000b", "echo a\x00b", "echo a\x1bb", "echo a\x7fb", "café",
 		// what touches the phone without saying adb
 		"fastboot erase userdata", "FASTBOOT reboot", "/opt/sdk/fastboot flash", "scrcpy", "./gradlew installDebug", "gradlew.bat installDebug", "gradle installDebug",
 		"sudo ls", "su root", "/usr/bin/su -c x", "~/platform-tools/x", "echo adbd",
@@ -526,5 +526,52 @@ func TestInsideAndConfigDir(t *testing.T) {
 	}
 	if c, _ := ConfigDir(func(string) string { return "" }, func() (string, error) { return "/h", nil }); c != filepath.Join("/h", ".claude") {
 		t.Error(c)
+	}
+}
+
+func TestCardSafe(t *testing.T) {
+	js := func(cmd, desc string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{"command": cmd, "description": desc})
+		return b
+	}
+	ok := []json.RawMessage{
+		js("touch uno.txt", "do it"),
+		js("echo a\n\tb", "multi\nline"),
+		js("echo café", "añade café"),
+		js(strings.Repeat("a", maxDetail), ""),
+	}
+	for i, in := range ok {
+		if !CardSafe("Bash", in) {
+			t.Errorf("ok[%d] refused", i)
+		}
+	}
+	bad := map[string]json.RawMessage{
+		"too long":          js(strings.Repeat("a", maxDetail+1), ""),
+		"long, tail hidden": js(strings.Repeat("a", maxDetail)+"; rm -rf ~", ""),
+		"escape":            js("echo a\x1b[2Jb", ""),
+		"cr":                js("echo a\rb", ""),
+		"nul":               js("echo a\x00b", ""),
+		"bidi":              js("echo \u202eb", ""),
+		"zero width":        js("echo a\u200bb", ""),
+		"nbsp":              js("echo a\u00a0b", ""),
+		"line sep":          js("echo a\u2028b", ""),
+		"bidi in desc":      js("ls", "safe \u202e"),
+		"control in desc":   js("ls", "a\x07b"),
+		"invalid utf8":      json.RawMessage("{\"command\":\"a\xffb\"}"),
+	}
+	for name, in := range bad {
+		if CardSafe("Bash", in) {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	long, _ := json.Marshal(map[string]string{"file_path": "/" + strings.Repeat("a", maxDetail)})
+	if CardSafe("Write", long) {
+		t.Error("a path that does not fit was accepted")
+	}
+	if !CardSafe("Write", json.RawMessage(`{"file_path":"/tmp/a.txt","content":"x\u202ey"}`)) {
+		t.Error("what the card does not show must not matter")
+	}
+	if CardSafe("Grep", json.RawMessage(`{"pattern":"a\u202eb"}`)) {
+		t.Error("bidi in the pattern of the title was accepted")
 	}
 }

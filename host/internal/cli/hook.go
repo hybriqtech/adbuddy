@@ -41,6 +41,8 @@ func newHookCmd(app *App) *cobra.Command {
 }
 
 func runHook(ctx context.Context, app *App, event string) {
+	// A panic would exit with 2, which blocks in Claude Code: fail open.
+	defer func() { _ = recover() }()
 	if !claudecode.IsEvent(event) || app.Stdin == nil {
 		return
 	}

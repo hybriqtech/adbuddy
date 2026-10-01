@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -96,21 +97,63 @@ func domainOf(u string) string {
 // the whole command of a Bash, the path of a file tool, else the input as
 // JSON, at most 2000 characters.
 func ToolDetail(tool string, raw json.RawMessage) string {
+	return cut(fullDetail(tool, raw), maxDetail)
+}
+
+func fullDetail(tool string, raw json.RawMessage) string {
 	in := input(raw)
-	var d string
 	switch {
 	case tool == "Bash" && str(in, "command") != "":
-		d = str(in, "command")
+		return str(in, "command")
 	case str(in, "file_path") != "":
-		d = str(in, "file_path")
+		return str(in, "file_path")
 	case str(in, "notebook_path") != "":
-		d = str(in, "notebook_path")
+		return str(in, "notebook_path")
 	case str(in, "url") != "":
-		d = str(in, "url")
-	default:
-		d = string(raw)
+		return str(in, "url")
 	}
-	return cut(d, maxDetail)
+	return string(raw)
+}
+
+// shownRune is false for what the person cannot be trusted to see as it is: a
+// control (but the newline and the tab), a format character (bidi, zero width),
+// a separator that is not the ASCII space, or what is not valid text.
+func shownRune(r rune) bool {
+	switch {
+	case r == '\n' || r == '\t' || r == ' ':
+		return true
+	case r == utf8.RuneError, unicode.IsControl(r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Z, r):
+		return false
+	}
+	return true
+}
+
+func shown(s string) bool {
+	for _, r := range s {
+		if !shownRune(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// CardSafe reports whether the phone's card shows what a "yes" would approve
+// (spec M4 §5.1, review I3): the detail must fit whole (the card cuts it and a
+// "yes" approves all of it) and neither it nor what the title is made of may
+// hold controls, bidi or invisible characters. When it is false the hook does
+// not ask the phone: the question stays on the terminal.
+func CardSafe(tool string, raw json.RawMessage) bool {
+	d := fullDetail(tool, raw)
+	if len(d) > maxDetail || !shown(d) {
+		return false
+	}
+	in := input(raw)
+	for _, k := range []string{"description", "pattern", "query"} {
+		if !shown(str(in, k)) {
+			return false
+		}
+	}
+	return true
 }
 
 // ruleRune is the whitelist of what a "yes, always" rule may be made of:

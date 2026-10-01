@@ -105,3 +105,23 @@ func TestHookIsNotInTheHelp(t *testing.T) {
 		t.Errorf("the hook command is shown in the help:\n%s", out)
 	}
 }
+
+type panicReader struct{}
+
+func (panicReader) Read([]byte) (int, error) { panic("boom") }
+
+// Review M4: a panic exits with 2, which BLOCKS in Claude Code. The hook fails
+// open: nothing written and exit 0.
+func TestHookFailsOpenOnAPanic(t *testing.T) {
+	isolate(t)
+	var out, errb bytes.Buffer
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("the panic got out of the hook: %v", r)
+		}
+	}()
+	code := mainContext(context.Background(), []string{"hook", "Stop"}, panicReader{}, &out, &errb)
+	if code != 0 || out.Len() != 0 {
+		t.Fatalf("exit %d, stdout %q", code, out.String())
+	}
+}

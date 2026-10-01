@@ -113,14 +113,14 @@ func (l *phoneLink) adapterConversation(conv string, stopped bool) {
 }
 
 // agentBusy says why a chat.send must wait: a question of the agent is
-// pending, or a dialog may be on the terminal's screen (spec M4 §6.2).
+// pending, or a dialog may be on the terminal's screen (spec M4 §6.2). It does
+// not depend on the adapter being active: a PermissionRequest raises its card
+// even when the SessionStart could not be followed, and the text typed then
+// would land on Claude Code's dialog.
 func (l *phoneLink) agentBusy() string {
 	a := &l.adapter
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if !a.active {
-		return ""
-	}
 	if len(a.perms) > 0 || time.Now().Before(a.attention) {
 		return busyPending
 	}
