@@ -132,6 +132,17 @@ class DownloadsTest {
         assertEquals(0, tmp.root.listFiles()!!.size)
     }
 
+    @Test fun theLateAnswerOfACancelledDownloadDoesNotFailTheNewOne() {
+        make()
+        val answers = mutableListOf<(tech.hybriq.adbuddy.bridge.Message?) -> Unit>()
+        ch.handler = { _, cb -> answers += cb; true }
+        dl.get(att)
+        dl.cancel(id)
+        dl.get(att)
+        answers[0](null) // the connection ended for the first request, after it was cancelled
+        assertTrue(dl.states.value[id] is DownloadState.Running)
+    }
+
     @Test fun autoLimitIsTenMiBOfImagesAndFiveInRemoteMode() {
         val mib = 1024L * 1024
         fun a(mime: String, size: Long) = Attachment(id, "x", mime, size, "x")

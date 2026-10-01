@@ -79,10 +79,11 @@ class Downloads(
         val part = cache.partFile(a)
         if (fromZero || (part.isFile && part.length() > a.size)) part.delete()
         val have = if (part.isFile) part.length() else 0L
-        active[a.id] = Active(a, have, retried)
+        val act = Active(a, have, retried)
+        active[a.id] = act
         set(a.id, DownloadState.Running(have, a.size))
         val rid = channel.request(Protocol.FILE_GET, Protocol.json.encodeToJsonElement(FileGet.serializer(), FileGet(a.id, have))) { m ->
-            scope.launch(io) { finish(a.id, m) }
+            scope.launch(io) { finish(act, m) }
         }
         if (rid == null) {
             active.remove(a.id)
@@ -104,14 +105,21 @@ class Downloads(
         set(c.id, DownloadState.Running(act.written, act.a.size))
     }
 
-    private fun finish(id: String, m: Message?) {
-        val act = synchronized(lock) { active[id] } ?: return
+    /** act: the download this answer is for, not whichever one is active under the same id by now. */
+    private fun finish(act: Active, m: Message?) {
+        val id = act.a.id
+        if (synchronized(lock) { active[id] } !== act) return
         val part = cache.partFile(act.a)
         when {
-            m == null -> fail(id, "", keep = true)
-            m.type == Protocol.ERROR -> fail(id, Protocol.payload<ErrorReply>(m)?.let { it.text.ifEmpty { it.code } } ?: "", keep = false)
+            m == null -> fail(act, "", keep = true)
+            m.type == Protocol.ERROR -> fail(act, Protocol.payload<ErrorReply>(m)?.let { it.text.ifEmpty { it.code } } ?: "", keep = false)
             else -> {
-                val ok = part.isFile && part.length() == act.a.size && sha256(part) == act.a.sha256
+                // The scope has no exception handler: an unreadable file must fail the download, not end the process.
+                val ok = try {
+                    part.isFile && part.length() == act.a.size && sha256(part) == act.a.sha256
+                } catch (e: java.io.IOException) {
+                    false
+                }
                 synchronized(lock) {
                     if (active[id] !== act) return // cancelled meanwhile
                     when {
@@ -123,21 +131,23 @@ class Downloads(
                                 set(id, DownloadState.Done(f))
                                 scope.launch(io) { cache.trim() }
                             } else {
-                                fail(id, "", keep = false)
+                                fail(act, "", keep = false)
                             }
                         }
                         !act.retried -> { active.remove(id); start(act.a, retried = true, fromZero = true) } // wrong bytes: once more from 0
-                        else -> fail(id, "", keep = false)
+                        else -> fail(act, "", keep = false)
                     }
                 }
             }
         }
     }
 
-    private fun fail(id: String, text: String, keep: Boolean) = synchronized(lock) {
-        val act = active.remove(id) ?: return@synchronized
+    /** Only if act is still the download in progress: the late answer of a cancelled one must not fail a new one. */
+    private fun fail(act: Active, text: String, keep: Boolean) = synchronized(lock) {
+        if (active[act.a.id] !== act) return@synchronized
+        active.remove(act.a.id)
         if (!keep) cache.partFile(act.a).delete()
-        set(id, DownloadState.Failed(text))
+        set(act.a.id, DownloadState.Failed(text))
     }
 
     private fun set(id: String, s: DownloadState) = _states.update { it + (id to s) }
