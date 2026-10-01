@@ -80,6 +80,20 @@ The connection port changes each time wireless debugging is turned on again: `se
 
 Pairing with the QR code needs the same network (it uses mDNS). If `setup` sees no phone with wireless debugging on the network after a few seconds, it says so and suggests `adbuddy setup --code`.
 
+### Mobile data only (remote mode)
+
+Without any Wi-Fi, ADBuddy can reach the phone over Tailscale through `adb tcpip 5555`. The phone must be connected to the host and have Tailscale on. You turn it on, not the agent:
+
+```sh
+adbuddy remote on       # asks you to confirm (in the app or in the `serve` terminal), then opens port 5555 for 12 hours
+adbuddy remote off      # closes it (`adb usb`)
+adbuddy remote status   # on, closing, or off, and when it expires
+```
+
+You can also use the switch in the ADBuddy app. From the agent's session these commands are refused (`AGENT_SESSION`). Port 5555 stays open on every network the phone joins until it expires or you turn it off, so use it only when you need it.
+
+`adbuddy serve` also watches the phone: if it disappears (for example after `adb tcpip` or when you leave home), after two failed checks, 10 s apart, it tries the saved address, the phone on the local network, the phone's Tailscale address and, in remote mode, `<tailscale ip>:5555`. In remote mode screenshots default to JPEG at half scale.
+
 ## Risk levels
 
 | Level | Examples | What happens |

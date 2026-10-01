@@ -5492,5 +5492,5 @@ Necesitan un móvil, y nunca el del usuario sin su permiso explícito. La primer
 ## Después de M5a
 
 - Revisión final de la rama con `adbuddy-reviewer-opus`; push y PR con el ok del supervisor; rebase sobre M3 de los commits de compartidos.
-- **M5b** (modo remoto) sobre el `serve` de M3, y **M5c** (notificaciones y pantallas de apps protegidas) sobre la base de diseño, cada uno con su plan.
+- **M5b** (modo remoto; hecho, ver `docs/superpowers/plans/2026-10-01-adbuddy-m5b-modo-remoto.md`) sobre el `serve` de M3, y **M5c** (notificaciones y pantallas de apps protegidas) sobre la base de diseño, cada uno con su plan.
 - Apuntar en `pendientes-m3-m5.md`, sección M5, las validaciones que queden.
