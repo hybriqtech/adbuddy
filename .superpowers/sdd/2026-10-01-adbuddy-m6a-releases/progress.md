@@ -70,3 +70,9 @@ Plan: `docs/superpowers/plans/2026-10-01-adbuddy-m6a-releases.md` · Spec: `docs
 
 - **Sin hallazgos de seguridad; lista para ejecutar.** Opcionales, a decidir en la Task 3/2 al ejecutar: (a) vaciar `ok` en `Same` tras un fallo definitivo de `Verify` (plan ~1503); (b) `fi.Mode().IsRegular()` en la rama `--apk` de setup, porque un FIFO sin escritor bloquea `os.Open` (plan ~2283).
 - **PAUSA hasta las 16:50 por orden del supervisor (91 % de la ventana).** Siguiente: Task 1 con `adbuddy-implementer` (Sonnet), un subagente a la vez, opus solo en revisiones de seguridad y la final.
+
+## Ejecución (2026-10-01, tras las 16:50)
+
+- Tasks 1-5 hechas, idénticas a la réplica: 47ae1d2 (T1), b4c4ccf (T2), 78bee28 (T3), 32fd8d0 (T4), 1b0de9f+2492963+1424327 (T5). Sin revisión opus propia: son byte a byte la réplica, ya revisada por opus (plan y re-revisión).
+- Task 6: 35b0d73 + revisión opus (2 importantes, 1 menor) arreglada en 875265f: `dumpsys deviceidle` entra en la regla de argumentos dinámicos; `pm reset-permissions` es especial con cualquier argumento (no existe `-p`); `appops reset` siempre especial (paquete no instalado → resetea todas las UID); sin `noPackage`. **El código de la Task 6 del plan queda desfasado respecto a 875265f.**
+- Aplazado (opus, Task 6): M-2 `deviceidle whitelist reset` no existe (defensivo); M-4 neutralizar por UID/PID (`appops set <uid>`, `kill`, `am kill-all`, `cmd netpolicy`) sale 🔴 no especial → a `pendientes-m3-m5.md`. Validar en emulador: `appops reset com.no.existe` resetea modos por UID.
