@@ -16,6 +16,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
+	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
 
 // sentMsg is what the link sent to the app: kind is "rid" (PublishRID),
@@ -95,20 +96,30 @@ type ctlADB struct {
 	mu    sync.Mutex
 	calls []string
 	fail  map[string]bool
-	port  string // answer of getprop service.adb.tcp.port
+	hang  map[string]bool // wait for the context to end
+	gate  chan struct{}   // `tcpip 5555` waits for it to close
+	port  string          // answer of getprop service.adb.tcp.port
 }
 
-func (a *ctlADB) Run(_ context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (int, error) {
+func (a *ctlADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (int, error) {
 	key := strings.Join(args, " ")
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.calls = append(a.calls, key)
-	if a.fail[key] {
+	hang, gate, fail, port := a.hang[key], a.gate, a.fail[key], a.port
+	a.mu.Unlock()
+	if hang {
+		<-ctx.Done()
+		return -1, ctx.Err()
+	}
+	if gate != nil && key == "tcpip 5555" {
+		<-gate
+	}
+	if fail {
 		io.WriteString(stderr, "error: closed")
 		return 1, nil
 	}
 	if key == "shell getprop service.adb.tcp.port" {
-		io.WriteString(stdout, a.port+"\n")
+		io.WriteString(stdout, port+"\n")
 	}
 	return 0, nil
 }
@@ -171,7 +182,7 @@ type remoteRig struct {
 func newRemoteRig(t *testing.T, cfg config.Config, port string) *remoteRig {
 	t.Helper()
 	rig := &remoteRig{adb: &tlsADB{port: port}, srv: &fakeRemoteSrv{}, log: &syncBuffer{}, path: filepath.Join(t.TempDir(), "config.toml"),
-		phone: &ctlADB{fail: map[string]bool{}}, clock: &testClock{t: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)}}
+		phone: &ctlADB{fail: map[string]bool{}, hang: map[string]bool{}}, clock: &testClock{t: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)}}
 	rig.ctx, rig.cancel = context.WithCancel(context.Background())
 	t.Cleanup(rig.cancel)
 	rig.srv.current.Store(true)
@@ -602,7 +613,7 @@ func TestWatchRemoteExpiresAndPublishes(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.r.refresh()
-	go watchRemote(g.ctx, g.log, g.ctl, g.r, 5*time.Millisecond)
+	go watchRemote(g.ctx, g.log, g.ctl, g.r, 5*time.Millisecond, time.Second)
 	time.Sleep(30 * time.Millisecond)
 	if len(g.srv.messages()) != 0 || g.phone.count("usb") != 0 {
 		t.Fatal("it expired early")
@@ -637,7 +648,7 @@ func TestWatchRemoteThatCannotCloseWarnsOnceAndBacksOff(t *testing.T) {
 	g.phone.setFail("usb", true)
 	ctx, cancel := context.WithCancel(g.ctx)
 	done := make(chan struct{})
-	go func() { watchRemote(ctx, g.log, g.ctl, g.r, 5*time.Millisecond); close(done) }()
+	go func() { watchRemote(ctx, g.log, g.ctl, g.r, 5*time.Millisecond, time.Second); close(done) }()
 	time.Sleep(150 * time.Millisecond) // about 30 ticks
 	cancel()
 	<-done
@@ -743,4 +754,168 @@ func TestRemoteSetThroughTheLink(t *testing.T) {
 		return
 	}
 	t.Fatal("no remote.state with the rid")
+}
+
+// ---- Round 1 of fixes ----
+
+func (a *ctlADB) setHang(cmd string, on bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.hang[cmd] = on
+}
+
+// I1: an `adb usb` that hangs does not keep the controller for ever.
+func TestWatchRemoteExpireHasATimeout(t *testing.T) {
+	setVar(t, &remoteOpTimeout, 150*time.Millisecond)
+	g := newRemoteRig(t, withTailscale(), "")
+	if err := g.store.SetUntil(g.clock.now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	g.r.refresh()
+	g.clock.advance(2 * time.Hour)
+	g.phone.setHang("usb", true)
+	go watchRemote(g.ctx, g.log, g.ctl, g.r, 5*time.Millisecond, remoteOpTimeout)
+	waitUntil(t, "usb to start", func() bool { return g.phone.count("usb") >= 1 })
+	g.r.handleSet(setMsg("r1", `{"enabled":true}`))
+	waitUntil(t, "an answer to remote.set", func() bool { return len(g.srv.messages()) >= 1 })
+	if !strings.Contains(g.log.String(), "could not be closed") {
+		t.Fatalf("log %q", g.log.String())
+	}
+}
+
+// I2: a failed remote.set tells the app the real state too.
+func TestRemoteSetErrorPublishesTheRealState(t *testing.T) {
+	g := newRemoteRig(t, withTailscale(), "")
+	g.phone.setFail("tcpip 5555", true)
+	g.phone.setFail("shell getprop service.adb.tcp.port", true) // the port cannot be read: the expiry stays
+	g.r.handleSet(setMsg("r1", `{"enabled":true}`))
+	msgs := g.waitMsgs(t, 2)
+	if e := errOf(t, msgs[0]); e.Code != bridge.CodeFailed {
+		t.Fatalf("error %+v", e)
+	}
+	if msgs[1].kind != "event" || msgs[1].typ != bridge.TypeRemoteState || !msgs[1].payload.(bridge.RemoteState).Enabled {
+		t.Fatalf("second message %+v", msgs[1])
+	}
+}
+
+// I3: after a success the next failure warns again and starts with the
+// smallest pause.
+func TestWatchRemoteResetsAfterASuccess(t *testing.T) {
+	g := newRemoteRig(t, withTailscale(), "")
+	expire := func() {
+		if err := g.store.SetUntil(g.clock.now().Add(-time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expire()
+	g.phone.setFail("usb", true)
+	go watchRemote(g.ctx, g.log, g.ctl, g.r, 5*time.Millisecond, time.Second)
+	warnings := func() int { return strings.Count(g.log.String(), "could not be closed") }
+	waitUntil(t, "the first warning", func() bool { return warnings() == 1 })
+	// Someone turns it off by other means: Expire finds nothing to do (no
+	// error, no change), which also ends the failure.
+	if err := g.store.SetUntil(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	expire()
+	waitUntil(t, "a second warning", func() bool { return warnings() == 2 })
+}
+
+func TestRemoteBackoffCapIsAboutTwoMinutes(t *testing.T) {
+	if got := int(maxRemoteBackoff / (30 * time.Second)); got != 4 {
+		t.Fatalf("a 30 s tick skips at most %d ticks", got)
+	}
+}
+
+// M1: requests run one at a time, in the order they came.
+func TestRemoteSetRunsInOrder(t *testing.T) {
+	g := newRemoteRig(t, withTailscale(), "")
+	g.phone.gate = make(chan struct{})
+	g.r.handleSet(setMsg("a", `{"enabled":true}`))
+	waitUntil(t, "tcpip to start", func() bool { return g.phone.count("tcpip 5555") == 1 })
+	g.r.handleSet(setMsg("b", `{"enabled":false}`))
+	close(g.phone.gate)
+	msgs := g.waitMsgs(t, 2)
+	if msgs[0].rid != "a" || msgs[1].rid != "b" || stateOfMsg(t, msgs[1]).Enabled {
+		t.Fatalf("answers %+v", msgs)
+	}
+	if calls := g.phone.called(); strings.Join(calls, "|") != "tcpip 5555|usb" {
+		t.Fatalf("adb %v", calls)
+	}
+	var s bridge.Snapshot
+	g.r.area().snapshot(&s)
+	if s.Remote.Enabled || g.store.Until() != (time.Time{}) {
+		t.Fatalf("the last request was off: %+v", s.Remote)
+	}
+}
+
+// M1: a full queue still answers.
+func TestRemoteSetFullQueueAnswersUnavailable(t *testing.T) {
+	g := newRemoteRig(t, withTailscale(), "")
+	g.phone.gate = make(chan struct{})
+	g.r.handleSet(setMsg("run", `{"enabled":true}`))
+	waitUntil(t, "tcpip to start", func() bool { return g.phone.count("tcpip 5555") == 1 })
+	for i := range maxRemoteQueue {
+		g.r.handleSet(setMsg("q"+strconv.Itoa(i), `{"enabled":true}`))
+	}
+	g.r.handleSet(setMsg("extra", `{"enabled":true}`))
+	m := g.waitMsgs(t, 1)[0]
+	if e := errOf(t, m); m.rid != "extra" || e.Code != bridge.CodeUnavailable {
+		t.Fatalf("answer %+v", m)
+	}
+	close(g.phone.gate)
+	msgs := g.waitMsgs(t, maxRemoteQueue+2)
+	if len(msgs) != maxRemoteQueue+2 {
+		t.Fatalf("%d answers", len(msgs))
+	}
+}
+
+// M3: an expiry that has passed is not "on until" a past hour.
+func TestRemoteNoticesForAClosingMode(t *testing.T) {
+	at := time.Date(2026, 10, 1, 21, 30, 0, 0, time.Local)
+	for name, got := range map[string]string{
+		"serve start": remoteOnNotice(remote.State{Enabled: true, Closing: true, ExpiresAt: at}),
+		"serve stop":  stillOnNotice(remote.State{Enabled: true, Closing: true, ExpiresAt: at}),
+	} {
+		if !strings.Contains(got, "Remote mode expired but port 5555 could not be closed yet") || strings.Contains(got, "21:30") {
+			t.Errorf("%s: %q", name, got)
+		}
+	}
+	if got := remoteOnNotice(remote.State{Enabled: true, ExpiresAt: at}); !strings.Contains(got, "Remote mode is on until 21:30") {
+		t.Errorf("%q", got)
+	}
+}
+
+// M4: serve's wiring of Reconcile and the invariant.
+func TestServeKeepsPort5555OnlyWhileRemoteIsOn(t *testing.T) {
+	shortWaits(t)
+	setVar(t, &usbDropWait, 100*time.Millisecond)
+	base := config.Default()
+	base.Serial, base.Address, base.TailscaleIP = phoneSerial, tsAddr, "100.101.102.103"
+	open := testutil.FakeRule{Match: tcpPortRule, Stdout: "5555\n"}
+
+	t.Run("remote_until in the future", func(t *testing.T) {
+		cfg := base
+		cfg.RemoteUntil = time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+		_, errOut, _, log := serveOnce(t, append([]testutil.FakeRule{open}, remoteRules("AAAA1111")...), cfg)
+		for _, c := range loggedCalls(t, log) {
+			if c == "usb" {
+				t.Fatalf("adb usb ran with the remote mode on: %q", loggedCalls(t, log))
+			}
+		}
+		if !strings.Contains(errOut, "Remote mode is on until") {
+			t.Fatalf("stderr %q", errOut)
+		}
+	})
+	t.Run("no remote_until", func(t *testing.T) {
+		_, _, _, log := serveOnce(t, append([]testutil.FakeRule{open, {Match: "^usb$"}}, remoteRules("AAAA1111")...), base)
+		found := false
+		for _, c := range loggedCalls(t, log) {
+			found = found || c == "usb"
+		}
+		if !found {
+			t.Fatalf("the open port was not closed: %q", loggedCalls(t, log))
+		}
+	})
 }

@@ -31,9 +31,14 @@ type remoteServer interface {
 // tlsPortTimeout bounds reading the wireless debugging port from the phone.
 const tlsPortTimeout = 5 * time.Second
 
-// remoteOpTimeout bounds one remote.set (adb tcpip or usb, and the check of
-// the port after a failure).
-const remoteOpTimeout = 30 * time.Second
+// remoteOpTimeout bounds one remote.set and each attempt to expire the mode
+// (adb tcpip or usb, and the check of the port after a failure): a hung adb
+// must not keep the controller for ever. A variable so a test can shorten it;
+// read before a goroutine starts.
+var remoteOpTimeout = 30 * time.Second
+
+// maxRemoteQueue is how many remote.set wait behind the one running.
+const maxRemoteQueue = 4
 
 // maxWarnedIPs is how many wrong addresses are remembered to warn once about
 // each: the app is the one that sends them, so the memory is bounded.
@@ -45,7 +50,7 @@ var remoteTick = 30 * time.Second
 
 // maxRemoteBackoff is the longest wait between two attempts to close a port
 // that would not close.
-const maxRemoteBackoff = 10 * time.Minute
+const maxRemoteBackoff = 2 * time.Minute
 
 // remoteLink is the remote mode's part of the phone link (M5b): it keeps the
 // Tailscale address and port the app reports in device.info, and handles
@@ -63,6 +68,8 @@ type remoteLink struct {
 	refreshMu sync.Mutex // the pointer never goes back to an older state
 
 	mu      sync.Mutex
+	queue   []remoteJob // remote.set waiting, in order
+	working bool        // a worker is draining queue
 	srv     remoteServer
 	warned  map[string]bool
 	pending *pendingInfo // the latest report not yet saved
@@ -171,37 +178,80 @@ func (r *remoteLink) handleSet(m bridge.Message) {
 		r.fail(srv, m, bridge.CodeUnavailable, "Remote mode is not available on this host.")
 		return
 	}
-	on := *req.Enabled
+	job := remoteJob{srv: srv, m: m, on: *req.Enabled, timeout: remoteOpTimeout}
+	// One worker, in order: a later "off" never runs before an earlier "on".
+	r.mu.Lock()
+	if len(r.queue) >= maxRemoteQueue {
+		r.mu.Unlock()
+		r.fail(srv, m, bridge.CodeUnavailable, "Too many remote mode requests are waiting: try again in a moment.")
+		return
+	}
+	r.queue = append(r.queue, job)
+	start := !r.working
+	r.working = true
+	r.mu.Unlock()
 	// adb takes seconds (adbd restarts): never on the app's message loop.
-	go func() {
-		ctx, cancel := context.WithTimeout(r.ctx, remoteOpTimeout)
-		defer cancel()
-		var (
-			st  remote.State
-			err error
-		)
-		if on {
-			st, err = r.ctl.Enable(ctx)
-		} else {
-			st, err = r.ctl.Disable(ctx)
-		}
-		r.refresh()
-		switch {
-		case errors.Is(err, remote.ErrNoTailscale):
-			r.fail(srv, m, bridge.CodeUnavailable, err.Error())
-		case err != nil:
-			r.fail(srv, m, bridge.CodeFailed, classify.Printable(err.Error()))
-		default:
-			// remote.state is an event: the answer and the publication are one.
-			_ = srv.PublishRID(bridge.TypeRemoteState, m.RID, toBridge(st))
-		}
-	}()
+	if start {
+		go r.work()
+	}
 }
 
-// watchRemote closes the remote mode when it expires, every `every`. A port
-// that will not close is said once and tried again with growing pauses: each
-// attempt is an `adb usb`, which restarts adbd (and the phone's connection).
-func watchRemote(ctx context.Context, log io.Writer, ctl *remote.Controller, link *remoteLink, every time.Duration) {
+// remoteJob is one remote.set.
+type remoteJob struct {
+	srv     remoteServer
+	m       bridge.Message
+	on      bool
+	timeout time.Duration
+}
+
+func (r *remoteLink) work() {
+	for {
+		r.mu.Lock()
+		if len(r.queue) == 0 {
+			r.working = false
+			r.mu.Unlock()
+			return
+		}
+		job := r.queue[0]
+		r.queue = r.queue[1:]
+		r.mu.Unlock()
+		r.run(job)
+	}
+}
+
+func (r *remoteLink) run(j remoteJob) {
+	ctx, cancel := context.WithTimeout(r.ctx, j.timeout)
+	defer cancel()
+	var (
+		st  remote.State
+		err error
+	)
+	if j.on {
+		st, err = r.ctl.Enable(ctx)
+	} else {
+		st, err = r.ctl.Disable(ctx)
+	}
+	now := r.refresh()
+	switch {
+	case errors.Is(err, remote.ErrNoTailscale):
+		r.fail(j.srv, j.m, bridge.CodeUnavailable, err.Error())
+	case err != nil:
+		r.fail(j.srv, j.m, bridge.CodeFailed, classify.Printable(err.Error()))
+		// The attempt may have changed the phone (adbd got the order and the
+		// answer was lost): the app is told what the host believes, so it does
+		// not show "off" while the port may be open.
+		r.publish(now)
+	default:
+		// remote.state is an event: the answer and the publication are one.
+		_ = j.srv.PublishRID(bridge.TypeRemoteState, j.m.RID, toBridge(st))
+	}
+}
+
+// watchRemote closes the remote mode when it expires, every `every`, with
+// opTimeout for each attempt. A port that will not close is said once and
+// tried again with growing pauses (at most maxRemoteBackoff): each attempt is
+// an `adb usb`, which restarts adbd and the phone's connection.
+func watchRemote(ctx context.Context, log io.Writer, ctl *remote.Controller, link *remoteLink, every, opTimeout time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	maxSkip := max(1, int(maxRemoteBackoff/every))
@@ -217,7 +267,9 @@ func watchRemote(ctx context.Context, log io.Writer, ctl *remote.Controller, lin
 			skip--
 			continue
 		}
-		s, changed, err := ctl.Expire(ctx)
+		actx, cancel := context.WithTimeout(ctx, opTimeout)
+		s, changed, err := ctl.Expire(actx)
+		cancel()
 		switch {
 		case err != nil:
 			if ctx.Err() != nil {
@@ -230,19 +282,32 @@ func watchRemote(ctx context.Context, log io.Writer, ctl *remote.Controller, lin
 			}
 			wait = min(max(1, wait*2), maxSkip)
 			skip = wait
-		case changed:
+		default:
 			warned, wait, skip = false, 0, 0
-			fmt.Fprintln(log, "Remote mode expired: port 5555 closed.")
-			link.refresh()
-			link.publish(s)
+			if changed {
+				fmt.Fprintln(log, "Remote mode expired: port 5555 closed.")
+				link.refresh()
+				link.publish(s)
+			}
 		}
 	}
 }
 
+// remoteOnNotice is what serve says at start when the remote mode is on.
+func remoteOnNotice(s remote.State) string {
+	if s.Closing {
+		return "Remote mode expired but port 5555 could not be closed yet: serve keeps trying."
+	}
+	return "Remote mode is on until " + s.ExpiresAt.Local().Format("15:04") + " (port 5555 open)."
+}
+
 // stillOnNotice is what serve says when it stops with the remote mode on.
 func stillOnNotice(s remote.State) string {
-	return "Remote mode is still on (port 5555 stays open until " + s.ExpiresAt.Local().Format("15:04") +
-		"). Nothing closes it while serve is stopped: run `adbuddy remote off` (it closes the port directly) or start serve again."
+	const rest = "Nothing closes it while serve is stopped: run `adbuddy remote off` (it closes the port directly) or start serve again."
+	if s.Closing {
+		return "Remote mode expired but port 5555 could not be closed yet. " + rest
+	}
+	return "Remote mode is still on (port 5555 stays open until " + s.ExpiresAt.Local().Format("15:04") + "). " + rest
 }
 
 // onDeviceInfo keeps the Tailscale address the app reports, and the port of

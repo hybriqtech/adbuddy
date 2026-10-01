@@ -148,7 +148,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			}
 			if rs.Enabled {
 				keep = remote.Port
-				fmt.Fprintf(app.Stderr, "Remote mode is on until %s (port 5555 open).\n", rs.ExpiresAt.Local().Format("15:04"))
+				fmt.Fprintln(app.Stderr, remoteOnNotice(rs))
 			}
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
 			if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy serve", keep); err != nil {
@@ -191,8 +191,8 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			}
 			// Read here, before the goroutine: a test that sets remoteTick for its
 			// own serve must not race with the goroutine of a previous one.
-			every := remoteTick
-			go watchRemote(ctx, app.Stderr, ctl, link.remote, every)
+			every, opTimeout := remoteTick, remoteOpTimeout
+			go watchRemote(ctx, app.Stderr, ctl, link.remote, every, opTimeout)
 			ui, protected := link.helpers()
 			d := daemon.New(daemon.Options{
 				Classifier: cls, ADB: runner, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: link.Confirmer(),
