@@ -52,6 +52,7 @@ func startChat(t *testing.T, port string) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dataDir) })
+	trustE2EApp(t, dataDir)
 	tmp := t.TempDir()
 	h := &harness{t: t, data: dataDir, ws: filepath.Join(tmp, "ws"), logPath: filepath.Join(tmp, "adb.log"), serveErr: &syncBuffer{}, serveOut: &syncBuffer{}}
 	script, err := testutil.WriteScript(tmp, append(phoneAppRules(port),

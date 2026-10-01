@@ -2,6 +2,9 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -19,6 +22,8 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/paths"
+	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
+	"github.com/hybriqtech/adbuddy/host/internal/phoneapp/apktest"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
 
@@ -35,6 +40,11 @@ type appPhone struct {
 	// fail makes the commands containing a key fail that many times (-1:
 	// always), with an escape sequence in adb's error.
 	fail map[string]int
+	// apk is the installed app (nil: signed with testCert); statKey its
+	// size, inode and mtime as stat prints them ("": from apk). update
+	// changes both, as an update in place does.
+	apk     []byte
+	statKey string
 	// onCall runs first, outside the lock; an error is adb's.
 	onCall func(joined string) error
 }
@@ -60,7 +70,15 @@ func (f *appPhone) Run(ctx context.Context, _ string, args []string, stdin io.Re
 	}
 	switch {
 	case strings.Contains(joined, "dumpsys package"):
-		io.WriteString(stdout, "Packages:\n    versionName=0.2.0\n")
+		io.WriteString(stdout, "Packages:\n  Package [tech.hybriq.adbuddy] (1a2b):\n    versionCode=1 minSdk=30 targetSdk=37\n    versionName=0.2.0\n")
+	case joined == "shell pm path tech.hybriq.adbuddy":
+		io.WriteString(stdout, "package:"+testAppPath+"\n")
+	case strings.HasPrefix(joined, "shell stat -c "):
+		_, key := f.app()
+		io.WriteString(stdout, key+"\n")
+	case strings.HasPrefix(joined, "shell base64 "):
+		apk, _ := f.app()
+		io.WriteString(stdout, base64.StdEncoding.EncodeToString(apk)+"\n")
 	case strings.HasPrefix(joined, "reverse tcp:"):
 		f.reverse = true
 	case joined == "reverse --list":
@@ -88,6 +106,26 @@ func (f *appPhone) lastReverse() string {
 		}
 	}
 	return ""
+}
+
+// app returns the installed APK and its stat (size, inode, mtime). The
+// caller holds f.mu.
+func (f *appPhone) app() ([]byte, string) {
+	apk := f.apk
+	if apk == nil {
+		apk = testAPK(testCert)
+	}
+	if f.statKey != "" {
+		return apk, f.statKey
+	}
+	return apk, strconv.Itoa(len(apk)) + " 1 1"
+}
+
+// update replaces the app in place: same path, other bytes and other stat.
+func (f *appPhone) update(apk []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.apk, f.statKey = apk, strconv.Itoa(len(apk))+" 2 2"
 }
 
 func (f *appPhone) count(prefix string) int {
@@ -375,10 +413,9 @@ func TestServeInterruptedDuringTheHandshake(t *testing.T) {
 	cfg := config.Default()
 	cfg.Serial, cfg.Address = phoneSerial, tsAddr
 	cfg.ChatPort = freeTCPPort(t)
-	rules := append([]testutil.FakeRule{
-		{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n    versionName=0.2.0\n"},
-		{Match: `^shell content write `, SleepMs: 20000},
-	}, remoteRules("AAAA1111")...)
+	rules := append(append(appReadRules(testAPK(testCert)),
+		testutil.FakeRule{Match: `^shell content write `, SleepMs: 20000}),
+		remoteRules("AAAA1111")...)
 	isolate(t)
 	if err := config.Save(filepath.Join(os.Getenv("ADBUDDY_CONFIG_DIR"), "config.toml"), cfg); err != nil {
 		t.Fatal(err)
@@ -545,5 +582,95 @@ func TestAQuestionMovedToTheTerminalLeavesTheApp(t *testing.T) {
 	close(fb.release)
 	if d := <-decided; d != confirm.Allow {
 		t.Fatalf("decided %v, want the terminal's allow", d)
+	}
+}
+
+// trustDevBuild makes the host in e trust apk as a development build.
+func trustDevBuild(t *testing.T, e *env, apk []byte) string {
+	t.Helper()
+	sum := sha256.Sum256(apk)
+	d := hex.EncodeToString(sum[:])
+	if _, err := phoneapp.TrustDevAPK(e.dirs.Data, d); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+// An app that is not ours gets no token, serve says why once, and it does
+// not read the app again on every tick.
+func TestLinkGivesNoTokenToAnUntrustedApp(t *testing.T) {
+	setVar(t, &tunnelCheck, 20*time.Millisecond)
+	e := linkEnv(t)
+	f := &appPhone{apk: testAPK(otherCert)}
+	_, stderr, err := startLink(t, e, f, confirm.DenyAll{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if got := f.handedTokens(); len(got) != 0 {
+		t.Fatalf("tokens handed to an untrusted app: %q", got)
+	}
+	if n := f.count("shell base64 "); n != 1 {
+		t.Fatalf("read the app %d times", n)
+	}
+	if out := stderr.String(); strings.Count(out, "is not trusted") != 1 || strings.Contains(out, "trusts a development build") {
+		t.Fatalf("stderr:\n%s", out)
+	}
+}
+
+// serve says at start that it trusts a development build, once, whether or
+// not the app on the phone is that APK.
+func TestServeWarnsOnceAboutTheDevelopmentBuild(t *testing.T) {
+	setVar(t, &tunnelCheck, 20*time.Millisecond)
+	e := linkEnv(t)
+	dev := testAPK(otherCert)
+	digest := trustDevBuild(t, e, dev)
+	f := &appPhone{apk: dev}
+	_, stderr, err := startLink(t, e, f, confirm.DenyAll{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "a handshake", func() bool { return len(f.handedTokens()) >= 1 })
+	time.Sleep(200 * time.Millisecond)
+	out := stderr.String()
+	if strings.Count(out, "trusts a development build of the phone app") != 1 || !strings.Contains(out, digest) || !strings.Contains(out, phoneapp.DevTrustPath(e.dirs.Data)) {
+		t.Fatalf("stderr:\n%s", out)
+	}
+}
+
+// The app is updated in place (same path, other stat) to a build that is not
+// the trusted one: with the token it already has it is refused, serve
+// checks the app again with a new token, and the updated app gets none.
+func TestAnAppUpdatedInPlaceGetsNoNewToken(t *testing.T) {
+	setVar(t, &tunnelCheck, 50*time.Millisecond)
+	e := linkEnv(t)
+	dev := testAPK(otherCert)
+	trustDevBuild(t, e, dev)
+	f := &appPhone{apk: dev}
+	_, stderr, err := startLink(t, e, f, confirm.DenyAll{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "a handshake", func() bool { return len(f.handedTokens()) >= 1 })
+	tok := f.handedTokens()[0]
+	if typ, _ := dialApp(t, e.cfg.ChatPort, tok); typ != bridge.TypeWelcome {
+		t.Fatalf("before the update: %q", typ)
+	}
+	// Same signer as the development build, other bytes: it keeps its data
+	// (the token), but it is not the APK that was trusted.
+	f.update(apktest.Build(apktest.Options{
+		Blocks: []apktest.Block{{ID: apktest.V2, Signers: []apktest.Signer{{Cert: otherCert}}}},
+		Files:  []string{"AndroidManifest.xml", "classes.dex"},
+	}))
+	if _, code := dialApp(t, e.cfg.ChatPort, tok); code != websocket.StatusPolicyViolation {
+		t.Fatalf("the updated app with its token: close %v, want 1008", code)
+	}
+	waitUntil(t, "the refusal to be said", func() bool { return strings.Contains(stderr.String(), "not the app ADBuddy checked") })
+	time.Sleep(300 * time.Millisecond) // several ticks
+	if n := len(f.handedTokens()); n != 1 {
+		t.Fatalf("%d tokens handed over: the updated app got one", n)
+	}
+	if _, code := dialApp(t, e.cfg.ChatPort, tok); code != websocket.StatusPolicyViolation {
+		t.Fatalf("the old token after the check: close %v, want 1008", code)
 	}
 }

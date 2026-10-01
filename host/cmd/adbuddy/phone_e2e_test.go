@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net"
@@ -12,6 +15,8 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
+	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
+	"github.com/hybriqtech/adbuddy/host/internal/phoneapp/apktest"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
 
@@ -92,11 +97,30 @@ func (p *phone) finalEntry(id string) map[string]string {
 	}
 }
 
+// e2eAPK is the app the fake phone has installed; each test trusts it as
+// the development build (the binary pins no release certificate).
+var (
+	e2eCert = apktest.Cert("e2e")
+	e2eAPK  = apktest.APK(apktest.Block{ID: apktest.V2, Signers: []apktest.Signer{{Cert: e2eCert}}})
+)
+
+// trustE2EApp makes the host in dataDir trust e2eAPK.
+func trustE2EApp(t *testing.T, dataDir string) {
+	t.Helper()
+	sum := sha256.Sum256(e2eAPK)
+	if _, err := phoneapp.TrustDevAPK(dataDir, hex.EncodeToString(sum[:])); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // phoneAppRules make the fake adb answer like a phone with the app installed
 // that takes the handshake: ping returns the nonce of the last handshake.
 func phoneAppRules(port string) []testutil.FakeRule {
 	return []testutil.FakeRule{
-		{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n    versionName=0.2.0\n"},
+		{Match: `^shell pm path tech\.hybriq\.adbuddy$`, Stdout: "package:/data/app/~~E2e==/tech.hybriq.adbuddy-E2e==/base.apk\n"},
+		{Match: `^shell stat -c `, Stdout: strconv.Itoa(len(e2eAPK)) + " 1 1\n"},
+		{Match: `^shell base64 `, Stdout: base64.StdEncoding.EncodeToString(e2eAPK) + "\n"},
+		{Match: `^shell dumpsys package tech\.hybriq\.adbuddy$`, Stdout: "Packages:\n  Package [tech.hybriq.adbuddy] (1a2b):\n    versionCode=1 minSdk=30 targetSdk=37\n    versionName=0.2.0\n"},
 		{Match: `^reverse tcp:` + port + ` tcp:` + port + `$`},
 		{Match: `^reverse --list$`, Stdout: "dev1 tcp:" + port + " tcp:" + port + "\n"},
 		{Match: `^shell content write --uri content://tech\.hybriq\.adbuddy\.bridge/handshake$`, EchoStdin: true, SaveStdin: "handshake"},
@@ -146,7 +170,7 @@ func connectPhone(t *testing.T, h *harness, port string) *phone {
 
 func TestPhoneAppConfirmsAndPauses(t *testing.T) {
 	port := strconv.Itoa(freePort(t))
-	h := startWith(t, "chat_port = "+port+"\n",
+	h := startWithData(t, "chat_port = "+port+"\n", func(data string) { trustE2EApp(t, data) },
 		append(phoneAppRules(port), testutil.FakeRule{Match: `^shell reboot$`})...)
 	p := connectPhone(t, h, port)
 
@@ -215,7 +239,7 @@ func waitDone(t *testing.T, done chan [2]string, h *harness) (code, errOut strin
 // moves to the terminal at once, and is answered there.
 func TestPhoneDisconnectMovesTheQuestionToTheTerminal(t *testing.T) {
 	port := strconv.Itoa(freePort(t))
-	h := startWith(t, "chat_port = "+port+"\n", phoneAppRules(port)...)
+	h := startWithData(t, "chat_port = "+port+"\n", func(data string) { trustE2EApp(t, data) }, phoneAppRules(port)...)
 	p := connectPhone(t, h, port)
 	done, _ := redOnThePhone(t, h, p)
 	p.c.CloseNow()
@@ -235,7 +259,7 @@ func TestPhoneDisconnectMovesTheQuestionToTheTerminal(t *testing.T) {
 // the command ends blocked as paused.
 func TestPhonePauseWithdrawsTheQuestion(t *testing.T) {
 	port := strconv.Itoa(freePort(t))
-	h := startWith(t, "chat_port = "+port+"\n", phoneAppRules(port)...)
+	h := startWithData(t, "chat_port = "+port+"\n", func(data string) { trustE2EApp(t, data) }, phoneAppRules(port)...)
 	p := connectPhone(t, h, port)
 	done, req := redOnThePhone(t, h, p)
 	if _, errOut, code := h.adb("", "shell", "input", "tap", "1", "1"); code != 126 || strings.TrimSpace(errOut) != `Blocked by ADBuddy: waiting for your answer to "Restart the phone"` {
@@ -262,7 +286,7 @@ func TestPhonePauseWithdrawsTheQuestion(t *testing.T) {
 // it is still paused and how to resume.
 func TestPhoneDisconnectWhilePaused(t *testing.T) {
 	port := strconv.Itoa(freePort(t))
-	h := startWith(t, "chat_port = "+port+"\n", phoneAppRules(port)...)
+	h := startWithData(t, "chat_port = "+port+"\n", func(data string) { trustE2EApp(t, data) }, phoneAppRules(port)...)
 	p := connectPhone(t, h, port)
 	p.send(bridge.TypePause, struct{}{})
 	p.until(bridge.TypeSessionState)
