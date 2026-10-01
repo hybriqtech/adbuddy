@@ -1,7 +1,7 @@
 # ADBuddy · M6a · Pipeline de releases y app de confianza · Diseño
 
 - **Fecha:** 2026-10-01
-- **Estado:** escrito por delegación del usuario. Revisión de seguridad 1 (nautilus-19 con `adbuddy-reviewer-opus`): 2 críticos, 4 importantes y 6 menores, todos incorporados (§12). Las decisiones están en §11.
+- **Estado:** escrito por delegación del usuario. Revisión de seguridad 1 (nautilus-19 con `adbuddy-reviewer-opus`): 2 críticos, 4 importantes y 6 menores. Re-revisión 2: 0 críticos, 4 importantes y 8 menores. Todo incorporado (§12). Las decisiones están en §11.
 - **Spec de la v1:** [2026-09-29-adbuddy-v1-design.md](2026-09-29-adbuddy-v1-design.md) (§12, §4.6 y la fila M6 de §13)
 - **Parte de:** línea B (M6 sin protocolo), rama `m6a`, que sale de `main` (0ec286f)
 - **En paralelo con:** M3 (tern-51) y M5 (nautilus-19), con el supervisor adbuddy-e5
@@ -80,9 +80,26 @@ Se dispara con `push` de etiquetas `v*`. `permissions: {}` arriba, y cada job pi
 | `sign` | en una VM limpia: descarga el artefacto, `zipalign` y `apksigner sign`; sube el APK firmado como artefacto | `environment: release`, sin `contents`, **solo aquí los secretos** |
 | `publish-apk` | descarga el APK firmado, comprueba su certificado contra el fijado (`scripts/release-cert.sh --pinned`), escribe `adbuddy.apk.sha256` y lo sube al borrador | `contents: write`, sin secretos |
 
+**Grafo de `needs:`** (revisión 2, I-4):
+
+- `test` necesita `version`;
+- `host` necesita `version` y `test`;
+- `build-apk` necesita `version` y `test`;
+- `sign` necesita `build-apk`;
+- `publish-apk` necesita `host` y `sign`.
+
+Una etiqueta que no pase `version` (fuera de `main` o mal formada) no crea ni el borrador.
+
+**Sin cachés en las builds de etiqueta** (revisión 2, M-7): `setup-go` con `cache: false` y `setup-gradle` con `cache-disabled: true` en `test`, `host`, `build-apk` y `publish-apk`. Una caché envenenada desde una rama no entra en lo que se publica. El contenido del APK lo decide `build-apk`, que ejecuta Gradle y sus dependencias. Es un riesgo aceptado (§11): la clave sigue a salvo, y la verificación de dependencias de Gradle queda para M6c.
+
 **El job `sign` (spec §12, I2):**
 
-- **Sin código de terceros:** ni Gradle, ni Go, ni cachés (`actions/cache`, `setup-gradle` o `setup-go` con caché), ni acciones que no sean de `actions/*`. Solo `actions/download-artifact` y `actions/upload-artifact`, el `sdkmanager` de Google para instalar `build-tools;37.0.0`, y `zipalign` y `apksigner` de esas build-tools, con el Java que trae el runner.
+- **Sin código de terceros:** ni Gradle, ni Go, ni cachés (`actions/cache`, ni `setup-gradle` o `setup-go` con caché), ni acciones que no sean de `actions/*`. Solo:
+  - `actions/download-artifact` y `actions/upload-artifact`;
+  - el `sdkmanager` de Google, para instalar `build-tools;37.0.0`;
+  - `zipalign` y `apksigner` de esas build-tools, con rutas absolutas y el Java que trae el runner.
+
+  El artefacto se descarga en `$RUNNER_TEMP/in` y ha de ser un único fichero, `app-release-unsigned.apk`.
 - **Los secretos, solo en el `env:` del paso que firma.** Ese paso restaura el keystore en `$RUNNER_TEMP` con `umask 077`, firma con `--ks-pass env:KS_PASS` (alias `adbuddy`, v1 apagada y v2 y v3 activas) y borra el keystore al final del mismo paso. Otro paso con `if: always()` lo borra también si el primero falla.
 - El job `sign` no comprueba el certificado con el código del host: eso hace falta Go y sus dependencias. Lo hace `publish-apk`, que no tiene secretos, sobre el APK firmado, que es público de todos modos.
 
@@ -104,6 +121,7 @@ Un *ruleset* de etiquetas reserva la creación de `v*` a los administradores. Si
 - `checksums.txt`;
 - `release.draft: true`, `prerelease: auto` y `mode: keep-existing`;
 - `mod_timestamp: {{ .CommitTimestamp }}`, para builds reproducibles;
+- `release.extra_files: scripts/install.sh`: el instalador viaja con cada release y se sirve desde `releases/latest/download/install.sh`, no desde `main` (revisión 2, I-4);
 - sin brew, winget ni nfpm (M6c).
 
 ## 5. Leer quién firmó un APK
@@ -119,9 +137,13 @@ Un *ruleset* de etiquetas reserva la creación de `v*` a los administradores. Si
 5. Los pares ID-valor ocupan el bloque entero, cada uno con longitud ≥ 4 y dentro del bloque.
 6. **Un ID repetido rechaza el APK.** Android usa el primero, y aceptar repetidos obligaría a imitarlo.
 7. Cualquier ID que no sea v2, v3 ni v3.1 rechaza el APK, salvo esta lista cerrada de bloques que no son de firma: relleno (`0x42726577`), sello de origen v1 y v2 (`0x2b09189e` y `0x6dff800d`), dependencias de AGP (`0x504b4453`) y *frosting* de Play (`0x2146444e`). Android elige el esquema más alto que conoce, así que un esquema que el host no sabe leer podría esconder otro firmante.
-8. Hay al menos uno de los tres bloques de firma; cada bloque tiene al menos un firmante y cada firmante, al menos un certificado no vacío. Ningún dato sobra al final de un bloque.
+8. Hay al menos uno de los tres bloques de firma; cada bloque tiene al menos un firmante y cada firmante, al menos un certificado no vacío. El certificado de un firmante es el **primero** de su lista, como en Android (`certs[0]`). Ningún dato sobra al final de un bloque.
 9. En v3 y v3.1 ningún firmante lleva prueba de rotación de clave (atributo `0x3ba06f8c`): la rotación no está soportada.
-10. **El APK no tiene firma v1:** ninguna entrada del directorio central se llama `META-INF/*.SF`, `.RSA`, `.DSA` o `.EC` (sin distinguir mayúsculas). Los nombres se leen con `archive/zip` sobre el mismo directorio central de las condiciones 1-3. Nuestros APK se firman sin v1 (`minSdk` 30), así que una firma v1 solo puede venir de otro.
+10. **El APK no tiene firma v1:** ninguna entrada del directorio central empieza por `META-INF/` y acaba en `.SF`, `.RSA`, `.DSA` o `.EC`, a cualquier profundidad y sin distinguir mayúsculas. Nuestros APK se firman sin v1 (`minSdk` 30), así que una firma v1 solo puede venir de otro.
+11. **El directorio central se recorre a mano**, sin `archive/zip`, que acepta recuentos módulo 65536:
+    - exactamente tantas entradas como dice el EOCD, cada cabecera con su firma `0x02014b50`;
+    - el recorrido acaba justo en `cdOffset+cdSize`;
+    - ningún nombre lleva NUL ni UTF-8 inválido (como exige libziparchive).
 
 Cualquier fallo es un error con la causa; nunca hay pánico ni lecturas fuera del búfer, con ninguna entrada (*fuzzing*).
 
@@ -131,67 +153,97 @@ Cualquier fallo es un error con la causa; nunca hay pánico ni lecturas fuera de
 
 ## 6. App de confianza
 
-### 6.1 Certificados de confianza
+### 6.1 Certificados y APK de confianza
 
-- **El de release:** `phoneapp.SigningCertSHA256`, una constante. Vale `""` hasta que el usuario genere la clave (§10). Mientras esté vacía, ningún APK descargado se acepta (`ErrUnpinned`, sin tocar la red) y `publish-apk` falla.
-- **Uno de desarrollo, solo si el usuario lo elige.** `adbuddy setup --apk <fichero>`, la vía para instalar un build propio, lee el certificado de ese fichero con `Signers`:
-  - si no es el de release, lo guarda en `<data>/app/trusted-dev-cert` con un aviso explícito: `⚠ Trusting the development signing certificate <sha> of <file>: adbuddy serve will hand the phone app's token to an app signed with it. Delete <path> to stop.`;
-  - si el fichero no tiene un bloque de firma válido, setup no lo instala.
+- **El certificado de release:** `phoneapp.SigningCertSHA256`, una constante. Vale `""` hasta que el usuario genere la clave (§10). Mientras esté vacía, no se acepta ningún APK descargado (`ErrUnpinned`, sin tocar la red) y `publish-apk` falla.
+- **Un APK de desarrollo concreto, solo si el usuario lo elige (revisión 2, I-1).** `adbuddy setup --apk <fichero>` es la vía para instalar un build propio:
+  1. lee el fichero **una vez** y comprueba con `Signers` que tiene un bloque de firma válido; si no, no lo instala;
+  2. si no lo firma el certificado de release, guarda el **SHA-256 del APK entero** (no el de su certificado) en `<data>/app/trusted-dev-apk`, con un aviso: `⚠ Trusting this development build of the app (SHA-256 <sha> of <file>): adbuddy serve will hand the phone app's token to exactly this APK. Delete <path> to stop.`;
+  3. lo copia a `<data>/app/dev.apk` (0600) e instala **esa copia**, para que nadie lo cambie entre la lectura y la instalación.
 
-  Nunca se confía en nada en silencio: `serve` repite el aviso cada vez que la app instalada lleva el certificado de desarrollo.
-- `phoneapp.TrustedCerts(dataDir)` devuelve los dos (los que no estén vacíos).
+  ¿Por qué el digest y no el certificado? La clave de debug de Android está en el PC (`~/.android/debug.keystore`, con la contraseña pública `android`). Con ella, un agente con acceso al PC podría firmar otra app y **actualizar** la de desarrollo con `adb install -r` (🟡). Android le dejaría sus datos, token incluido, y sus permisos. Con el digest solo vale ese APK exacto: cada build nuevo pide repetir `setup --apk`.
+- **`LoadTrust`** lee `trusted-dev-apk` solo si es un fichero normal (no un enlace) que contiene un SHA-256 y, en Unix, con permisos 0600. Si no, no confía en nada de desarrollo. La carpeta de datos está fuera del entorno del agente, así que `adb pull` no puede escribir ahí: `daemon/pcwrite.go` solo deja escribir dentro del entorno.
+- **El aviso no se calla:** `serve` avisa al arrancar siempre que exista `trusted-dev-apk`, lleve o no la app instalada ese APK. Un `setup` sin `--apk` que verifica una app firmada con el certificado de release borra `trusted-dev-apk` y lo dice.
 
 ### 6.2 Comprobar la app instalada
 
-`phoneapp.VerifyInstalled(ctx, a, trusted, minCode)` devuelve un `phoneapp.Verified`. Es un valor que solo se puede obtener así: sus campos no son exportados, y el paquete no lo construye en ningún otro sitio. Hace esto:
+`(*phoneapp.Verifier).Verify(ctx, a)` devuelve un `phoneapp.Verified` de campos no exportados. Fuera del paquete solo se puede escribir su valor cero, `phoneapp.Verified{}`. **Toda función que recibe un `Verified` rechaza el valor cero de forma explícita** (revisión 2, I-2), con un test que lo comprueba.
 
-1. `pm path tech.hybriq.adbuddy` ha de dar exactamente una línea `package:<ruta>`, y la ruta ha de casar con `^/data/app/[A-Za-z0-9._~=+/-]+/base\.apk$` y no tener `..`. Si no, devuelve `ErrNoTrustedApp`: no se puede leer, o la app no es la nuestra (la nuestra no tiene *splits*).
-2. `stat -c %s <ruta>` ha de dar como mucho `maxAPK` (200 MiB).
-3. `base64 <ruta>` (toybox, Android 7+; la app pide API 30) devuelve el APK, que se decodifica en el PC. Así no hace falta escribir ningún fichero temporal, y el adb falso de los tests puede servirlo como texto.
-4. `CheckSigner(apk, trusted...)`. Es seguro aunque el parser no verifique la criptografía: ese APK lo verificó Android al instalarlo, y las condiciones de §5 garantizan que el host lee el mismo bloque.
-5. `versionCode` de `dumpsys package` ≥ `minCode` (`phoneapp.MinAppVersionCode`, hoy 0). Si no, devuelve `ErrAppTooOld`. Es la defensa contra volver a una release vieja con fallos firmada por hybriqtech (spec §12, I4). Cuando una release arregle un fallo de seguridad de la app, se sube esta constante; lo dice `docs/releasing.md`.
+`Verify` da estos pasos:
 
-Falla **cerrado**: cualquier error (un adb que no responde, una salida rara) devuelve un error que envuelve `ErrNoTrustedApp` o `ErrAppTooOld`, y no hay `Verified`.
+1. **Ruta.** `pm path tech.hybriq.adbuddy` ha de dar exactamente una línea `package:<ruta>`, y la ruta ha de casar con `^/data/app/[A-Za-z0-9._~=+/-]+/base\.apk$` y no tener `..`. Si no, falla cerrado con `ErrNoTrustedApp`. Pasa si no se puede leer, si la app no es la nuestra (la nuestra no tiene *splits*) o si está en almacenamiento adoptado, fuera de `/data/app`.
+2. **Tamaño.** `stat -c %s <ruta>` no puede pasar de `maxAPK` (200 MiB).
+3. **Lectura.** `base64 <ruta>` (toybox, Android 7+; la app pide API 30) devuelve el APK, que se decodifica en el PC:
+   - con su propio plazo, `pullTimeout` (2 min);
+   - con la salida **limitada** a lo que ocupa en base64 el tamaño de `stat`, más los saltos de línea;
+   - el tamaño decodificado ha de ser exactamente el de `stat`.
+
+   Así no hace falta ningún fichero temporal, y el adb falso de los tests lo sirve como texto.
+4. **Firmante.** Una de dos:
+   - con el certificado de release: `CheckSigner(apk, release)`;
+   - con un APK de desarrollo de confianza: el SHA-256 del APK leído es el de `trusted-dev-apk`, y `Signers` no da error.
+
+   No verificar la criptografía es seguro aquí: Android verificó ese APK al instalarlo, y las condiciones de §5 garantizan que el host lee el mismo bloque.
+5. **Versión.** El `versionCode` se lee del bloque `Package [tech.hybriq.adbuddy]` de `dumpsys package` (no de *Hidden system packages*). Ha de ser ≥ `phoneapp.MinAppVersionCode`, hoy 0; si no, `ErrAppTooOld`.
+   - Es la defensa contra volver a una release vieja con fallos firmada por hybriqtech (revisión 1, I4).
+   - Se sube cuando una release arregla un fallo de seguridad de la app. Lo dice `docs/releasing.md`.
+6. **Ruta otra vez.** Vuelve a llamar a `pm path` y exige la misma ruta: la app no se reinstaló durante la lectura.
+
+Falla **cerrado**: cualquier error (un adb que no responde, una salida rara) envuelve `ErrNoTrustedApp` o `ErrAppTooOld`, y no hay `Verified`.
+
+`Verifier` recuerda para cada ruta el último resultado definitivo: bien, `ErrSigner`, `ErrAppTooOld` o `ErrUnpinned`. Los fallos de adb no los recuerda. En Android 11+ cada instalación o actualización va a una carpeta aleatoria nueva, así que la misma ruta es el mismo APK. Por eso las reconexiones de `serve` no vuelven a leer el APK hasta que la app se reinstala.
+
+**Límites del modelo:**
+- Con root o `adb root` (que es 🔴 especial), la shell del móvil puede mentir, y no hay garantía.
+- En un móvil sin root, `pm`, `stat`, `base64` y `sh` están en `/system`, y el usuario `shell` no puede escribir en `/data/app`.
 
 ### 6.3 Dónde se exige
 
-Las funciones de `phoneapp` que dan algo a la app **piden un `Verified` como argumento**. Así un llamador nuevo (M5 incluido) no puede saltarse la comprobación sin que falle la compilación:
+Las funciones de `phoneapp` que dan algo a la app **piden un `Verified` como argumento**:
 
-- `Handshake(ctx, a, v Verified, token, port, host)`: la entrega del token;
+- `Handshake(ctx, a, v Verified, token, port, host)`, la entrega del token;
 - `AskConsent(ctx, a, v, …)`, `Grant(ctx, a, v)`, `AllowBackground(ctx, a, v)` y `EnableAccessibility(ctx, a, v)`.
 
-`Verified` lleva el SHA-256 del certificado y la ruta comprobada. `Handshake` y las concesiones vuelven a llamar a `pm path` justo antes de actuar y fallan si la ruta cambió (la app se reinstaló entre medias). La ventana restante, entre ese `pm path` y la orden misma, es de milisegundos y exige reinstalar la app, lo que pasa por una desinstalación 🔴 (§7).
+Un llamador nuevo (M5 incluido) solo puede saltarse la comprobación pasándoles a propósito un valor cero, y eso falla en ejecución.
 
-**En `setup` (`appsetup.go`):** tras instalar (o si ya estaba), `VerifyInstalled` y después, con su `Verified`, el consentimiento y las concesiones. Si falla:
+Antes de actuar, cada una vuelve a llamar a `pm path` y falla si la ruta cambió. Quedan dos cosas que conviene saber:
 
-- con la app firmada con otra clave: `⚠ The ADBuddy app on the phone is not signed by hybriqtech (a development build?): ADBuddy will not trust it. Uninstall it on the phone and run adbuddy setup again, or pass --apk <that APK> to trust a development build.`;
-- con una app demasiado vieja: `⚠ The ADBuddy app on the phone is too old for this host: run adbuddy setup to update it.`;
-- en ambos casos setup sigue sin la app, y las 🔴 van a la terminal.
+- **La ventana entre ese `pm path` y la orden** es de milisegundos. Con el certificado de release, cambiar la app en ella exige desinstalarla, y eso es 🔴 (§7). Con un APK de desarrollo, una actualización con la misma clave de debug cambia la ruta, y con ella el digest.
+- **La autoridad del provider.** `Handshake` y `Call` van a `content://tech.hybriq.adbuddy.bridge`, que se resuelve por autoridad y no por paquete. Es seguro porque Android no deja instalar dos providers con la misma autoridad (`INSTALL_FAILED_CONFLICTING_PROVIDER`): mientras la app verificada siga instalada, la autoridad es suya.
 
-**En `serve` (`phone.go`, `connect`):** antes de cada `Handshake`, que se repite en cada reconexión, `VerifyInstalled`. Si falla, no se entrega el token, se avisa una vez (como hoy los fallos de conexión) y las 🔴 siguen en la terminal.
+**En `setup` (`appsetup.go`):** tras instalar (o si la app ya estaba), `Verify`; después, con su `Verified`, el consentimiento y las concesiones. Si `Verify` falla:
 
-**`setup --apk` y `INSTALL_FAILED_UPDATE_INCOMPATIBLE`:** Android no actualiza una app firmada con otra clave. `Install` lo reconoce (`ErrOtherSigner`) y setup explica qué hacer: `Uninstall it on the phone (it forgets its pairing with this PC) and run adbuddy setup again.` **ADBuddy no desinstala nada por su cuenta.** El Pixel del usuario tiene hoy un build de debug: la primera release lo pide.
+- con otra clave: `⚠ The ADBuddy app on the phone is not signed by hybriqtech (a development build?): ADBuddy will not trust it. Uninstall it on the phone and run adbuddy setup again, or pass --apk <that APK> to trust a development build.`;
+- demasiado vieja: `⚠ The ADBuddy app on the phone is too old for this host: run adbuddy setup to update it.`;
+- en los dos casos setup sigue sin la app, y las 🔴 van a la terminal.
 
-**`Install`** pasa `--no-incremental`: la instalación incremental leería el APK del PC después de comprobarlo.
+**En `serve` (`phone.go`, `connect`):** `Verify` antes de cada `Handshake`, también al reconectar. Si falla, no se entrega el token, se avisa una vez (como hoy con los fallos de conexión) y las 🔴 siguen en la terminal.
+
+**`setup --apk` e `INSTALL_FAILED_UPDATE_INCOMPATIBLE`:** Android no actualiza una app firmada con otra clave. `Install` reconoce ese error (`ErrOtherSigner`) y setup dice qué hacer: `Uninstall it on the phone (it forgets its pairing with this PC) and run adbuddy setup again.`
+
+- **ADBuddy no desinstala nada por su cuenta.**
+- El Pixel del usuario tiene hoy un build de debug, así que la primera release lo pedirá.
+
+**`Install`** pasa `--no-incremental`. Con la instalación incremental, adb leería el APK del PC después de comprobarlo, y el APK instalado no sería idéntico byte a byte.
 
 ### 6.4 Descarga
 
 `phoneapp.Download(ctx, client, base, dir, cert)`:
 
-- sin `cert`, `ErrUnpinned` antes de tocar la red;
-- tras el `.sha256`, `CheckSigner(data, cert)` con el certificado de release **solamente**: un APK descargado nunca vale por el certificado de desarrollo;
-- un fallo es `ErrSigner`, y setup lo dice: `⚠ The downloaded ADBuddy app is not signed by hybriqtech, so nothing was installed. Please report it at https://github.com/hybriqtech/adbuddy/issues, or pass --apk <file>.`
+- sin `cert`, devuelve `ErrUnpinned` antes de tocar la red;
+- tras el `.sha256`, `CheckSigner(data, cert)` **solo** con el certificado de release: la confianza de desarrollo nunca vale para un APK descargado;
+- si falla, `ErrSigner`, y setup lo dice: `⚠ The downloaded ADBuddy app is not signed by hybriqtech, so nothing was installed. Please report it at https://github.com/hybriqtech/adbuddy/issues, or pass --apk <file>.`
 
-El cambio del APK en disco entre `Download` e `Install` (TOCTOU) lo cubre §6.2: lo que se instale y no sea nuestro no recibe nada.
+Si el APK cambia en disco entre `Download` e `Install`, lo cubre §6.2: lo que se instale y no sea nuestro no recibe nada.
 
 **`ADBUDDY_RELEASE_URL`** se queda para los tests e2e, con dos límites:
 
-- solo se acepta `https://` o `http://` a `127.0.0.1`, `::1` o `localhost`; cualquier otra cosa es un error de setup;
-- aunque sirva una release vieja firmada por hybriqtech, `MinAppVersionCode` la frena.
+- solo admite `https://`, o `http://` hacia `127.0.0.1`, `::1` o `localhost`; cualquier otra cosa es un error de setup;
+- si sirve una release vieja firmada por hybriqtech, la frena `MinAppVersionCode`.
 
 Con esto se cierra el pendiente de M6.
 
-**`--apk <fichero>`** no se comprueba contra el certificado de release, porque es el fichero que elige el usuario. Sí se lee su certificado (§6.1), y la ayuda de la opción lo dice.
+**`--apk <fichero>`** no se compara con el certificado de release, porque el fichero lo elige el usuario. Sigue §6.1, y la ayuda de la opción lo dice.
 
 ## 7. Defensa en el clasificador
 
@@ -205,13 +257,18 @@ Ruling del supervisor. Un caso de `host/internal/classify`, con revisión opus. 
 - `am force-stop` y `am kill`;
 - `adb uninstall` (también con `-k`).
 
-Si alguna se quita, la app real deja de estar y entra en juego §6. Hoy `mentionsADBuddy` ya debería cubrirlas, por nombre de paquete en las palabras (en `shell` solo cuando el nivel no es 🟢). M6a lo deja escrito en `testdata/habitual.jsonl`, una línea por orden con `"level":"red","special":true`, y añade a `special.go` lo que no salga.
+Además (revisión 2, M-6):
+
+- `cmd` entra en la regla de argumentos dinámicos de `special.go`, como ya lo están `pm`, `appops` y `am`;
+- tres órdenes que neutralizan la app sin nombrarla pasan a 🔴 especiales: `pm reset-permissions` (quitaría WRITE_SECURE_SETTINGS, y con ello "Cortar acceso"), `dumpsys deviceidle whitelist reset` y `cmd appops reset`.
+
+Si alguna de estas órdenes llega a quitar la app, la real deja de estar y entra en juego §6. Hoy `mentionsADBuddy` ya debería cubrirlas, por nombre de paquete en las palabras (en `shell` solo cuando el nivel no es 🟢). M6a lo deja escrito en `testdata/habitual.jsonl`, una línea por orden con `"level":"red","special":true`, y añade a `special.go` lo que no salga.
 
 `adb install <apk>` sigue siendo 🟡: el host no sabe qué paquete lleva el APK, y §6 es lo que impide que una app falsa reciba nada.
 
 ## 8. Script de instalación (`scripts/install.sh`)
 
-Para Linux y macOS: `curl -fsSL https://raw.githubusercontent.com/hybriqtech/adbuddy/main/scripts/install.sh | sh`.
+Para Linux y macOS: `curl -fsSL https://github.com/hybriqtech/adbuddy/releases/latest/download/install.sh | sh`. El instalador viaja con la release (§4); un cambio en `main` no llega a los usuarios hasta la siguiente release.
 
 - POSIX `sh`, con `set -eu`, todo dentro de `main` y llamado en la última línea: si la descarga se corta, no se ejecuta nada.
 - Sistema y arquitectura: `Linux` con `x86_64`/`amd64` o `aarch64`/`arm64`, y `Darwin` (siempre `darwin_all`). Cualquier otra combinación falla con un mensaje claro, y Windows apunta al `.zip`.
@@ -235,7 +292,7 @@ Jobs:
 - **`goreleaser`:** `goreleaser check` y `goreleaser release --snapshot --clean`. Comprueba que están los cinco archivos y `checksums.txt`, y que `install.sh` instala el snapshot (con `file://`) y el binario dice su versión.
 - **`sign`:** `assembleRelease` con una versión de prueba. Firma con una clave de usar y tirar (`keytool -storepass:env`) y `apksigner`. `scripts/release-cert.sh` (sin `--pinned`) comprueba que `apksigner` y `apkcert` dan el mismo certificado. Como `apkcert` aplica todas las condiciones de §5, un bloque nuevo de AGP sale en el PR. Al final comprueba la versión con `aapt2 dump badging`.
 
-`host.yml` ya ejecuta los tests unitarios del parser y de `VerifyInstalled`, con un corpus de *fuzzing* corto.
+`host.yml` ya ejecuta los tests unitarios del parser y de `Verify`, con un corpus de *fuzzing* corto.
 
 ## 10. Acciones del usuario
 
@@ -246,8 +303,17 @@ Están en `docs/releasing.md`, en "User actions", y en "Validaciones manuales pe
    - la contraseña la pide `keytool`; nunca pasa por la línea de órdenes;
    - imprime el SHA-256 del certificado y las órdenes para los secretos, **no** el base64.
 2. **Copia de seguridad** del keystore y su contraseña. Si se pierden, ninguna release podrá actualizar la app instalada.
-3. **Environment `release`** en GitHub, solo para etiquetas `v*` y con el propio usuario como revisor obligatorio. Dentro, sus dos secretos: `gh secret set --env release ADBUDDY_KEYSTORE_B64 < <(base64 …)` y `gh secret set --env release ADBUDDY_KEYSTORE_PASSWORD`, que pide el valor sin mostrarlo.
-4. **Ruleset de etiquetas:** solo los administradores crean `v*`.
+3. **Environment `release`** en GitHub:
+   - solo para etiquetas `v*`;
+   - con el propio usuario como revisor obligatorio;
+   - con "Allow administrators to bypass" desactivado.
+
+   Dentro, sus dos secretos, con las órdenes que imprime el script. Se ejecutan en Git Bash (el `|` y `<` de PowerShell no sirven). `gh` lee el valor de stdin o lo pide sin mostrarlo.
+4. **Rulesets:**
+   - etiquetas `v*`: solo los administradores las crean, mueven o borran;
+   - `main`: sin push directo ni force-push, cambios solo por PR, y sin ningún actor que pueda saltárselo, `github-actions` incluido (revisión 2, I-4).
+
+   Los jobs con `contents: write` (`host` y `publish-apk`) no pueden entonces tocar `main`.
 5. **Fijar el certificado:** pasar su SHA-256 (es público) para ponerlo en `SigningCertSHA256`, en un commit y un PR propios.
 6. **Su móvil:** desinstalar el build de debug antes de la primera release. Hasta entonces, `adbuddy setup --apk <su build>` para seguir confiando en él (§6.1).
 7. **Primera release:** etiqueta, aprobar el despliegue de `sign`, revisar el borrador y "Publish release".
@@ -265,7 +331,9 @@ Están en `docs/releasing.md`, en "User actions", y en "Validaciones manuales pe
 - **Ruling: comprobar la app instalada antes de cada token y de cada concesión, con un tipo `Verified` como prueba.** Por qué: el token y las concesiones van a cualquier app con nuestro nombre, y una app falsa salta todas las 🔴. Pedir el tipo en la firma de cada función hace que un llamador nuevo no pueda olvidarlo. Si me equivoco: el coste es leer el APK por adb en cada conexión (unos segundos por Wi-Fi con un APK de unos 10 MB), solo al arrancar `serve` y al reconectar.
 - **Ruling: leer el certificado de la app instalada con `pm path` y `base64`, y el mismo parser.** Por qué: Android no da el SHA-256 del certificado a la shell. `dumpsys package` solo muestra `signatures:[xxxxxxxx]`, un `hashCode()` de 32 bits que un atacante puede igualar. Si me equivoco: si una versión de Android cambia la salida de `pm path` o quita `base64`, la comprobación falla cerrada y la app no recibe el token, que se ve en `serve`. No queda abierta.
 - **Ruling: condiciones del parser más estrictas que AOSP (sin comentario en el EOCD, sin IDs repetidos, sin v1).** Por qué: ante la duda, rechazar. Los APK los produce nuestro pipeline, y `release-check` prueba cada cambio. Si me equivoco: un cambio de AGP rompe `release-check` antes de publicar.
-- **Ruling: un certificado de desarrollo solo con `setup --apk` y con aviso en cada `serve`.** Por qué: hay que poder desarrollar la app sin la clave de release, sin que la confianza se dé en silencio. Si me equivoco: quien tenga acceso al PC puede ejecutar `setup --apk`, pero ese mismo acceso ya le deja cambiar el binario del host.
+- **Ruling: la confianza de desarrollo es el SHA-256 de un APK concreto, con aviso en cada `serve` mientras exista.** Por qué: la clave de debug está en el PC con una contraseña pública. Confiar en su certificado dejaría al agente sustituir la app con una actualización 🟡 que hereda token y permisos. Si me equivoco: cada build de desarrollo pide repetir `setup --apk`.
+- **Ruling: el comportamiento de Android que §5 da por hecho se demuestra en un emulador antes de la primera release pública, no antes de integrar.** Por qué: la imagen del emulador está rota hasta M2.5b. Las condiciones de §5 son las de AOSP o más estrictas, y que el host exija todos los firmantes de todos los bloques hace que no importe cuál elige Android. Si me equivoco: un APK de ataque que el host acepte y Android instale con otra firma. No llega a ningún usuario antes de esa prueba, porque no hay release pública hasta entonces (validación 3 del plan).
+- **Ruling: el contenido del APK lo decide `build-apk` (Gradle y sus dependencias), un riesgo aceptado.** Por qué: firmar sin compilar lo deja todo en el job aislado; reproducir el build en otro sitio es trabajo de F-Droid y M6c. Si me equivoco: una dependencia comprometida entra firmada, igual que en cualquier app Android.
 - **Ruling: compilar y firmar en jobs distintos, y el de firma sin código de terceros, con environment y revisor.** Por qué: Gradle ejecuta plugins y dependencias de terceros que podrían leer el keystore o la contraseña. Y unos secretos del repo los lee cualquier workflow de cualquier rama. Si me equivoco: un artefacto y un job más por release.
 - **Ruling: release en borrador, que publica el usuario.** Por qué: publicar es irreversible hacia fuera (la URL `latest` la usan todos los hosts instalados). Si me equivoco: un clic más por release.
 - **Ruling: `MinAppVersionCode` en el host, hoy 0.** Por qué: con el certificado fijado, toda release vieja firmada por hybriqtech sigue siendo "nuestra". Si me equivoco: olvidar subirla deja la vuelta atrás abierta hasta la siguiente; `docs/releasing.md` lo pone en la lista de cada release de seguridad.
@@ -275,11 +343,13 @@ Están en `docs/releasing.md`, en "User actions", y en "Validaciones manuales pe
 - **Ruling: brew, winget, IzzyOnDroid, SignPath y la procedencia firmada, a M6c.** Por qué: necesitan cuentas, repos o una release pública. Si me equivoco: goreleaser los añade con pocas líneas.
 - **Ruling: `CGO_ENABLED=0`.** Por qué: compilación cruzada y binarios estáticos. M3 confirma que su PTY es Go puro (conpty, creack/pty y charmbracelet/x/vt). Si me equivoco: si algún destino necesita cgo, pasa a su runner nativo.
 
-## 12. Revisión de seguridad 1 y cómo se resolvió
+## 12. Revisiones de seguridad y cómo se resolvieron
+
+### Revisión 1
 
 | Hallazgo | Resuelto en |
 |---|---|
-| C1: el certificado solo se comprueba al descargar, no en la app que recibe el token y las concesiones | §6.2 y §6.3 (`VerifyInstalled` y el tipo `Verified`) y §7 |
+| C1: el certificado solo se comprueba al descargar, no en la app que recibe el token y las concesiones | §6.2 y §6.3 (`Verify` y el tipo `Verified`) y §7 |
 | C2: el parser puede leer un bloque que Android no ve (vuelta a v1); IDs repetidos | §5, condiciones 1-10 |
 | I1: los secretos se pueden leer desde cualquier rama | §4 (environment `release`, ruleset y la etiqueta, que ha de descender de `main`) |
 | I2: compilar y firmar en el mismo job | §4 (`build-apk`, `sign` y `publish-apk`; acciones fijadas por SHA; `permissions: {}`) |
@@ -292,25 +362,43 @@ Están en `docs/releasing.md`, en "User actions", y en "Validaciones manuales pe
 | M5: endurecer `install.sh` | §8 |
 | M6: qué hacer si se filtra la clave | §10 |
 
+### Re-revisión 2
+
+| Hallazgo | Resuelto en |
+|---|---|
+| I-1: confiar en el certificado de debug deja actualizar la app con la misma clave y heredar el token | §6.1 (SHA-256 del APK, copia privada, aviso en cada `serve`, borrado al verificar una release) |
+| I-2: `Verified{}` se puede construir fuera del paquete | §6.2 y §6.3 (cada función rechaza el valor cero, con test) |
+| I-3: las afirmaciones sobre Android no tienen evidencia grabada | §11 (ruling) y validación 3 del plan: emulador en API 30, 33 y la última, antes de la primera release |
+| I-4: la integridad de `main`, `install.sh` servido desde `main` y el grafo de `needs:` | §4 (grafo y `extra_files`), §8 y §10.4 (ruleset de `main`) |
+| M-1: primer certificado, `META-INF/` a cualquier profundidad, recuento exacto, nombres con NUL o UTF-8 inválido | §5, condiciones 8, 10 y 11 |
+| M-2: salida de `base64` sin límite, plazo propio, `pm path` al final | §6.2, pasos 3 y 6 |
+| M-3: `versionCode` del bloque del paquete | §6.2, paso 5 |
+| M-4: la autoridad del provider | §6.3 |
+| M-5: TOCTOU de `--apk`; fichero de confianza normal y 0600 | §6.1 |
+| M-6: `cmd` con argumentos dinámicos; `pm reset-permissions`, `deviceidle whitelist reset` y `cmd appops reset` | §7. El `dump()` de la app es cosa de M5 (aviso a nautilus-19) |
+| M-7: cachés y contenido de lo que se firma | §4 (sin cachés, artefacto único, rutas absolutas) y §11 (riesgo aceptado) |
+| M-8: PowerShell, bypass de administradores, almacenamiento adoptado y `doctor` | §10, §6.2 y M6c (`doctor`, en `pendientes-m3-m5.md`) |
+
 ## 13. Tests
 
 - **Parser** (`phoneapp/apksig_test.go`), con APK sintéticos de `phoneapp/apktest`:
   - aceptados: v2, v3 y v3.1 buenos, v2 + v3 y los bloques permitidos que no son de firma;
   - rechazados por quién firma o por los firmantes: v2 nuestro + v3 ajeno, dos firmantes con uno ajeno, rotación, sin firmantes y certificado vacío;
   - rechazados por la estructura del bloque: sin bloque, solo relleno, ID desconocido, ID repetido, datos sobrantes y truncado;
-  - rechazados por la estructura del zip: EOCD con comentario, hueco entre el directorio central y el EOCD, localizador ZIP64, `0xffffffff`, tamaños del bloque distintos o fuera de rango, par fuera del bloque, y `META-INF/CERT.SF` o `cert.rsa` en el zip;
+  - rechazados por la estructura del zip: EOCD con comentario, hueco entre el directorio central y el EOCD, localizador ZIP64, `0xffffffff`, tamaños del bloque distintos o fuera de rango, par fuera del bloque, `META-INF/CERT.SF`, `cert.rsa` o `META-INF/a/b.SF`, un recuento de entradas que no cuadra con el directorio central, y nombres con NUL o UTF-8 inválido;
   - además, `FuzzSigners`.
-- **`VerifyInstalled`**, con el adb falso del paquete:
-  - casos buenos: el de release y el de desarrollo;
-  - rechazados: firmante ajeno, `pm path` con dos líneas, con ruta rara o vacío, tamaño de más, `base64` ilegible, versión menor que la mínima y adb que falla. Todos cerrados.
-- **`Handshake` y concesiones:** con un `Verified` cuya ruta ya no da `pm path`, no envían nada.
-- **`Download`:** firmante ajeno, sin certificado (cero peticiones), y que el certificado de desarrollo no valga para una descarga.
+- **`Verify`**, con el adb falso del paquete:
+  - casos buenos: el certificado de release y el APK de desarrollo exacto;
+  - rechazados: firmante ajeno, otro APK con la misma clave que el de desarrollo, `pm path` con dos líneas, con ruta rara, vacío o que cambia durante la lectura, tamaño de más, salida de `base64` más larga de lo esperado o ilegible, `versionCode` solo fuera del bloque del paquete, versión menor que la mínima y adb que falla. Todos cerrados;
+  - la caché: no vuelve a leer la misma ruta, sí una nueva, y no recuerda los fallos de adb.
+- **`Handshake` y concesiones:** con `Verified{}`, o con uno cuya ruta ya no da `pm path`, no envían nada.
+- **`Download`:** firmante ajeno, sin certificado (cero peticiones), y que la confianza de desarrollo no valga para una descarga.
 - **`Install`:** `--no-incremental` y `ErrOtherSigner`, por stdout y por stderr.
 - **`cli`:**
-  - `setupApp`: los mensajes nuevos, que no se pida consentimiento ni se conceda nada a una app no verificada, y `--apk` que confía en el certificado de desarrollo con su aviso;
-  - `startPhoneLink`: no entrega el token a una app no verificada, avisa una vez y repite la comprobación al reconectar;
+  - `setupApp`: los mensajes nuevos, que no se pida consentimiento ni se conceda nada a una app no verificada, `--apk` que confía en el APK de desarrollo con su aviso e instala la copia privada, y un setup con la app de release que borra `trusted-dev-apk`;
+  - `startPhoneLink`: no entrega el token a una app no verificada, avisa una vez y no relee el APK en cada tick; avisa al arrancar si existe `trusted-dev-apk`;
   - `ADBUDDY_RELEASE_URL` con un esquema o host no permitidos.
-- **Clasificador:** las líneas de §7 en `habitual.jsonl`.
+- **Clasificador:** las líneas de §7 en `habitual.jsonl`, también las de argumentos dinámicos con `cmd` y las tres órdenes de *reset*.
 - **Scripts y pipeline:** §9.
 
 ## 14. Coordinación
@@ -320,8 +408,8 @@ Están en `docs/releasing.md`, en "User actions", y en "Validaciones manuales pe
 | `host/internal/phoneapp/**`, `host/cmd/apkcert` | M6a | todo | sí |
 | `host/internal/cli/appsetup.go` y su test | M6a | todo | sí |
 | `host/internal/cli/setup.go` | — | la ayuda de `--apk` | sí |
-| `host/internal/cli/phone.go` y `phone_test.go` | compartido | `connect()` (`VerifyInstalled` + `Handshake` con `Verified`) y el adb falso de los tests | **pedido** |
-| `host/cmd/adbuddy/phone_e2e_test.go` | compartido | reglas `pm path`, `stat` y `base64` y el certificado de desarrollo en el directorio de datos | **pedido** |
+| `host/internal/cli/phone.go` y `phone_test.go` | compartido | `connect()` (`Verify` + `Handshake` con `Verified`, y el aviso de `trusted-dev-apk`) y el adb falso de los tests | sí, en un commit propio |
+| `host/cmd/adbuddy/phone_e2e_test.go` | compartido | reglas `pm path`, `stat` y `base64`, y el APK de desarrollo de confianza en el directorio de datos | sí |
 | `host/internal/classify/special.go` y `testdata/habitual.jsonl` | — | §7 | sí (ruling) |
 | `android/app/build.gradle.kts` | tern (dependencias) | las 2 líneas de versión, en su propio commit | sí |
 | `pendientes-m3-m5.md` | cada uno su sección | solo M6 | sí |
