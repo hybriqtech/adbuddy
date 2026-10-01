@@ -251,7 +251,7 @@ La salida del PTY es un flujo con posición propia, fuera del búfer de eventos:
 M3.0 deja el contrato completo y estos puntos, para que cada hito añada **solo ficheros suyos**:
 
 - **Host:** `cli/phone.go` deja el `switch` y pasa a un registro `map[tipo]manejador`. Los tipos de M2 quedan registrados. Cada hito registra los suyos en su propio fichero (`phone_chat.go`, `phone_agent.go`, `phone_ui.go`) desde una función que llama `newPhoneLink`; esa función la deja M3.0 vacía con un comentario por hito. El `snapshot` se compone igual: cada parte aporta su función.
-- **App:** `BridgeState.apply` pasa a delegar en reductores por área (`ConfirmReducer`, de M2; `ChatReducer`, de M3/M4; `RemoteReducer`, de M5). M3.0 crea los vacíos.
+- **App:** `BridgeState.apply` pasa a delegar en reductores por área (`ConfirmReducer`, de M2; `ChatReducer`, de M3/M4; `RemoteReducer`, de M5). M3.0 crea los vacíos. `Bridge` gana `listen(tipo)` y `listenFrames` (respuestas, flujos y tramas, que el estado no guarda), `send`, `request` (pone un `rid` nuevo y lo devuelve) y `sendFrame`, para que ningún hito tenga que tocar el cliente WebSocket.
 - **Tipos y fixtures:** todos los de §4-§8 quedan escritos en M3.0. Si un hito necesita un campo nuevo, lo añade al tipo, a las dos implementaciones y a la fixture en el mismo commit. Es el único cambio permitido en `protocol.go` y `Protocol.kt`, y la línea que lo haga se lo dice a la otra al integrar.
 
 | Hito | Tipos de los que implementa el comportamiento |
@@ -282,5 +282,6 @@ M3.0 deja el contrato completo y estos puntos, para que cada hito añada **solo 
   - un tipo desconocido con `rid` da `error` `unsupported`, y sin `rid` da `notice`;
   - un `rid` de más de 64 caracteres se descarta;
   - las tramas binarias de ids no aceptados se descartan.
-- **Compatibilidad con M2:** las cadenas de `ProtocolTest.kt` pasan a fixtures (`host/confirm.request.json`…) y la app falsa del e2e sigue pasando sin cambios.
+- **Compatibilidad con M2:** las variantes `@m2` (`host/session.state@m2.json`, `host/snapshot@m2.json` y `app/hello@m2.json`) son lo que envían un host y una app de M2, y la app falsa del e2e sigue pasando sin cambios. `ProtocolTest.kt` se queda como está (prueba campos desconocidos y anidamiento absurdo, no el contrato).
+- **Registro completo:** en Kotlin, un test cruza las constantes de tipo de `Protocol` con el registro, para que una constante nueva sin registrar no se quede sin fixture.
 - **Fuera de M3.0:** el comportamiento de cada tipo se prueba en su hito, con las mismas fixtures como entrada.
