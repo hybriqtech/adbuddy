@@ -57,7 +57,7 @@ const (
 	// KindSend sends a file of the environment to the phone (adbuddy send):
 	// Argv is the path and the caption.
 	KindSend = "send"
-	KindUI = "ui" // an agent's helper: adbuddy screen, tap, type… (M5)
+	KindUI   = "ui" // an agent's helper: adbuddy screen, tap, type… (M5)
 )
 
 // Request is the first frame of every connection.
