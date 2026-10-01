@@ -94,6 +94,9 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 				return Interrupted()
 			}
 
+			// The one writer of config.toml from here on (chat port, the phone's
+			// Tailscale address, the remote mode's expiry).
+			store := newCfgStore(e.dirs.ConfigFile(), e.cfg)
 			runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
 			fmt.Fprintf(app.Stderr, "Waiting for the phone on ADBuddy's adb server (port %d)…\n", e.cfg.ADBServerPort)
 			// The phone that mDNS does not find (Tailscale, another network) is
@@ -166,7 +169,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			session := journal.NewID("s_", time.Now())
 			// Without the app, or if its channel fails, confirmations stay
 			// here: only Ctrl+C stops serve at this step.
-			link, err := startPhoneLink(ctx, app, &e, runner, session, agentName, confirmer)
+			link, err := startPhoneLink(ctx, app, &e, store, runner, session, agentName, confirmer)
 			if err != nil {
 				return err
 			}

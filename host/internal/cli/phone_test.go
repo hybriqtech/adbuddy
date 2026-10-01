@@ -161,6 +161,9 @@ func linkEnv(t *testing.T) *env {
 	return e
 }
 
+// linkStore is the config store of e as serve makes it.
+func linkStore(e *env) *cfgStore { return newCfgStore(e.dirs.ConfigFile(), e.cfg) }
+
 // startLink runs startPhoneLink until ctx ends (the test's end).
 func startLink(t *testing.T, e *env, f *appPhone, fallback confirm.Confirmer) (*phoneLink, *syncBuffer, error) {
 	t.Helper()
@@ -168,7 +171,7 @@ func startLink(t *testing.T, e *env, f *appPhone, fallback confirm.Confirmer) (*
 	t.Cleanup(cancel)
 	var errb syncBuffer
 	app := &App{Stderr: &errb, Stdout: io.Discard, Getenv: func(string) string { return "" }}
-	l, err := startPhoneLink(ctx, app, e, f, "s_1", "claude", fallback)
+	l, err := startPhoneLink(ctx, app, e, linkStore(e), f, "s_1", "claude", fallback)
 	return l, &errb, err
 }
 
@@ -213,7 +216,7 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 func TestChatPortIsChosenOnceAndSaved(t *testing.T) {
 	dir := t.TempDir()
 	e := &env{dirs: paths.Dirs{Config: dir, Data: dir}, cfg: config.Default()}
-	port, err := chatPort(e)
+	port, err := chatPort(linkStore(e))
 	if err != nil || port < 20000 || port > 59999 {
 		t.Fatalf("%d %v", port, err)
 	}
@@ -221,7 +224,7 @@ func TestChatPortIsChosenOnceAndSaved(t *testing.T) {
 	if err != nil || saved.ChatPort != port {
 		t.Fatalf("saved %+v %v", saved, err)
 	}
-	again, err := chatPort(&env{dirs: e.dirs, cfg: saved})
+	again, err := chatPort(newCfgStore(e.dirs.ConfigFile(), saved))
 	if err != nil || again != port {
 		t.Fatalf("second time %d %v", again, err)
 	}
@@ -395,7 +398,7 @@ func TestInterruptedWhileStartingTheLink(t *testing.T) {
 			}}
 			var errb syncBuffer
 			app := &App{Stderr: &errb, Stdout: io.Discard, Getenv: func(string) string { return "" }}
-			_, err := startPhoneLink(ctx, app, e, f, "s_1", "claude", confirm.DenyAll{})
+			_, err := startPhoneLink(ctx, app, e, linkStore(e), f, "s_1", "claude", confirm.DenyAll{})
 			if !hasCode(err, "INTERRUPTED") {
 				t.Fatalf("err %v", err)
 			}

@@ -49,6 +49,9 @@ type phoneLink struct {
 	handlers map[string]func(bridge.Message)
 	// ui is the helpers' channel and the protected apps (phone_ui.go).
 	ui *uiLink
+	// remote keeps the Tailscale address the app reports (phone_remote.go);
+	// always set by startPhoneLink, with no server when the app is off.
+	remote *remoteLink
 
 	mu       sync.Mutex
 	paused   bool
@@ -77,9 +80,9 @@ const maxNotices = 16
 
 // chatPort returns the configured port of the app channel, choosing and
 // saving one on first use (spec §5.2: fixed, so the reverse never changes).
-func chatPort(e *env) (int, error) {
-	if e.cfg.ChatPort != 0 {
-		return e.cfg.ChatPort, nil
+func chatPort(store *cfgStore) (int, error) {
+	if p := store.Config().ChatPort; p != 0 {
+		return p, nil
 	}
 	for range 20 {
 		n, err := rand.Int(rand.Reader, big.NewInt(40000))
@@ -92,8 +95,7 @@ func chatPort(e *env) (int, error) {
 			continue // in use
 		}
 		l.Close()
-		e.cfg.ChatPort = port
-		if err := config.Save(e.dirs.ConfigFile(), e.cfg); err != nil {
+		if err := store.Update(func(c *config.Config) { c.ChatPort = port }); err != nil {
 			return 0, err
 		}
 		return port, nil
@@ -109,9 +111,11 @@ var newToken = bridge.NewToken
 // the app, or when the channel cannot start, it returns a link that
 // confirms with fallback and never pauses, and says why: no failure of the
 // app's channel stops serve. Its only error is Interrupted (ctx ended).
-func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
+func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
 	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf}
 	l.ui = newUILink(protectedAppsPath(e), app.Stderr)
+	l.remote = newRemoteLink(store, a, app.Stderr)
+	l.ui.deviceInfo = l.remote.onDeviceInfo
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
 	if trust := phoneapp.LoadTrust(releaseCert, e.dirs.Data); trust.DevAPK != "" {
 		fmt.Fprintf(app.Stderr, "⚠ ADBuddy trusts a development build of the phone app (SHA-256 %s, from `adbuddy setup --apk`): it gets the token like a release. Delete %s to stop.\n", trust.DevAPK, phoneapp.DevTrustPath(e.dirs.Data))
@@ -134,7 +138,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 		fmt.Fprintln(app.Stderr, "The ADBuddy app is not on the phone: 🔴 confirmations happen here. Run `adbuddy setup` to install it.")
 		return l, nil
 	}
-	port, err := chatPort(e)
+	port, err := chatPort(store)
 	if err != nil {
 		return without("Could not choose a port for the phone app's channel (" + classify.Printable(err.Error()) + "); set chat_port in " + e.dirs.ConfigFile())
 	}
@@ -182,6 +186,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 		},
 	})
 	l.conf = bridge.NewConfirmer(l.srv, fallback)
+	l.remote.setServer(l.srv)
 	l.setAreas(l.confirmArea(), l.chatArea(), l.agentArea(), l.uiArea())
 	l.conf.Notify = func(title string, moved bool) {
 		if moved {

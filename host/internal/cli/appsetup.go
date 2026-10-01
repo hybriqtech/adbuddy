@@ -221,7 +221,10 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 	} else if removed {
 		say("The app on the phone is a release: ADBuddy no longer trusts the development build.\n")
 	}
-	if _, err := chatPort(e); err != nil {
+	store := newCfgStore(e.dirs.ConfigFile(), e.cfg)
+	_, err = chatPort(store)
+	e.cfg.ChatPort = store.Config().ChatPort // setup saves e.cfg later
+	if err != nil {
 		res.note(err.Error())
 		warn("⚠ %v. Setup goes on; the app's chat needs it. "+again+"\n", err)
 	}

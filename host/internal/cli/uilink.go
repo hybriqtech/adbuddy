@@ -45,6 +45,10 @@ type uiLink struct {
 	protected map[string]bool
 	known     bool // a list came from the app, now or in an earlier session
 	warned    bool // said once that there is no list
+
+	// deviceInfo, when set before the server starts, also gets each device.info
+	// (the remote mode's address and port; phone_remote.go).
+	deviceInfo func(bridge.Message, bridge.DeviceInfo)
 }
 
 // uiWaiter is a request waiting for its answer.
@@ -187,11 +191,18 @@ func (u *uiLink) onResponse(m bridge.Message) {
 	}
 }
 
-// onDeviceInfo takes the protected apps the app reports: absent means no
+// onDeviceInfo is the one handler of device.info: it hands the decoded report
+// to the hook, then takes the protected apps the app reports: absent means no
 // change, and a list that does not check is refused whole.
 func (u *uiLink) onDeviceInfo(m bridge.Message) {
 	var info bridge.DeviceInfo
-	if json.Unmarshal(m.Payload, &info) != nil || info.ProtectedApps == nil {
+	if json.Unmarshal(m.Payload, &info) != nil {
+		return
+	}
+	if u.deviceInfo != nil {
+		u.deviceInfo(m, info)
+	}
+	if info.ProtectedApps == nil {
 		return
 	}
 	u.mu.Lock()
