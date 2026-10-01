@@ -1,0 +1,58 @@
+# Releases of the adbuddy host (spec M6a §4). .github/workflows/release.yml
+# runs it on a vX.Y.Z tag; the signed APK joins the same draft later.
+version: 2
+
+project_name: adbuddy
+dist: host/dist
+
+builds:
+  - id: adbuddy
+    dir: host
+    main: ./cmd/adbuddy
+    binary: adbuddy
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/hybriqtech/adbuddy/host/internal/cli.Version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+
+universal_binaries:
+  - id: adbuddy
+    replace: true
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: adbuddy
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+# The installer travels with each release: curl … /releases/latest/download/install.sh | sh
+# (a change on main reaches nobody until the next release; spec M6a §8).
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+
+# No release.github: goreleaser takes owner and name from the git remote,
+# so the pipeline also works in a fork.
+release:
+  draft: true
+  prerelease: auto
+  mode: keep-existing
+  extra_files:
+    - glob: scripts/install.sh

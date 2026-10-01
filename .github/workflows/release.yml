@@ -1,0 +1,207 @@
+name: release
+
+# A tag vX.Y.Z or vX.Y.Z-rc.N builds a DRAFT release: the host binaries
+# (goreleaser) and the signed APK. The APK is built without secrets, signed
+# in a clean job of the "release" environment (a required reviewer, tags v*
+# only) with no third-party code, and checked against the host's pin before
+# it is uploaded. The maintainer publishes the draft by hand
+# (docs/releasing.md). Spec: docs/superpowers/specs/2026-10-01-adbuddy-m6a-releases-design.md.
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUILD_TOOLS: "37.0.0"
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      name: ${{ steps.v.outputs.name }}
+      code: ${{ steps.v.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: v
+        env:
+          TAG: ${{ github.ref_name }}
+        run: sh scripts/release-version.sh "$TAG" >> "$GITHUB_OUTPUT"
+      - name: The tag is on main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::The tag's commit is not on main: nothing is released."
+            exit 1
+          }
+
+  test:
+    needs: version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: host/go.mod
+          cache: false
+      - name: Host tests
+        working-directory: host
+        run: |
+          go vet ./...
+          go test -race -timeout 20m ./...
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@b9bee63ef481cc545e4517ec730544a4d8b1dfa0 # v6.4.0
+        with:
+          gradle-version: "9.8.0"
+          cache-disabled: true
+      - name: Install Android SDK platform 37
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0"
+      - name: App unit tests
+        working-directory: android
+        run: gradle --no-daemon :app:testDebugUnitTest
+
+  host:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: host/go.mod
+          cache: false
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: "v2.18.2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-apk:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@b9bee63ef481cc545e4517ec730544a4d8b1dfa0 # v6.4.0
+        with:
+          gradle-version: "9.8.0"
+          cache-disabled: true
+      - name: Install Android SDK platform 37
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0"
+      - name: Build the release APK (unsigned)
+        working-directory: android
+        env:
+          NAME: ${{ needs.version.outputs.name }}
+          CODE: ${{ needs.version.outputs.code }}
+        run: gradle --no-daemon :app:assembleRelease -Padbuddy.versionName="$NAME" -Padbuddy.versionCode="$CODE"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apk-unsigned
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  # Signs in a clean VM: no checkout, no Gradle, no Go, no caches and no
+  # third-party actions; the secrets only reach the step that signs.
+  sign:
+    needs: build-apk
+    runs-on: ubuntu-latest
+    environment: release
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: apk-unsigned
+          path: ${{ runner.temp }}/in
+      - name: The artifact is one APK
+        run: |
+          [ "$(ls -A "$RUNNER_TEMP/in")" = "app-release-unsigned.apk" ] || { echo "::error::unexpected artifact: $(ls -A "$RUNNER_TEMP/in")"; exit 1; }
+      - name: Install build-tools
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;$BUILD_TOOLS"
+      - name: Sign
+        env:
+          KS: ${{ secrets.ADBUDDY_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ADBUDDY_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KS" ] || [ -z "$KS_PASS" ]; then
+            echo "::error::The release environment has no ADBUDDY_KEYSTORE_B64 or ADBUDDY_KEYSTORE_PASSWORD: see docs/releasing.md. The draft release has no APK."
+            exit 1
+          fi
+          umask 077
+          ks="$RUNNER_TEMP/release.p12"
+          trap 'rm -f "$ks"' EXIT
+          printf '%s' "$KS" | base64 -d > "$ks"
+          bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
+          mkdir -p "$RUNNER_TEMP/out"
+          "$bt/zipalign" -f 4 "$RUNNER_TEMP/in/app-release-unsigned.apk" "$RUNNER_TEMP/aligned.apk"
+          "$bt/apksigner" sign --ks "$ks" --ks-type PKCS12 --ks-pass env:KS_PASS --ks-key-alias adbuddy \
+            --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
+            --out "$RUNNER_TEMP/out/adbuddy.apk" "$RUNNER_TEMP/aligned.apk"
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.p12"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apk-signed
+          path: ${{ runner.temp }}/out/adbuddy.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-apk:
+    needs: [host, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: host/go.mod
+          cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: apk-signed
+          path: signed
+      - name: Install build-tools
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;$BUILD_TOOLS"
+      - name: Check the certificate against the host's pin
+        run: APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" sh scripts/release-cert.sh signed/adbuddy.apk --pinned
+      - name: Upload the APK to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd signed
+          sha256sum adbuddy.apk > adbuddy.apk.sha256
+          gh release upload "$TAG" adbuddy.apk adbuddy.apk.sha256 --repo "$GITHUB_REPOSITORY"
