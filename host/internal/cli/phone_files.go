@@ -69,6 +69,8 @@ type upload struct {
 	h               hash.Hash
 	last            time.Time
 	bad             bool               // dropped: more data than it declared
+	broken          bool               // dropped: writing to disk failed
+	ready           bool               // h covers what was already there; frames wait for it
 	done            *bridge.Attachment // finished
 }
 
@@ -141,6 +143,9 @@ func validSHA(s string) (string, bool) {
 	return strings.ToLower(s), true
 }
 
+// thumbnailOf makes the thumbnail of a file, a variable for the tests.
+var thumbnailOf = thumbnail
+
 // ---- uploads ----
 
 // onAttachBegin starts or resumes an upload.
@@ -181,13 +186,44 @@ func (l *phoneLink) onAttachBegin(m bridge.Message) {
 // beginUpload does the work of attach.begin and returns the offset to go on
 // from, or an error code and its text.
 func (l *phoneLink) beginUpload(ab bridge.AttachBegin) (int64, string, string) {
-	ws, _ := l.workspaceAndADB()
-	if ws == "" {
-		return 0, bridge.CodeFailed, "The host has no environment to keep files in."
-	}
 	fs := &l.files
 	fs.upMu.Lock()
+	u, offset, code, text := l.beginUploadLocked(ab)
+	fs.upMu.Unlock()
+	if code != "" || u == nil || u.ready {
+		return offset, code, text
+	}
+	// A resumption hashes what is already there once, without the mutex (it
+	// can be 200 MiB); the entry takes no frames until it is ready.
+	h := sha256.New()
+	_, err := io.Copy(h, io.NewSectionReader(u.f, 0, offset))
+	fs.upMu.Lock()
 	defer fs.upMu.Unlock()
+	if err != nil {
+		if fs.uploads[ab.ID] == u {
+			delete(fs.uploads, ab.ID)
+			u.f.Close()
+		}
+		return 0, bridge.CodeFailed, "Could not read what was already uploaded."
+	}
+	if fs.uploads[ab.ID] != u {
+		// Another connection took over meanwhile.
+		return 0, bridge.CodeFailed, "The upload was interrupted."
+	}
+	u.h = h
+	u.ready = true
+	return offset, "", ""
+}
+
+// beginUploadLocked is the part of beginUpload that runs with upMu held. It
+// returns the new upload, or nil when it answers by itself (an error, or a
+// retry of a finished one).
+func (l *phoneLink) beginUploadLocked(ab bridge.AttachBegin) (*upload, int64, string, string) {
+	ws, _ := l.workspaceAndADB()
+	if ws == "" {
+		return nil, 0, bridge.CodeFailed, "The host has no environment to keep files in."
+	}
+	fs := &l.files
 	if fs.uploads == nil {
 		fs.uploads = map[string]*upload{}
 	}
@@ -196,20 +232,20 @@ func (l *phoneLink) beginUpload(ab bridge.AttachBegin) (int64, string, string) {
 	// Finished before: the app lost the answer and asks again.
 	if a, ok := l.chat.attachments.get(ab.ID); ok {
 		if a.SHA256 != ab.SHA256 {
-			return 0, bridge.CodeInvalid, "An attachment with this id already exists with other content."
+			return nil, 0, bridge.CodeInvalid, "An attachment with this id already exists with other content."
 		}
 		if old := fs.uploads[ab.ID]; old != nil && old.f != nil {
 			old.f.Close()
 		}
 		att := a.Attachment
 		fs.uploads[ab.ID] = &upload{sha: ab.SHA256, size: a.Size, last: now, done: &att}
-		return a.Size, "", ""
+		return nil, a.Size, "", ""
 	}
 
 	inbox := filepath.Join(ws, "inbox")
 	partials := filepath.Join(inbox, partialDir)
 	if err := os.MkdirAll(partials, 0o700); err != nil {
-		return 0, bridge.CodeFailed, "Could not create the inbox folder."
+		return nil, 0, bridge.CodeFailed, "Could not create the inbox folder."
 	}
 	l.dropStaleLocked(partials, now)
 	if old := fs.uploads[ab.ID]; old != nil {
@@ -226,27 +262,21 @@ func (l *phoneLink) beginUpload(ab bridge.AttachBegin) (int64, string, string) {
 		}
 	}
 	if running >= maxUploads {
-		return 0, bridge.CodeBusy, "Too many uploads at once: wait for one to finish."
+		return nil, 0, bridge.CodeBusy, "Too many uploads at once: wait for one to finish."
 	}
 	if inboxUsedLocked(inbox, ab.ID, fs.uploads)+ab.Size > inboxQuota {
-		return 0, bridge.CodeTooLarge, "The inbox is full (2 GiB): free space by deleting files from the inbox folder of the environment."
+		return nil, 0, bridge.CodeTooLarge, "The inbox is full (2 GiB): free space by deleting files from the inbox folder of the environment."
 	}
 
 	data := filepath.Join(partials, ab.ID)
 	meta := filepath.Join(partials, ab.ID+".json")
 	f, offset, err := openPartial(data, meta, ab)
 	if err != nil {
-		return 0, bridge.CodeFailed, "Could not keep the upload."
+		return nil, 0, bridge.CodeFailed, "Could not keep the upload."
 	}
-	h := sha256.New()
-	if offset > 0 {
-		if _, err := io.Copy(h, io.NewSectionReader(f, 0, offset)); err != nil {
-			f.Close()
-			return 0, bridge.CodeFailed, "Could not read what was already uploaded."
-		}
-	}
-	fs.uploads[ab.ID] = &upload{sha: ab.SHA256, name: ab.Name, mime: ab.MIME, size: ab.Size, f: f, written: offset, h: h, last: now}
-	return offset, "", ""
+	u := &upload{sha: ab.SHA256, name: ab.Name, mime: ab.MIME, size: ab.Size, f: f, written: offset, h: sha256.New(), last: now, ready: offset == 0}
+	fs.uploads[ab.ID] = u
+	return u, offset, "", ""
 }
 
 // openPartial opens inbox/.partial/<id> to write: the one a previous upload
@@ -384,7 +414,7 @@ func (l *phoneLink) onUploadFrame(fid bridge.FrameID, offset int64, data []byte)
 	defer fs.upMu.Unlock()
 	id := fid.String()
 	u := fs.uploads[id]
-	if u == nil || u.done != nil || u.bad || u.f == nil || offset != u.written {
+	if u == nil || u.done != nil || u.bad || u.broken || !u.ready || u.f == nil || offset != u.written {
 		return
 	}
 	if u.written+int64(len(data)) > u.size {
@@ -400,7 +430,7 @@ func (l *phoneLink) onUploadFrame(fid bridge.FrameID, offset int64, data []byte)
 		return
 	}
 	if _, err := u.f.WriteAt(data, offset); err != nil {
-		u.bad = true
+		u.broken = true
 		u.f.Close()
 		u.f = nil
 		return
@@ -424,7 +454,12 @@ func (l *phoneLink) onAttachEnd(m bridge.Message) {
 		l.fail(m, bridge.CodeInvalid, "The attachment has no valid id.")
 		return
 	}
-	att, code, text := l.endUpload(ae.ID)
+	att, final, code, text := l.endUpload(ae.ID)
+	if code == "" && final != "" {
+		// Outside the mutex: decoding a large image takes seconds.
+		att.Thumb = thumbnailOf(filepath.Join(l.inboxDir(), final))
+		l.finishUpload(att, final)
+	}
 	if code != "" {
 		l.fail(m, code, text)
 		return
@@ -432,41 +467,61 @@ func (l *phoneLink) onAttachEnd(m bridge.Message) {
 	_ = l.srv.Reply(m, bridge.TypeAttachDone, bridge.AttachDone{Attachment: att})
 }
 
-func (l *phoneLink) endUpload(id string) (bridge.Attachment, string, string) {
+// inboxDir is inbox/ of the environment ("" without one).
+func (l *phoneLink) inboxDir() string {
+	ws, _ := l.workspaceAndADB()
+	if ws == "" {
+		return ""
+	}
+	return filepath.Join(ws, "inbox")
+}
+
+// endUpload checks a finished upload and moves it to its final name in
+// inbox/. It returns the attachment (without thumb) and the final name; for a
+// retry of a finished one the attachment is the existing one and the name "".
+// The move (a copy where hard links are not possible) runs without upMu.
+func (l *phoneLink) endUpload(id string) (bridge.Attachment, string, string, string) {
 	ws, _ := l.workspaceAndADB()
 	fs := &l.files
 	fs.upMu.Lock()
-	defer fs.upMu.Unlock()
 	u := fs.uploads[id]
 	if u == nil || ws == "" {
-		return bridge.Attachment{}, bridge.CodeNotFound, "There is no upload with this id."
+		fs.upMu.Unlock()
+		return bridge.Attachment{}, "", bridge.CodeNotFound, "There is no upload with this id."
 	}
 	if u.done != nil {
-		return *u.done, "", ""
+		fs.upMu.Unlock()
+		return *u.done, "", "", ""
 	}
 	inbox := filepath.Join(ws, "inbox")
 	partials := filepath.Join(inbox, partialDir)
-	discard := func() {
+	fail := func(code, text string) (bridge.Attachment, string, string, string) {
 		if u.f != nil {
 			u.f.Close()
 		}
 		os.Remove(filepath.Join(partials, id))
 		os.Remove(filepath.Join(partials, id+".json"))
 		delete(fs.uploads, id)
+		fs.upMu.Unlock()
+		return bridge.Attachment{}, "", code, text
 	}
-	if u.bad {
-		discard()
-		return bridge.Attachment{}, bridge.CodeInvalid, "The upload carried more data than it declared."
-	}
-	if u.written != u.size || hex.EncodeToString(u.h.Sum(nil)) != u.sha {
-		discard()
-		return bridge.Attachment{}, bridge.CodeChecksum, "The file did not arrive intact: send it again."
+	switch {
+	case u.bad:
+		return fail(bridge.CodeInvalid, "The upload carried more data than it declared.")
+	case u.broken:
+		return fail(bridge.CodeFailed, "Could not write the upload to the disk of the PC.")
+	case !u.ready || u.written != u.size || hex.EncodeToString(u.h.Sum(nil)) != u.sha:
+		return fail(bridge.CodeChecksum, "The file did not arrive intact: send it again.")
 	}
 	if err := u.f.Close(); err != nil {
-		discard()
-		return bridge.Attachment{}, bridge.CodeFailed, "Could not save the file."
+		return fail(bridge.CodeFailed, "Could not save the file.")
 	}
 	u.f = nil
+	// Out of the map while it moves: nothing else touches it (the reader of
+	// this connection is the one here).
+	delete(fs.uploads, id)
+	fs.upMu.Unlock()
+
 	name := safeName(u.name)
 	ext := filepath.Ext(name)
 	if ext == name {
@@ -474,19 +529,28 @@ func (l *phoneLink) endUpload(id string) (bridge.Attachment, string, string) {
 	}
 	stem := filesNow().Format("20060102-150405") + "-" + strings.TrimSuffix(name, ext)
 	final, err := moveExclusive(filepath.Join(partials, id), inbox, stem, ext)
-	if err != nil {
-		discard()
-		return bridge.Attachment{}, bridge.CodeFailed, "Could not save the file."
-	}
 	os.Remove(filepath.Join(partials, id+".json"))
+	if err != nil {
+		os.Remove(filepath.Join(partials, id))
+		return bridge.Attachment{}, "", bridge.CodeFailed, "Could not save the file."
+	}
 	mime := u.mime
 	if mime == "" {
 		mime = "application/octet-stream"
 	}
-	att := bridge.Attachment{ID: id, Name: name, MIME: mime, Size: u.size, SHA256: u.sha, Thumb: thumbnail(filepath.Join(inbox, final))}
+	return bridge.Attachment{ID: id, Name: name, MIME: mime, Size: u.size, SHA256: u.sha}, final, "", ""
+}
+
+// finishUpload registers a filed upload, with its thumbnail, and keeps it as
+// done for a retry.
+func (l *phoneLink) finishUpload(att bridge.Attachment, final string) {
 	l.chat.attachments.put(att, "inbox/"+final)
-	fs.uploads[id] = &upload{sha: u.sha, size: u.size, last: filesNow(), done: &att}
-	return att, "", ""
+	l.files.upMu.Lock()
+	if l.files.uploads == nil {
+		l.files.uploads = map[string]*upload{}
+	}
+	l.files.uploads[att.ID] = &upload{sha: att.SHA256, size: att.Size, last: filesNow(), done: &att}
+	l.files.upMu.Unlock()
 }
 
 // ---- downloads ----
@@ -544,14 +608,25 @@ func (l *phoneLink) onFileGet(m bridge.Message) {
 // openStored opens the regular file of an attachment, whose path is relative
 // to the environment ("inbox/…" or "outbox/…").
 func openStored(ws, rel string) (*os.File, error) {
-	if ws == "" || !(strings.HasPrefix(rel, "inbox/") || strings.HasPrefix(rel, "outbox/")) || strings.Contains(rel, "..") {
+	local := filepath.FromSlash(rel)
+	if ws == "" || !(strings.HasPrefix(rel, "inbox/") || strings.HasPrefix(rel, "outbox/")) || !filepath.IsLocal(local) {
 		return nil, os.ErrInvalid
 	}
-	f, err := os.Open(filepath.Join(ws, filepath.FromSlash(rel)))
+	path := filepath.Join(ws, local)
+	// A link is never followed: Lstat says what is there, and the opened file
+	// must be that very one.
+	lst, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
-	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+	if !lst.Mode().IsRegular() {
+		return nil, os.ErrInvalid
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() || !os.SameFile(lst, st) {
 		f.Close()
 		return nil, os.ErrInvalid
 	}
@@ -710,7 +785,7 @@ func (l *phoneLink) capture() (bridge.Attachment, string) {
 	sum := sha256.Sum256(img)
 	att := bridge.Attachment{
 		ID: bridge.FrameID(idb).String(), Name: "captura.png", MIME: "image/png", Size: int64(len(img)),
-		SHA256: hex.EncodeToString(sum[:]), Thumb: thumbnail(filepath.Join(inbox, final)),
+		SHA256: hex.EncodeToString(sum[:]), Thumb: thumbnailOf(filepath.Join(inbox, final)),
 	}
 	l.chat.attachments.put(att, "inbox/"+final)
 	return att, ""

@@ -25,7 +25,7 @@ import (
 
 const (
 	maxNameBytes  = 100       // of a saved name, without the date
-	thumbWidth    = 256       // px
+	thumbSide     = 256       // px, the longer side
 	maxThumbBytes = 16 << 10  // protocol spec §4.2
 	maxThumbPixel = 40 << 20  // 40 Mpx: more is not decoded at all
 	fallbackName  = "fichero" // what an empty or dotted name becomes
@@ -198,28 +198,32 @@ func thumbnail(path string) string {
 	if err != nil {
 		return ""
 	}
-	w := min(src.Bounds().Dx(), thumbWidth)
+	side := min(max(src.Bounds().Dx(), src.Bounds().Dy()), thumbSide)
 	for range 6 {
-		small := scaleTo(src, w)
+		small := scaleTo(src, side)
 		for _, q := range []int{80, 60, 40, 25, 10} {
 			var b bytes.Buffer
 			if jpeg.Encode(&b, small, &jpeg.Options{Quality: q}) == nil && b.Len() <= maxThumbBytes {
 				return base64.StdEncoding.EncodeToString(b.Bytes())
 			}
 		}
-		w /= 2
-		if w < 8 {
+		side /= 2
+		if side < 8 {
 			break
 		}
 	}
 	return ""
 }
 
-// scaleTo is src reduced to width w, over white (a JPEG has no transparency),
-// sampling a small grid of points of src for each pixel.
-func scaleTo(src image.Image, w int) *image.RGBA {
+// scaleTo is src reduced so that its longer side is side pixels (a smaller
+// image is not enlarged), over white (a JPEG has no transparency), sampling a
+// small grid of points of src for each pixel.
+func scaleTo(src image.Image, side int) *image.RGBA {
 	sb := src.Bounds()
-	h := max(1, sb.Dy()*w/sb.Dx())
+	w, h := sb.Dx(), sb.Dy()
+	if long := max(w, h); long > side {
+		w, h = max(1, w*side/long), max(1, h*side/long)
+	}
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
 	draw.Draw(dst, dst.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
 	const grid = 3

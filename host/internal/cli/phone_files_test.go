@@ -397,6 +397,10 @@ func TestUploadFramesThatDoNotBelongAreDropped(t *testing.T) {
 	sendFrame(t, r.c, id, 0, data[:200])      // again: not where the file stands
 	sendFrame(t, r.c, id, 300, data[300:400]) // skipping 200..300
 	sendFrame(t, r.c, id, 200, data[200:300])
+	// A round trip on the old connection: its frames were all processed (the
+	// reader takes messages in order) before the new connection comes.
+	r.begin(t, "r_sync", fileID(50), "z", testBytes(5))
+	wantReady(t, readApp(t, r.c), "r_sync", 0)
 	// Another connection: the uploads of this one are forgotten, so a frame
 	// of the old one that is still on its way is dropped.
 	r.c = r.connect(t)
@@ -1125,4 +1129,116 @@ func TestPartialThatIsAFolderIsReplaced(t *testing.T) {
 	sendData(t, r.c, id, data, 0, 50)
 	sendApp(t, r.c, bridge.TypeAttachEnd, "r_2", bridge.AttachEnd{ID: id})
 	wantDone(t, readApp(t, r.c), "r_2")
+}
+
+// ---- round 1 of the review ----
+
+// Names with two dots in a row are fine: they upload, register and download
+// (only a path element that is exactly ".." is refused).
+func TestNamesWithDoubleDotsDownload(t *testing.T) {
+	r := newFilesRig(t, nil)
+	for i, n := range []string{"a..b.txt", "informe..v2.pdf", "...x"} {
+		data := testBytes(300 + i)
+		att := r.upload(t, fileID(10+i), n, data)
+		sendApp(t, r.c, bridge.TypeFileGet, "r_g", bridge.FileGet{ID: att.ID})
+		g := readDownload(t, r.c, att.ID, 0)
+		wantType(t, *g.end, "r_g", bridge.TypeFileEnd)
+		if !bytes.Equal(g.data, data) {
+			t.Fatalf("%s: other content", n)
+		}
+	}
+	// A real ".." element is refused, whatever the registry says.
+	r.l.chat.attachments.put(bridge.Attachment{ID: fileID(1), Size: 5}, "inbox/../x")
+	sendApp(t, r.c, bridge.TypeFileGet, "r_x", bridge.FileGet{ID: fileID(1)})
+	wantFileError(t, readApp(t, r.c), "r_x", bridge.CodeFailed)
+}
+
+// What is registered must be a regular file: a folder, and a link (Unix) that
+// points elsewhere, are not served.
+func TestDownloadNeverFollowsLinks(t *testing.T) {
+	r := newFilesRig(t, nil)
+	os.MkdirAll(filepath.Join(r.ws, "outbox", "dir"), 0o700)
+	r.l.chat.attachments.put(bridge.Attachment{ID: fileID(1), Size: 5}, "outbox/dir")
+	sendApp(t, r.c, bridge.TypeFileGet, "r_1", bridge.FileGet{ID: fileID(1)})
+	wantFileError(t, readApp(t, r.c), "r_1", bridge.CodeFailed)
+
+	target := filepath.Join(t.TempDir(), "secret")
+	os.WriteFile(target, []byte("secret"), 0o600)
+	if err := os.Symlink(target, filepath.Join(r.ws, "outbox", "link")); err != nil {
+		t.Skipf("no symbolic links here: %v", err)
+	}
+	r.l.chat.attachments.put(bridge.Attachment{ID: fileID(2), Size: 6}, "outbox/link")
+	sendApp(t, r.c, bridge.TypeFileGet, "r_2", bridge.FileGet{ID: fileID(2)})
+	wantFileError(t, readApp(t, r.c), "r_2", bridge.CodeFailed)
+}
+
+// The thumbnail is made without upMu: the frames of the other uploads, which
+// take it, are not held while a large image is decoded.
+func TestThumbnailIsMadeWithoutTheMutex(t *testing.T) {
+	r := newFilesRig(t, nil)
+	locked := make(chan bool, 4)
+	setVar(t, &thumbnailOf, func(path string) string {
+		if r.l.files.upMu.TryLock() {
+			r.l.files.upMu.Unlock()
+			locked <- false
+		} else {
+			locked <- true
+		}
+		return thumbnail(path)
+	})
+	att := r.upload(t, fileID(1), "a.png", pngData(40, 40))
+	if att.Thumb == "" {
+		t.Fatal("no thumbnail")
+	}
+	if held := <-locked; held {
+		t.Fatal("the thumbnail was made with the uploads' mutex held")
+	}
+	// And the retry of that upload still gets the attachment, thumb included.
+	r.begin(t, "r_2", fileID(1), "a.png", pngData(40, 40))
+	wantReady(t, readApp(t, r.c), "r_2", int64(att.Size))
+	sendApp(t, r.c, bridge.TypeAttachEnd, "r_3", bridge.AttachEnd{ID: fileID(1)})
+	if again := wantDone(t, readApp(t, r.c), "r_3"); again != att {
+		t.Fatalf("%+v, want %+v", again, att)
+	}
+}
+
+// A resumption does not take frames until its hash covers what was there, and
+// the hash is right: a resumed upload verifies.
+func TestResumedUploadHashIsRightWithoutTheMutex(t *testing.T) {
+	r := newFilesRig(t, nil)
+	data := testBytes(5000)
+	id := fileID(1)
+	r.begin(t, "r_1", id, "a.bin", data)
+	wantReady(t, readApp(t, r.c), "r_1", 0)
+	sendData(t, r.c, id, data[:3000], 0, 1000)
+	r.begin(t, "r_2", id, "a.bin", data)
+	wantReady(t, readApp(t, r.c), "r_2", 3000)
+	if u := r.l.files.uploads[id]; u == nil || !u.ready {
+		t.Fatalf("upload %+v", u)
+	}
+	sendData(t, r.c, id, data, 3000, 1000)
+	sendApp(t, r.c, bridge.TypeAttachEnd, "r_3", bridge.AttachEnd{ID: id})
+	wantDone(t, readApp(t, r.c), "r_3")
+}
+
+// A failed write is not "more data than declared": attach.end says failed, in
+// words that fit.
+func TestUploadWriteFailureIsFailed(t *testing.T) {
+	r := newFilesRig(t, nil)
+	data := testBytes(100)
+	id := fileID(1)
+	r.begin(t, "r_1", id, "a.bin", data)
+	wantReady(t, readApp(t, r.c), "r_1", 0)
+	r.l.files.upMu.Lock()
+	r.l.files.uploads[id].f.Close() // the next write fails
+	r.l.files.upMu.Unlock()
+	sendFrame(t, r.c, id, 0, data)
+	sendApp(t, r.c, bridge.TypeAttachEnd, "r_2", bridge.AttachEnd{ID: id})
+	er := wantFileError(t, readApp(t, r.c), "r_2", bridge.CodeFailed)
+	if strings.Contains(er.Text, "more data") || !strings.Contains(er.Text, "disk") {
+		t.Fatalf("text %q", er.Text)
+	}
+	if p := r.partials(t); len(p) != 0 {
+		t.Fatalf("left %v", p)
+	}
 }

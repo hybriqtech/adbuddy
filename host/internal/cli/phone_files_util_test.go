@@ -185,3 +185,22 @@ func TestThumbnailOfAHugePNGIsNotDecoded(t *testing.T) {
 		t.Fatal("a thumbnail of 100000x100000")
 	}
 }
+
+// The longer side is the one that is reduced: a very tall image does not
+// become 256 x N.
+func TestThumbnailOfATallImage(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "tall.png")
+	writeImage(t, p, 100, 2000, "png")
+	raw, err := base64.StdEncoding.DecodeString(thumbnail(p))
+	if err != nil || len(raw) == 0 || len(raw) > 16<<10 {
+		t.Fatalf("%d bytes %v", len(raw), err)
+	}
+	img, err := jpeg.Decode(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := img.Bounds(); b.Dy() != 256 || b.Dx() != 12 {
+		t.Fatalf("%v, want 12x256", b)
+	}
+}
