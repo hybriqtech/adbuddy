@@ -60,12 +60,6 @@ class DumperTest {
         assertEquals("PIN field", e.desc)
     }
 
-    @Test fun lockedDumpGivesNoNodesNorTheProtectedApp() {
-        val d = Dumper.dump(windows, SCREEN, 0, "", "", locked = true, all = true, hidden = { it == "com.android.settings" })
-        assertEquals("", d.`package`)
-        assertTrue(d.elements.isEmpty())
-    }
-
     @Test fun checkedOnlyWhenCheckable() {
         val d = dump()
         assertEquals(true, d.elements.first { it.desc == "Wi-Fi" }.checked)

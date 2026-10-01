@@ -175,10 +175,10 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
         return n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }
 
-    override fun acting(mark: Box?) {
+    override fun acting(mark: Box?): Boolean {
         val app = application as AdbuddyApp
-        if (app.bridge.state.value.sessionState.paused) return
-        overlay?.show(mark)
+        if (app.bridge.state.value.sessionState.paused) return true // the executor refuses while paused
+        return overlay?.show(mark) ?: false
     }
 
     companion object {

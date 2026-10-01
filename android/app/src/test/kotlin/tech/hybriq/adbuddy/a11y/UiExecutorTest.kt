@@ -26,6 +26,7 @@ class UiExecutorTest {
         var clickWorks: Boolean = true,
         var tapWorks: Boolean = true,
         var afterClick: (() -> Unit)? = null,
+        var actingWorks: Boolean = true,
     ) : Screen {
         val did = mutableListOf<String>()
         override fun windows() = windows
@@ -37,8 +38,9 @@ class UiExecutorTest {
         override fun tap(x: Int, y: Int): Boolean = tapWorks.also { did += "tap $x,$y" }
         override fun focusedInput() = focused
         override fun setText(node: UiNode, text: String): Boolean = true.also { did += "setText $text" }
-        override fun acting(mark: Box?) {
+        override fun acting(mark: Box?): Boolean {
             did += "acting $mark"
+            return actingWorks
         }
     }
 
@@ -296,6 +298,51 @@ class UiExecutorTest {
         assertEquals("", d["package"]!!.jsonPrimitive.content)
         assertEquals("", d["activity"]!!.jsonPrimitive.content)
         assertFalse(r.result.toString().contains("com.example.bank"))
+    }
+
+    @Test fun anExpiresAtOutOfRangeOrGarbageIsInvalid() {
+        assertEquals(ErrorCode.INVALID, error(x.run(req(UiOp.DUMP, expires = "+999999999-01-01T00:00:00Z"))))
+        assertEquals(ErrorCode.INVALID, error(x.run(req(UiOp.DUMP, expires = "-999999999-01-01T00:00:00Z"))))
+        assertEquals(ErrorCode.INVALID, error(x.run(req(UiOp.DUMP, expires = "garbage"))))
+        val sentBefore = sent.size
+        x.onMessage(raw("""{"id":"u_5","op":"dump","args":{},"expiresAt":"+999999999-01-01T00:00:00Z"}"""))
+        assertEquals(sentBefore + 1, sent.size)
+        assertEquals(ErrorCode.INVALID, error(sent.last()))
+    }
+
+    @Test fun aSendThatThrowsDoesNotEscapeTheExecutor() {
+        val failing = UiExecutor({ screen }, { throw IllegalStateException("socket closed") }, { now }, { it in protected }, { question }, { paused }, { false }, { it.run() })
+        failing.onMessage(raw("""{"id":"u_6","op":"foreground","args":{},"expiresAt":"2026-10-01T10:00:10Z"}"""))
+        failing.onMessage(raw("""{"id":"u_7","op":"dump","args":{},"expiresAt":"2026-10-01T10:00:10Z","future":1}"""))
+    }
+
+    @Test fun aRunThatThrowsAnswersFailed() {
+        val broken = UiExecutor({ screen }, { sent += it }, { throw IllegalStateException("clock") }, { false }, { false }, { false }, { false }, { it.run() })
+        broken.onMessage(raw("""{"id":"u_8","op":"dump","args":{},"expiresAt":"2026-10-01T10:00:10Z"}"""))
+        assertEquals(listOf("u_8" to ErrorCode.FAILED), sent.map { it.id to error(it) })
+    }
+
+    @Test fun anIdThatIsTooLongIsNotAnswered() {
+        val ok = "a".repeat(UiExecutor.MAX_ID)
+        x.onMessage(raw("""{"id":"$ok","op":"dump","args":{},"expiresAt":"2026-10-01T10:00:10Z","future":1}"""))
+        assertEquals(listOf(ok), sent.map { it.id })
+        x.onMessage(raw("""{"id":"${ok}a","op":"dump","args":{},"expiresAt":"2026-10-01T10:00:10Z","future":1}"""))
+        assertEquals(1, sent.size)
+    }
+
+    @Test fun withoutTheNoticeClickAndSetTextDoNotAct() {
+        val msg = "ADBuddy can't show the on-screen notice, so it won't act. Ask the user to do this part."
+        val field = UiNode(pkg = "com.android.settings", cls = "android.widget.EditText", bounds = Box(0, 0, 10, 10), editable = true, focused = true)
+        val s = FakeScreen(actingWorks = false, focused = field)
+        screen = s
+        for (r in listOf(req(UiOp.CLICK, obj("text" to "Network & internet")), req(UiOp.CLICK, obj("x" to 540, "y" to 1200)), req(UiOp.SET_TEXT, obj("text" to "hi")))) {
+            val a = x.run(r)
+            assertEquals(ErrorCode.FAILED, error(a))
+            assertEquals(msg, a.error!!.text)
+        }
+        assertFalse(s.did.any { it.startsWith("click") || it.startsWith("tap") || it.startsWith("setText") })
+        assertTrue(x.run(req(UiOp.DUMP)).ok)
+        assertTrue(x.run(req(UiOp.FOREGROUND)).ok)
     }
 
     @Test fun neverTwiceTheSameId() {

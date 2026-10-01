@@ -16,6 +16,8 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 import tech.hybriq.adbuddy.R
 
 /**
@@ -31,21 +33,35 @@ class Overlay(private val service: AccessibilityService, private val onPause: ()
     @Volatile private var pill: TextView? = null
     private val hider = Runnable { remove() }
 
-    /** Shows the overlay (from any thread), with a mark when there is one. */
-    fun show(mark: Box?) {
-        main.post {
-            if (frame == null) {
-                try {
-                    add()
-                } catch (e: RuntimeException) {
-                    Log.w(TAG, "overlay", e)
-                    return@post
-                }
-            }
-            mark?.let { frame?.mark(it) }
-            main.removeCallbacks(hider)
-            main.postDelayed(hider, HIDE_AFTER_MS)
+    /**
+     * Shows the overlay (from any thread but the main one), with a mark when
+     * there is one, and waits for it. false when the frame and the pill could
+     * not be put on screen: the agent must not act without them.
+     */
+    fun show(mark: Box?): Boolean {
+        val task = FutureTask { showNow(mark) }
+        main.post(task)
+        return try {
+            task.get(SHOW_WAIT_MS, TimeUnit.MILLISECONDS)
+        } catch (e: Exception) {
+            Log.e(TAG, "overlay did not show", e)
+            false
         }
+    }
+
+    private fun showNow(mark: Box?): Boolean {
+        if (frame == null) {
+            try {
+                add()
+            } catch (e: RuntimeException) {
+                Log.e(TAG, "overlay", e)
+                return false
+            }
+        }
+        mark?.let { frame?.mark(it) }
+        main.removeCallbacks(hider)
+        main.postDelayed(hider, HIDE_AFTER_MS)
+        return true
     }
 
     /** Hides the overlay (from any thread). */
@@ -151,6 +167,7 @@ class Overlay(private val service: AccessibilityService, private val onPause: ()
     private companion object {
         const val TAG = "ADBuddyOverlay"
         const val HIDE_AFTER_MS = 4_000L
+        const val SHOW_WAIT_MS = 2_000L
         const val MARK_MS = 600L
     }
 }

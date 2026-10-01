@@ -1,7 +1,6 @@
 package tech.hybriq.adbuddy.a11y
 
 import java.time.Instant
-import java.time.format.DateTimeParseException
 import java.util.concurrent.Executor
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
@@ -45,8 +44,8 @@ interface Screen {
     /** ACTION_SET_TEXT on node; false when it did not happen. */
     fun setText(node: UiNode, text: String): Boolean
 
-    /** The agent is acting: show the overlay, with a mark where it touches (null: no mark). */
-    fun acting(mark: Box?)
+    /** The agent is acting: show the overlay, with a mark where it touches (null: no mark). false when the notice could not be shown: the agent must not act. */
+    fun acting(mark: Box?): Boolean
 }
 
 /**
@@ -81,26 +80,45 @@ class UiExecutor(
             synchronized(seen) {
                 if (seen.put(id, true) != null) return
             }
-            executor.execute { send(UiResponse(id, ok = false, error = ErrorReply(ErrorCode.INVALID, "The request is not valid."))) }
+            executor.execute { deliver(UiResponse(id, ok = false, error = ErrorReply(ErrorCode.INVALID, "The request is not valid."))) }
             return
         }
         synchronized(seen) {
             if (seen.put(r.id, true) != null) return
         }
-        executor.execute { send(run(r)) }
+        executor.execute { answer(r) }
     }
 
-    /** The id of a request that did not decode: a minimal parse, a non-empty string or null. */
+    /** Runs r and sends its answer; nothing escapes (an exception on the helpers thread would kill the app). */
+    private fun answer(r: UiRequest) {
+        val response = try {
+            run(r)
+        } catch (e: RuntimeException) {
+            fail(r, ErrorCode.FAILED, "The app could not do it: ${e.javaClass.simpleName}.")
+        }
+        deliver(response)
+    }
+
+    private fun deliver(response: UiResponse) {
+        try {
+            send(response)
+        } catch (e: RuntimeException) {
+            // The channel failed: there is nobody left to tell.
+        }
+    }
+
+    /** The id of a request that did not decode: a minimal parse, a non-empty string of at most MAX_ID characters, or null. */
     private fun rescueId(payload: JsonElement): String? {
         val id = (payload as? JsonObject)?.get("id") as? JsonPrimitive ?: return null
-        return id.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
+        return id.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() && it.length <= MAX_ID }
     }
 
     /** Runs one request and returns its answer. */
     fun run(r: UiRequest): UiResponse {
         val expires = try {
             Instant.parse(r.expiresAt).toEpochMilli()
-        } catch (e: DateTimeParseException) {
+        } catch (e: RuntimeException) {
+            // Not a time (DateTimeParseException) or out of range (DateTimeException, ArithmeticException).
             return fail(r, ErrorCode.INVALID, "expiresAt is not a time.")
         }
         if (now() > expires) return fail(r, ErrorCode.EXPIRED, "The request expired before it ran.")
@@ -137,6 +155,8 @@ class UiExecutor(
     private fun guardedOnScreen(windows: List<UiWindow>) =
         windows.any { (it.type == "app" || it.type == "dialog") && (it.pkg.isEmpty() || guarded(it.pkg)) }
 
+    private fun noNotice(r: UiRequest) = fail(r, ErrorCode.FAILED, "ADBuddy can't show the on-screen notice, so it won't act. Ask the user to do this part.")
+
     private fun pausedNow(r: UiRequest) = fail(r, ErrorCode.PROTECTED, "The agent is paused from the phone.")
 
     private fun dump(r: UiRequest, s: Screen, a: UiDumpArgs): UiResponse {
@@ -164,7 +184,7 @@ class UiExecutor(
         if (a.x != null && a.y != null) {
             pointBlocked(r, windows, a.x, a.y)?.let { return it }
             lateBlock(r)?.let { return it }
-            s.acting(Box(a.x, a.y, a.x + 1, a.y + 1))
+            if (!s.acting(Box(a.x, a.y, a.x + 1, a.y + 1))) return noNotice(r)
             if (!s.tap(a.x, a.y)) return fail(r, ErrorCode.FAILED, "The tap did not happen.")
             return ok(r, UiClicked(true, listOf(a.x, a.y, a.x + 1, a.y + 1), "gesture"), UiClicked.serializer())
         }
@@ -180,7 +200,7 @@ class UiExecutor(
                 m.target.pkg == Packages.SYSTEM_UI && questionWaiting() -> fail(r, ErrorCode.PROTECTED, "A question of ADBuddy is waiting on the phone: the system UI cannot be touched now.")
                 else -> {
                     lateBlock(r)?.let { return it }
-                    s.acting(m.bounds)
+                    if (!s.acting(m.bounds)) return noNotice(r)
                     if (s.click(m.target)) {
                         ok(r, UiClicked(true, m.bounds.list(), "action"), UiClicked.serializer())
                     } else {
@@ -219,7 +239,7 @@ class UiExecutor(
         if (guarded(field.pkg)) return protectedApp(r, field.pkg)
         if (field.password) return fail(r, ErrorCode.PROTECTED, "ADBuddy does not type into password fields: ask the user to type it.")
         lateBlock(r)?.let { return it }
-        s.acting(field.bounds)
+        if (!s.acting(field.bounds)) return noNotice(r)
         if (!s.setText(field, a.text)) return fail(r, ErrorCode.FAILED, "The field did not take the text.")
         return ok(r, UiTextSet(true), UiTextSet.serializer())
     }
@@ -254,6 +274,9 @@ class UiExecutor(
     companion object {
         /** The ids remembered so none runs twice. */
         const val SEEN = 64
+
+        /** The longest id that is answered when the request does not decode. */
+        const val MAX_ID = 128
 
         private val strict = Json(Protocol.json) { ignoreUnknownKeys = false }
 
