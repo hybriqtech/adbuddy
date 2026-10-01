@@ -28,7 +28,7 @@ The user asks which apps can use the microphone, camera, location, SMS or contac
 shell pm list packages -3   # green
 ```
 
-2. Read the granted permissions. One `dumpsys package` without arguments covers all apps in a single call. The output is very large: read it in the agent, do not pipe it on the PC, and keep only the dangerous permissions that show `granted=true` for packages of step 1:
+2. Read the granted permissions. One `dumpsys package` without arguments covers all apps in a single call. The output is very large: read it in the agent, do not pipe it on the PC, and keep only the dangerous permissions that show `granted=true` for packages of step 1. If the output is cut, use the per-app form below for each package of step 1:
 
 ```adb
 shell dumpsys package   # green
@@ -41,7 +41,11 @@ shell dumpsys package com.example.app   # green
 shell cmd appops get com.example.app   # green
 ```
 
-If the phone prints nothing or an error for either form, say so and work with the other one; do not guess.
+If the phone prints nothing or an error for either form, say so and work with the other one; do not guess. The active accessibility services are in a setting (read-only):
+
+```adb
+shell settings get secure enabled_accessibility_services   # green
+```
 
 3. Group what you found by permission, not by app: background location, microphone, camera, SMS, call log, contacts, access to all files, draw over other apps, and accessibility services. In the chat, give the user a table per group with how many apps hold it.
 
@@ -55,7 +59,13 @@ If the phone prints nothing or an error for either form, say so and work with th
 
 Say in the chat that each revocation waits for the user's confirmation in ADBuddy, that `adbuddy undo` cannot reverse it, and that revoking a permission can close the app if it is open.
 
-6. After the yes, revoke one permission of one app per call. It is red: it waits for the user's confirmation, and if they say no, do not retry it or look for another way (rule 7 of `AGENTS.md`); ask what they want:
+6. `pm revoke` only works on runtime permissions (microphone, camera, location, SMS, call log, contacts and similar). "Access to all files" and "draw over other apps" are special accesses that `pm revoke` cannot take away: it would fail, and the user's confirmation would be spent for nothing. For those two, show the user the path in Settings (Apps, Special app access; the names vary by phone) and let them decide. Only for "draw over other apps", if the user says yes in the chat, this reversible form exists (yellow: it runs at once and `adbuddy undo` reverts it; read the current value first with `cmd appops get`):
+
+```adb
+shell cmd appops set com.example.app SYSTEM_ALERT_WINDOW ignore   # yellow
+```
+
+For runtime permissions, after the yes, revoke one permission of one app per call. It is red: it waits for the user's confirmation, and if they say no, do not retry it or look for another way (rule 7 of `AGENTS.md`); ask what they want:
 
 ```adb
 shell pm revoke com.example.app android.permission.RECORD_AUDIO   # red
@@ -71,7 +81,7 @@ shell dumpsys package com.example.app   # green
 foreground
 ```
 
-If the app closed, tell the user; that is expected. If something looks wrong, or adb stops answering, stop and tell the user the package name, the permission, and how to give it back by hand: Settings, Apps, the app, Permissions. Do not retry in a loop and do not look for another way in (rules 9 and 10 of `AGENTS.md`). Ask the user again before the next revocation.
+If the app closed, tell the user; that is expected. If something looks wrong, or adb stops answering, stop and tell the user the package name, the permission, and how to give it back by hand: Settings, Apps, the app, Permissions. Do not retry in a loop and do not look for another way in (rules 9 and 10 of `AGENTS.md`). After a failure or anything unexpected, ask the user again before the next revocation.
 
 8. Giving a permission back, if the user asks, is `pm grant` with the same package and permission. It is red too and waits for the user's confirmation:
 

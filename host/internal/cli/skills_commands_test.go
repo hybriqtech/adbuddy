@@ -398,6 +398,8 @@ func TestSkillExamplesCatches(t *testing.T) {
 		"shell recovery --wipe_data",
 		"shell wipe data",
 		"shell pm wipe com.example.app",
+		"shell x_wipe",
+		"shell 1wipe",
 	} {
 		t.Run("wipe/"+cmd, func(t *testing.T) {
 			errs := skillProblems(t, cl, adbBlock(cmd+"   # red"))
