@@ -181,7 +181,11 @@ func (l *phoneLink) onTermWatch(m bridge.Message) {
 }
 
 func (l *phoneLink) termLoop(w *termWatch) {
-	t := time.NewTicker(termInterval)
+	every := l.termEvery
+	if every <= 0 {
+		every = 50 * time.Millisecond
+	}
+	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		select {

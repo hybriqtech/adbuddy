@@ -53,6 +53,10 @@ type phoneLink struct {
 	files   filesState       // phone_files.go
 	adb     phoneapp.ADB     // the phone's adb, for screenshots
 	ws      string           // the environment (useWorkspace)
+
+	// termEvery is termInterval as it was when the link started: read here,
+	// not from the variable, by the goroutines that outlive a test.
+	termEvery time.Duration
 }
 
 // maxNotices is how many unsupported types a connection is told of by notice:
@@ -94,7 +98,7 @@ var newToken = bridge.NewToken
 // confirms with fallback and never pauses, and says why: no failure of the
 // app's channel stops serve. Its only error is Interrupted (ctx ended).
 func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
-	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a}
+	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval}
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
 	without := func(why string) (*phoneLink, error) {
 		fmt.Fprintf(app.Stderr, "⚠ %s. 🔴 confirmations happen here, without the phone app.\n", why)
@@ -187,12 +191,15 @@ func startPhoneLink(ctx context.Context, app *App, e *env, a phoneapp.ADB, sessi
 	if err != nil {
 		fmt.Fprintf(app.Stderr, "⚠ Could not reach the phone app (%s): 🔴 confirmations happen here until it connects.\n", classify.Printable(err.Error()))
 	}
+	// Read here, before the goroutine: a test that sets tunnelCheck for its
+	// own link must not race with the goroutine of a previous one.
+	every := tunnelCheck
 	go func() {
 		// connected: the last connect() worked. If not, it is tried again
 		// on each tick; if so, only when adb lost the tunnel. A failure is
 		// said once until it works again.
 		connected, warned := err == nil, err != nil
-		t := time.NewTicker(tunnelCheck)
+		t := time.NewTicker(every)
 		defer t.Stop()
 		for {
 			select {
