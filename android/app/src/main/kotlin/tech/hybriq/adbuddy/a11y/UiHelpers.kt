@@ -15,6 +15,20 @@ import tech.hybriq.adbuddy.bridge.Protocol
 object UiHelpers {
     private const val TAG = "ADBuddyHelpers"
 
+    /**
+     * The WELCOME listener: the list goes out on work, and whatever sendList
+     * throws is logged (an uncaught exception on the helpers thread would kill the app).
+     */
+    internal fun welcomeHandler(work: java.util.concurrent.Executor, sendList: () -> Unit, log: (RuntimeException) -> Unit): (tech.hybriq.adbuddy.bridge.Message) -> Unit = {
+        work.execute {
+            try {
+                sendList()
+            } catch (e: RuntimeException) {
+                log(e)
+            }
+        }
+    }
+
     fun install(app: AdbuddyApp) {
         val protected = ProtectedApps.of(app)
         val work = Executors.newSingleThreadExecutor { Thread(it, "adbuddy-helpers") }
@@ -39,7 +53,7 @@ object UiHelpers {
                 Log.w(TAG, "ui.request", e)
             }
         }
-        app.bridge.listen(Protocol.WELCOME) { work.execute(::sendList) }
+        app.bridge.listen(Protocol.WELCOME, welcomeHandler(work, ::sendList) { Log.w(TAG, "welcome", it) })
         // The first proposal (and a new app that looks like a bank) reaches the
         // host at once if it is connected; otherwise with the next welcome.
         work.execute {

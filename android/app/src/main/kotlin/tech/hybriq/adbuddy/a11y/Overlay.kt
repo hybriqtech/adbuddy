@@ -10,6 +10,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -26,14 +27,21 @@ import tech.hybriq.adbuddy.R
 class Overlay(private val service: AccessibilityService, private val onPause: () -> Unit) {
     private val main = Handler(Looper.getMainLooper())
     private val wm = service.getSystemService(WindowManager::class.java)
-    private var frame: FrameView? = null
-    private var pill: TextView? = null
+    @Volatile private var frame: FrameView? = null
+    @Volatile private var pill: TextView? = null
     private val hider = Runnable { remove() }
 
     /** Shows the overlay (from any thread), with a mark when there is one. */
     fun show(mark: Box?) {
         main.post {
-            if (frame == null) add()
+            if (frame == null) {
+                try {
+                    add()
+                } catch (e: RuntimeException) {
+                    Log.w(TAG, "overlay", e)
+                    return@post
+                }
+            }
             mark?.let { frame?.mark(it) }
             main.removeCallbacks(hider)
             main.postDelayed(hider, HIDE_AFTER_MS)
@@ -63,16 +71,14 @@ class Overlay(private val service: AccessibilityService, private val onPause: ()
     private fun add() {
         val color = accent()
         val f = FrameView(color, dp(3f), dp(24f))
-        wm.addView(
-            f,
+        val frameParams =
             WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT,
-            ),
-        )
+            )
         val p = TextView(service).apply {
             text = service.getString(R.string.overlay_pill)
             setTextColor(Color.WHITE)
@@ -89,8 +95,7 @@ class Overlay(private val service: AccessibilityService, private val onPause: ()
                 remove()
             }
         }
-        wm.addView(
-            p,
+        val pillParams =
             WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -99,7 +104,12 @@ class Overlay(private val service: AccessibilityService, private val onPause: ()
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
                 y = dp(48f).toInt()
-            },
+            }
+        // If the pill cannot be added, the frame is taken off again: no orphan frame.
+        OverlayWindows.addBoth(
+            first = { f.also { wm.addView(it, frameParams) } },
+            second = { p.also { wm.addView(it, pillParams) } },
+            remove = { runCatching { wm.removeView(it) } },
         )
         frame = f
         pill = p
@@ -139,7 +149,25 @@ class Overlay(private val service: AccessibilityService, private val onPause: ()
     }
 
     private companion object {
+        const val TAG = "ADBuddyOverlay"
         const val HIDE_AFTER_MS = 4_000L
         const val MARK_MS = 600L
+    }
+}
+
+/** Adding the overlay's two windows as one: all or none. */
+internal object OverlayWindows {
+    /**
+     * Adds first, then second; if second fails, first is removed (it would stay
+     * on screen with nobody holding it) and the failure goes on.
+     */
+    fun <V : Any> addBoth(first: () -> V, second: () -> V, remove: (V) -> Unit): Pair<V, V> {
+        val a = first()
+        try {
+            return a to second()
+        } catch (e: RuntimeException) {
+            remove(a)
+            throw e
+        }
     }
 }

@@ -23,7 +23,7 @@ object Matcher {
 
     private class Candidate(val target: UiNode, val bounds: Box, val adbuddy: Boolean)
 
-    fun find(windows: List<UiWindow>, screen: Box, id: String?, text: String?, hidden: (String) -> Boolean = { false }): Match {
+    fun find(windows: List<UiWindow>, screen: Box, id: String?, text: String?, hidden: (String) -> Boolean): Match {
         val exact = mutableListOf<Candidate>()
         val byText = mutableListOf<Candidate>()
         val folded = mutableListOf<Candidate>()

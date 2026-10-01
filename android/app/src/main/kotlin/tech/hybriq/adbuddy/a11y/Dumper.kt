@@ -28,7 +28,7 @@ object Dumper {
         activity: String,
         locked: Boolean,
         all: Boolean,
-        hidden: (String) -> Boolean = { false },
+        hidden: (String) -> Boolean,
     ): UiDump {
         if (locked) return UiDump(locked = true, `package` = pkg, activity = activity, width = screen.r, height = screen.b, rotation = rotation, truncated = false, elements = emptyList())
         val elements = mutableListOf<UiElement>()

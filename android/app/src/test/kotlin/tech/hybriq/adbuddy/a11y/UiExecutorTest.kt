@@ -255,6 +255,49 @@ class UiExecutorTest {
         assertEquals(ErrorCode.UNAVAILABLE, error(x.run(req(UiOp.DUMP))))
     }
 
+    private fun raw(json: String) = Message(v = Protocol.VERSION, type = Protocol.UI_REQUEST, ts = "2026-10-01T10:00:00Z", payload = Protocol.json.parseToJsonElement(json))
+
+    @Test fun anUnknownFieldIsAnsweredInvalid() {
+        x.onMessage(raw("""{"id":"u_1","op":"dump","args":{},"expiresAt":"2026-10-01T10:00:10Z","future":1}"""))
+        assertEquals(1, sent.size)
+        assertEquals("u_1", sent[0].id)
+        assertFalse(sent[0].ok)
+        assertEquals(ErrorCode.INVALID, error(sent[0]))
+        assertTrue(screen!!.did.isEmpty())
+    }
+
+    @Test fun aMalformedFieldWithAnIdIsAnsweredInvalid() {
+        x.onMessage(raw("""{"id":"u_2","op":7,"args":{},"expiresAt":"2026-10-01T10:00:10Z"}"""))
+        x.onMessage(raw("""{"id":"u_3","op":"dump","args":{}}"""))
+        assertEquals(listOf("u_2" to ErrorCode.INVALID, "u_3" to ErrorCode.INVALID), sent.map { it.id to error(it) })
+    }
+
+    @Test fun withoutAReadableIdThereIsNobodyToAnswer() {
+        x.onMessage(raw("""{"op":"dump","args":{},"expiresAt":"2026-10-01T10:00:10Z"}"""))
+        x.onMessage(raw("""{"id":5,"op":"dump","args":{},"expiresAt":"2026-10-01T10:00:10Z"}"""))
+        x.onMessage(raw("""{"id":"","op":"dump","args":{},"expiresAt":"2026-10-01T10:00:10Z","future":1}"""))
+        x.onMessage(raw("""[1,2]"""))
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test fun anInvalidIdIsNotAnsweredTwice() {
+        val m = raw("""{"id":"u_9","op":"dump","args":{},"expiresAt":"2026-10-01T10:00:10Z","future":1}""")
+        x.onMessage(m)
+        x.onMessage(m)
+        assertEquals(1, sent.size)
+    }
+
+    @Test fun lockedDumpNeverNamesTheProtectedApp() {
+        screen = FakeScreen(fg = "com.example.bank" to "com.example.bank.Main", locked = true)
+        val r = x.run(req(UiOp.DUMP))
+        assertTrue(r.ok)
+        val d = r.result!!.jsonObject
+        assertEquals("true", d["locked"]!!.jsonPrimitive.content)
+        assertEquals("", d["package"]!!.jsonPrimitive.content)
+        assertEquals("", d["activity"]!!.jsonPrimitive.content)
+        assertFalse(r.result.toString().contains("com.example.bank"))
+    }
+
     @Test fun neverTwiceTheSameId() {
         fun message(id: String) = Message(v = Protocol.VERSION, type = Protocol.UI_REQUEST, ts = "2026-10-01T10:00:00Z", payload = Protocol.json.encodeToJsonElement(UiRequest.serializer(), req(UiOp.FOREGROUND, id = id)))
         x.onMessage(message("u_1"))

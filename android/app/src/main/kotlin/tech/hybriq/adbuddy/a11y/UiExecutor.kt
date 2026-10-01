@@ -6,6 +6,8 @@ import java.util.concurrent.Executor
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import tech.hybriq.adbuddy.bridge.ErrorCode
 import tech.hybriq.adbuddy.bridge.ErrorReply
 import tech.hybriq.adbuddy.bridge.Message
@@ -73,12 +75,25 @@ class UiExecutor(
         val r = try {
             strict.decodeFromJsonElement(UiRequest.serializer(), m.payload)
         } catch (e: IllegalArgumentException) {
-            return // without an id there is nobody to answer
+            // Unknown or malformed fields: the host is told (it would wait 10 s otherwise),
+            // if the id can be read; without one there is nobody to answer.
+            val id = rescueId(m.payload) ?: return
+            synchronized(seen) {
+                if (seen.put(id, true) != null) return
+            }
+            executor.execute { send(UiResponse(id, ok = false, error = ErrorReply(ErrorCode.INVALID, "The request is not valid."))) }
+            return
         }
         synchronized(seen) {
             if (seen.put(r.id, true) != null) return
         }
         executor.execute { send(run(r)) }
+    }
+
+    /** The id of a request that did not decode: a minimal parse, a non-empty string or null. */
+    private fun rescueId(payload: JsonElement): String? {
+        val id = (payload as? JsonObject)?.get("id") as? JsonPrimitive ?: return null
+        return id.takeIf { it.isString }?.content?.takeIf { it.isNotEmpty() }
     }
 
     /** Runs one request and returns its answer. */
