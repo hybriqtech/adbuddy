@@ -93,3 +93,8 @@ Task 8: review opus (38fcc74): reglas del encargo ✅; 5 Importantes de segurida
 Task 8: complete (commits 1ee4223..3be575b, 2 rondas de arreglos)
 Task 8: minor (deferred): "official Gradle you installed in step 2" (el paso 2 solo anuncia); `.\gradlew` en PowerShell/cmd; la versión de Gradle del ejemplo (8.7) caducará; `where.exe`/Get-Command. Las nueve skills existen (requiredSkills completo).
 Pendiente para la revisión final: nota §2.5 (entrecomillado por shell) falta en device-profile, debloat, battery; ver también los minors diferidos de T1-T7.
+
+Task 9: review (Sonnet, 69f0eeb): Approved con 1 Importante (el test del emulador descartaba error y contexto: un timeout o un adb que no arranca contaba como verde) + 4 menores; ronda 1 (504b46f): re-revisión 3/3 ADDRESSED, sin rotura.
+Task 9: complete (commits d0f071b..504b46f, 1 ronda de arreglos)
+Task 9: minor (deferred): el nombre del job de emulator.yml ("oracle against the emulator's mksh") ya no describe todo (renombrarlo rompería un check requerido); el test del emulador no se ha ejecutado en emulador real (solo en la CI).
+TODAS LAS TAREAS (T1-T9) COMPLETAS. Siguiente: rebase sobre origin/main 0a22518 (supervisor), go test, revisión final opus de la rama, push y PR.
