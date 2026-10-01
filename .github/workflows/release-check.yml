@@ -83,10 +83,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: host/go.mod
-          cache-dependency-path: host/go.sum
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -110,11 +106,11 @@ jobs:
           "$bt/apksigner" sign --ks "$RUNNER_TEMP/test.p12" --ks-type PKCS12 --ks-pass env:KS_PASS --ks-key-alias adbuddy \
             --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled true \
             --out "$RUNNER_TEMP/adbuddy.apk" "$RUNNER_TEMP/aligned.apk"
-      - name: Which go runs here
-        run: |
-          command -v go
-          go version
-          echo "$PATH" | tr : " "
+      # After setup-java and setup-gradle: they put /usr/bin (go 1.24) first in PATH.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: host/go.mod
+          cache-dependency-path: host/go.sum
       - name: The host reads the same certificate as apksigner
         run: APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" sh scripts/release-cert.sh "$RUNNER_TEMP/adbuddy.apk"
       - name: The APK has the test version
