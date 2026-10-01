@@ -140,13 +140,8 @@ class UiExecutor(
         if (guarded(fg)) return protectedApp(r, fg)
         val windows = s.windows()
         if (a.x != null && a.y != null) {
-            val w = Matcher.windowAt(windows, a.x, a.y)
-            val pkg = w?.pkg.orEmpty()
-            when {
-                pkg.isEmpty() -> return fail(r, ErrorCode.PROTECTED, "ADBuddy cannot see what is at that point: it does not tap there.")
-                guarded(pkg) -> return protectedApp(r, pkg)
-                pkg == Packages.SYSTEM_UI && questionWaiting() -> return fail(r, ErrorCode.PROTECTED, "A question of ADBuddy is waiting on the phone: the system UI cannot be touched now.")
-            }
+            pointBlocked(r, windows, a.x, a.y)?.let { return it }
+            if (paused()) return pausedNow(r)
             s.acting(Box(a.x, a.y, a.x + 1, a.y + 1))
             if (!s.tap(a.x, a.y)) return fail(r, ErrorCode.FAILED, "The tap did not happen.")
             return ok(r, UiClicked(true, listOf(a.x, a.y, a.x + 1, a.y + 1), "gesture"), UiClicked.serializer())
@@ -162,16 +157,31 @@ class UiExecutor(
                 guarded(m.target.pkg) -> protectedApp(r, m.target.pkg)
                 m.target.pkg == Packages.SYSTEM_UI && questionWaiting() -> fail(r, ErrorCode.PROTECTED, "A question of ADBuddy is waiting on the phone: the system UI cannot be touched now.")
                 else -> {
+                    if (paused()) return pausedNow(r)
                     s.acting(m.bounds)
                     if (s.click(m.target)) {
                         ok(r, UiClicked(true, m.bounds.list(), "action"), UiClicked.serializer())
                     } else {
-                        // Not every clickable view takes ACTION_CLICK: tap its middle.
+                        // Not every clickable view takes ACTION_CLICK: tap its middle, but
+                        // only after checking again what is on top of that point now.
+                        pointBlocked(r, s.windows(), m.bounds.centerX, m.bounds.centerY)?.let { return it }
+                        if (paused()) return pausedNow(r)
                         if (!s.tap(m.bounds.centerX, m.bounds.centerY)) return fail(r, ErrorCode.FAILED, "The tap did not happen.")
                         ok(r, UiClicked(true, m.bounds.list(), "gesture"), UiClicked.serializer())
                     }
                 }
             }
+        }
+    }
+
+    /** A refusal when the window on top at (x, y) cannot be touched, or null. */
+    private fun pointBlocked(r: UiRequest, windows: List<UiWindow>, x: Int, y: Int): UiResponse? {
+        val pkg = Matcher.windowAt(windows, x, y)?.pkg.orEmpty()
+        return when {
+            pkg.isEmpty() -> fail(r, ErrorCode.PROTECTED, "ADBuddy cannot see what is at that point: it does not tap there.")
+            guarded(pkg) -> protectedApp(r, pkg)
+            pkg == Packages.SYSTEM_UI && questionWaiting() -> fail(r, ErrorCode.PROTECTED, "A question of ADBuddy is waiting on the phone: the system UI cannot be touched now.")
+            else -> null
         }
     }
 
@@ -185,6 +195,7 @@ class UiExecutor(
         val field = s.focusedInput() ?: return fail(r, ErrorCode.NOT_FOUND, "No text field has the focus: tap one first.")
         if (guarded(field.pkg)) return protectedApp(r, field.pkg)
         if (field.password) return fail(r, ErrorCode.PROTECTED, "ADBuddy does not type into password fields: ask the user to type it.")
+        if (paused()) return pausedNow(r)
         s.acting(field.bounds)
         if (!s.setText(field, a.text)) return fail(r, ErrorCode.FAILED, "The field did not take the text.")
         return ok(r, UiTextSet(true), UiTextSet.serializer())

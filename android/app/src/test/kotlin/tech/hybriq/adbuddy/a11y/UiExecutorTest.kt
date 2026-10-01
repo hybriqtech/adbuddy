@@ -24,6 +24,8 @@ class UiExecutorTest {
         var locked: Boolean = false,
         var focused: UiNode? = null,
         var clickWorks: Boolean = true,
+        var tapWorks: Boolean = true,
+        var afterClick: (() -> Unit)? = null,
     ) : Screen {
         val did = mutableListOf<String>()
         override fun windows() = windows
@@ -31,8 +33,8 @@ class UiExecutorTest {
         override fun rotation() = 0
         override fun locked() = locked
         override fun foreground() = fg
-        override fun click(node: UiNode): Boolean = clickWorks.also { did += "click ${node.bounds}" }
-        override fun tap(x: Int, y: Int): Boolean = true.also { did += "tap $x,$y" }
+        override fun click(node: UiNode): Boolean = clickWorks.also { did += "click ${node.bounds}"; afterClick?.invoke() }
+        override fun tap(x: Int, y: Int): Boolean = tapWorks.also { did += "tap $x,$y" }
         override fun focusedInput() = focused
         override fun setText(node: UiNode, text: String): Boolean = true.also { did += "setText $text" }
         override fun acting(mark: Box?) {
@@ -76,6 +78,36 @@ class UiExecutorTest {
         val r = x.run(req(UiOp.CLICK, obj("text" to "Network & internet")))
         assertEquals("gesture", r.result!!.jsonObject["how"]!!.jsonPrimitive.content)
         assertTrue(screen!!.did.contains("tap 672,645"))
+    }
+
+    @Test fun theFallbackTapChecksWhatIsOnTopNow() {
+        // Clean centre: the tap happens.
+        screen!!.clickWorks = false
+        assertTrue(x.run(req(UiOp.CLICK, obj("text" to "Network & internet"))).ok)
+        assertTrue(screen!!.did.contains("tap 672,645"))
+        // The system UI covers the centre after the click failed, while a question waits.
+        val s = FakeScreen(clickWorks = false)
+        screen = s
+        question = true
+        val cover = UiWindow("system", 9, Box(0, 600, 1344, 690), ScreenFixtures.notification)
+        s.afterClick = { s.windows = ScreenFixtures.windows + cover }
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.CLICK, obj("text" to "Network & internet")))))
+        assertFalse(s.did.any { it.startsWith("tap") })
+        // A protected app covers it.
+        question = false
+        val bank = UiWindow("app", 9, Box(0, 600, 1344, 690), UiNode(pkg = "com.example.bank", cls = "android.widget.FrameLayout", bounds = Box(0, 600, 1344, 690)))
+        val s2 = FakeScreen(clickWorks = false)
+        screen = s2
+        s2.afterClick = { s2.windows = ScreenFixtures.windows + bank }
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.CLICK, obj("text" to "Network & internet")))))
+        assertFalse(s2.did.any { it.startsWith("tap") })
+    }
+
+    @Test fun aTapThatDoesNotHappenFails() {
+        screen!!.tapWorks = false
+        assertEquals(ErrorCode.FAILED, error(x.run(req(UiOp.CLICK, obj("x" to 540, "y" to 1200)))))
+        screen!!.clickWorks = false
+        assertEquals(ErrorCode.FAILED, error(x.run(req(UiOp.CLICK, obj("text" to "Network & internet")))))
     }
 
     @Test fun clickErrors() {
@@ -129,7 +161,7 @@ class UiExecutorTest {
         assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.CLICK, obj("x" to 1, "y" to 1)))))
         assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.SET_TEXT, obj("text" to "hi")))))
         assertTrue(x.run(req(UiOp.DUMP)).ok)
-        assertFalse(screen!!.did.any { it.startsWith("tap") || it.startsWith("setText") })
+        assertFalse(screen!!.did.any { it.startsWith("tap") || it.startsWith("setText") || (it.startsWith("acting") && it != "acting null") })
     }
 
     @Test fun aSplitScreenWithABank() {
