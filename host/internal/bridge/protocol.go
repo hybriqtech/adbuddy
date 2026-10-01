@@ -51,6 +51,10 @@ type Message struct {
 	RID     string          `json:"rid,omitempty"`
 	TS      time.Time       `json:"ts"`
 	Payload json.RawMessage `json:"payload"`
+
+	// conn is the connection an app message came on: Reply answers on that
+	// one only. Not part of the JSON.
+	conn uint64
 }
 
 // Class is how the host sends a message type (protocol spec §3). HostClasses
@@ -184,6 +188,24 @@ type Snapshot struct {
 	Chat        []ChatMessage       `json:"chat"`        // the last 100 chat messages, oldest first (M3)
 	Permissions []PermissionRequest `json:"permissions"` // the agent's questions waiting for an answer (M4)
 	Remote      RemoteState         `json:"remote"`      // M5
+}
+
+// filled returns s with empty lists instead of nil ones: the app reads a
+// list, never null.
+func (s Snapshot) filled() Snapshot {
+	if s.Pending == nil {
+		s.Pending = []ConfirmRequest{}
+	}
+	if s.Journal == nil {
+		s.Journal = []json.RawMessage{}
+	}
+	if s.Chat == nil {
+		s.Chat = []ChatMessage{}
+	}
+	if s.Permissions == nil {
+		s.Permissions = []PermissionRequest{}
+	}
+	return s
 }
 
 // Notice is a message for the person ("disconnected from the agent"…).

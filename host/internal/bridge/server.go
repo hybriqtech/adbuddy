@@ -23,9 +23,12 @@ var helloTimeout = 5 * time.Second
 // OnMessage. A var so a test can hold a message there; New copies it.
 var beforeDispatch = func(Message) {}
 
+// beforeFrame does the same for each binary frame about to reach OnFrame.
+var beforeFrame = func() {}
+
 const (
 	helloLimit = 4 << 10 // read limit until the token is checked
-	maxMessage = 1 << 20 // text messages; attachments (binary frames) arrive in M3
+	maxMessage = 1 << 20 // text messages and binary frames (FrameHeaderLen+MaxFrameData fits)
 	sendQueue  = 256
 	pingEvery  = 20 * time.Second
 )
@@ -50,6 +53,15 @@ type Options struct {
 	OnConnect func(bool)
 	// OnReject is called when an authenticated app is too old to talk to.
 	OnReject func(Hello)
+	// OnFrame receives the app's binary frames that DecodeFrame accepts, one
+	// at a time and in order with OnMessage. Its data comes from the app and
+	// is only valid during the call: copy what it keeps.
+	OnFrame func(id FrameID, offset int64, data []byte)
+	// OnAttach is called each time an app authenticates, also when it
+	// replaces another one (which OnConnect does not report), before any of
+	// its messages: state kept per connection starts over. It comes after
+	// OnConnect(true), in order with it, and may call Publish and Send.
+	OnAttach func()
 	Now      func() time.Time
 }
 
@@ -59,6 +71,7 @@ type Server struct {
 	o              Options
 	helloTimeout   time.Duration
 	beforeDispatch func(Message)
+	beforeFrame    func()
 
 	// connMu orders attach and detach together with their OnConnect calls,
 	// which run outside mu.
@@ -70,6 +83,7 @@ type Server struct {
 	seq    uint64
 	ring   []Message // the last BufferSize events, oldest first
 	client *client
+	gens   uint64 // connections authenticated so far: each client's gen
 }
 
 type client struct {
@@ -77,6 +91,7 @@ type client struct {
 	cancel context.CancelFunc
 	token  string // the token it authenticated with
 	conn   *websocket.Conn
+	gen    uint64 // set by swap; Message.conn of what it sends
 }
 
 // New returns a Server.
@@ -93,10 +108,16 @@ func New(o Options) *Server {
 	if o.OnReject == nil {
 		o.OnReject = func(Hello) {}
 	}
-	if o.Snapshot == nil {
-		o.Snapshot = func() Snapshot { return Snapshot{Pending: []ConfirmRequest{}, Journal: []json.RawMessage{}} }
+	if o.OnFrame == nil {
+		o.OnFrame = func(FrameID, int64, []byte) {}
 	}
-	return &Server{o: o, helloTimeout: helloTimeout, beforeDispatch: beforeDispatch, token: o.Token}
+	if o.OnAttach == nil {
+		o.OnAttach = func() {}
+	}
+	if o.Snapshot == nil {
+		o.Snapshot = func() Snapshot { return Snapshot{} }
+	}
+	return &Server{o: o, helloTimeout: helloTimeout, beforeDispatch: beforeDispatch, beforeFrame: beforeFrame, token: o.Token}
 }
 
 // SetToken makes tok the only token accepted from now on, and closes the
@@ -167,16 +188,88 @@ func (s *Server) Connected() bool {
 	return s.client != nil
 }
 
+// ErrNoApp is the error of Send when no app is connected, and of Reply when
+// the connection that asked is gone.
+var ErrNoApp = errors.New("the phone app is not connected")
+
+// ErrClass is the error of Publish, Reply and Send for a type of another
+// class (HostClasses): an event sent as a stream would never be resent, and a
+// stream message published as an event would be (a screen tap repeated after
+// a reconnection).
+var ErrClass = errors.New("wrong method for this message type")
+
 // Publish sends an event to the app (if connected) and keeps it to resend
 // after a reconnection.
 func (s *Server) Publish(typ string, payload any) error {
+	return s.PublishRID(typ, "", payload)
+}
+
+// PublishRID is Publish for an event that confirms a request (protocol spec
+// §3): it carries the request's rid, also when resent.
+func (s *Server) PublishRID(typ, rid string, payload any) error {
+	if HostClasses[typ] != ClassEvent {
+		return fmt.Errorf("publish %s: %w", typ, ErrClass)
+	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sendLocked(s.keepLocked(typ, raw))
+	s.sendLocked(s.keepLocked(typ, rid, raw))
+	return nil
+}
+
+// Reply answers req, a request from the app, with its rid (protocol spec §3):
+// only on the connection req came on, never kept nor resent. If that
+// connection is gone (replaced, revoked, closed) it returns ErrNoApp: the app
+// gives the request up when its connection drops.
+func (s *Server) Reply(req Message, typ string, payload any) error {
+	if HostClasses[typ] != ClassReply {
+		return fmt.Errorf("reply %s: %w", typ, ErrClass)
+	}
+	if req.conn == 0 || req.RID == "" {
+		// Not a request as OnMessage gives it: it has no connection to go to.
+		return ErrNoApp
+	}
+	return s.sendVolatile(req.conn, typ, req.RID, payload)
+}
+
+// Current reports whether m, a message from OnMessage, came on the connection
+// that is current now. A handler that keeps state per connection checks it:
+// a message read before a replacement can reach OnMessage after the new
+// connection's OnAttach.
+func (s *Server) Current(m Message) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.client != nil && m.conn != 0 && s.client.gen == m.conn
+}
+
+// Send sends a stream message (protocol spec §3) to the connected app only:
+// never numbered, kept nor resent after a reconnection.
+//
+// Like Publish, it drops an app too slow to take it. M3 adds a send that waits
+// for room instead, for the terminal and downloads (protocol spec §6.4, §7).
+func (s *Server) Send(typ string, payload any) error {
+	if HostClasses[typ] != ClassStream {
+		return fmt.Errorf("send %s: %w", typ, ErrClass)
+	}
+	return s.sendVolatile(0, typ, "", payload)
+}
+
+// sendVolatile queues a message that is not kept: for the connection gen, or
+// for the current one when gen is 0.
+func (s *Server) sendVolatile(gen uint64, typ, rid string, payload any) error {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client == nil || gen != 0 && s.client.gen != gen {
+		return ErrNoApp
+	}
+	s.sendLocked(Message{V: ProtocolVersion, Type: typ, RID: rid, TS: s.o.Now().UTC(), Payload: raw})
 	return nil
 }
 
@@ -187,14 +280,14 @@ func (s *Server) Publish(typ string, payload any) error {
 func (s *Server) PublishSnapshot() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	raw, _ := json.Marshal(s.o.Snapshot())
-	s.sendLocked(s.keepLocked(TypeSnapshot, raw))
+	raw, _ := json.Marshal(s.o.Snapshot().filled())
+	s.sendLocked(s.keepLocked(TypeSnapshot, "", raw))
 }
 
 // keepLocked numbers an event and keeps it to resend. Call it with mu held.
-func (s *Server) keepLocked(typ string, raw json.RawMessage) Message {
+func (s *Server) keepLocked(typ, rid string, raw json.RawMessage) Message {
 	s.seq++
-	m := Message{V: ProtocolVersion, Seq: s.seq, Type: typ, TS: s.o.Now().UTC(), Payload: raw}
+	m := Message{V: ProtocolVersion, Seq: s.seq, Type: typ, RID: rid, TS: s.o.Now().UTC(), Payload: raw}
 	s.ring = append(s.ring, m)
 	if len(s.ring) > BufferSize {
 		s.ring = s.ring[len(s.ring)-BufferSize:]
@@ -289,16 +382,26 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return // the connection is gone
 			}
-			if typ != websocket.MessageText {
-				continue // binary frames (attachments) arrive in M3
+			if typ == websocket.MessageBinary {
+				id, off, frame, err := DecodeFrame(data)
+				if err != nil {
+					continue
+				}
+				s.beforeFrame()
+				// Revoked, replaced or dropped: nothing it sends counts (below).
+				if s.current(cl) {
+					s.o.OnFrame(id, off, frame)
+				}
+				continue
 			}
 			m, err := decode(data)
 			if err != nil {
 				continue // a malformed message does not cut the channel
 			}
-			if m.V != ProtocolVersion || m.Type == "" || m.Type == TypeHello {
+			if m.V != ProtocolVersion || m.Type == "" || m.Type == TypeHello || m.RID != "" && !ValidRID(m.RID) {
 				continue
 			}
+			m.conn = cl.gen
 			s.beforeDispatch(m)
 			if !s.current(cl) {
 				// Revoked by SetToken, replaced or dropped: its close may
@@ -346,6 +449,7 @@ func (s *Server) attach(cl *client, h Hello) (backlog []Message, first uint64, o
 		s.announced = true
 		s.o.OnConnect(true)
 	}
+	s.o.OnAttach()
 	return backlog, first, true
 }
 
@@ -362,6 +466,8 @@ func (s *Server) swap(cl *client, h Hello) (backlog []Message, first uint64, ok 
 	if s.client != nil {
 		s.client.cancel()
 	}
+	s.gens++
+	cl.gen = s.gens
 	s.client = cl
 	oldest := s.seq + 1
 	if len(s.ring) > 0 {
@@ -369,10 +475,10 @@ func (s *Server) swap(cl *client, h Hello) (backlog []Message, first uint64, ok 
 	}
 	restarted := h.LastSeq > 0 && h.Session != s.o.Session
 	if restarted || h.LastSeq > s.seq || h.LastSeq+1 < oldest {
-		snap, _ := json.Marshal(s.o.Snapshot())
+		snap, _ := json.Marshal(s.o.Snapshot().filled())
 		// The snapshot takes the next number, so the app's lastSeq moves past
 		// everything it replaces.
-		m := s.keepLocked(TypeSnapshot, snap)
+		m := s.keepLocked(TypeSnapshot, "", snap)
 		return []Message{m}, m.Seq, true
 	}
 	for _, m := range s.ring {
@@ -439,13 +545,14 @@ func decode(data []byte) (Message, error) {
 	var in struct {
 		V       int             `json:"v"`
 		Type    string          `json:"type"`
+		RID     string          `json:"rid"`
 		TS      json.RawMessage `json:"ts"`
 		Payload json.RawMessage `json:"payload"`
 	}
 	if err := json.Unmarshal(data, &in); err != nil {
 		return Message{}, err
 	}
-	m := Message{V: in.V, Type: in.Type, Payload: in.Payload}
+	m := Message{V: in.V, Type: in.Type, RID: in.RID, Payload: in.Payload}
 	_ = json.Unmarshal(in.TS, &m.TS)
 	return m, nil
 }
