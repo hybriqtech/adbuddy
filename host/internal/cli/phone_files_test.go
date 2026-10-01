@@ -1034,9 +1034,11 @@ func TestCaptureFailures(t *testing.T) {
 	if er := try("r_1"); !strings.Contains(er.Text, "device") || strings.Contains(er.Text, "\x1b") {
 		t.Fatalf("text %q", er.Text)
 	}
-	set(func(context.Context, io.Writer, io.Writer) (int, error) { return -1, errors.New("adb not found") })
-	if er := try("r_2"); !strings.Contains(er.Text, "adb not found") {
-		t.Fatalf("text %q", er.Text)
+	set(func(context.Context, io.Writer, io.Writer) (int, error) {
+		return -1, errors.New(`exec: "C:\\secret\\adb.exe": adb not found`)
+	})
+	if er := try("r_2"); strings.Contains(er.Text, "adb not found") || strings.Contains(er.Text, "secret") || !strings.Contains(er.Text, "adb failed") {
+		t.Fatalf("text %q: it must not carry what adb's error says (paths)", er.Text)
 	}
 	set(shotOf([]byte("this is not a png")))
 	try("r_3")
@@ -1240,5 +1242,99 @@ func TestUploadWriteFailureIsFailed(t *testing.T) {
 	}
 	if p := r.partials(t); len(p) != 0 {
 		t.Fatalf("left %v", p)
+	}
+}
+
+// ---- final review ----
+
+// outsideWith makes a folder outside the environment with an old file named
+// like a partial upload and another that is not ours, and returns what is in it.
+func outsideWith(t *testing.T) (string, func() []string) {
+	t.Helper()
+	dir := t.TempDir()
+	old := time.Now().Add(-3 * time.Hour)
+	for _, n := range []string{fileID(1), fileID(1) + ".json", "precious.txt", "another.json"} {
+		p := filepath.Join(dir, n)
+		os.WriteFile(p, []byte("x"), 0o600)
+		os.Chtimes(p, old, old)
+	}
+	return dir, func() []string {
+		entries, _ := os.ReadDir(dir)
+		var out []string
+		for _, e := range entries {
+			out = append(out, e.Name())
+		}
+		return out
+	}
+}
+
+// inbox/ or inbox/.partial that is a link is never used: uploads and captures
+// fail, nothing is created, listed nor deleted where the link points.
+func TestInboxThatIsALinkIsRefused(t *testing.T) {
+	for _, which := range []string{"inbox", "partial"} {
+		t.Run(which, func(t *testing.T) {
+			r := newFilesRig(t, shotOf(pngData(20, 20)))
+			outside, list := outsideWith(t)
+			before := list()
+			if which == "inbox" {
+				linkDir(t, filepath.Join(r.ws, "inbox"), outside)
+			} else {
+				os.MkdirAll(filepath.Join(r.ws, "inbox"), 0o700)
+				linkDir(t, filepath.Join(r.ws, "inbox", ".partial"), outside)
+			}
+			r.begin(t, "r_1", fileID(2), "a.bin", testBytes(10))
+			wantFileError(t, readApp(t, r.c), "r_1", bridge.CodeFailed)
+			sendApp(t, r.c, bridge.TypeCaptureReq, "r_2", bridge.Empty{})
+			wantFileError(t, readApp(t, r.c), "r_2", bridge.CodeFailed)
+			if got := list(); strings.Join(got, ",") != strings.Join(before, ",") {
+				t.Fatalf("outside: %v, was %v", got, before)
+			}
+		})
+	}
+}
+
+// The link appears between begin and end: attach.end fails and nothing is
+// moved through it.
+func TestInboxBecomesALinkBeforeTheEnd(t *testing.T) {
+	r := newFilesRig(t, nil)
+	data := testBytes(20)
+	r.begin(t, "r_1", fileID(2), "a.bin", data)
+	wantReady(t, readApp(t, r.c), "r_1", 0)
+	sendData(t, r.c, fileID(2), data, 0, 20)
+	// The agent replaces the real inbox by a link.
+	outside, list := outsideWith(t)
+	before := list()
+	r.l.files.upMu.Lock()
+	r.l.files.uploads[fileID(2)].f.Close()
+	r.l.files.upMu.Unlock()
+	if err := os.Rename(filepath.Join(r.ws, "inbox"), filepath.Join(r.ws, "inbox.real")); err != nil {
+		t.Skip(err)
+	}
+	linkDir(t, filepath.Join(r.ws, "inbox"), outside)
+	sendApp(t, r.c, bridge.TypeAttachEnd, "r_2", bridge.AttachEnd{ID: fileID(2)})
+	wantFileError(t, readApp(t, r.c), "r_2", bridge.CodeFailed)
+	if got := list(); strings.Join(got, ",") != strings.Join(before, ",") {
+		t.Fatalf("outside: %v, was %v", got, before)
+	}
+}
+
+// Stale deletion only touches names that are ids of uploads (with or without
+// .json): a foreign old file inside .partial stays.
+func TestStaleDeletionOnlyTouchesUploadIDs(t *testing.T) {
+	r := newFilesRig(t, nil)
+	partials := filepath.Join(r.ws, "inbox", ".partial")
+	os.MkdirAll(partials, 0o700)
+	old := time.Now().Add(-3 * time.Hour)
+	for _, n := range []string{fileID(1), fileID(1) + ".json", "precious.txt", "another.json", "x" + fileID(1)} {
+		p := filepath.Join(partials, n)
+		os.WriteFile(p, []byte("x"), 0o600)
+		os.Chtimes(p, old, old)
+	}
+	r.begin(t, "r_1", fileID(2), "a", testBytes(5))
+	wantReady(t, readApp(t, r.c), "r_1", 0)
+	got := strings.Join(r.partials(t), ",")
+	want := strings.Join([]string{fileID(2), fileID(2) + ".json", "another.json", "precious.txt", "x" + fileID(1)}, ",")
+	if got != want {
+		t.Fatalf("left %s, want %s", got, want)
 	}
 }

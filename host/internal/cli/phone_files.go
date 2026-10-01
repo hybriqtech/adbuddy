@@ -242,11 +242,11 @@ func (l *phoneLink) beginUploadLocked(ab bridge.AttachBegin) (*upload, int64, st
 		return nil, a.Size, "", ""
 	}
 
-	inbox := filepath.Join(ws, "inbox")
-	partials := filepath.Join(inbox, partialDir)
-	if err := os.MkdirAll(partials, 0o700); err != nil {
-		return nil, 0, bridge.CodeFailed, "Could not create the inbox folder."
+	inbox, ok := ensureInbox(ws)
+	if !ok {
+		return nil, 0, bridge.CodeFailed, "The inbox folder cannot be used: it is a link or cannot be created."
 	}
+	partials := filepath.Join(inbox, partialDir)
 	l.dropStaleLocked(partials, now)
 	if old := fs.uploads[ab.ID]; old != nil {
 		// What it wrote stays in .partial: the resumption below takes it.
@@ -378,6 +378,30 @@ func inboxUsedLocked(inbox, skip string, uploads map[string]*upload) int64 {
 
 // dropStaleLocked deletes the uploads that did not advance for uploadStale,
 // those in memory and those left on disk by an earlier connection.
+// ensureInbox creates inbox/ and inbox/.partial of the environment and checks
+// that both are real folders: they are the agent's to replace, and a link
+// (a symlink, a junction) would send what is kept, listed and deleted there
+// wherever it points. MkdirAll is not used: it goes through links.
+func ensureInbox(ws string) (string, bool) {
+	inbox := filepath.Join(ws, "inbox")
+	for _, d := range []string{inbox, filepath.Join(inbox, partialDir)} {
+		if _, err := os.Lstat(d); errors.Is(err, os.ErrNotExist) {
+			if err := os.Mkdir(d, 0o700); err != nil {
+				return "", false
+			}
+		}
+		if !plainDir(d) {
+			return "", false
+		}
+	}
+	return inbox, true
+}
+
+// inboxPlain reports whether inbox/ and inbox/.partial are real folders.
+func inboxPlain(inbox string) bool {
+	return plainDir(inbox) && plainDir(filepath.Join(inbox, partialDir))
+}
+
 func (l *phoneLink) dropStaleLocked(partials string, now time.Time) {
 	for id, u := range l.files.uploads {
 		if u.done == nil && now.Sub(u.last) > uploadStale {
@@ -395,6 +419,9 @@ func (l *phoneLink) dropStaleLocked(partials string, now time.Time) {
 	}
 	for _, e := range entries {
 		id := strings.TrimSuffix(e.Name(), ".json")
+		if _, err := bridge.ParseFrameID(id); err != nil {
+			continue // not ours: never deleted
+		}
 		if u := l.files.uploads[id]; u != nil {
 			continue
 		}
@@ -456,8 +483,13 @@ func (l *phoneLink) onAttachEnd(m bridge.Message) {
 	}
 	att, final, code, text := l.endUpload(ae.ID)
 	if code == "" && final != "" {
+		inbox := l.inboxDir()
+		if !inboxPlain(inbox) {
+			l.fail(m, bridge.CodeFailed, "The inbox folder cannot be used: it is a link.")
+			return
+		}
 		// Outside the mutex: decoding a large image takes seconds.
-		att.Thumb = thumbnailOf(filepath.Join(l.inboxDir(), final))
+		att.Thumb = thumbnailOf(filepath.Join(inbox, final))
 		l.finishUpload(att, final)
 	}
 	if code != "" {
@@ -506,6 +538,8 @@ func (l *phoneLink) endUpload(id string) (bridge.Attachment, string, string, str
 		return bridge.Attachment{}, "", code, text
 	}
 	switch {
+	case !inboxPlain(inbox):
+		return fail(bridge.CodeFailed, "The inbox folder cannot be used: it is a link.")
 	case u.bad:
 		return fail(bridge.CodeInvalid, "The upload carried more data than it declared.")
 	case u.broken:
@@ -746,7 +780,9 @@ func (l *phoneLink) capture() (bridge.Attachment, string) {
 	case ctx.Err() != nil:
 		return bridge.Attachment{}, "The screenshot took more than 10 seconds."
 	case err != nil:
-		return bridge.Attachment{}, "adb failed: " + reason(err.Error())
+		// No err.Error(): it carries the path of adb on this PC, which the app
+		// must not learn (spec §10).
+		return bridge.Attachment{}, "adb failed to take the screenshot."
 	case out.over:
 		return bridge.Attachment{}, "The screenshot is too large."
 	case code != 0:
@@ -760,9 +796,9 @@ func (l *phoneLink) capture() (bridge.Attachment, string) {
 		return bridge.Attachment{}, "The phone did not return a valid image."
 	}
 
-	inbox := filepath.Join(ws, "inbox")
-	if err := os.MkdirAll(filepath.Join(inbox, partialDir), 0o700); err != nil {
-		return bridge.Attachment{}, "Could not create the inbox folder."
+	inbox, ok := ensureInbox(ws)
+	if !ok {
+		return bridge.Attachment{}, "The inbox folder cannot be used: it is a link or cannot be created."
 	}
 	l.files.upMu.Lock()
 	full := inboxUsedLocked(inbox, "", l.files.uploads)+int64(len(img)) > inboxQuota
