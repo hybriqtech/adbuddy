@@ -177,8 +177,15 @@ func (l *phoneLink) chatArea() area {
 			bridge.TypeSessionNew:  l.onSessionNew,
 			bridge.TypeSessionStop: l.onSessionStop,
 			bridge.TypeInterrupt:   l.onInterrupt,
+
+			bridge.TypeTerminalWatch:   l.onTermWatch,
+			bridge.TypeTerminalUnwatch: l.onTermUnwatch,
+			bridge.TypeTerminalInput:   l.onTermInput,
+			bridge.TypeTerminalResize:  l.onTermResize,
 		},
 		snapshot: l.chatSnapshot,
+		attach:   l.stopTerm,
+		gone:     l.stopTerm,
 	}
 }
 

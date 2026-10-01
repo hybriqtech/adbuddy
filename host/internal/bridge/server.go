@@ -283,6 +283,18 @@ func (s *Server) SendTo(req Message, typ string, payload any) error {
 	return s.sendVolatile(req.conn, typ, "", payload)
 }
 
+// Backlog is how many messages wait in the queue of the connected app: 0
+// without one. The terminal checks it before sending, so that it never fills
+// a queue whose overflow drops the app (protocol spec §7).
+func (s *Server) Backlog() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.client == nil {
+		return 0
+	}
+	return len(s.client.send)
+}
+
 // sendVolatile queues a message that is not kept: for the connection gen, or
 // for the current one when gen is 0.
 func (s *Server) sendVolatile(gen uint64, typ, rid string, payload any) error {

@@ -49,6 +49,7 @@ type phoneLink struct {
 	sess    session.Info     // the agent's session, as shown on the phone
 	manager *session.Manager // nil until serve starts the session
 	chat    chatState        // phone_chat.go
+	term    termState        // phone_term.go
 }
 
 // maxNotices is how many unsupported types a connection is told of by notice:
@@ -281,8 +282,9 @@ func (l *phoneLink) sessionInfo(i session.Info) {
 // useSession gives the chat area the agent's session.
 func (l *phoneLink) useSession(m *session.Manager) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	l.manager = m
+	l.mu.Unlock()
+	l.subscribeTerm(m) // phone_term.go
 }
 
 // snapshot is called with the server's lock held: neither it nor the parts

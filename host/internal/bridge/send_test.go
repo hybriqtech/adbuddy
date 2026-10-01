@@ -311,3 +311,27 @@ func TestSendToGoesToTheConnectionThatAsked(t *testing.T) {
 	}
 	quiet(t, c2)
 }
+
+// Backlog counts the messages waiting for the connected app, 0 without one.
+func TestBacklogCountsTheQueue(t *testing.T) {
+	s := New(Options{})
+	if n := s.Backlog(); n != 0 {
+		t.Fatalf("without an app: %d", n)
+	}
+	s.client = &client{send: make(chan Message, sendQueue), cancel: func() {}, gen: 1}
+	if n := s.Backlog(); n != 0 {
+		t.Fatalf("empty queue: %d", n)
+	}
+	for range 5 {
+		if err := s.Send(TypeTerminalOutput, TerminalOutput{Epoch: "e_1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := s.Backlog(); n != 5 {
+		t.Fatalf("got %d, want 5", n)
+	}
+	<-s.client.send
+	if n := s.Backlog(); n != 4 {
+		t.Fatalf("got %d, want 4", n)
+	}
+}
