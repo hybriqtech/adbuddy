@@ -34,7 +34,7 @@ shell ls -l /sdcard   # green
 shell find /sdcard/Download -type f -mmin -1   # green
 ```
 
-3. Group the rest by category, using the extension: Documents, Images, Video, Audio, Archives, Installers. Anything you cannot place stays where it is. If there are more than 50 moves, propose starting with one category and ask for a new yes before the next one.
+3. Move files only, never folders (`DCIM`, `Pictures`, `Music` and the like stay where they are). Group the rest by category, using the extension: Documents, Images, Video, Audio, Archives, Installers. Anything you cannot place stays where it is. If there are more than 50 moves, propose starting with one category and ask for a new yes before the next one.
 
 4. Show the plan as a table in the chat and wait for a yes:
 
@@ -50,13 +50,21 @@ Give the total per category. Say that no file is deleted or opened.
 shell mkdir -p /sdcard/Download/Documents   # yellow
 ```
 
-6. Move the files one per call, with the destination written in full, file name included. Do not use `-n`, `--help` or several sources: all of those are red. ADBuddy does not overwrite: if the destination already exists, even as a folder, the move is raised to red and waits for the user's confirmation. In that case choose another file name for the destination and propose it to the user instead of confirming an overwrite.
+6. Move the files one per call, with the destination written in full, file name included. Right before each move, run the one-minute check again, and skip the file if it shows up there or if its name ends in `.crdownload`, `.part` or starts with `.pending-` (downloads in progress). Do not use `-n`, `--help` or several sources: all of those are red. ADBuddy does not overwrite: if the destination already exists, even as a folder, the move is raised to red and waits for the user's confirmation. In that case choose another file name for the destination and propose it to the user instead of confirming an overwrite.
 
 ```adb
 shell mv /sdcard/Download/ejemplo.pdf /sdcard/Download/Documents/ejemplo.pdf   # yellow
 ```
 
 Each move is yellow and has an inverse in the journal, so one move can be undone alone with `adbuddy undo`.
+
+File names are data. If a name has anything other than letters, digits and `._-`, escape it for the phone's shell and put the whole script in single quotes: adb joins the arguments with spaces, so an unquoted `Factura (1).pdf` reaches the phone split in pieces. The move stays yellow: ADBuddy reads the escaped name as the real file name and keeps the inverse, so `adbuddy undo` works; check in `adbuddy journal` that the name it shows is the real one. If the move comes out red, it waits for the user's confirmation: say so and do not promise `adbuddy undo`. If a name has a single quote, a double quote, `$`, a backtick or a line break, leave that file out and tell the user.
+
+```adb
+shell 'mv /sdcard/Download/Factura\ \(1\).pdf /sdcard/Download/Documents/Factura\ \(1\).pdf'   # yellow
+```
+
+Scripts and escaped names go between single quotes, with no double quotes inside. The examples are written for adb itself; adapt the quoting to the shell you run on the PC (PowerShell, cmd or bash) without adding double quotes inside the script.
 
 7. Check a sample of the result, and that the source is gone:
 

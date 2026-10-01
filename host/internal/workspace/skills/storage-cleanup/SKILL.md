@@ -43,7 +43,7 @@ shell command -v md5sum   # green
 shell md5sum /sdcard/Download/ejemplo.pdf   # green
 ```
 
-Hash the candidate files one call at a time (same size is the first filter) and compare the hashes yourself, as text, in the chat. The hash is the only thing you read of the file. Two files with the same hash are duplicates; keep the one the user prefers.
+Hash the candidate files one call at a time (same size is the first filter) and compare the hashes yourself, as text, in your own working notes (do not paste all the hashes into the chat). The hash is the only thing you read of the file. Two files with the same hash are duplicates; keep the one the user prefers.
 
 4. Show the plan in a table and wait for a yes before the first move:
 
@@ -53,19 +53,28 @@ Hash the candidate files one call at a time (same size is the first filter) and 
 
 Say how many files and how much space it would free. Say that nothing is deleted: the files go to a trash folder, and the space is only freed when the user empties it.
 
-5. Create the trash folder, once:
+5. After the yes, create the trash folder, once, and list it: it may hold files from earlier sessions, and you must not overwrite them.
 
 ```adb
 shell mkdir -p /sdcard/ADBuddy-papelera   # yellow
+shell ls -l /sdcard/ADBuddy-papelera   # green
 ```
 
-6. After the yes, move the files one per call. Always write the full destination, with the file name, never just the folder. If a file with that name is already in the trash, choose another name for the destination (add the date to the name). If the destination exists, even as a folder, ADBuddy raises the move to red: it waits for the user's confirmation and leaves no inverse in the journal. `mv` with options or several sources is also red, so do not use them:
+6. Move the files one per call. Move files only, never folders. Always write the full destination, with the file name, never just the folder. If a file with that name is already in the trash, choose another name for the destination (add the date to the name). If the destination exists, even as a folder, ADBuddy raises the move to red: it waits for the user's confirmation and leaves no inverse in the journal. In that case propose another name to the user and ask them NOT to approve an overwrite. `mv` with options or several sources is also red, so do not use them:
 
 ```adb
 shell mv /sdcard/Download/ejemplo.pdf /sdcard/ADBuddy-papelera/ejemplo.pdf   # yellow
 ```
 
 The move is yellow and `adbuddy undo` reverses it. Check each result with `shell ls -l /sdcard/ADBuddy-papelera` (green) and go on with the next file.
+
+File names are data. If a name has anything other than letters, digits and `._-`, escape it for the phone's shell and put the whole script in single quotes: adb joins the arguments with spaces, so an unquoted `Factura (1).pdf` reaches the phone split in pieces. The move stays yellow: ADBuddy reads the escaped name as the real file name and keeps the inverse, so `adbuddy undo` works; check in `adbuddy journal` that the name it shows is the real one. If the move comes out red, it waits for the user's confirmation: say so and do not promise `adbuddy undo`. If a name has a single quote, a double quote, `$`, a backtick or a line break, leave that file out and tell the user.
+
+```adb
+shell 'mv /sdcard/Download/Factura\ \(1\).pdf /sdcard/ADBuddy-papelera/Factura\ \(1\).pdf'   # yellow
+```
+
+Scripts and escaped names go between single quotes, with no double quotes inside. The examples are written for adb itself; adapt the quoting to the shell you run on the PC (PowerShell, cmd or bash) without adding double quotes inside the script.
 
 7. Show the user what is in the trash and how to get each file back:
 
@@ -87,7 +96,7 @@ shell rm -r /sdcard/ADBuddy-papelera   # red
 shell cmd package help   # green
 ```
 
-If `trim-caches` is not in the answer, say so and stop. If it is, tell the user, before anything else, that this clears the cache of every app, protected apps included, that it cannot be undone and that apps may be slower the first time they open. The choice is the user's. The command is red: it waits for the user's confirmation.
+If `trim-caches` is not in the answer, say so and stop. If it is, tell the user, before anything else, that this clears the cache of every app, protected apps included, that it cannot be undone and that apps may be slower the first time they open. The choice is the user's. Note that `1G` means "until 1 GB is free": if there is already more free space than that, the command may do nothing. The command is red: it waits for the user's confirmation.
 
 ```adb
 shell cmd package trim-caches 1G   # red

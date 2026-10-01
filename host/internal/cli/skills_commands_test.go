@@ -45,7 +45,9 @@ var skillAdbuddySubcommands = map[string]bool{
 
 // allowedRecursiveRm is the one recursive delete a recipe may carry: storage-cleanup
 // empties its own trash folder with it (red: the user confirms it). The match is
-// the exact command, field by field: no patterns, no prefixes.
+// the exact command, field by field, in that one skill: no patterns, no prefixes.
+const allowedRecursiveRmFile = "storage-cleanup/SKILL.md"
+
 var allowedRecursiveRm = [][]string{
 	{"shell", "rm", "-r", "/sdcard/ADBuddy-papelera"},
 }
@@ -53,9 +55,9 @@ var allowedRecursiveRm = [][]string{
 // forbiddenRecipe says whether a command does what no recipe does, however
 // well it is annotated (spec §2.3): clear an app's data, delete recursively,
 // wipe, reboot, or install granting every permission.
-func forbiddenRecipe(fields []string) bool {
+func forbiddenRecipe(file string, fields []string) bool {
 	for _, ok := range allowedRecursiveRm {
-		if slices.Equal(fields, ok) {
+		if file == allowedRecursiveRmFile && slices.Equal(fields, ok) {
 			return false
 		}
 	}
@@ -239,7 +241,7 @@ func checkSkillExample(cl *classify.Classifier, ex skillExample) (errs []string)
 			bad("write the command without the adb prefix: %q", ex.text)
 			return
 		}
-		if forbiddenRecipe(fields) {
+		if forbiddenRecipe(ex.file, fields) {
 			bad("a recipe never does this (spec §2.3): %q", ex.text)
 			return
 		}
@@ -316,6 +318,13 @@ func skillProblems(t *testing.T, cl *classify.Classifier, md string) []string {
 	return append(errs, checkSkillExamples(cl, examples)...)
 }
 
+// skillProblemsAt is skillProblems for a file at the given path of the skills folder.
+func skillProblemsAt(t *testing.T, cl *classify.Classifier, path, md string) []string {
+	t.Helper()
+	examples, errs := skillExamplesIn(fstest.MapFS{path: {Data: []byte(md)}})
+	return append(errs, checkSkillExamples(cl, examples)...)
+}
+
 func adbBlock(lines ...string) string {
 	return "```adb\n" + strings.Join(lines, "\n") + "\n```\n"
 }
@@ -382,15 +391,14 @@ func TestSkillExamplesCatches(t *testing.T) {
 		})
 	}
 	good := map[string]string{
-		"getprop":         adbBlock("shell getprop ro.product.model   # green"),
-		"packages":        adbBlock("shell pm list packages -3   # green"),
-		"settings":        adbBlock("shell settings get global window_animation_scale   # green"),
-		"screenshot -o":   adbuddyBlock("screenshot -oshot.png"),
-		"screen":          adbuddyBlock("screen"),
-		"send":            adbuddyBlock(`send outbox/device-profile.md --caption "Device profile"`),
-		"foreground":      adbuddyBlock("foreground"),
-		"empty own trash": adbBlock("shell rm -r /sdcard/ADBuddy-papelera   # red"),
-		"other language":  "```text\nsome output\n```\n\nPlain prose about the phone.\n",
+		"getprop":        adbBlock("shell getprop ro.product.model   # green"),
+		"packages":       adbBlock("shell pm list packages -3   # green"),
+		"settings":       adbBlock("shell settings get global window_animation_scale   # green"),
+		"screenshot -o":  adbuddyBlock("screenshot -oshot.png"),
+		"screen":         adbuddyBlock("screen"),
+		"send":           adbuddyBlock(`send outbox/device-profile.md --caption "Device profile"`),
+		"foreground":     adbuddyBlock("foreground"),
+		"other language": "```text\nsome output\n```\n\nPlain prose about the phone.\n",
 	}
 	for name, md := range good {
 		t.Run("good/"+name, func(t *testing.T) {
@@ -398,5 +406,44 @@ func TestSkillExamplesCatches(t *testing.T) {
 				t.Errorf("a good example failed: %v", errs)
 			}
 		})
+	}
+}
+
+// TestRecursiveRmException keeps the one exception to the rm -r ban exact: only
+// that command, only in storage-cleanup, and every negative case annotated red
+// so that the recipe filter is the only reason it can fail.
+func TestRecursiveRmException(t *testing.T) {
+	cl, err := classify.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const own = allowedRecursiveRmFile
+	if errs := skillProblemsAt(t, cl, own, adbBlock("shell rm -r /sdcard/ADBuddy-papelera   # red")); len(errs) != 0 {
+		t.Errorf("the exact command must pass in %s: %v", own, errs)
+	}
+	for _, cmd := range []string{
+		"shell rm -r /sdcard/ADBuddy-papelera/..",
+		"shell rm -r /sdcard/ADBuddy-papelera/",
+		"shell rm -r /sdcard/ADBuddy-papelera/x",
+		"shell rm -r //sdcard/ADBuddy-papelera",
+		"shell rm -r /sdcard/adbuddy-papelera",
+		"shell rm -r /sdcard/ADBuddy-papelera2",
+		"shell rm -rf /sdcard/ADBuddy-papelera",
+		"shell rm -r -f /sdcard/ADBuddy-papelera",
+		"shell 'rm -r /sdcard/ADBuddy-papelera'",
+		"shell rm -r /sdcard",
+	} {
+		t.Run("bad/"+cmd, func(t *testing.T) {
+			errs := skillProblemsAt(t, cl, own, adbBlock(cmd+"   # red"))
+			if len(errs) != 1 || !strings.Contains(errs[0], "a recipe never does this") {
+				t.Errorf("want only the recipe filter to reject it, got %v", errs)
+			}
+		})
+	}
+	for _, other := range []string{"organize-files/SKILL.md", "x/SKILL.md"} {
+		errs := skillProblemsAt(t, cl, other, adbBlock("shell rm -r /sdcard/ADBuddy-papelera   # red"))
+		if len(errs) != 1 || !strings.Contains(errs[0], "a recipe never does this") {
+			t.Errorf("the exact command must fail outside %s (%s): %v", own, other, errs)
+		}
 	}
 }
