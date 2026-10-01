@@ -9,11 +9,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import tech.hybriq.adbuddy.a11y.UiHelpers
 import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.bridge.Bridge
 import tech.hybriq.adbuddy.bridge.BridgeChannel
 import tech.hybriq.adbuddy.bridge.Channel
+import tech.hybriq.adbuddy.bridge.Notice
+import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.chat.ChatController
 import tech.hybriq.adbuddy.confirm.HostClock
 import tech.hybriq.adbuddy.files.Captures
@@ -56,6 +61,11 @@ class AdbuddyApp : Application() {
     lateinit var terminal: TerminalFeed
         private set
 
+    private val _notices = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
+    /** The text of each `notice` of the host (spec M2 section 4), for a snackbar: it is shown as the host wrote it. */
+    val notices: SharedFlow<String> = _notices.asSharedFlow()
+
     /** The host's clock, which the questions' expiry is written in. */
     val clock = HostClock()
 
@@ -64,6 +74,7 @@ class AdbuddyApp : Application() {
         bridge = Bridge(scope, BuildConfigInfo.versionName(this)) { m, _ -> clock.observe(m) }
         UiHelpers.install(this)
         channel = BridgeChannel(bridge, scope)
+        channel.listen(Protocol.NOTICE) { m -> Protocol.payload<Notice>(m)?.text?.takeIf { it.isNotEmpty() }?.let(_notices::tryEmit) }
         chat = ChatController(channel)
         UriSource.clearCache(this)
         captures = Captures(channel)

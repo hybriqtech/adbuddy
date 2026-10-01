@@ -13,11 +13,10 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tech.hybriq.adbuddy.bridge.BridgePrefs
 import tech.hybriq.adbuddy.bridge.BridgeService
 import tech.hybriq.adbuddy.ui.ConsentScreen
-import tech.hybriq.adbuddy.ui.HomeScreen
+import tech.hybriq.adbuddy.ui.ChatRoot
 
 class MainActivity : ComponentActivity() {
     private var showConsent by mutableStateOf(false)
@@ -50,7 +49,6 @@ class MainActivity : ComponentActivity() {
         if (prefs.link != null) BridgeService.start(this)
         setContent {
             AdbuddyTheme {
-                val state by app.bridge.state.collectAsStateWithLifecycle()
                 if (showConsent) {
                     ConsentScreen(
                         host = prefs.consentHost,
@@ -61,10 +59,7 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 } else {
-                    HomeScreen(
-                        state = state, bridge = app.bridge, clock = app.clock, focusConfirm = focusConfirm,
-                        closed = closed, onClose = { closed = closed + it },
-                    )
+                    ChatRoot(app, focusConfirm, closed) { closed = closed + it }
                 }
             }
         }

@@ -48,4 +48,37 @@
     <string name="restore_failed">No se ha podido volver a activar la depuración. Actívala en Opciones de desarrollador.</string>
     <string name="filter_all">Todo</string>
     <string name="overlay_pill">Agente usando la pantalla · Pausar</string>
+
+    <string name="action_cancel">Cancelar</string>
+    <string name="action_back">Atrás</string>
+    <string name="action_menu">Más opciones</string>
+    <string name="session_working">Trabajando</string>
+    <string name="session_waiting">Esperándote</string>
+    <string name="session_idle">Listo</string>
+    <string name="session_stopped">Parado</string>
+    <string name="chat_hint">Escribe al agente</string>
+    <string name="chat_send">Enviar</string>
+    <string name="chat_attach">Adjuntar</string>
+    <string name="chat_photo">Foto</string>
+    <string name="chat_file">Archivo</string>
+    <string name="chat_capture">Captura de pantalla</string>
+    <string name="chat_terminal_show">Mostrar la terminal</string>
+    <string name="chat_terminal_hide">Ocultar la terminal</string>
+    <string name="chat_retry">Reintentar</string>
+    <string name="chat_discard">Descartar</string>
+    <string name="chat_not_sent">No enviado</string>
+    <string name="chat_sending">Enviando…</string>
+    <string name="menu_activity">Actividad</string>
+    <string name="menu_new_conversation">Nueva conversación</string>
+    <string name="new_conversation_title">¿Empezar una conversación nueva?</string>
+    <string name="new_conversation_body">El agente empieza de nuevo sin recordar esta. Esta conversación se queda en el PC.</string>
+    <string name="new_conversation_confirm">Empezar</string>
+    <string name="attach_failed">No se ha podido añadir el archivo</string>
+    <string name="draft_failed">Falló la subida: toca para reintentar</string>
+    <string name="link_open_title">¿Abrir %1$s?</string>
+    <string name="link_open">Abrir</string>
+    <string name="file_tap_download">Toca para descargar</string>
+    <string name="file_downloading">Descargando… %1$d%%</string>
+    <string name="file_open">Toca para abrir</string>
+    <string name="file_failed">Falló la descarga: toca para reintentar</string>
 </resources>
