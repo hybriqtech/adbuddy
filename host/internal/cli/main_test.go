@@ -72,6 +72,7 @@ func isolate(t *testing.T) string {
 	data := shortDir(t)
 	t.Setenv("ADBUDDY_DATA_DIR", data)
 	t.Setenv("ADBUDDY_CONFIG_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir()) // doctor reads Claude Code's global hooks: not the machine's
 	t.Setenv("ADBUDDY_SOURCE", "")
 	t.Setenv("ANDROID_SERIAL", "")
 	return data
