@@ -61,6 +61,15 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - **Jerarquía:** la pantalla de consentimiento es texto suelto con dos botones; necesita estructura (cabecera, lista de lo que se concede con iconos, nota de privacidad aparte y acciones al pie).
   - Usar el skill `frontend-design` al diseñar, y comprobar cada pantalla en claro, oscuro y con letra grande.
 - **PTY en Windows: hijos con consola propia** (re-revisión de la ronda 2 de M3a). Tras una salida normal del agente, `Kill` ya no llama a `taskkill`, y cerrar la consola solo termina lo que sigue enganchado a ella. Los hijos con consola propia (node con `windowsHide`, como los servidores MCP) siguen vivos. Arreglo: un Job object con `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (crear el proceso suspendido, asignarlo, `ResumeThread`, cerrar el job en `Kill`). Ajustes opcionales del mismo fichero: cerrar el handle del hilo tras `CreateProcess`, cerrar `cmdOut` antes de `ClosePseudoConsole` si falla `spawn`, `taskkill` con `CREATE_NO_WINDOW` y `o.Path` como `lpApplicationName`.
+- **Aplazados de M3a (revisiones de T6-T9):**
+  - un `chat.send` reintentado tras `session.new` o fuera de los 100 del historial se vuelve a inyectar: falta un conjunto acotado de ids ya inyectados, independiente del historial;
+  - `chatSnapshot` serializa hasta ~6,4 MB con el lock del servidor tomado: guardar el tamaño de cada mensaje en el upsert;
+  - en la terminal, si `sendTerm` falla con un error distinto de `ErrNoApp`, se descarta lo acumulado sin pedir un snapshot (y se pierde el `terminal.size`);
+  - subidas: ventana entre conexiones mientras se mueve el fichero final (un `attach.begin` del mismo id desde otra conexión), y sin tope de descargas simultáneas (acotadas por el registro);
+  - `outbox/` sin cuota y registro de adjuntos que no se vacía: el agente puede llenar el disco con copias de hasta 200 MiB;
+  - `adbuddy send`: una FIFO puesta entre el `Lstat` y el `open` bloquea (abrir con `O_NONBLOCK` en Unix);
+  - `daemon/pcwrite.go` debe usar `internal/pathguard` (hoy son dos copias) cuando `daemon.go` quede libre de M5a;
+  - `-race` no se ha corrido en M3a (sin cgo en el PC de desarrollo): que lo corra la CI de Linux.
 - **`adbuddy doctor` desde la sesión del agente** usa el adb real fuera del shim (solo lecturas fijas, sin argumentos del agente) aunque haya pausa o una pregunta pendiente, y no lo apunta en el diario. Decidir si se registra o se bloquea en pausa.
 
 ## M5 · Ayudas al agente
