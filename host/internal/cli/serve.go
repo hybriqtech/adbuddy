@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -102,19 +103,22 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			fmt.Fprintf(app.Stderr, "Waiting for the phone on ADBuddy's adb server (port %d)…\n", e.cfg.ADBServerPort)
 			// The phone that mDNS does not find (Tailscale, another network) is
 			// tried at the address that worked last time.
-			addr := ""
+			// The addresses are those of the phone in config.toml. The remote
+			// mode counts as on while an expiry is saved, even a past one: its
+			// controller does not exist yet (and Closing is still on).
+			var addrs []string
 			if serial == e.cfg.Serial {
-				addr = e.cfg.Address
+				addrs = candidateAddrs(store.Config(), !store.Until().IsZero())
 			}
 			const reconnect = "run `adbuddy connect <new ip:port>` with the IP address and port on the phone's Wireless debugging screen, then `adbuddy serve` again."
-			k, err := findKnownPhone(ctx, runner, serial, addr, deviceWait, app.Stderr)
+			k, err := findKnownPhone(ctx, runner, serial, addrs, deviceWait, app.Stderr)
 			switch {
 			case err != nil && ctx.Err() != nil:
 				return Interrupted()
 			case hasCode(err, "WRONG_PHONE") || hasCode(err, "DEVICE_UNREADABLE"):
 				return err
 			case errors.Is(err, adb.ErrNoDevice) && k.AddrErr != nil:
-				return TransientError("DEVICE_NOT_FOUND", "the phone did not show up, and its saved address "+addr+" did not work: "+AsError(k.AddrErr).Message,
+				return TransientError("DEVICE_NOT_FOUND", "the phone did not show up, and its saved address did not work ("+strings.Join(addrs, ", ")+": "+AsError(k.AddrErr).Message+")",
 					"The port changes each time wireless debugging is turned on: "+reconnect)
 			case errors.Is(err, adb.ErrNoDevice):
 				return TransientError("DEVICE_NOT_FOUND", "no phone in state `device` on adb server port "+strconv.Itoa(e.cfg.ADBServerPort),
@@ -134,6 +138,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			} else if _, byGuid := pairing.GuidOf(serial); byGuid || k.Used != "" {
 				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s); the journal knows it as %s this time.\n", activeSerial, unverifiedWhy(serial), activeSerial)
 			}
+			hostRunner := runner // for host commands: the watcher of the connection has no serial
 			runner.Serial = activeSerial
 			// From here every command to the agent's phone asks `active` for its
 			// serial (it can change); `runner` is not used again.
@@ -196,6 +201,13 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			// own serve must not race with the goroutine of a previous one.
 			every, opTimeout := remoteTick, remoteOpTimeout
 			go watchRemote(ctx, app.Stderr, ctl, link.remote, every, opTimeout)
+			// Same here for the watcher of the phone's connection. It never
+			// touches the adb port: only the remote mode does.
+			go watchPhone(ctx, phoneWatch{
+				Active: active, Runner: hostRunner, Serial: serial,
+				Cfg: store.Config, RemoteOn: func() bool { return !store.Until().IsZero() }, Log: app.Stderr,
+				Every: watchEvery, Misses: watchMisses, TryWait: watchTryWait,
+			})
 			ui, protected := link.helpers()
 			d := daemon.New(daemon.Options{
 				Classifier: cls, ADB: active, Journal: journal.OpenSigned(workspace.JournalDir(ws), []byte(secret)), Confirmer: link.Confirmer(),

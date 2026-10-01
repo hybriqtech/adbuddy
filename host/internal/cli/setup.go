@@ -188,7 +188,11 @@ connection address with --connect (or type it when asked).`,
 						known = e.cfg.Address
 					}
 					say("Looking for your phone…\n")
-					k, err := findKnownPhone(ctx, runner, e.cfg.Serial, known, knownPhoneWait, app.Stderr)
+					var knownAddrs []string
+					if known != "" {
+						knownAddrs = []string{known}
+					}
+					k, err := findKnownPhone(ctx, runner, e.cfg.Serial, knownAddrs, knownPhoneWait, app.Stderr)
 					if ctx.Err() != nil {
 						return ctx.Err() // Ctrl+C: no guide nor QR code
 					}

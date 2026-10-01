@@ -27,10 +27,14 @@ func loggedSerials(t *testing.T, log string) []string {
 	}
 	defer f.Close()
 	var out []string
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
+	r := bufio.NewReader(f)
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			break // a last line without a newline is one the fake adb is still writing
+		}
 		var c struct{ Args []string }
-		if err := json.Unmarshal(sc.Bytes(), &c); err != nil {
+		if err := json.Unmarshal(line, &c); err != nil {
 			t.Fatal(err)
 		}
 		s := ""

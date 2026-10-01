@@ -44,7 +44,7 @@ type Options struct {
 	ADB        Executor
 	Journal    *journal.Store
 	Confirmer  confirm.Confirmer
-	Serial     string // active device, as adb lists it this session: every command runs with -s Serial
+	Serial     string // serial at start; the agent's ANDROID_SERIAL
 	// Serials: the serials the agent may name besides Serial and the identity
 	// (every one the session used: the agent keeps the ANDROID_SERIAL it
 	// started with when the phone changes address). nil: only Serial.
