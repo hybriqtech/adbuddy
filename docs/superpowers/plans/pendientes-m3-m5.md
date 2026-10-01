@@ -70,6 +70,11 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - `adbuddy send`: una FIFO puesta entre el `Lstat` y el `open` bloquea (abrir con `O_NONBLOCK` en Unix);
   - `daemon/pcwrite.go` debe usar `internal/pathguard` (hoy son dos copias) cuando `daemon.go` quede libre de M5a;
   - `-race` no se ha corrido en M3a (sin cgo en el PC de desarrollo): que lo corra la CI de Linux.
+  - **`ADBUDDY_SOURCE` lo declara el cliente:** un agente que vacía la variable puede hacer `attach`, `new` o `stop` sobre su propia sesión. La defensa real es la identidad del par del socket IPC (M4 o antes).
+  - `adbuddy send`: entre `ReparseBelow` y `Lstat` hay una ventana en la que un componente puede pasar a junction, y la segunda resolución no la ve (`EvalSymlinks` no sigue junctions).
+  - **El lector del bridge escribe en el PTY sin tope:** `chat.send` y `terminal.input` escriben en línea desde el lector, así que un agente que no lee su stdin bloquea también `confirm.response` (el 🔴 caduca y se deniega: falla seguro). También bloquean el lector `session.new`/`stop` (hasta 5 s más el kill) y el trabajo de disco de `attach.*`; si pasa de 10 s, falla el ping. Arreglo: un escritor por sesión con cola acotada.
+  - **`session.state.activity` no se rellena** (spec M3 §3.5): M3b lo necesita para la notificación de "Trabajando".
+  - **`Busy` solo reconoce los diálogos de Claude Code en inglés:** un Enter del chat puede aprobar un permiso de Codex o Gemini (adb sigue pasando por el shim). Para M4, con los permisos con botones.
 - **`adbuddy doctor` desde la sesión del agente** usa el adb real fuera del shim (solo lecturas fijas, sin argumentos del agente) aunque haya pausa o una pregunta pendiente, y no lo apunta en el diario. Decidir si se registra o se bloquea en pausa.
 
 ## M5 · Ayudas al agente

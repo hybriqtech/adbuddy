@@ -221,3 +221,7 @@ En el Pixel del usuario:
 
 En Linux y macOS (la CI corre los tests de `internal/pty`; esto es lo que no cubre):
 - `/exit` del agente llega a `stopped` aunque un nieto con `setsid` mantenga abierto el esclavo (si cerrar el maestro no despierta `Read`, `pump` no acaba y `Stop` espera sin límite).
+- los tests solo de Unix de M3a pasan en la CI de Linux y macOS: `.partial`, `inbox/` y `outbox/` como symlink, FIFO en `adbuddy send`, `pathguard`, y los de `internal/pty`.
+
+En Windows:
+- cuánto tarda `--continue` en fallar cuando no hay conversación previa, y que el reintento sin `--continue` arranca bien (spec M3 §3.2).
