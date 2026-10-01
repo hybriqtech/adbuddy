@@ -98,6 +98,33 @@ class ConversationViewTest {
         assertTrue(whole.contains(emoji))
     }
 
+    private fun ch(cp: Int) = String(Character.toChars(cp))
+
+    @Test fun doneLineTurnsUnicodeSeparatorsAndInvisiblesIntoOneSpace() {
+        val raw = "a" + ch(0x2028) + "b" + ch(0x2029) + "c" + ch(0x85) + "d" + ch(0xA0) + "e" + ch(0x202E) + "f" + ch(0x200B) + "g"
+        assertEquals("a b c d e f g", done(raw))
+    }
+
+    @Test fun doneLineKeepsWordsThatLookLikeMarkdown() {
+        assertEquals("use snake_case in ~/ruta and *.kt files", done("use snake_case in ~/ruta and *.kt files"))
+        assertEquals("2 * 3 * 4", done("2 * 3 * 4"))
+        assertEquals("a *.kt and *.md", done("a *.kt and *.md"))
+    }
+
+    @Test fun doneLineStripsOnlyDelimiters() {
+        assertEquals("x y z w v u", done("**x** __y__ `z` *w* _v_ ~~u~~"))
+        assertEquals("alt text", done("![alt text](u.png)"))
+        assertEquals("x rest", done("```x``` rest"))
+    }
+
+    @Test fun doneLineOnHugeHostileInputIsFast() {
+        for (bad in listOf("[".repeat(1_000_000), "![".repeat(500_000), " ".repeat(1_000_000) + "x", "*_".repeat(500_000))) {
+            val t0 = System.nanoTime()
+            done(bad)
+            assertTrue("took ${(System.nanoTime() - t0) / 1_000_000} ms", (System.nanoTime() - t0) < 500_000_000L)
+        }
+    }
+
     private fun perm(id: String = "p1") = PermissionRequest(id, "Bash", "SECRET-SUMMARY rm -rf /", "SECRET-DETAIL", "2026-10-01T10:00:00Z")
 
     @Test fun aPendingPermissionIsAskingAndTheNoticeIsGenericWithoutItsData() {

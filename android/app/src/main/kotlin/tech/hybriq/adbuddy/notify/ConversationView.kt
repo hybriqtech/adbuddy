@@ -80,19 +80,28 @@ object Notify {
     fun shouldAnnounceDone(s: BridgeState, detectorFired: Boolean): Boolean = detectorFired && s.chat.permissions.isEmpty()
 
     private const val MAX_LETTERS = 100
-    private val FENCE = Regex("```[^\\n]*")
-    private val LINK = Regex("\\[([^\\]]*)]\\([^)]*\\)")
-    private val LINE_MARKS = Regex("(?m)^\\s*(?:#{1,6}\\s+|>+\\s*|[-*+]\\s+)")
-    private val INLINE_MARKS = Regex("[*_`~]+")
-    private val SPACES = Regex("\\s+")
+
+    /** Markdown is looked for only in the first of these chars: the rest never reaches the line and the regexes stay cheap. */
+    private const val SCAN = 1000
+    private val FENCE_LINE = Regex("(?m)^[ \\t]*```[^\\n`]*$")
+    private val FENCE = Regex("```")
+    private val IMAGE_OR_LINK = Regex("!?\\[([^\\]\\[]{0,200})]\\([^)\\s]{0,300}\\)")
+    private val LINE_MARKS = Regex("(?m)^[ \\t]*(?:#{1,6}[ \\t]+|>+[ \\t]*|[-*+][ \\t]+)")
+    private val STRONG = Regex("(\\*\\*|__)(?=[^\\s*_])(.{1,300}?)(?<=[^\\s*_])\\1")
+    private val STRIKE = Regex("~~(?=\\S)(.{1,300}?)(?<=\\S)~~")
+    private val CODE = Regex("`([^`\\n]{0,300})`")
+    private val EMPHASIS = Regex("(?<![\\p{L}\\p{N}*_])([*_])(?=[^\\s*_])(.{1,300}?)(?<=[^\\s*_])\\1(?![\\p{L}\\p{N}*_])")
+    private val INVISIBLE = Regex("[\\p{Z}\\p{Cc}\\p{Cf}]+")
 
     /** The start of the agent's last answer in this conversation, for "Done"; null when it said nothing. */
     fun doneLine(chat: ChatState, conversation: String): String? {
         val m = chat.messages.lastOrNull {
             it.role == "assistant" && (conversation.isEmpty() || it.conversation.isEmpty() || it.conversation == conversation)
         } ?: return null
-        val plain = m.text.replace(FENCE, " ").replace(LINK, "$1").replace(LINE_MARKS, "")
-            .replace(INLINE_MARKS, "").replace(SPACES, " ").trim()
+        val head = if (m.text.length <= SCAN) m.text else m.text.take(if (m.text[SCAN - 1].isHighSurrogate()) SCAN - 1 else SCAN)
+        val plain = head.replace(FENCE_LINE, " ").replace(FENCE, "").replace(IMAGE_OR_LINK, "$1").replace(LINE_MARKS, "")
+            .replace(STRONG, "$2").replace(STRIKE, "$1").replace(CODE, "$1").replace(EMPHASIS, "$2")
+            .replace(INVISIBLE, " ").trim()
         if (plain.isEmpty()) return null
         if (plain.length <= MAX_LETTERS) return plain
         // Never between the two halves of a surrogate pair; at a word boundary when one is near.
