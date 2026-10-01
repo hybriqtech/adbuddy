@@ -198,11 +198,11 @@ func (s *Server) Connected() bool {
 	return s.client != nil
 }
 
-// ErrNoApp is the error of Send when no app is connected, and of Reply when
-// the connection that asked is gone.
+// ErrNoApp is the error of Send when no app is connected, and of Reply and
+// SendTo when the connection that asked is gone.
 var ErrNoApp = errors.New("the phone app is not connected")
 
-// ErrClass is the error of Publish, Reply and Send for a type of another
+// ErrClass is the error of Publish, Reply, Send and SendTo for a type of another
 // class (HostClasses): an event sent as a stream would never be resent, and a
 // stream message published as an event would be (a screen tap repeated after
 // a reconnection).
@@ -265,6 +265,22 @@ func (s *Server) Send(typ string, payload any) error {
 		return fmt.Errorf("send %s: %w", typ, ErrClass)
 	}
 	return s.sendVolatile(0, typ, "", payload)
+}
+
+// SendTo sends a stream message to the connection req came on, like Reply: a
+// terminal subscription belongs to the connection that asked for it (protocol
+// spec §7), and another app that replaced it must not get its output. If that
+// connection is gone it returns ErrNoApp. Like Send, it drops an app too slow
+// to take it. (Downloads go as binary frames and end with file.end, a Reply.)
+func (s *Server) SendTo(req Message, typ string, payload any) error {
+	if HostClasses[typ] != ClassStream {
+		return fmt.Errorf("send %s: %w", typ, ErrClass)
+	}
+	if req.conn == 0 {
+		// Not a request as OnMessage gives it: it has no connection to go to.
+		return ErrNoApp
+	}
+	return s.sendVolatile(req.conn, typ, "", payload)
 }
 
 // sendVolatile queues a message that is not kept: for the connection gen, or

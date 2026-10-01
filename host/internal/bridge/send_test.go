@@ -281,3 +281,33 @@ func TestSnapshotListsAreNeverNull(t *testing.T) {
 		}
 	}
 }
+
+// SendTo sends a stream message to the connection that asked for it, and
+// nowhere once another one replaced it.
+func TestSendToGoesToTheConnectionThatAsked(t *testing.T) {
+	h := start(t, Options{})
+	c1 := h.dial(token, 0)
+	recv(t, c1)
+	send(t, c1, TypeTerminalWatch, TerminalWatch{})
+	watch := wantMsg(t, h, TypeTerminalWatch)
+	if err := h.srv.SendTo(watch, TypeTerminalOutput, TerminalOutput{Epoch: "e_1", Data: []byte("x")}); err != nil {
+		t.Fatal(err)
+	}
+	if m := recv(t, c1); m.Type != TypeTerminalOutput || m.Seq != 0 || m.RID != "" {
+		t.Fatalf("got %+v", m)
+	}
+	if err := h.srv.SendTo(watch, TypeError, ErrorReply{}); !errors.Is(err, ErrClass) {
+		t.Fatalf("a reply through SendTo: %v, want ErrClass", err)
+	}
+	if err := h.srv.SendTo(Message{}, TypeTerminalOutput, TerminalOutput{}); !errors.Is(err, ErrNoApp) {
+		t.Fatalf("a built request: %v, want ErrNoApp", err)
+	}
+
+	c2 := h.dial(token, 0)
+	recv(t, c2)
+	waitUntilReplaced(t, c1)
+	if err := h.srv.SendTo(watch, TypeTerminalOutput, TerminalOutput{Epoch: "e_1", Data: []byte("y")}); !errors.Is(err, ErrNoApp) {
+		t.Fatalf("to the replaced connection: %v, want ErrNoApp", err)
+	}
+	quiet(t, c2)
+}
