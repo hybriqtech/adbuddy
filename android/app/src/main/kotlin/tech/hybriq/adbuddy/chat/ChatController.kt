@@ -1,6 +1,7 @@
 package tech.hybriq.adbuddy.chat
 
 import java.util.UUID
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -8,12 +9,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.Channel
 import tech.hybriq.adbuddy.bridge.ChatSend
 import tech.hybriq.adbuddy.bridge.ErrorReply
 import tech.hybriq.adbuddy.bridge.Message
 import tech.hybriq.adbuddy.bridge.PermissionReply
+import tech.hybriq.adbuddy.bridge.PermissionRequest
+import tech.hybriq.adbuddy.bridge.PermissionResolved
 import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.bridge.SessionNew
 
@@ -30,10 +34,25 @@ data class Outgoing(val id: String, val text: String, val attachments: List<Atta
  */
 class ChatController(
     private val channel: Channel,
+    /** With a scope, a lost connection frees the answered cards (the answer may never have arrived). */
+    scope: CoroutineScope? = null,
+    clock: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { "c" + UUID.randomUUID().toString().replace("-", "") },
 ) {
     private val _outgoing = MutableStateFlow<List<Outgoing>>(emptyList())
     val outgoing: StateFlow<List<Outgoing>> = _outgoing.asStateFlow()
+
+    private val guard = PermissionGuard(clock)
+    private val _answering = MutableStateFlow<Set<String>>(emptySet())
+
+    /** The permission cards answered here whose permission.resolved has not come: their buttons stay off. */
+    val answering: StateFlow<Set<String>> = _answering.asStateFlow()
+
+    init {
+        channel.listen(Protocol.PERMISSION_RESOLVED) { m -> Protocol.payload<PermissionResolved>(m)?.let { r -> _answering.update { it - r.id } } }
+        // An answer sent on a socket that dropped may never have reached the host: the card can be answered again.
+        scope?.launch { channel.connected.collect { if (!it) _answering.value = emptySet() } }
+    }
 
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 8)
 
@@ -63,13 +82,34 @@ class ChatController(
         }
     }
 
+    /** The cards on screen, oldest first (the state's list, each time it changes): starts the promote guard and forgets the answered ones that went. */
+    fun onPermissions(permissions: List<PermissionRequest>) {
+        guard.observe(permissions.map { it.id })
+        val ids = permissions.map { it.id }.toSet()
+        _answering.update { a -> a.filter { it in ids }.toSet() }
+    }
+
+    /** Milliseconds before the card may be answered (its promote guard); 0 when it may. */
+    fun guardLeftMs(id: String): Long = guard.leftMs(id)
+
+    /** Whether the card may be answered now, apart from the connection and its time (PermissionUi.canAnswer). */
+    fun canAnswer(id: String): Boolean = id !in _answering.value && guard.leftMs(id) == 0L
+
     /**
      * Answers a question of the agent (permission.reply, M4). It has no rid and no reply: the card goes when the
-     * host's permission.resolved arrives. false when it could not be sent (the card stays; the buttons are off then).
+     * host's permission.resolved arrives, and until then (or a lost connection) it is answering and takes no other
+     * answer: one id, one reply. false when nothing was sent: a decision that is not the protocol's, a card already
+     * answered, not the one on screen or just promoted, or the host unreachable (then it can be answered again).
      */
     fun answerPermission(id: String, decision: String): Boolean {
-        val payload = Protocol.json.encodeToJsonElement(PermissionReply.serializer(), PermissionReply(id, decision))
-        return channel.send(Protocol.PERMISSION_REPLY, payload)
+        if (!PermissionUi.isDecision(decision) || !canAnswer(id)) return false
+        var first = false
+        _answering.update { a -> first = id !in a; a + id }
+        if (!first) return false
+        val payload = Protocol.json.encodeToJsonElement(PermissionReply.serializer(), PermissionUi.reply(id, decision))
+        val ok = channel.send(Protocol.PERMISSION_REPLY, payload)
+        if (!ok) _answering.update { it - id }
+        return ok
     }
 
     fun discard(id: String) = _outgoing.update { l -> l.filterNot { it.id == id } }

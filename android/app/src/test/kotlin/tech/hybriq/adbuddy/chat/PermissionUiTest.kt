@@ -53,4 +53,39 @@ class PermissionUiTest {
         assertEquals("p1", r.id)
         assertEquals("deny", r.decision)
     }
+
+    @Test fun anAnsweringOrJustPromotedCardTakesNoAnswer() {
+        assertFalse("answering", PermissionUi.canAnswer(p(), PermissionUi.ALLOW, true, t0, answering = true))
+        assertFalse("guarded", PermissionUi.canAnswer(p(), PermissionUi.DENY, true, t0, guardLeftMs = 1))
+        assertTrue(PermissionUi.canAnswer(p(), PermissionUi.DENY, true, t0, answering = false, guardLeftMs = 0))
+    }
+
+    @Test fun theGuardEndsByItselfSoTheClockTicksForIt() {
+        assertEquals(250L, PermissionUi.nextTickMs(listOf(p()), t0, guardLeftMs = 250))
+        assertEquals(600L, PermissionUi.nextTickMs(listOf(p()), t0, guardLeftMs = 600))
+        assertEquals(1000L, PermissionUi.nextTickMs(listOf(p()), t0, guardLeftMs = 1500))
+        assertEquals(250L, PermissionUi.nextTickMs(listOf(p()), t0 + 600_000, guardLeftMs = 250))
+        assertNull(PermissionUi.nextTickMs(listOf(p()), t0 + 600_000, guardLeftMs = 0))
+    }
+
+    @Test fun theGuardCountsFromTheFirstCardChanging() {
+        var now = 5_000L
+        val g = PermissionGuard { now }
+        assertEquals("nothing observed, nothing guarded", 0L, g.leftMs("p1"))
+        g.observe(listOf("p1", "p2"))
+        assertEquals(PermissionUi.PROMOTE_GUARD_MS, g.leftMs("p1"))
+        assertTrue("not the card on screen", g.leftMs("p2") > 0)
+        now += 100
+        g.observe(listOf("p1", "p2", "p3")) // same first: the guard goes on
+        assertEquals(500L, g.leftMs("p1"))
+        now += 500
+        assertEquals(0L, g.leftMs("p1"))
+        g.observe(listOf("p2", "p3"))
+        assertEquals(PermissionUi.PROMOTE_GUARD_MS, g.leftMs("p2"))
+    }
+
+    @Test fun onlyTheProtocolsDecisionsAreDecisions() {
+        assertTrue(listOf("allow", "allow_always", "deny").all(PermissionUi::isDecision))
+        assertFalse(listOf("", "Allow", "yes", "allow ").any(PermissionUi::isDecision))
+    }
 }

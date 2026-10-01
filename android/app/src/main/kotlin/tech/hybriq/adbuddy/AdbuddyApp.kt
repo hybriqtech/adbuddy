@@ -79,7 +79,7 @@ class AdbuddyApp : Application() {
         deviceInfo = DeviceInfoSender(this).also { it.start() }
         channel = BridgeChannel(bridge, scope)
         channel.listen(Protocol.NOTICE) { m -> Protocol.payload<Notice>(m)?.text?.takeIf { it.isNotEmpty() }?.let(_notices::tryEmit) }
-        chat = ChatController(channel)
+        chat = ChatController(channel, scope)
         UriSource.clearCache(this)
         captures = Captures(channel)
         drafts = Drafts(scope, Uploader(channel), captures)
