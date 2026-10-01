@@ -66,6 +66,29 @@ class Drafts(
         return key
     }
 
+    /**
+     * A file picked and still being copied (up to 200 MiB, hashed on the way): its draft is visible, and Send
+     * waits for it, before its source exists. bind() gives it the source; remove() before that drops it.
+     */
+    fun reserve(): String {
+        val key = newKey()
+        _items.update { it + Draft(key, RESERVED_NAME, "", 0, 0, DraftStatus.UPLOADING) }
+        return key
+    }
+
+    /** The copy finished: the reserved draft uploads src. If it was removed meanwhile, the copy is closed. */
+    fun bind(key: String, src: UploadSource) {
+        val alive = synchronized(lock) {
+            if (_items.value.any { it.key == key }) { sources[key] = src; true } else false
+        }
+        if (!alive) {
+            src.close()
+            return
+        }
+        update(key) { it.copy(name = src.name, mime = src.mime, size = src.size) }
+        start(key, src)
+    }
+
     fun capture() {
         val key = newKey()
         synchronized(lock) { captureKeys += key }
@@ -137,5 +160,6 @@ class Drafts(
     companion object {
         const val MAX_PARALLEL = 3
         const val CAPTURE_NAME = "screenshot.png"
+        const val RESERVED_NAME = "…"
     }
 }

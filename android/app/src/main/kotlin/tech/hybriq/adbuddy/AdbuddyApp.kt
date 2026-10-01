@@ -94,14 +94,18 @@ class AdbuddyApp : Application() {
      * onFailed gets the host's text, or "" (the screen then says it in its own words); it runs off the main thread too.
      */
     fun attachUri(uri: Uri, onFailed: (String) -> Unit) {
+        // The draft shows (and blocks Send) while the file is copied and hashed, not only once it uploads.
+        val key = drafts.reserve()
         scope.launch {
             try {
-                drafts.add(UriSource.copy(this@AdbuddyApp, uri))
+                drafts.bind(key, UriSource.copy(this@AdbuddyApp, uri))
             } catch (e: UploadFailed) {
+                drafts.remove(key)
                 onFailed(e.text)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) { // a provider that fails (Drive offline, permission revoked) must not end the process
+                drafts.remove(key)
                 onFailed("")
             }
         }

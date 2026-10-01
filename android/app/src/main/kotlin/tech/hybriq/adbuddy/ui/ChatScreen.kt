@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -95,7 +96,7 @@ fun ChatScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { inner ->
-        Column(Modifier.padding(inner).imePadding().fillMaxSize()) {
+        Column(Modifier.padding(inner).consumeWindowInsets(inner).imePadding().fillMaxSize()) {
             if (terminalOn) {
                 TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.weight(0.45f).fillMaxSize())
             }

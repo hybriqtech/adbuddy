@@ -18,7 +18,18 @@ class ChatBubbleActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // A rotation keeps the questions the person closed (MainActivity does the same).
+        closed = savedInstanceState?.getStringArrayList(STATE_CLOSED)?.toSet() ?: emptySet()
         val app = application as AdbuddyApp
         setContent { AdbuddyTheme { ChatRoot(app, focusConfirm = null, closed = closed, onClose = { closed = closed + it }) } }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putStringArrayList(STATE_CLOSED, ArrayList(closed))
+    }
+
+    private companion object {
+        const val STATE_CLOSED = "closed"
     }
 }

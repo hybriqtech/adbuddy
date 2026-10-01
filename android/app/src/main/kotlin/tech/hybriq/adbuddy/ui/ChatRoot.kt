@@ -79,8 +79,10 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, onClos
     val actions = remember(app) {
         ChatActions(
             send = { text ->
-                app.chat.send(text, app.drafts.items.value.mapNotNull { it.attachment })
-                app.drafts.clear()
+                // Only what this message carries goes: a file picked after the button was drawn stays in the draft.
+                val sent = app.drafts.items.value
+                app.chat.send(text, sent.mapNotNull { it.attachment })
+                sent.forEach { app.drafts.remove(it.key) }
             },
             retry = app.chat::retry,
             discard = app.chat::discard,

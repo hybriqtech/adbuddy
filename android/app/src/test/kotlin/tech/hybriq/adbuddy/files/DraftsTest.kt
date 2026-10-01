@@ -79,6 +79,37 @@ class DraftsTest {
         assertTrue(drafts.items.value.isEmpty())
     }
 
+    @Test fun aReservedDraftBlocksSendUntilItsCopyIsBound() {
+        hostOk()
+        val key = drafts.reserve()
+        assertEquals(DraftStatus.UPLOADING, drafts.items.value.single().status)
+        drafts.bind(key, BytesSource(byteArrayOf(1, 2, 3), "a.bin"))
+        val d = drafts.items.value.single()
+        assertEquals(key, d.key)
+        assertEquals("a.bin", d.name)
+        assertEquals(DraftStatus.DONE, d.status)
+    }
+
+    @Test fun aCopyThatFinishesAfterTheDraftWasRemovedIsClosed() {
+        hostOk()
+        val key = drafts.reserve()
+        drafts.remove(key)
+        var closed = false
+        val src = object : UploadSource {
+            private val inner = BytesSource(byteArrayOf(1))
+            override val name = inner.name
+            override val mime = inner.mime
+            override val size = inner.size
+            override val sha256 = inner.sha256
+            override fun open(offset: Long) = inner.open(offset)
+            override fun close() { closed = true }
+        }
+        drafts.bind(key, src)
+        assertTrue(closed)
+        assertTrue(drafts.items.value.isEmpty())
+        assertEquals("nothing was sent", 0, ch.sent.size)
+    }
+
     @Test fun removingAnUnknownKeyIsHarmless() {
         drafts.remove("nope")
         assertNull(drafts.items.value.firstOrNull())
