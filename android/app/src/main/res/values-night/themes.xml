@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Adbuddy" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0E1513</item>
+    </style>
+</resources>

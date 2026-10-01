@@ -8,7 +8,8 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
+import androidx.activity.enableEdgeToEdge
+import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -27,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         val prefs = BridgePrefs(this)
         if (savedInstanceState == null) {
             handle(intent)
@@ -47,7 +49,7 @@ class MainActivity : ComponentActivity() {
         // Bridge.start ignores the same link, so the connection is kept.
         if (prefs.link != null) BridgeService.start(this)
         setContent {
-            MaterialTheme {
+            AdbuddyTheme {
                 val state by app.bridge.state.collectAsStateWithLifecycle()
                 if (showConsent) {
                     ConsentScreen(
