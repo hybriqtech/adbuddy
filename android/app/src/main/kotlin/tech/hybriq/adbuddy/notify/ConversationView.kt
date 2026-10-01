@@ -5,9 +5,12 @@ import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.ChatState
 import tech.hybriq.adbuddy.ui.LinkStatus
+import tech.hybriq.adbuddy.ui.PauseButton
 import tech.hybriq.adbuddy.ui.StatusView
 
 data class LastMessage(val id: String, val fromUser: Boolean, val text: String)
+
+enum class NotifAction { REPLY, CAPTURE, PAUSE, RESUME, CUT }
 
 /** A string resource and its one argument, so the text is chosen where there is a Context and tested here without one. */
 data class Headline(@param:StringRes val res: Int, val arg: String? = null)
@@ -25,6 +28,16 @@ data class ConversationView(
     /** The agent has a permission question pending: a generic notice, never its tool, command or detail. */
     val asking: Boolean = false,
 ) {
+    /** The buttons of the conversation notification, in order: asking leaves only the safe cut (the answer is given in the app). */
+    fun actions(): List<NotifAction> = buildList {
+        if (!asking) {
+            add(NotifAction.REPLY)
+            add(NotifAction.CAPTURE)
+            status.button?.let { add(if (it == PauseButton.RESUME) NotifAction.RESUME else NotifAction.PAUSE) }
+        }
+        add(NotifAction.CUT)
+    }
+
     fun headline(): Headline = when {
         status.status != LinkStatus.CONNECTED -> Headline(status.status.text)
         asking -> Headline(R.string.notif_asking)
@@ -53,8 +66,9 @@ data class ConversationView(
             val text = m?.let { it.text.ifEmpty { it.attachments.joinToString { a -> a.name } } }
             val last = if (m == null || text.isNullOrEmpty()) null else LastMessage(m.id, m.role == "user", cutText(text))
             val working = s.sessionState.state == "working"
-            return ConversationView(StatusView.of(s, cut), s.sessionState.agent, s.sessionState.state, if (working) s.sessionState.activity else "", last,
-                asking = s.chat.permissions.isNotEmpty())
+            val status = StatusView.of(s, cut)
+            return ConversationView(status, s.sessionState.agent, s.sessionState.state, if (working) s.sessionState.activity else "", last,
+                asking = s.chat.permissions.isNotEmpty() && status.status == LinkStatus.CONNECTED)
         }
 
         private fun cutText(t: String) = if (t.length <= MAX_TEXT) t else t.take(MAX_TEXT - 1) + "…"
@@ -62,6 +76,9 @@ data class ConversationView(
 }
 
 object Notify {
+    /** "Done" yields to a pending question: the generic "needs an answer" notice already says it. */
+    fun shouldAnnounceDone(s: BridgeState, detectorFired: Boolean): Boolean = detectorFired && s.chat.permissions.isEmpty()
+
     private const val MAX_LETTERS = 100
     private val FENCE = Regex("```[^\\n]*")
     private val LINK = Regex("\\[([^\\]]*)]\\([^)]*\\)")

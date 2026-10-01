@@ -106,8 +106,48 @@ class ConversationViewTest {
         assertTrue(v.asking)
         assertEquals(Headline(R.string.notif_asking), v.headline())
         assertEquals(Headline(R.string.notif_asking), v.publicHeadline())
-        assertTrue(!v.toString().contains("SECRET"))
-        assertTrue(!ConversationView.of(state(), cut = false).asking)
+        val plain = ConversationView.of(s, cut = false)
+        assertEquals("the notice carries nothing more than without the question", plain.last, v.last)
+        assertEquals(plain.activity, v.activity)
+        assertEquals(plain.status, v.status)
+        assertEquals(plain.state, v.state)
+        assertEquals(plain.agent, v.agent)
+        assertTrue(!plain.asking)
+    }
+
+    private fun withPerm(s: BridgeState) = s.copy(chat = s.chat.copy(permissions = listOf(perm())))
+
+    @Test fun pausedOrDisconnectedIsNotAsking_andResumeStaysOffered() {
+        val paused = state()
+        val p = withPerm(paused.copy(sessionState = paused.sessionState.copy(paused = true)))
+        val v = ConversationView.of(p, cut = false)
+        assertTrue(!v.asking)
+        assertEquals(Headline(R.string.status_paused), v.headline())
+        assertTrue(v.actions().contains(NotifAction.RESUME))
+        assertTrue(!ConversationView.of(withPerm(state(conn = BridgeState.Connection.WAITING)), cut = false).asking)
+        assertTrue(!ConversationView.of(withPerm(state()), cut = true).asking)
+    }
+
+    @Test fun askingOffersOnlyCut_otherwiseTheM3Actions() {
+        assertEquals(listOf(NotifAction.CUT), ConversationView.of(withPerm(state()), cut = false).actions())
+        assertEquals(listOf(NotifAction.REPLY, NotifAction.CAPTURE, NotifAction.PAUSE, NotifAction.CUT), ConversationView.of(state(), cut = false).actions())
+        assertEquals(listOf(NotifAction.CUT), ConversationView.of(withPerm(state()), cut = false).actions())
+    }
+
+    @Test fun doneIsNotAnnouncedWhileAQuestionIsPending() {
+        assertTrue(Notify.shouldAnnounceDone(state(), detectorFired = true))
+        assertTrue(!Notify.shouldAnnounceDone(withPerm(state()), detectorFired = true))
+        assertTrue(!Notify.shouldAnnounceDone(state(), detectorFired = false))
+    }
+
+    @Test fun theLockScreenLineNeverHasAgentTextOrPermissionData() {
+        val msgs = listOf(msg("a", "assistant", "SECRET-ANSWER"))
+        for (st in listOf("working", "waiting", "idle", "stopped")) {
+            for (s in listOf(state(st, msgs = msgs), withPerm(state(st, msgs = msgs)))) {
+                val p = ConversationView.of(s, cut = false).publicHeadline()
+                assertNull(st, p.arg)
+            }
+        }
     }
 
     @Test fun askingBeatsWorkingWaitingAndStoppedButNotALostConnection() {
