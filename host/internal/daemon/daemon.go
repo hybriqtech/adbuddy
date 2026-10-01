@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -69,7 +70,16 @@ type Options struct {
 	// also stops what was already waiting. Nil: never paused. Called
 	// concurrently: it must be safe across goroutines (an atomic.Bool, say).
 	Paused func() bool
-	Now    func() time.Time
+	// UI runs a helper operation (bridge.UIOp*) on the phone app and returns
+	// its result (M5 spec §2): its errors are ErrNoApp, ErrUITimeout, a
+	// *UIError the app answered, or the context's. Nil: there is no app, and
+	// adb does what it can. Called concurrently.
+	UI func(ctx context.Context, op string, args json.RawMessage) (json.RawMessage, error)
+	// Protected reports whether pkg is one of the user's protected apps (M5
+	// spec §4.3); ADBuddy itself always is. Nil: only ADBuddy. Called
+	// concurrently.
+	Protected func(pkg string) bool
+	Now       func() time.Time
 }
 
 // Daemon handles IPC requests.
@@ -298,6 +308,8 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 		return d.exec(ctx, req, s)
 	case ipc.KindUndo:
 		return d.undo(ctx, req, s)
+	case ipc.KindUI:
+		return d.ui(ctx, req, s)
 	case ipc.KindPing:
 		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.o.Serial, Identity: d.identity(), Journal: d.o.Journal.Dir()})
 		return ipc.Exit{}
@@ -477,6 +489,14 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			return d.block(e, s, other)
 		}
 		release = r
+	}
+	// The guard (M5 spec §4.3), after the doors: nothing touches or reads the
+	// screen with a protected app, or ADBuddy, in front.
+	if why := d.guard(ctx, res, args); why != "" {
+		return d.refuse(ctx, e, s, why)
+	}
+	if d.o.Paused() { // paused while the guard looked
+		return d.block(e, s, PausedMessage)
 	}
 	if level >= classify.Yellow {
 		running := e

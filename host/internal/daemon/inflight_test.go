@@ -123,7 +123,8 @@ func TestQuestionWaitsForAChangeInFlight(t *testing.T) {
 	e.d.o.Confirmer = held
 	n := &notices{}
 	e.d.o.OnNotice = n.add
-	yellow := e.execAsync("shell", "sleep 1; input tap 1 1")
+	// Alone: since M5 the guard refuses input inside a compound command.
+	yellow := e.execAsync("shell", "input tap 1 1")
 	g.waitStarted(t)
 	red := e.execAsync("shell", "reboot")
 	if !n.waitFor(`Waiting for "Interface action: tap 1 1" to finish before asking "Restart the phone"`) {

@@ -89,6 +89,9 @@ func (s *stream) Data(v any) error {
 	return err
 }
 
+// settingsInFront is dumpsys with Settings, not a protected app, in front.
+const settingsInFront = "ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)\n  topResumedActivity=ActivityRecord{1 u0 com.android.settings/.Settings t1}\n"
+
 type env struct {
 	ws      string // the agent's environment
 	d       *Daemon
@@ -106,8 +109,11 @@ func newEnv(t *testing.T) *env {
 	}
 	ws := t.TempDir()
 	e := &env{
-		ws:    ws,
-		adb:   &fakeADB{shell: map[string]string{}, exits: map[string]int{}, out: map[string]string{}},
+		ws: ws,
+		adb: &fakeADB{shell: map[string]string{
+			// What the guard reads before input and screencap (M5 spec §4.3).
+			"dumpsys activity activities": settingsInFront,
+		}, exits: map[string]int{}, out: map[string]string{}},
 		conf:  &fakeConfirmer{decision: confirm.Allow},
 		store: journal.OpenSigned(filepath.Join(ws, "journal"), []byte("test key")),
 	}

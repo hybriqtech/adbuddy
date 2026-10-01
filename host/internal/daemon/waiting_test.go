@@ -150,7 +150,8 @@ func TestCommandsAreBlockedWhileAQuestionWaits(t *testing.T) {
 			t.Fatalf("%q after the answer: %+v", argv, exit)
 		}
 	}
-	if ran := e.adb.ran(); strings.Join(ran, "|") != "shell reboot|shell input tap 1 1|shell getprop ro.product.model" {
+	// input tap is guarded: the guard reads the foreground first (M5 spec §4.3).
+	if ran := e.adb.ran(); strings.Join(ran, "|") != "shell reboot|precheck: dumpsys activity activities|shell input tap 1 1|shell getprop ro.product.model" {
 		t.Fatalf("adb ran %q", ran)
 	}
 }
