@@ -1,8 +1,12 @@
 package tech.hybriq.adbuddy.bridge
 
 import java.net.Proxy
+import java.security.SecureRandom
 import java.time.Instant
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -16,12 +20,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
 
 /**
  * The app end of the channel (spec §5.2): a WebSocket client to
@@ -58,6 +65,23 @@ class Bridge internal constructor(
     @Volatile private var socket: WebSocket? = null
     @Volatile private var loop: Job? = null
     @Volatile private var link: BridgePrefs.Link? = null
+
+    /** Listeners by type and of binary frames (protocol spec §3 and §10): listen(), listenFrames(). */
+    private val listeners = ConcurrentHashMap<String, CopyOnWriteArrayList<(Message) -> Unit>>()
+    private val frameListeners = CopyOnWriteArrayList<(Chunk) -> Unit>()
+
+    /** A request waiting for its answer, with the socket it went on. */
+    private class Pending(val socket: WebSocket, val onResult: (Message?) -> Unit)
+
+    /** Requests waiting for their answer, by rid. Guarded by lock. */
+    private val pending = HashMap<String, Pending>()
+
+    /**
+     * Request ids: unique in this process and unlike those of an earlier one,
+     * since the host resends events with the rid they confirm (protocol spec §3).
+     */
+    private val ridPrefix = "r" + Frame.idString(ByteArray(4).also { SecureRandom().nextBytes(it) }) + "-"
+    private val rids = AtomicLong()
 
     /** Connects with link, and keeps reconnecting until stop(). The same link again changes nothing. */
     fun start(link: BridgePrefs.Link) {
@@ -122,8 +146,18 @@ class Bridge internal constructor(
         } finally {
             synchronized(lock) { if (socket === ws) socket = null }
             ws?.cancel()
+            ws?.let { failPending(it) }
         }
         return attempt
+    }
+
+    /** The requests sent on ws get no answer now: each one fails (onResult(null)). */
+    private fun failPending(ws: WebSocket) {
+        val failed = synchronized(lock) {
+            val ids = pending.filterValues { it.socket === ws }.keys
+            ids.mapNotNull { pending.remove(it) }
+        }
+        failed.forEach { it.onResult(null) }
     }
 
     /** Callbacks of one socket. Only the current socket changes the state; any socket completes its own attempt. */
@@ -139,16 +173,28 @@ class Bridge internal constructor(
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             val m = Protocol.decode(text) ?: return
-            val next = synchronized(lock) {
+            val (next, answered) = synchronized(lock) {
                 if (webSocket !== socket) return
-                _state.updateAndGet { it.apply(m) }
+                _state.updateAndGet { it.apply(m) } to m.rid?.let { pending.remove(it) }
             }
             if (next.connection == BridgeState.Connection.INCOMPATIBLE) {
                 webSocket.close(1000, "host too old")
+                answered?.onResult?.invoke(null)
                 return
             }
             if (m.type == Protocol.WELCOME) attempt.welcomed = true
             onMessage(m, next)
+            answered?.onResult?.invoke(m)
+            listeners[m.type]?.forEach { it(m) }
+        }
+
+        override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            if (frameListeners.isEmpty()) return
+            val chunk = Frame.decode(bytes.toByteArray()) ?: return
+            synchronized(lock) {
+                if (webSocket !== socket || _state.value.connection != BridgeState.Connection.CONNECTED) return
+            }
+            frameListeners.forEach { it(chunk) }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -206,6 +252,61 @@ class Bridge internal constructor(
     fun pause(paused: Boolean): Boolean = synchronized(lock) {
         welcomedSocket()?.send(Protocol.encodeElement(if (paused) Protocol.PAUSE else Protocol.RESUME, JsonObject(emptyMap()), now())) ?: false
     }
+
+    /**
+     * Calls listener with each message of type from the current socket, after
+     * the state took it: for replies and stream messages, which the state does
+     * not keep (protocol spec §3), and events too, repeated ones included (the
+     * state skips those; a listener must not count on that). Each milestone
+     * adds its own; the returned function removes this one. It runs on
+     * OkHttp's reader thread, so it must be quick.
+     */
+    fun listen(type: String, listener: (Message) -> Unit): () -> Unit {
+        val list = listeners.computeIfAbsent(type) { CopyOnWriteArrayList() }
+        list.add(listener)
+        return { list.remove(listener) }
+    }
+
+    /** Calls listener with each valid binary frame from the welcomed socket. The returned function removes it. */
+    fun listenFrames(listener: (Chunk) -> Unit): () -> Unit {
+        frameListeners.add(listener)
+        return { frameListeners.remove(listener) }
+    }
+
+    /** Sends a message without a rid. false when the host is not reachable or has not welcomed the app yet. */
+    fun send(type: String, payload: JsonElement): Boolean = synchronized(lock) {
+        welcomedSocket()?.send(Protocol.encodeElement(type, payload, now())) ?: false
+    }
+
+    /**
+     * Sends a request with a new rid and returns it, or null (and no
+     * onResult) when it could not be sent. onResult gets the first message
+     * from the host with that rid (a reply, an error or the event that
+     * confirms it), or null when the connection ends first (protocol spec §3).
+     * It is waiting before the request leaves, so no answer comes too early.
+     */
+    fun request(type: String, payload: JsonElement, onResult: (Message?) -> Unit): String? {
+        val rid = ridPrefix + rids.incrementAndGet()
+        synchronized(lock) {
+            val ws = welcomedSocket() ?: return null
+            pending[rid] = Pending(ws, onResult)
+            if (ws.send(Protocol.encodeElement(type, payload, now(), rid))) return rid
+            pending.remove(rid)
+        }
+        return null
+    }
+
+    /** Sends a binary frame (protocol spec §6.4). false for a bad id, offset or size, or when not welcomed. */
+    fun sendFrame(id: String, offset: Long, data: ByteArray): Boolean = synchronized(lock) {
+        val frame = Frame.encode(id, offset, data) ?: return false
+        welcomedSocket()?.send(frame.toByteString()) ?: false
+    }
+
+    /**
+     * Bytes queued on the socket and not sent yet. A sender of frames waits
+     * while it is high: OkHttp closes the socket past 16 MiB.
+     */
+    fun queuedBytes(): Long = synchronized(lock) { socket?.queueSize() ?: 0 }
 
     private fun now() = Instant.now().toString()
 

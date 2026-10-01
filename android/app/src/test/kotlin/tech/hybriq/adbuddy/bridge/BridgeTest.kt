@@ -1,6 +1,7 @@
 package tech.hybriq.adbuddy.bridge
 
 import java.net.Proxy
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -8,11 +9,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.serialization.json.JsonObject
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -39,10 +43,12 @@ class BridgeTest {
         val opened = CountDownLatch(1)
         val gone = CountDownLatch(1)
         val received = LinkedBlockingQueue<String>()
+        val frames = LinkedBlockingQueue<ByteString>()
         @Volatile var ws: WebSocket? = null
 
         override fun onOpen(webSocket: WebSocket, response: Response) { ws = webSocket; opened.countDown() }
         override fun onMessage(webSocket: WebSocket, text: String) { received.add(text) }
+        override fun onMessage(webSocket: WebSocket, bytes: ByteString) { frames.add(bytes) }
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { gone.countDown() }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { gone.countDown() }
@@ -318,5 +324,87 @@ class BridgeTest {
         assertEquals(30_000L, b.after(welcomed = true, rejected = true))
         // Only a welcome (the host took the token) brings the short waits back.
         assertEquals(1_000L, b.after(welcomed = true, rejected = false))
+    }
+
+    /**
+     * A request carries a new rid; its first answer reaches onResult, and every
+     * listener of the answer's type gets it too (protocol spec §3).
+     */
+    @Test fun requestsAndTheirReplies() {
+        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
+        val errors = LinkedBlockingQueue<Message>()
+        val others = LinkedBlockingQueue<Message>()
+        bridge.listen(Protocol.ERROR) { errors.add(it) }
+        val remove = bridge.listen(Protocol.ERROR) { others.add(it) }
+        assertEquals("not welcomed yet", null, bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { })
+        bridge.start(link())
+        connect(bridge, hosts[0])
+
+        val result = CompletableFuture<Message?>()
+        val rid = bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { result.complete(it) }
+        assertNotNull(rid)
+        assertTrue("a valid rid", Protocol.validRid(rid!!))
+        val sent = hosts[0].next()
+        assertEquals(Protocol.CAPTURE_REQUEST, sent.type)
+        assertEquals(rid, sent.rid)
+        val second = bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { }
+        assertTrue("rids differ", second != null && second != rid)
+        assertEquals(second, hosts[0].next().rid)
+
+        hosts[0].send("""{"v":1,"rid":"$rid","type":"error","ts":"x","payload":{"code":"unsupported","text":"no"}}""")
+        val got = result.get(5, TimeUnit.SECONDS)!!
+        assertEquals(ErrorCode.UNSUPPORTED, Protocol.payload<ErrorReply>(got)!!.code)
+        assertEquals(rid, errors.poll(5, TimeUnit.SECONDS)!!.rid)
+        assertEquals(rid, others.poll(5, TimeUnit.SECONDS)!!.rid)
+        assertEquals("a reply does not move lastSeq", 0L, bridge.state.value.lastSeq)
+
+        remove()
+        hosts[0].send("""{"v":1,"type":"error","ts":"x","payload":{"code":"failed","text":"x"}}""")
+        assertNotNull(errors.poll(5, TimeUnit.SECONDS))
+        assertEquals("a removed listener hears nothing", null, others.poll(200, TimeUnit.MILLISECONDS))
+
+        assertTrue(bridge.send(Protocol.TERMINAL_UNWATCH, JsonObject(emptyMap())))
+        val plain = hosts[0].next()
+        assertEquals(Protocol.TERMINAL_UNWATCH, plain.type)
+        assertEquals(null, plain.rid)
+        bridge.stop()
+    }
+
+    /** A request still waiting when its connection ends fails with null. */
+    @Test fun aDroppedConnectionFailsItsRequests() {
+        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        val result = CompletableFuture<Message?>()
+        assertNotNull(bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { result.complete(it) })
+        hosts[0].next()
+        hosts[0].ws!!.close(1000, "restart")
+        assertEquals(null, result.get(5, TimeUnit.SECONDS))
+        bridge.stop()
+    }
+
+    /** Binary frames both ways, through Frame; malformed ones never reach the listener. */
+    @Test fun binaryFrames() {
+        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
+        val frames = LinkedBlockingQueue<Chunk>()
+        bridge.listenFrames { frames.add(it) }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        val id = "00112233445566778899aabbccddeeff"
+
+        assertTrue(bridge.sendFrame(id, 7, "hello".toByteArray()))
+        assertEquals(Frame.encode(id, 7, "hello".toByteArray())!!.toByteString(), hosts[0].frames.poll(5, TimeUnit.SECONDS))
+        assertFalse("a bad id is not sent", bridge.sendFrame("XYZ", 0, "x".toByteArray()))
+        assertFalse("an empty frame is not sent", bridge.sendFrame(id, 0, ByteArray(0)))
+        assertTrue(bridge.queuedBytes() >= 0)
+
+        assertTrue(hosts[0].ws!!.send(ByteArray(4).toByteString())) // shorter than an id
+        assertTrue(hosts[0].ws!!.send(Frame.encode(id, 3, "back".toByteArray())!!.toByteString()))
+        val chunk = frames.poll(5, TimeUnit.SECONDS)!!
+        assertEquals(id, chunk.id)
+        assertEquals(3L, chunk.offset)
+        assertEquals("back", String(chunk.data))
+        assertEquals(null, frames.poll(200, TimeUnit.MILLISECONDS))
+        bridge.stop()
     }
 }

@@ -198,4 +198,25 @@ class BridgeStateTest {
         assertEquals(before, s)
         assertTrue(s.pending.isEmpty())
     }
+
+    /** Each type has one reducer at most (protocol spec §10). */
+    @Test fun noTwoReducersShareAType() {
+        val all = BridgeState.REDUCERS.flatMap { it.types }
+        assertEquals(all.toSet().size, all.size)
+    }
+
+    /** Replies and stream messages (seq 0) change neither lastSeq nor what the state shows. */
+    @Test fun repliesAndStreamsKeepTheState() {
+        val s = BridgeState().apply(welcome("s_1")).apply(msg(3, Protocol.CONFIRM_REQUEST, question))
+        val out = msg(0, Protocol.TERMINAL_OUTPUT, """{"epoch":"e_1","offset":0,"data":"eA=="}""")
+        assertEquals(s, s.apply(out))
+        assertEquals(s, s.apply(msg(0, Protocol.ERROR, """{"code":"unsupported","text":"x"}""")))
+    }
+
+    /** Events of milestones still to come only move lastSeq. */
+    @Test fun eventsNotYetHandledMoveLastSeq() {
+        val s = BridgeState().apply(welcome("s_1"))
+        val next = s.apply(msg(1, Protocol.CHAT_MESSAGE, """{"id":"m_1","role":"user","text":"hi"}"""))
+        assertEquals(s.copy(lastSeq = 1), next)
+    }
 }
