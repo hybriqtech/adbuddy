@@ -201,7 +201,7 @@ func TestAdapterPromptsOfThePhoneAreNotRepeated(t *testing.T) {
 		tline("user", "p3", map[string]any{"role": "user", "content": "<command-name>/clear</command-name>"}),
 	)
 	m := chatMessageOf(t, r.readType(t, bridge.TypeChatMessage))
-	if m.Role != "user" || m.Text != "esto lo escribí en el PC" || !strings.HasPrefix(m.ID, "t_") {
+	if m.Role != "user" || m.Text != "esto lo escribí en el PC" || m.ID != "t_p2" {
 		t.Fatalf("%+v", m)
 	}
 }

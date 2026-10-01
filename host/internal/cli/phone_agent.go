@@ -389,7 +389,11 @@ func (l *phoneLink) apply(e claudecode.Event) {
 			if l.wasSent(e.Text) {
 				return
 			}
-			l.addMessage(bridge.ChatMessage{ID: newID("t_"), Role: "user", Text: e.Text, Conversation: conv})
+			id := newID("t_")
+			if e.MessageID != "" {
+				id = "t_" + e.MessageID // the same on every read of the transcript (spec M4 §4.2)
+			}
+			l.addMessage(bridge.ChatMessage{ID: id, Role: "user", Text: e.Text, Conversation: conv})
 			return
 		}
 		a.mu.Lock()

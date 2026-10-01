@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 )
 
@@ -43,7 +44,8 @@ const (
 type Event struct {
 	Kind Kind
 
-	// KindMessage
+	// KindMessage. For a prompt typed in the terminal MessageID is the uuid
+	// of its line (stable across readers), or "" if the line had none.
 	MessageID string
 	Role      string // assistant, or user for a prompt typed in the terminal
 	Text      string
@@ -131,7 +133,14 @@ func (p *Parser) Feed(line []byte) []Event {
 	}
 	var l rawLine
 	if err := json.Unmarshal(line, &l); err != nil {
-		p.badRun++
+		var syn *json.SyntaxError
+		if errors.As(err, &syn) {
+			p.badRun++
+			return nil
+		}
+		// Valid JSON whose field has another type than this parser knows:
+		// not a bad line, just one it does not understand.
+		p.badRun = 0
 		return nil
 	}
 	p.badRun = 0
@@ -159,7 +168,7 @@ func (p *Parser) Feed(line []byte) []Event {
 	if l.Type == "assistant" {
 		return p.assistant(l, m)
 	}
-	return p.user(m)
+	return p.user(l, m)
 }
 
 func (p *Parser) assistant(l rawLine, m rawMessage) []Event {
@@ -182,7 +191,9 @@ func (p *Parser) assistant(l rawLine, m rawMessage) []Event {
 			if strings.TrimSpace(b.Text) == "" {
 				continue
 			}
-			p.addText(id, b.Text)
+			if !p.addText(id, b.Text) {
+				continue // the message is full: the rest is not kept
+			}
 			grew = true
 		case "tool_use":
 			if b.ID == "" {
@@ -200,7 +211,7 @@ func (p *Parser) assistant(l rawLine, m rawMessage) []Event {
 	return out
 }
 
-func (p *Parser) user(m rawMessage) []Event {
+func (p *Parser) user(l rawLine, m rawMessage) []Event {
 	var prompt string
 	if json.Unmarshal(m.Content, &prompt) == nil {
 		t := strings.TrimSpace(prompt)
@@ -212,7 +223,7 @@ func (p *Parser) user(m rawMessage) []Event {
 				return nil
 			}
 		}
-		return []Event{{Kind: KindMessage, MessageID: "", Role: "user", Text: cut(prompt, maxMessageText)}}
+		return []Event{{Kind: KindMessage, MessageID: l.UUID, Role: "user", Text: cut(prompt, maxMessageText)}}
 	}
 	var blocks []rawBlock
 	if json.Unmarshal(m.Content, &blocks) != nil {
@@ -233,7 +244,19 @@ func (p *Parser) user(m rawMessage) []Event {
 	return out
 }
 
-func (p *Parser) addText(id, text string) {
+// addText keeps a block of text of message id, up to maxMessageText bytes
+// in all; it reports whether anything was added.
+func (p *Parser) addText(id, text string) bool {
+	have := 0
+	for _, t := range p.texts[id] {
+		have += len(t)
+	}
+	if have >= maxMessageText {
+		return false
+	}
+	if room := maxMessageText - have; len(text) > room {
+		text = strings.ToValidUTF8(text[:room], "")
+	}
 	if _, ok := p.texts[id]; !ok {
 		p.textOrder = append(p.textOrder, id)
 		if len(p.textOrder) > keepMessages {
@@ -242,6 +265,7 @@ func (p *Parser) addText(id, text string) {
 		}
 	}
 	p.texts[id] = append(p.texts[id], text)
+	return true
 }
 
 func (p *Parser) addTool(id string, ti toolInfo) {

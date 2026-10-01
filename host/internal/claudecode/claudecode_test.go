@@ -3,6 +3,7 @@ package claudecode
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -311,7 +312,7 @@ func TestParserIgnores(t *testing.T) {
 		"slash command":  line("user", "g", map[string]any{"role": "user", "content": "<command-name>/clear</command-name>"}, nil),
 		"local stdout":   line("user", "h", map[string]any{"role": "user", "content": "<local-command-stdout></local-command-stdout>"}, nil),
 		"blank":          []byte("   "),
-		"tool_result ok": line("user", "i", map[string]any{"role": "user", "content": []map[string]any{{"type": "text", "text": "[Request interrupted]"}}}, nil),
+		"interrupt text": line("user", "i", map[string]any{"role": "user", "content": []map[string]any{{"type": "text", "text": "[Request interrupted]"}}}, nil),
 		"bad message":    []byte(`{"type":"assistant","uuid":"j","message":"nope"}`),
 		"bad content":    []byte(`{"type":"assistant","uuid":"k","message":{"id":"m9","content":"nope"}}`),
 	} {
@@ -350,16 +351,116 @@ func TestParserBadRunAndForgetting(t *testing.T) {
 	if p.BadRun() != 0 {
 		t.Error("a good line resets the run")
 	}
-	// What it remembers is bounded.
-	for i := 0; i < keepMessages*3; i++ {
-		id := "m" + string(rune('A'+i%26)) + strings.Repeat("x", i)
-		p.Feed(line("assistant", "u"+id, asst(id, map[string]any{"type": "text", "text": "t"}), nil))
+}
+
+func TestParserForgetsOnlyTheOldest(t *testing.T) {
+	prompt := func(i int) []byte {
+		return line("user", fmt.Sprintf("p%d", i), map[string]any{"role": "user", "content": fmt.Sprintf("prompt %d", i)}, nil)
 	}
-	if len(p.texts) > keepMessages {
-		t.Errorf("%d messages kept", len(p.texts))
+	// Lines: the oldest uuid is forgotten past keepLines, the newest is kept.
+	p := NewParser()
+	n := keepLines + 10
+	for i := 0; i < n; i++ {
+		p.Feed(prompt(i))
 	}
-	if len(p.lines) > keepLines {
-		t.Errorf("%d lines kept", len(p.lines))
+	if len(p.lines) != keepLines {
+		t.Errorf("%d lines kept, want %d", len(p.lines), keepLines)
+	}
+	if ev := p.Feed(prompt(n - 1)); len(ev) != 0 {
+		t.Errorf("the newest line was forgotten: %+v", ev)
+	}
+	if ev := p.Feed(prompt(0)); len(ev) != 1 {
+		t.Errorf("the oldest line should be forgotten: %+v", ev)
+	}
+
+	// Messages: the text of the oldest is forgotten past keepMessages.
+	p = NewParser()
+	text := func(i int, part string) []byte {
+		return line("assistant", fmt.Sprintf("u%d%s", i, part), asst(fmt.Sprintf("m%d", i), map[string]any{"type": "text", "text": part}), nil)
+	}
+	nm := keepMessages + 5
+	for i := 0; i < nm; i++ {
+		p.Feed(text(i, "uno"))
+	}
+	if len(p.texts) != keepMessages {
+		t.Errorf("%d messages kept, want %d", len(p.texts), keepMessages)
+	}
+	if ev := p.Feed(text(nm-1, "dos")); len(ev) != 1 || ev[0].Text != "uno\n\ndos" {
+		t.Errorf("the newest message keeps its text: %+v", ev)
+	}
+	if ev := p.Feed(text(0, "dos")); len(ev) != 1 || ev[0].Text != "dos" {
+		t.Errorf("the oldest message is forgotten: %+v", ev)
+	}
+
+	// Tools: the name of the oldest tool use is forgotten past keepTools.
+	p = NewParser()
+	nt := keepTools + 5
+	for i := 0; i < nt; i++ {
+		p.Feed(line("assistant", fmt.Sprintf("a%d", i), asst(fmt.Sprintf("x%d", i), map[string]any{"type": "tool_use", "id": fmt.Sprintf("t%d", i), "name": "Read", "input": map[string]any{"file_path": "/x/y.txt"}}), nil))
+	}
+	if len(p.tools) != keepTools {
+		t.Errorf("%d tools kept, want %d", len(p.tools), keepTools)
+	}
+	result := func(i int) []byte {
+		return line("user", fmt.Sprintf("r%d", i), map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": fmt.Sprintf("t%d", i)}}}, nil)
+	}
+	if ev := p.Feed(result(nt - 1)); len(ev) != 1 || ev[0].Tool != "Read" {
+		t.Errorf("the newest tool is kept: %+v", ev)
+	}
+	if ev := p.Feed(result(0)); len(ev) != 1 || ev[0].Tool != "" || ev[0].Status != "done" {
+		t.Errorf("the oldest tool is forgotten: %+v", ev)
+	}
+}
+
+func TestParserPromptIDIsTheLineUUID(t *testing.T) {
+	l := line("user", "uuid-1", map[string]any{"role": "user", "content": "escrito en el PC"}, nil)
+	a := NewParser().Feed(l)
+	b := NewParser().Feed(l) // a reader restarted over the same transcript
+	if len(a) != 1 || a[0].MessageID != "uuid-1" || len(b) != 1 || b[0].MessageID != a[0].MessageID {
+		t.Errorf("%+v %+v", a, b)
+	}
+}
+
+func TestParserOnlySyntaxErrorsAreBadLines(t *testing.T) {
+	p := NewParser()
+	for _, l := range []string{`{"type":"user","version":2}`, `[]`, `"text"`, `{"type":5}`, `{"isMeta":"yes"}`, `null`} {
+		if ev := p.Feed([]byte(l)); len(ev) != 0 {
+			t.Errorf("%s: %+v", l, ev)
+		}
+		if p.BadRun() != 0 {
+			t.Errorf("%s counts as a bad line: %d", l, p.BadRun())
+		}
+	}
+	p.Feed([]byte(`{"type":`))
+	if p.BadRun() != 1 {
+		t.Errorf("a truncated JSON is a bad line: %d", p.BadRun())
+	}
+}
+
+func TestParserCapsAMessageBeforeJoining(t *testing.T) {
+	p := NewParser()
+	big := strings.Repeat("a", maxMessageText/4)
+	var last []Event
+	for i := 0; i < 20; i++ {
+		last = p.Feed(line("assistant", fmt.Sprintf("u%d", i), asst("m", map[string]any{"type": "text", "text": big}), nil))
+	}
+	total := 0
+	for _, s := range p.texts["m"] {
+		total += len(s)
+	}
+	if total > maxMessageText {
+		t.Errorf("%d bytes accumulated, limit %d", total, maxMessageText)
+	}
+	if len(last) != 0 && len(last[0].Text) > maxMessageText+len("…") {
+		t.Errorf("event text %d", len(last[0].Text))
+	}
+}
+
+func TestParserCRLF(t *testing.T) {
+	p := NewParser()
+	l := append(line("user", "c1", map[string]any{"role": "user", "content": "hola"}, nil), '\r')
+	if ev := p.Feed(l); len(ev) != 1 || ev[0].Text != "hola" || p.BadRun() != 0 {
+		t.Errorf("%+v %d", ev, p.BadRun())
 	}
 }
 
@@ -457,6 +558,90 @@ func TestTailerSkipsAHugeLine(t *testing.T) {
 	}
 	if tl.Parser().BadRun() != 0 {
 		t.Error("a skipped line is not a bad one")
+	}
+}
+
+func TestTailerCRLF(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	l := strings.TrimSuffix(textLine("u1", "m1", "uno"), "\n") + "\r\n"
+	write(t, path, os.O_TRUNC, l+strings.TrimSuffix(textLine("u2", "m2", "dos"), "\n")+"\r\n")
+	tl := NewTailer(path, false)
+	ev, _ := tl.Poll()
+	if len(ev) != 2 || ev[1].Text != "dos" || tl.Parser().BadRun() != 0 {
+		t.Fatalf("%v", ev)
+	}
+}
+
+func TestTailerStartsAgainWhenTheFileIsReplacedByALargerOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	write(t, path, os.O_TRUNC, textLine("u1", "m1", "uno"))
+	tl := NewTailer(path, false)
+	if ev, _ := tl.Poll(); len(ev) != 1 {
+		t.Fatal(ev)
+	}
+	// Another file takes its place, larger than the offset.
+	other := filepath.Join(dir, "new.jsonl")
+	write(t, other, os.O_TRUNC, textLine("u2", "m2", "dos")+textLine("u3", "m3", "tres"))
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(other, path); err != nil {
+		t.Fatal(err)
+	}
+	ev, err := tl.Poll()
+	if err != nil || len(ev) != 2 || ev[0].Text != "dos" || ev[1].Text != "tres" {
+		t.Fatalf("after replacement: %v %v", ev, err)
+	}
+}
+
+func TestTailerRefusesALinkWhenReopening(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	write(t, path, os.O_TRUNC, textLine("u1", "m1", "uno"))
+	tl := NewTailer(path, false)
+	if ev, _ := tl.Poll(); len(ev) != 1 {
+		t.Fatal(ev)
+	}
+	target := filepath.Join(dir, "secret.txt")
+	write(t, target, os.O_TRUNC, textLine("u9", "m9", "secreto")+textLine("u8", "m8", "mas"))
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Skip("symlinks not available:", err)
+	}
+	if ev, err := tl.Poll(); err == nil || len(ev) != 0 {
+		t.Fatalf("a link was read: %v %v", ev, err)
+	}
+}
+
+func TestTailerFromEndDropsTheRestOfALineInProgress(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	l2 := textLine("u2", "m2", "a medias")
+	write(t, path, os.O_TRUNC, textLine("u1", "m1", "viejo")+l2[:15])
+	tl := NewTailer(path, true)
+	if ev, _ := tl.Poll(); len(ev) != 0 {
+		t.Fatalf("history: %v", ev)
+	}
+	write(t, path, os.O_APPEND, l2[15:])
+	if ev, _ := tl.Poll(); len(ev) != 0 || tl.Parser().BadRun() != 0 || tl.Seen() {
+		t.Fatalf("the rest of the line was read: %v bad=%d", ev, tl.Parser().BadRun())
+	}
+	write(t, path, os.O_APPEND, textLine("u3", "m3", "nuevo"))
+	if ev, _ := tl.Poll(); len(ev) != 1 || ev[0].Text != "nuevo" {
+		t.Fatalf("%v", ev)
+	}
+}
+
+func TestTailerFromEndOnACompleteLineKeepsTheNext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	write(t, path, os.O_TRUNC, textLine("u1", "m1", "viejo"))
+	tl := NewTailer(path, true)
+	tl.Poll()
+	write(t, path, os.O_APPEND, textLine("u2", "m2", "nuevo"))
+	if ev, _ := tl.Poll(); len(ev) != 1 || ev[0].Text != "nuevo" {
+		t.Fatalf("%v", ev)
 	}
 }
 
