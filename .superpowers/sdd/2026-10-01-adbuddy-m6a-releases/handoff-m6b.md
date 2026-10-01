@@ -11,3 +11,8 @@ Sesión nueva y limpia. Supervisor: adbuddy-e5 (avísale al empezar; mensajes de
 ## M6b
 - Alcance: las skills de contexto (spec de M6a, línea 44: van después de M6a, junto con la i18n y el README completo). Empieza por la spec (`superpowers:brainstorming`), luego plan, réplica acumulada, revisión del plan y `superpowers:subagent-driven-development`.
 - Reglas del proyecto en `CLAUDE.md`; trailer exacto `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; gh con `GH_CONFIG_DIR="$HOME/.config/gh-hybriqtech"` y `-R hybriqtech/adbuddy`; `git grep` de seriales e IPs antes de cada push; nunca `--force`.
+
+## Reglas nuevas (supervisor, 2026-10-01)
+- Hooks de git locales en el repo (commit-msg: identidad hybriqtech y trailer exacto, también en merges; pre-push: nada de no-ff, IPs privadas ni borrar main): si bloquean, se arregla la causa, nunca `--no-verify`. Merges con el trailer en `-m`.
+- `gh` siempre con `GH_CONFIG_DIR="$HOME/.config/gh-hybriqtech"` y `-R hybriqtech/adbuddy`; nunca `--force` (si una rama ya pushed necesita reescribirse: rama nueva).
+- Una revisión por tarea con lógica (no por cada fichero mecánico); tras una revisión final limpia, push y PR sin pedir ok; el merge lo hace el supervisor. `main` está en 244e56f.
