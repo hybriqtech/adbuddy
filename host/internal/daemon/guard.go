@@ -276,6 +276,9 @@ func (d *Daemon) refuse(ctx context.Context, e journal.Entry, s Stream, why stri
 }
 
 func protectedReason(pkg string) string {
+	if pkg == "" { // the app says the screen is protected without naming an app
+		pkg = "something on the screen"
+	}
 	return classify.Printable(pkg) + " is a protected app; ask the user to do this part"
 }
 
@@ -301,7 +304,8 @@ func (f front) first() string {
 }
 
 // inFront asks the app what is in front and, when it cannot say, adb. An
-// empty package from the app does not count (its window had no content).
+// empty package from the app does not count (its window had no content)
+// unless it also says the screen is protected: that blocks.
 // From dumpsys, no resumed activity counts as nothing in front only when
 // dumpsys power says the screen is off; otherwise it is unknown.
 func (d *Daemon) inFront(ctx context.Context) (front, error) {
@@ -310,7 +314,7 @@ func (d *Daemon) inFront(ctx context.Context) (front, error) {
 		raw, err := d.o.UI(fctx, bridge.UIOpForeground, json.RawMessage("{}"))
 		cancel()
 		var fg bridge.UIForeground
-		if err == nil && json.Unmarshal(raw, &fg) == nil && fg.Package != "" {
+		if err == nil && json.Unmarshal(raw, &fg) == nil && (fg.Package != "" || fg.Protected) {
 			return front{packages: []string{fg.Package}, activity: fg.Activity, appProtected: fg.Protected, viaApp: true}, nil
 		}
 	}

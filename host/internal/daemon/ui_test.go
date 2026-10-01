@@ -369,6 +369,7 @@ func TestGuardBlocksWithAProtectedAppInFront(t *testing.T) {
 		{"in the list", bridge.UIForeground{Package: "com.example.bank"}, []string{"com.example.bank"}},
 		{"the app says so", bridge.UIForeground{Package: "com.other.bank", Protected: true}, nil},
 		{"ADBuddy", bridge.UIForeground{Package: "tech.hybriq.adbuddy"}, nil},
+		{"protected without a package", bridge.UIForeground{Protected: true}, nil},
 	}
 	for _, c := range cases {
 		e := newEnv(t)
@@ -435,6 +436,21 @@ func TestGuardFailsClosed(t *testing.T) {
 	// What does not touch the screen is not guarded.
 	if _, exit := e.exec(t, "shell", "getprop", "ro.product.model"); exit.Code != 0 {
 		t.Fatalf("getprop: %+v", exit)
+	}
+}
+
+// An empty package from the app with Protected=false carries no information:
+// the guard goes to adb, as before.
+func TestGuardEmptyPackageNotProtectedFallsBackToAdb(t *testing.T) {
+	e := newEnv(t) // dumpsys says Settings
+	a := e.withApp()
+	a.results[bridge.UIOpForeground] = bridge.UIForeground{}
+	if _, exit := e.exec(t, "shell", "input", "tap", "1", "1"); exit.Code != 0 {
+		t.Fatalf("empty package, not protected: %+v", exit)
+	}
+	e.d.o.Protected = func(p string) bool { return p == "com.android.settings" }
+	if _, exit := e.exec(t, "shell", "input", "tap", "1", "1"); exit.Code != 126 {
+		t.Fatalf("adb says a protected app: %+v", exit)
 	}
 }
 
