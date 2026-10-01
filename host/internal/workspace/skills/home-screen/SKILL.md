@@ -41,7 +41,11 @@ Say how many apps you would move, that nothing is uninstalled or deleted, and th
 
 3. Before the first drag, find where the drop zones are. Many launchers show "Uninstall", "Remove" or "Delete" targets only while an icon is held. A long press is a swipe that does not move; then read the screen to see the zones and the icon grid. A long press may start moving that icon, so do it on an icon you plan to move anyway:
 
-The command is `adb shell input swipe 540 1200 540 1200 800` (same start and end point, 800 ms; the numbers are an example, use the icon's centre from `adbuddy screen`). It is yellow: it runs at once, and it has no inverse in the journal. Then read the screen:
+The numbers are an example: use the icon's centre from `adbuddy screen`. Same start and end point, 800 ms. `input` is yellow: it runs at once and leaves no inverse in the journal. Then read the screen:
+
+```adb
+shell input swipe 540 1200 540 1200 800   # yellow
+```
 
 ```adbuddy
 screen
@@ -58,7 +62,11 @@ If a zone with one of those words shows up, note where it is. If the icon is sti
 
 5. Start with one app only. Drag its icon onto another icon of the same category (most launchers then create a folder). The numbers are an example: take the real start and end points from the coordinates `adbuddy screen` shows for the two icons:
 
-The command is `adb shell input swipe 540 1200 540 700 600` (from x 540, y 1200 to x 540, y 700, in 600 ms). It is yellow too, with no inverse: the drag cannot be undone with `adbuddy undo`.
+This is yellow too: it runs at once, and `adbuddy undo` cannot undo a drag because `input` leaves no inverse in the journal:
+
+```adb
+shell input swipe 540 1200 540 700 600   # yellow
+```
 
 6. Look at what happened:
 

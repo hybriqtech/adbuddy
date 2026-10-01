@@ -37,6 +37,10 @@ var adbProgramRe = regexp.MustCompile(`(?i)^(.*[/\\])?adb(\.exe)?$`)
 // installGroupRe is a group of short options of install that includes -g.
 var installGroupRe = regexp.MustCompile(`^-[a-z]*g[a-z]*$`)
 
+// wipeRe matches "wipe" not preceded by a letter: wipe, --wipe_data, /wipe, pm
+// wipe; not swipe (input swipe is the way to drag an icon).
+var wipeRe = regexp.MustCompile(`(^|[^a-z])wipe`)
+
 // skillAdbuddySubcommands are the subcommands a skill may use.
 var skillAdbuddySubcommands = map[string]bool{
 	"screen": true, "tap": true, "type": true, "foreground": true,
@@ -66,7 +70,7 @@ func forbiddenRecipe(file string, fields []string) bool {
 		toks = append(toks, strings.Fields(strings.ToLower(f))...)
 	}
 	joined := strings.Join(toks, " ")
-	if strings.Contains(joined, "wipe") || strings.Contains(joined, "reboot") ||
+	if wipeRe.MatchString(joined) || strings.Contains(joined, "reboot") ||
 		strings.Contains(joined, "pm clear") || strings.Contains(joined, "package clear") {
 		return true
 	}
@@ -390,8 +394,21 @@ func TestSkillExamplesCatches(t *testing.T) {
 			}
 		})
 	}
+	for _, cmd := range []string{
+		"shell recovery --wipe_data",
+		"shell wipe data",
+		"shell pm wipe com.example.app",
+	} {
+		t.Run("wipe/"+cmd, func(t *testing.T) {
+			errs := skillProblems(t, cl, adbBlock(cmd+"   # red"))
+			if len(errs) != 1 || !strings.Contains(errs[0], "a recipe never does this") {
+				t.Errorf("want only the recipe filter to reject it, got %v", errs)
+			}
+		})
+	}
 	good := map[string]string{
 		"getprop":        adbBlock("shell getprop ro.product.model   # green"),
+		"input swipe":    adbBlock("shell input swipe 540 1200 540 400 600   # yellow"),
 		"packages":       adbBlock("shell pm list packages -3   # green"),
 		"settings":       adbBlock("shell settings get global window_animation_scale   # green"),
 		"screenshot -o":  adbuddyBlock("screenshot -oshot.png"),
