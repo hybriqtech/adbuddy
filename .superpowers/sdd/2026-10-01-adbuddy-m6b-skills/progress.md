@@ -88,3 +88,8 @@ Task 7: review opus (810e547): guarda correcta; 2 Importantes de texto (menú de
 Task 7: complete (commits 0178bf0..4fc005f, 1 ronda de arreglos)
 Task 7: minor (deferred): home-screen: línea suelta con espacio tras el bloque `tap "Cancel"`; "Do not insist after two failed tries" vs "one try = fallo"; permissions-audit línea 19 "Revoking is red" sin la excepción yellow de appops; regla 3 del paso 4 "or that is on the screen" vaga; sin bloque `screen` tras Atrás.
 Task 7: nota: `TestRemoteOnClientGoneWhileAsking` (internal/cli) falló una vez por temporización en la máquina Windows y pasó a la segunda; no es de M6b — mirar en la CI.
+
+Task 8: review opus (38fcc74): reglas del encargo ✅; 5 Importantes de seguridad no previstos por el brief (wrapper de Gradle sin origen fijado/ejecutar código sin verificar; cambios persistentes de PATH/perfil que ponen otro adb delante del shim; instalar sin mirar y sin camino si falla; permisos reales del APK; licencias del SDK imposibles de aceptar por el agente) + 6 menores. Ronda 1 (0183a44): re-revisión 11/11 ADDRESSED, 4 menores de redacción (frase de repositorios ambigua, cabecera inexacta, orden pasos 3-4, orden del wrapper). Ronda 2 (3be575b): 4/4 ADDRESSED, sin rotura.
+Task 8: complete (commits 1ee4223..3be575b, 2 rondas de arreglos)
+Task 8: minor (deferred): "official Gradle you installed in step 2" (el paso 2 solo anuncia); `.\gradlew` en PowerShell/cmd; la versión de Gradle del ejemplo (8.7) caducará; `where.exe`/Get-Command. Las nueve skills existen (requiredSkills completo).
+Pendiente para la revisión final: nota §2.5 (entrecomillado por shell) falta en device-profile, debloat, battery; ver también los minors diferidos de T1-T7.
