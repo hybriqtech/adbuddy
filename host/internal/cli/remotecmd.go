@@ -243,6 +243,32 @@ func remoteConfirmDetail(lang string) string {
 	return "adb will listen on port 5555 on any network until you close it with `adbuddy remote off` or 12 hours pass."
 }
 
+// withdrawRemoteAsk cancels the question of `remote on` that is waiting, if
+// any (a pause from the phone).
+func (l *phoneLink) withdrawRemoteAsk() {
+	l.mu.Lock()
+	cancel := l.askCancel
+	l.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// noPhone reports whether adb failed because no phone is connected or it is
+// offline: the spec's REMOTE_UNAVAILABLE. Matched on adb's own messages.
+func noPhone(err error) bool {
+	if errors.Is(err, adb.ErrNoDevice) {
+		return true
+	}
+	m := strings.ToLower(err.Error())
+	for _, s := range []string{"no devices/emulators found", "device offline", "no devices", "no phone connected"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // useRemoteAsk sets the language and the time `adbuddy remote on` asks the
 // user in. Call it before the IPC server starts.
 func (l *phoneLink) useRemoteAsk(lang string, timeout time.Duration) {
@@ -308,15 +334,32 @@ func (l *phoneLink) confirmRemoteOn(ctx context.Context) ipc.Exit {
 	if timeout <= 0 {
 		timeout = config.DefaultConfirmTimeout
 	}
-	now := time.Now()
 	qctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	// One question at a time; a pause from the phone withdraws it.
+	l.mu.Lock()
+	if l.askBusy {
+		l.mu.Unlock()
+		return remoteExit(1, "REMOTE_BUSY", "another question to turn the remote mode on is waiting for an answer")
+	}
+	l.askBusy, l.askCancel = true, cancel
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		l.askBusy, l.askCancel = false, nil
+		l.mu.Unlock()
+	}()
+	offs := l.remote.offCount()
+	now := time.Now()
 	d := l.Confirmer().Confirm(qctx, confirm.Request{
 		ID: journal.NewID("r_", now), Title: remoteConfirmTitle(l.askLang), Detail: remoteConfirmDetail(l.askLang),
 		RawCommand: "adbuddy remote on", ExpiresAt: now.UTC().Add(timeout), Special: true, Key: "",
 	})
 	if l.Paused() { // an answer that comes after a pause counts for nothing
 		return denied("the agent was paused from the phone")
+	}
+	if d == confirm.Allow && l.remote.offCount() != offs {
+		return denied("the remote mode was turned off while asking; run it again")
 	}
 	switch d {
 	case confirm.Allow:
@@ -343,6 +386,8 @@ func (l *phoneLink) changeRemote(ctx context.Context, on bool, reply func(remote
 		switch {
 		case errors.Is(res.err, remote.ErrNoTailscale):
 			return remoteExit(1, "REMOTE_UNAVAILABLE", "%s", res.err.Error())
+		case res.err != nil && noPhone(res.err):
+			return remoteExit(1, "REMOTE_UNAVAILABLE", "no phone connected: %s", classify.Printable(res.err.Error()))
 		case res.err != nil:
 			msg := classify.Printable(res.err.Error())
 			if s := r.ctl.State(); s.Enabled {

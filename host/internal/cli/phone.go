@@ -71,6 +71,10 @@ type phoneLink struct {
 	// (useRemoteAsk); set before the IPC server starts.
 	askLang    string
 	askTimeout time.Duration
+	// askBusy: a question of `remote on` is open; askCancel withdraws it
+	// (a pause from the phone). Under mu.
+	askBusy   bool
+	askCancel context.CancelFunc
 
 	// termEvery is termInterval as it was when the link started: read here,
 	// not from the variable, by the goroutines that outlive a test.
@@ -453,6 +457,7 @@ func (l *phoneLink) onPauseMessage(m bridge.Message) {
 		if withdraw != nil {
 			withdraw()
 		}
+		l.withdrawRemoteAsk()
 	} else {
 		fmt.Fprintln(l.log, "▶ Resumed from the phone.")
 	}

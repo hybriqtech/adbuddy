@@ -68,6 +68,7 @@ type remoteLink struct {
 	refreshMu sync.Mutex // the pointer never goes back to an older state
 
 	mu      sync.Mutex
+	offs    int         // how many changes to off were queued (under mu)
 	queue   []remoteJob // remote.set waiting, in order
 	working bool        // a worker is draining queue
 	srv     remoteServer
@@ -195,6 +196,9 @@ func (r *remoteLink) enqueue(job remoteJob) bool {
 		return false
 	}
 	r.queue = append(r.queue, job)
+	if !job.on {
+		r.offs++
+	}
 	start := !r.working
 	r.working = true
 	r.mu.Unlock()
@@ -203,6 +207,14 @@ func (r *remoteLink) enqueue(job remoteJob) bool {
 		go r.work()
 	}
 	return true
+}
+
+// offCount is how many times the mode was asked to turn off: a yes to an
+// older `on` is told from a current one by it not having changed.
+func (r *remoteLink) offCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.offs
 }
 
 // remoteJob is one change of the mode: a remote.set (srv and m answer it) or

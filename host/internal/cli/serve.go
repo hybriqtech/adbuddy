@@ -19,12 +19,14 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/agent"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
+	"github.com/hybriqtech/adbuddy/host/internal/session"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -234,18 +236,7 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			defer sess.Stop()
 			link.useSession(sess)
 			link.useWorkspace(ws)
-			srv, err := ipc.Listen(e.dirs.Data, secret, func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {
-				if req.Kind == ipc.KindSend {
-					return link.handleSend(ctx, ws, req, c)
-				}
-				if req.Kind == ipc.KindRemote {
-					return link.handleRemote(ctx, req, c)
-				}
-				if req.Kind == ipc.KindAttach || req.Kind == ipc.KindSession {
-					return handleSession(ctx, sess, agentName, req, c)
-				}
-				return d.Handle(ctx, req, c)
-			})
+			srv, err := ipc.Listen(e.dirs.Data, secret, serveHandler(link, e.cfg, app.Getenv, ws, agentName, sess, d))
 			if errors.Is(err, ipc.ErrAlreadyRunning) {
 				return alreadyRunning
 			}
@@ -276,6 +267,25 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 	cmd.Flags().BoolVar(&noAgent, "no-agent", false, "do not start the agent here: run it yourself with `adbuddy run` (no chat from the phone)")
 	cmd.Flags().StringVar(&confirmMode, "confirm", "auto", "where to confirm 🔴 commands: auto (this terminal if interactive, else deny), terminal (read the answers from stdin even when it is not interactive, e.g. a pipe) or deny")
 	return cmd
+}
+
+// serveHandler is what serve's IPC socket answers: each kind goes to the part
+// that owns it. It also tells the link how to ask the user about `remote on`
+// (their language and confirm_timeout, as the daemon has them).
+func serveHandler(link *phoneLink, cfg config.Config, getenv func(string) string, ws, agentName string, sess *session.Manager, d *daemon.Daemon) ipc.Handler {
+	link.useRemoteAsk(cfg.Lang(getenv), cfg.ConfirmTimeout.Duration)
+	return func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {
+		if req.Kind == ipc.KindSend {
+			return link.handleSend(ctx, ws, req, c)
+		}
+		if req.Kind == ipc.KindRemote {
+			return link.handleRemote(ctx, req, c)
+		}
+		if req.Kind == ipc.KindAttach || req.Kind == ipc.KindSession {
+			return handleSession(ctx, sess, agentName, req, c)
+		}
+		return d.Handle(ctx, req, c)
+	}
 }
 
 var alreadyRunning = NewError("ALREADY_RUNNING", "another `adbuddy serve` is already running", "Use that terminal, or stop it (Ctrl+C) first.")

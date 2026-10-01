@@ -93,19 +93,20 @@ func (a *tlsADB) called() []string {
 // ctlADB is the phone for the remote.Controller: it records the orders and
 // fails the ones in fail.
 type ctlADB struct {
-	mu    sync.Mutex
-	calls []string
-	fail  map[string]bool
-	hang  map[string]bool // wait for the context to end
-	gate  chan struct{}   // `tcpip 5555` waits for it to close
-	port  string          // answer of getprop service.adb.tcp.port
+	mu     sync.Mutex
+	calls  []string
+	fail   map[string]bool
+	hang   map[string]bool // wait for the context to end
+	gate   chan struct{}   // `tcpip 5555` waits for it to close
+	port   string          // answer of getprop service.adb.tcp.port
+	stderr string          // what a failing command says (default "error: closed")
 }
 
 func (a *ctlADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (int, error) {
 	key := strings.Join(args, " ")
 	a.mu.Lock()
 	a.calls = append(a.calls, key)
-	hang, gate, fail, port := a.hang[key], a.gate, a.fail[key], a.port
+	hang, gate, fail, port, serr := a.hang[key], a.gate, a.fail[key], a.port, a.stderr
 	a.mu.Unlock()
 	if hang {
 		<-ctx.Done()
@@ -115,7 +116,10 @@ func (a *ctlADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, 
 		<-gate
 	}
 	if fail {
-		io.WriteString(stderr, "error: closed")
+		if serr == "" {
+			serr = "error: closed"
+		}
+		io.WriteString(stderr, serr)
 		return 1, nil
 	}
 	if key == "shell getprop service.adb.tcp.port" {

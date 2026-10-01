@@ -520,3 +520,197 @@ func TestRemoteOffWithoutServe(t *testing.T) {
 		}
 	})
 }
+
+// ---- Round 1 of the review ----
+
+// serve's own wiring (not a call the test makes to useRemoteAsk) gives the
+// question the user's language and confirm_timeout.
+func TestServeHandlerWiresTheRemoteQuestion(t *testing.T) {
+	data := isolate(t)
+	g := newRemoteRig(t, withTailscale(), "41234")
+	ask := &askFake{answer: confirm.Deny}
+	l := &phoneLink{remote: g.r, conf: bridge.NewConfirmer(noApp{}, ask), log: g.log}
+	cfg := withTailscale()
+	cfg.ConfirmTimeout = config.Duration{Duration: 30 * time.Second}
+	getenv := func(k string) string {
+		if k == "LANG" {
+			return "es_ES.UTF-8"
+		}
+		return ""
+	}
+	h := serveHandler(l, cfg, getenv, t.TempDir(), "claude", nil, nil)
+	secret, err := ipc.EnsureSecret(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := ipc.Listen(data, secret, h)
+	if err != nil {
+		t.Skipf("no socket: %v", err)
+	}
+	go srv.Serve()
+	t.Cleanup(func() { srv.Close() })
+	before := time.Now()
+	exit, err := ipc.Call(context.Background(), data, ipc.Request{Kind: ipc.KindRemote, Argv: []string{"on"}}, nil, nopWriter{}, nopWriter{}, nil)
+	if err != nil || exit.ErrorCode != "REMOTE_DENIED" {
+		t.Fatalf("%v %+v", err, exit)
+	}
+	qs := ask.asked()
+	if len(qs) != 1 || qs[0].Title != "Abrir el puerto de red 5555 de adb durante 12 horas" {
+		t.Fatalf("questions %+v", qs)
+	}
+	if d := qs[0].ExpiresAt.Sub(before); d < 25*time.Second || d > 35*time.Second {
+		t.Fatalf("the question expires in %v, want about 30s (confirm_timeout)", d)
+	}
+}
+
+// A yes that comes after a later `off` (from the app or the terminal) is the
+// answer to an old question: it does not open the port.
+func TestRemoteOnAllowedAfterALaterOffDenies(t *testing.T) {
+	h := newRemoteHost(t, withTailscale(), confirm.Allow)
+	h.l.conf = bridge.NewConfirmer(noApp{}, confirmerFunc(func(context.Context, confirm.Request) confirm.Decision {
+		if !h.g.r.enqueue(remoteJob{on: false, timeout: time.Second, reply: make(chan remoteResult, 1)}) {
+			t.Error("not queued")
+		}
+		return confirm.Allow
+	}))
+	exit, _ := h.call(t, "on", nil)
+	if exit.Code != 126 || exit.ErrorCode != "REMOTE_DENIED" || !strings.Contains(exit.Error, "turned off while asking; run it again") {
+		t.Fatalf("%+v", exit)
+	}
+	waitUntil(t, "the off to run", func() bool { return h.g.phone.count("usb") == 1 })
+	if h.g.phone.count("tcpip 5555") != 0 {
+		t.Fatalf("calls %v", h.g.phone.called())
+	}
+}
+
+// One question of `on` at a time.
+func TestRemoteOnOneQuestionAtATime(t *testing.T) {
+	h := newRemoteHost(t, withTailscale(), confirm.Allow)
+	entered, release := make(chan struct{}, 4), make(chan struct{})
+	var mu sync.Mutex
+	asks := 0
+	h.l.conf = bridge.NewConfirmer(noApp{}, confirmerFunc(func(context.Context, confirm.Request) confirm.Decision {
+		mu.Lock()
+		asks++
+		mu.Unlock()
+		entered <- struct{}{}
+		<-release
+		return confirm.Allow
+	}))
+	first := make(chan ipc.Exit, 1)
+	go func() {
+		exit, _ := h.call(t, "on", nil)
+		first <- exit
+	}()
+	<-entered
+	exit, _ := h.call(t, "on", nil)
+	if exit.Code != 1 || exit.ErrorCode != "REMOTE_BUSY" {
+		t.Fatalf("second: %+v", exit)
+	}
+	mu.Lock()
+	if asks != 1 {
+		t.Fatalf("asked %d times", asks)
+	}
+	mu.Unlock()
+	close(release)
+	if e := <-first; e.Code != 0 {
+		t.Fatalf("first: %+v", e)
+	}
+	// Answered: it can be asked again.
+	if e, _ := h.call(t, "off", nil); e.Code != 0 {
+		t.Fatalf("%+v", e)
+	}
+	if e, _ := h.call(t, "on", nil); e.Code != 0 {
+		t.Fatalf("third: %+v", e)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if asks != 2 {
+		t.Fatalf("asked %d times, want 2", asks)
+	}
+}
+
+// The client leaves while the question is open: denied, nothing runs, and the
+// next `on` can ask again.
+func TestRemoteOnClientGoneWhileAsking(t *testing.T) {
+	h := newRemoteHost(t, withTailscale(), confirm.Allow)
+	entered, ended := make(chan struct{}), make(chan error, 1)
+	h.l.conf = bridge.NewConfirmer(noApp{}, confirmerFunc(func(ctx context.Context, _ confirm.Request) confirm.Decision {
+		close(entered)
+		<-ctx.Done()
+		ended <- ctx.Err()
+		return confirm.Deny
+	}))
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		_, _ = ipc.Call(ctx, h.data, ipc.Request{Kind: ipc.KindRemote, Argv: []string{"on"}}, nil, nopWriter{}, nopWriter{}, nil)
+	}()
+	<-entered
+	cancel()
+	select {
+	case err := <-ended:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("the question ended with %v, want a cancellation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the question stayed open after the client left")
+	}
+	waitUntil(t, "the question to be released", func() bool {
+		h.l.mu.Lock()
+		defer h.l.mu.Unlock()
+		return !h.l.askBusy
+	})
+	if len(h.g.phone.called()) != 0 || !h.g.store.Until().IsZero() {
+		t.Fatalf("phone %v", h.g.phone.called())
+	}
+}
+
+// A pause from the phone withdraws the question of `on`.
+func TestPauseWithdrawsTheRemoteQuestion(t *testing.T) {
+	r := newFilesRig(t, nil)
+	g := newRemoteRig(t, withTailscale(), "41234")
+	r.l.remote = g.r
+	r.l.useRemoteAsk("en", time.Minute)
+	done := make(chan ipc.Exit, 1)
+	go func() {
+		done <- r.l.handleRemote(context.Background(), ipc.Request{Kind: ipc.KindRemote, Argv: []string{"on"}}, nil)
+	}()
+	for {
+		if m := readApp(t, r.c); m.Type == bridge.TypeConfirmReq {
+			break
+		}
+	}
+	r.l.onPauseMessage(bridge.Message{Type: bridge.TypePause})
+	select {
+	case exit := <-done:
+		if exit.Code != 126 || exit.ErrorCode != "REMOTE_DENIED" {
+			t.Fatalf("%+v", exit)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the pause did not withdraw the question")
+	}
+	if len(g.phone.called()) != 0 {
+		t.Fatalf("calls %v", g.phone.called())
+	}
+}
+
+// No phone connected is REMOTE_UNAVAILABLE (spec §8), after the question.
+func TestRemoteOnWithoutPhoneIsUnavailable(t *testing.T) {
+	for _, why := range []string{"adb tcpip: error: no devices/emulators found", "adb tcpip: error: device offline", "no phone connected"} {
+		h := newRemoteHost(t, withTailscale(), confirm.Allow)
+		h.g.phone.mu.Lock()
+		h.g.phone.stderr = why
+		h.g.phone.mu.Unlock()
+		h.g.phone.setFail("tcpip 5555", true)
+		exit, _ := h.call(t, "on", nil)
+		if exit.Code != 1 || exit.ErrorCode != "REMOTE_UNAVAILABLE" {
+			t.Errorf("%q: %+v", why, exit)
+		}
+	}
+	// Any other failure stays REMOTE_FAILED.
+	h := newRemoteHost(t, withTailscale(), confirm.Allow)
+	h.g.phone.setFail("tcpip 5555", true)
+	if exit, _ := h.call(t, "on", nil); exit.ErrorCode != "REMOTE_FAILED" {
+		t.Fatalf("%+v", exit)
+	}
+}
