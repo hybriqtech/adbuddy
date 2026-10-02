@@ -2,7 +2,8 @@ name: release-check
 
 # Builds everything the release workflow builds, without publishing and
 # without secrets (spec M6a §9). pull_request only, never
-# pull_request_target. Linux only.
+# pull_request_target. Runners come from repository variables
+# (docs/ci-self-hosted.md); with none set, ubuntu-latest is used.
 on:
   pull_request:
     paths:
@@ -34,9 +35,14 @@ permissions:
 env:
   BUILD_TOOLS: "37.0.0"
 
+# Runner needs: Linux for all three. `scripts` needs shellcheck; `sign` needs
+# ANDROID_HOME (apksigner and zipalign are Linux scripts here).
 jobs:
   scripts:
-    runs-on: ubuntu-latest
+    # Fork pull requests never reach a self-hosted runner.
+    if: ${{ vars.CI_RUNNER_RELEASE != '"none"' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_RELEASE || '"ubuntu-latest"') }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,7 +52,10 @@ jobs:
       - run: sh scripts/install_test.sh
 
   goreleaser:
-    runs-on: ubuntu-latest
+    # Fork pull requests never reach a self-hosted runner.
+    if: ${{ vars.CI_RUNNER_RELEASE != '"none"' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_RELEASE || '"ubuntu-latest"') }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,7 +87,10 @@ jobs:
           "$RUNNER_TEMP/bin/adbuddy" --version | grep -q '^adbuddy .*-snapshot'
 
   sign:
-    runs-on: ubuntu-latest
+    # Fork pull requests never reach a self-hosted runner.
+    if: ${{ vars.CI_RUNNER_SIGN != '"none"' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_SIGN || '"ubuntu-latest"') }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
