@@ -31,3 +31,5 @@ Pendiente: reescribir el plan con esto y commitear; luego ejecutar T1 (Sonnet), 
 Task 1: complete — commits 6b76bb7 e3806ef 723120a 1ea7ea6; opus review ✅ (0 critical/important). Ruling: minors 1 (doctor journalWritable no mira Nlink>1/backups-link), 2 (OneDrive cloud reparse tags => ModeIrregular, validar a mano), 3 (residuo adb pull: symlink `original` plantado en la carpeta ya creada) — van a pendientes-m3-m5.md en T4 — son seguros (fallan cerrado) — cuesta nada si me equivoco. Minor 4/5 ignorados.
 
 Task 2: complete — commit 0e2276c; opus review ✅ (minors only, ignored).
+
+Task 3a: complete — commit 30e7311 (implementer report OK). Ruling: no per-subtask review for 3a/3b; one opus review of T3 (3a+3b+3c) acts as T3 task review AND final branch review (supervisor asked for economy; T1/T2 already reviewed) — cost if wrong: one extra fix round. Concern to carry: Windows Peer copy keeps released handle value; Peer.Same valid only inside the synchronous handler — reviewer must check 3b/3c callers.
