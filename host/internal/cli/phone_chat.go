@@ -21,6 +21,9 @@ const (
 	// serialized: the snapshot carries the pending 🔴 too, and the app takes
 	// 1 MiB at most.
 	maxChatSnapshot = 512 << 10
+	// maxSentIDs is how many ids of typed messages are remembered after they
+	// leave the history, so a retry is not typed twice (fixed memory, FIFO).
+	maxSentIDs = 1024
 )
 
 // storedAttachment is an attachment the host keeps and where: Path is
@@ -57,8 +60,14 @@ func (r *attachmentRegistry) get(id string) (storedAttachment, bool) {
 type chatState struct {
 	mu       sync.Mutex
 	history  []bridge.ChatMessage // the last keptChat of the conversation, oldest first
+	sizes    []int                // sizes[i] is the serialized weight of history[i] without thumbnails, comma included
 	conv     string               // the conversation the history belongs to
 	inflight map[string]bool      // ids of the chat.send being typed
+
+	// sent are the ids already typed, across conversations: the last
+	// maxSentIDs, in sentOrder (oldest first).
+	sent      map[string]bool
+	sentOrder []string
 
 	attachments attachmentRegistry
 }
@@ -74,22 +83,54 @@ func (c *chatState) conversation(conv string) {
 func (c *chatState) resetLocked(conv string) {
 	if conv != c.conv {
 		c.conv = conv
-		c.history = nil
+		c.history, c.sizes = nil, nil
 	}
+}
+
+// markSentLocked remembers that id was typed; the oldest ids leave first.
+func (c *chatState) markSentLocked(id string) {
+	if c.sent[id] {
+		return
+	}
+	if c.sent == nil {
+		c.sent = map[string]bool{}
+	}
+	c.sent[id] = true
+	c.sentOrder = append(c.sentOrder, id)
+	if len(c.sentOrder) > maxSentIDs {
+		delete(c.sent, c.sentOrder[0])
+		c.sentOrder = append([]string(nil), c.sentOrder[1:]...)
+	}
+}
+
+// chatWeight is what m weighs in a snapshot: serialized, without thumbnails,
+// and its comma.
+func chatWeight(m bridge.ChatMessage) int {
+	atts := make([]bridge.Attachment, len(m.Attachments))
+	for j, a := range m.Attachments {
+		a.Thumb = ""
+		atts[j] = a
+	}
+	m.Attachments = atts
+	raw, _ := json.Marshal(m)
+	return len(raw) + 1
 }
 
 // upsertLocked stores m, replacing the one with its id.
 func (c *chatState) upsertLocked(m bridge.ChatMessage) {
 	c.resetLocked(m.Conversation)
+	w := chatWeight(m)
 	for i := range c.history {
 		if c.history[i].ID == m.ID {
-			c.history[i] = m
+			c.history[i], c.sizes[i] = m, w
 			return
 		}
 	}
 	c.history = append(c.history, m)
+	c.sizes = append(c.sizes, w)
 	if len(c.history) > keptChat {
 		c.history = append([]bridge.ChatMessage(nil), c.history[len(c.history)-keptChat:]...)
+		c.sizes = append([]int(nil), c.sizes[len(c.sizes)-keptChat:]...)
 	}
 }
 
@@ -107,6 +148,7 @@ func (c *chatState) findLocked(id string) (bridge.ChatMessage, bool) {
 // maxChatSnapshot serialized.
 func (l *phoneLink) chatSnapshot(s *bridge.Snapshot) {
 	l.chat.mu.Lock()
+	sizesCopy := append([]int(nil), l.chat.sizes...)
 	out := make([]bridge.ChatMessage, len(l.chat.history))
 	for i, m := range l.chat.history {
 		atts := make([]bridge.Attachment, len(m.Attachments))
@@ -118,12 +160,10 @@ func (l *phoneLink) chatSnapshot(s *bridge.Snapshot) {
 		out[i] = m
 	}
 	l.chat.mu.Unlock()
-	sizes := make([]int, len(out))
+	sizes := sizesCopy
 	total := 2 // the brackets
-	for i, m := range out {
-		raw, _ := json.Marshal(m)
-		sizes[i] = len(raw) + 1 // and its comma
-		total += sizes[i]
+	for _, n := range sizes {
+		total += n
 	}
 	drop := 0
 	for drop < len(out) && total >= maxChatSnapshot {
@@ -222,6 +262,15 @@ func (l *phoneLink) onChatSend(m bridge.Message) {
 		_ = l.srv.PublishRID(bridge.TypeChatMessage, m.RID, old)
 		return
 	}
+	if l.chat.sent[cs.ID] {
+		// Typed already, but no longer in the history (another conversation,
+		// or more than keptChat messages later): typing it again would
+		// repeat what the person said, and its text is gone. Fail closed:
+		// an error the protocol already has, and nothing enters the history.
+		l.chat.mu.Unlock()
+		l.fail(m, bridge.CodeInvalid, "The message has no valid id.")
+		return
+	}
 	if l.chat.inflight[cs.ID] {
 		l.chat.mu.Unlock()
 		l.fail(m, bridge.CodeBusy, "This message is already being sent.")
@@ -287,6 +336,7 @@ func (l *phoneLink) onChatSend(m bridge.Message) {
 	msg := bridge.ChatMessage{ID: cs.ID, Role: "user", Text: cs.Text, Attachments: atts, Conversation: conv}
 	l.chat.mu.Lock()
 	l.chat.upsertLocked(msg)
+	l.chat.markSentLocked(cs.ID)
 	delete(l.chat.inflight, cs.ID)
 	l.chat.mu.Unlock()
 	_ = l.srv.PublishRID(bridge.TypeChatMessage, m.RID, msg)
