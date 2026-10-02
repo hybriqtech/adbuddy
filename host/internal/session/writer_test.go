@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,6 +35,31 @@ func waitSignal(t *testing.T, ch <-chan struct{}, what string) {
 	case <-ch:
 	case <-time.After(3 * time.Second):
 		t.Fatalf("%s: not after 3 s", what)
+	}
+}
+
+// waitParked waits until exactly n goroutines are parked in waitRoom's select
+// (waiting for room in a queue), as the runtime reports them: an explicit
+// sign that a Wait is in line, with no sleep.
+func waitParked(t *testing.T, n int) {
+	t.Helper()
+	parked := func() int {
+		buf := make([]byte, 1<<20)
+		buf = buf[:runtime.Stack(buf, true)]
+		count := 0
+		for _, g := range strings.Split(string(buf), "\n\n") {
+			if strings.Contains(g, " [select") && strings.Contains(g, "session.(*proc).waitRoom") {
+				count++
+			}
+		}
+		return count
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for parked() != n {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d goroutines waiting for room, want %d", parked(), n)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -427,11 +453,13 @@ func TestTyperWait(t *testing.T) {
 		t.Fatalf("the cancelled Wait: %v", err)
 	}
 
+	// FIFO: q starts once p is parked in its send, waiting for room.
+	waitParked(t, 0)
 	p, q := make(chan error, 1), make(chan error, 1)
 	go func() { p <- ty.Wait(ctx, []byte("<p>")) }()
-	time.Sleep(50 * time.Millisecond)
+	waitParked(t, 1)
 	go func() { q <- r.m.NewTyper().Wait(ctx, []byte("<q>")) }()
-	time.Sleep(50 * time.Millisecond)
+	waitParked(t, 2)
 	open()
 	for _, ch := range []chan error{p, q} {
 		if err := waitErr(t, ch, 3*time.Second, "a waiting Wait"); err != nil {
@@ -458,5 +486,48 @@ func TestTyperWaitEndsWithTheProcess(t *testing.T) {
 	r.m.Stop()
 	if err := waitErr(t, res, 3*time.Second, "the Wait"); !errors.Is(err, ErrNoAgent) {
 		t.Fatalf("Wait when the process stopped: %v", err)
+	}
+}
+
+// 8. A Wait into a stopped process with room in its queue never reports
+// typing that will not happen: ErrNoAgent every time (its select may choose
+// the send).
+func TestWaitIntoAStoppedProcessIsNoAgent(t *testing.T) {
+	r := newRig(t)
+	r.m.Start("codex", false)
+	pr := r.m.current()
+	r.m.Stop()
+	waitSignal(t, pr.wdone, "the writer's end")
+	for i := 0; i < writeQueue; i++ { // each try may fill one slot
+		if err := pr.waitRoom(context.Background(), &writeJob{gen: pr.gen, data: []byte("x")}); !errors.Is(err, ErrNoAgent) {
+			t.Fatalf("try %d: %v, want ErrNoAgent", i, err)
+		}
+	}
+}
+
+// 2. Bracketed paste or one line is chosen when the paste is typed, not when
+// it was queued: the agent turns bracketed paste on while the paste waits.
+func TestPasteChoosesBracketsWhenTyped(t *testing.T) {
+	r := newRig(t)
+	r.m.Start("claude", false)
+	ty := r.m.NewTyper()
+	writing, _, open := r.fake(0).holdWrites()
+	t.Cleanup(open)
+	if err := ty.Input([]byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	waitSignal(t, writing, "the Write of a")
+	res := make(chan error, 1)
+	go func() { res <- r.m.Paste("one\ntwo", nil) }()
+	pr := r.m.current()
+	waitFor(t, func() bool { return len(pr.q) == 1 })
+	r.fake(0).outW.Write([]byte("\x1b[?2004h"))
+	waitFor(t, func() bool { return pr.screen.BracketedPaste() })
+	open()
+	if err := waitErr(t, res, 5*time.Second, "the Paste"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := r.fake(0).said(), "a\x1b[200~one\ntwo\x1b[201~\r"; got != want {
+		t.Fatalf("typed %q, want %q", got, want)
 	}
 }

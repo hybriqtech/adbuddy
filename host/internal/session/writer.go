@@ -262,6 +262,11 @@ func (m *Manager) Paste(text string, guard func() string) error {
 				return ErrBusy
 			}
 			if pr.isStopped() {
+				// The writer does not type the Enter once it sees the stop.
+				// A stop that came while it was typing the Enter, with the
+				// time up before its result, still lands here: ErrNoAgent
+				// although the Enter went out. Benign: that conversation
+				// ends with the stop, and the message's id is only freed.
 				return ErrNoAgent
 			}
 			// Started and not done: the text is being typed and cannot be
@@ -326,13 +331,23 @@ func (t *Typer) Wait(ctx context.Context, p []byte) error {
 	if pr == nil || pr.isStopped() {
 		return ErrNoAgent
 	}
-	j := &writeJob{gen: pr.gen, data: append([]byte(nil), p...)}
+	return pr.waitRoom(ctx, &writeJob{gen: pr.gen, data: append([]byte(nil), p...)})
+}
+
+// waitRoom queues j, waiting for room. With stopped closed and room in the
+// queue the select may still choose to queue j: the writer is gone or going
+// and never types it, so that is ErrNoAgent too, not a nil for typing that
+// never happens.
+func (pr *proc) waitRoom(ctx context.Context, j *writeJob) error {
 	select {
 	case <-pr.stopped:
 		return ErrNoAgent
 	case <-ctx.Done():
 		return ctx.Err()
 	case pr.q <- j:
+		if pr.isStopped() {
+			return ErrNoAgent
+		}
 		return nil
 	}
 }
