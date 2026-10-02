@@ -159,12 +159,15 @@ func (p *Parser) Dropped() int { return p.dropped }
 func (p *Parser) BadRun() int { return p.badRun }
 
 type rawLine struct {
-	Type        string          `json:"type"`
-	UUID        string          `json:"uuid"`
-	Version     string          `json:"version"`
-	IsSidechain bool            `json:"isSidechain"`
-	IsMeta      bool            `json:"isMeta"`
-	Message     json.RawMessage `json:"message"`
+	Type        string `json:"type"`
+	UUID        string `json:"uuid"`
+	Version     string `json:"version"`
+	IsSidechain bool   `json:"isSidechain"`
+	IsMeta      bool   `json:"isMeta"`
+	// IsCompactSummary marks the summary Claude Code writes as a "user" line
+	// after /compact: not typed by anyone [validar with a real /compact].
+	IsCompactSummary bool            `json:"isCompactSummary"`
+	Message          json.RawMessage `json:"message"`
 }
 
 type rawMessage struct {
@@ -220,7 +223,7 @@ func (p *Parser) Feed(line []byte) []Event {
 			p.badVersion = true
 		}
 	}
-	if l.IsSidechain || l.IsMeta || (l.Type != "assistant" && l.Type != "user") {
+	if l.IsSidechain || l.IsMeta || l.IsCompactSummary || (l.Type != "assistant" && l.Type != "user") {
 		return nil
 	}
 	if l.UUID != "" {

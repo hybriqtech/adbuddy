@@ -1134,3 +1134,19 @@ func TestCardSafeFileToolsOnTheAgentsConfig(t *testing.T) {
 		t.Error("Read of the config refused")
 	}
 }
+
+// The summary Claude Code writes after /compact is a "user" line with
+// isCompactSummary: it is not something the person typed. This is the minimum
+// record; the exact fields of a real one are still to be recorded (/compact in
+// the plan's manual validations).
+func TestParserIgnoresTheCompactSummary(t *testing.T) {
+	p := NewParser()
+	rec := []byte(`{"type":"user","uuid":"c1","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation."}}`)
+	if ev := p.Feed(rec); len(ev) != 0 {
+		t.Fatalf("the summary of /compact is shown as typed in the terminal: %+v", ev)
+	}
+	typed := []byte(`{"type":"user","uuid":"c2","isCompactSummary":false,"message":{"role":"user","content":"hola"}}`)
+	if ev := p.Feed(typed); len(ev) != 1 || ev[0].Text != "hola" {
+		t.Fatalf("a normal prompt is lost: %+v", ev)
+	}
+}
