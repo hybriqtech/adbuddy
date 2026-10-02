@@ -17,10 +17,12 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 | Variable | Used by | Default | What the runner needs |
 | --- | --- | --- | --- |
 | `CI_HOST_MATRIX` | `host.yml` | the three hosted cells (`ubuntu-latest`, `windows-latest`, `macos-latest`) | A JSON array of cells `{"name": ..., "runner": ...}`. A Linux cell needs `gcc` (for `go test -race`); a Windows cell needs Git for Windows. Leave a cell out of the array to drop it. |
-| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. |
+| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min). |
 | `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, the AVD `adbuddy-ci-api37`, hardware acceleration; a Linux runner needs `/dev/kvm` (see section 6). |
 | `CI_RUNNER_RELEASE` | `release-check.yml` (`scripts` and `goreleaser`) | `"ubuntu-latest"` | Linux with `shellcheck`. |
 | `CI_RUNNER_SIGN` | `release-check.yml` (`sign`) | `"ubuntu-latest"` | Linux with an Android SDK: `apksigner` and `zipalign` are Linux scripts here. |
+
+`emulator.yml` runs on `pull_request` (same path filters) and by hand with `workflow_dispatch`. It does not run on every push to `main`: merges are fast-forwards of a pull request that already passed it.
 
 The special value `"none"` skips the job of a single-job workflow.
 
@@ -28,7 +30,7 @@ Example for "only a Windows runner for now":
 
 ```sh
 gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-local"]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
 ```
 
 Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`. The same goes for `CI_RUNNER_EMULATOR`.
@@ -37,7 +39,7 @@ Example with both runners (Windows and the Linux runner of section 4):
 
 ```sh
 gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":["self-hosted","linux","adbuddy-local"]},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-local"]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
 gh variable set CI_RUNNER_RELEASE --body '["self-hosted","linux","adbuddy-local"]'
 gh variable set CI_RUNNER_SIGN --body '["self-hosted","linux","adbuddy-local"]'
 ```
@@ -49,6 +51,25 @@ Never point a Linux cell at a Windows runner. The steps that only run on Linux (
 Every job whose variable is set refuses pull requests from forks. With no variables set, the workflows behave exactly as before, fork pull requests included, on GitHub-hosted runners.
 
 For `CI_HOST_MATRIX`, `"none"` and `[]` are not valid: they break the workflow. Delete the variable, or leave in the array the cells you want.
+
+### Emulator environment variables
+
+`scripts/emulator.sh` (used by the emulator job and by the local oracle tests) reads these variables:
+
+| Variable | Meaning |
+| --- | --- |
+| `ADBUDDY_EMU_AVD` | AVD name. The CI uses `adbuddy-ci-api37`. |
+| `ADBUDDY_EMU_PORT` | Emulator port. The CI uses `5590`. |
+| `ADBUDDY_EMU_ADB_PORT` | Port of the script's own adb server. The CI uses `5049`. |
+| `ADBUDDY_EMU_GPU` | GPU mode (default `swiftshader_indirect`). |
+| `ADBUDDY_EMU_IMAGE` | System image used when the AVD is created (the AVD is created with it the first time only: to change the image, use another AVD name). |
+| `ADBUDDY_EMU_STABLE_SECS` | After boot, watch this many seconds that `system_server` and `surfaceflinger` do not restart. Default `0` (off); on a restart the script exits with 4. |
+
+The CI values differ from the defaults so that a job does not collide with an emulator started by hand.
+
+The script exports `ADB_MDNS=0` and `ADB_MDNS_AUTO_CONNECT=0` so that its adb server never auto-connects a real phone found over mDNS, and it aborts (exit 3) if that server sees any other device.
+
+Exit codes: `1` SDK or packages missing; `2` incorrect usage; `3` the adb server sees another device (or none); `4` the emulator is not stable; `124` it did not boot in 10 minutes.
 
 ## 3. Setting up a Windows runner
 
