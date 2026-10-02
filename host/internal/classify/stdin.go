@@ -210,8 +210,9 @@ func inertLine(line string) bool {
 		switch {
 		case t == "<" || t == ">":
 			if !redirect {
-				out, dup = t == ">", false
+				out, dup = false, false
 			}
+			out = out || t == ">" // >, >>, >| and <> (N1) open the file for writing
 			redirect = true
 		case redirect && (t == "&" || t == "|"):
 			dup = dup || t == "&" // >&2, <&0: a file descriptor, not a file
@@ -220,8 +221,9 @@ func inertLine(line string) bool {
 			end()
 		case redirect:
 			redirect = false
-			if out && !dup && t != "/dev/null" {
-				writes = true
+			descriptor := dup && strings.Trim(t, "0123456789") == ""
+			if out && !descriptor && t != "/dev/null" {
+				writes = true // a file, or a duplication to something not a descriptor
 			}
 		case commandPos && (assignment.MatchString(t) || keywords[t]):
 		case commandPos:

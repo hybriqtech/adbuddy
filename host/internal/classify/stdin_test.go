@@ -163,6 +163,12 @@ func TestStdinDecidesIsAnAllowlist(t *testing.T) {
 		// A filter that reads stdin writes it to a file: other contents next time.
 		sh("head -c 10 > /sdcard/x"), sh("grep x > /sdcard/y"), sh("sort -o /sdcard/x"), sh("tr a b >> /sdcard/x"),
 		sh("rm -rf /sdcard/x; cat > /sdcard/y"),
+		// N1: <> opens the file for writing too; with fd 1 (or a descriptor
+		// stdout is then sent to) the filter writes what it read to it.
+		sh("cat 1<>/sdcard/x"), sh("cat 3<>/sdcard/x >&3"), sh("rm -rf /sdcard/x; cat 1<>/sdcard/x"),
+		sh("cat <>/sdcard/x"), sh("head -c 9 1<> /sdcard/x"),
+		// A duplication whose target is not a descriptor is not followed.
+		sh("cat >&/sdcard/x"), sh("cat >& /sdcard/x"),
 		// adb commands ADBuddy does not know.
 		{"frob"}, {"emu", "kill"}, {"pair", "1.2.3.4:5"},
 	}
@@ -173,6 +179,7 @@ func TestStdinDecidesIsAnAllowlist(t *testing.T) {
 		sh("cat"), sh("rm -rf /sdcard/x | cat"),
 		// Redirections that are not a file written from stdin.
 		sh("rm x 2>/dev/null"), sh("ls >&2"), sh("rm x 2>&1 | head"), sh("ls > /sdcard/list.txt"),
+		sh("ls 1<>/sdcard/list.txt"), sh("cat /proc/cpuinfo 2>&1 | head"),
 		// Assignments, keywords and the system's paths.
 		sh("foo=1 rm x"), sh("if true; then rm x; fi"), sh("/system/bin/rm -rf /sdcard/x"), sh("rm x && reboot || svc wifi disable"),
 		sh("settings put global x 1; am force-stop com.x; input keyevent 3"),
