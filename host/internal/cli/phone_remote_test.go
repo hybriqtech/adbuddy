@@ -313,6 +313,31 @@ func TestDeviceInfoPortFallbacks(t *testing.T) {
 	}
 }
 
+// Validation 11: what `getprop service.adb.tls.port` says becomes a port only
+// when, trimmed, it is a number from 1 to 65535.
+func TestReadTLSPortParses(t *testing.T) {
+	for _, c := range []struct {
+		out  string
+		want int
+	}{
+		{"41234", 41234},
+		{"41234", 41234}, // adb on Windows ends lines with CRLF
+		{" 41234 ", 41234},
+		{"1", 1},
+		{"65535", 65535},
+		{"0", 0},
+		{"abc", 0},
+		{"", 0},
+		{"70000", 0},
+		{"-5", 0},
+	} {
+		g := newRemoteRig(t, config.Default(), c.out)
+		if got := g.r.readTLSPort(); got != c.want {
+			t.Errorf("getprop says %q: port %d, want %d", c.out, got, c.want)
+		}
+	}
+}
+
 func TestDeviceInfoFromAReplacedConnectionIsIgnored(t *testing.T) {
 	g := newRemoteRig(t, config.Default(), "41234")
 	g.srv.current.Store(false)
