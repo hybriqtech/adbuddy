@@ -191,7 +191,9 @@ func (l *phoneLink) hookCall(ctx context.Context, ws, event string, raw []byte) 
 		l.setHookState("working", true)
 	case claudecode.EventStop:
 		l.setHookState("idle", true)
-		go l.afterStop(in)
+		// The delay is read here, not in the goroutine: a test that sets
+		// stopDelay restores it when it ends, and the goroutine is not waited for.
+		go l.afterStop(in, stopDelay)
 	case claudecode.EventNotification:
 		switch in.NotificationType {
 		case "permission_prompt":
@@ -290,7 +292,10 @@ func (l *phoneLink) onSessionStart(in claudecode.HookInput) {
 		old()
 	}
 	l.publishState()
-	go l.tailLoop(ctx, tl, time.Now())
+	// agentPoll is read here, before the goroutine, for the same reason as
+	// tunnelCheck in startPhoneLink: a test that sets it must not race with a
+	// goroutine that has not run yet when the test ends.
+	go l.tailLoop(ctx, tl, time.Now(), agentPoll)
 }
 
 func (l *phoneLink) onSessionEnd() {
@@ -307,8 +312,8 @@ func (l *phoneLink) onSessionEnd() {
 	l.publishState()
 }
 
-func (l *phoneLink) tailLoop(ctx context.Context, tl *claudecode.Tailer, started time.Time) {
-	t := time.NewTicker(agentPoll)
+func (l *phoneLink) tailLoop(ctx context.Context, tl *claudecode.Tailer, started time.Time, poll time.Duration) {
+	t := time.NewTicker(poll)
 	defer t.Stop()
 	for {
 		select {
@@ -443,7 +448,7 @@ func (l *phoneLink) currentConversation() string {
 // afterStop makes sure the last answer of the turn is in the chat (spec M4
 // §4.4): it rereads the transcript a few times and, if the text of Stop is
 // still not there, says it itself.
-func (l *phoneLink) afterStop(in claudecode.HookInput) {
+func (l *phoneLink) afterStop(in claudecode.HookInput, delay time.Duration) {
 	want := claudecode.Normalize(in.LastAssistantMessage)
 	if want == "" {
 		return
@@ -456,7 +461,7 @@ func (l *phoneLink) afterStop(in claudecode.HookInput) {
 		if !live || tl == nil {
 			break
 		}
-		time.Sleep(stopDelay)
+		time.Sleep(delay)
 		a.pollMu.Lock()
 		events, _ := tl.Poll()
 		for _, e := range events {
