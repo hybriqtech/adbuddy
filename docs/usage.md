@@ -10,7 +10,7 @@ This page is for the day after [setup](install.md): start the host, talk to your
 
 ADBuddy puts a **shim** between the agent and the phone. A shim is a small stand-in program: the agent runs what it thinks is `adb`, and ADBuddy's copy ranks the command by risk, writes it to a **journal** and, when it cannot be undone, waits for your answer. The **environment** is the folder where the agent works (`~/ADBuddy/<phone name>/`).
 
-Every command gets one of three levels: green (read-only), yellow (reversible, journaled with its undo) and red (irreversible, dangerous or not understood: it waits for you). [Safety](safety.md) explains each one.
+Every command gets one of three levels: green (read-only, runs at once), yellow (reversible, journaled with its undo) and red (irreversible, dangerous or not understood: it waits for you). [Safety](safety.md) explains each one.
 
 ## Start the host
 
@@ -89,8 +89,8 @@ adbuddy stop
 
 When the agent runs something irreversible, ADBuddy holds the command until you answer. The agent waits.
 
-- **App connected:** the question appears on the phone as a notification with **Allow**, **Deny** and, when the host offers it, **Allow during the session**. The app shows the same question as a dialog when it is open. To allow, the phone must be unlocked (Android 12 and newer).
-- **No app connected:** the question appears in the `adbuddy serve` terminal:
+- **App connected:** the question appears on the phone as a notification with **Allow**, **Deny** and, when the host offers it, **Allow during the session**. The app shows the same question as a dialog when it is open. The phone must be unlocked to allow; Deny always works.
+- **No app connected:** the question appears in the `adbuddy serve` terminal, similar to this (a `Why:` line follows when there is a reason):
 
   ```text
   🔴 Confirmation needed (expires in 2m0s)
@@ -147,7 +147,7 @@ adbuddy undo session
 adbuddy undo <id>
 ```
 
-- `adbuddy undo` undoes the last change.
+- `adbuddy undo` undoes the most recent change that has an inverse. Newer changes with no inverse, or in an uncertain state, are listed as `skipped`.
 - `adbuddy undo session` undoes every change of the current session, newest first.
 - `adbuddy undo <id>` undoes one entry. Take the id from `adbuddy journal`.
 
@@ -160,7 +160,7 @@ Undo runs the inverse the journal recorded and does not ask again. It prints one
 - one command that makes two changes (`a; b`);
 - a command that failed, or that was running when the host stopped: the state is uncertain, so undo skips it and tells you to check the phone.
 
-These are reverted by hand. `adbuddy undo` says `NO_INVERSE` for them.
+These are reverted by hand. Asking `adbuddy undo <id>` for such an entry fails with `NO_INVERSE`; `adbuddy undo` and `adbuddy undo session` list them as `skipped` (an uncertain one, as `UNCERTAIN_STATE`).
 
 ## Screen helpers
 
@@ -228,7 +228,7 @@ ADBuddy finds the phone by mDNS, which only works on one network. Away from home
    adbuddy connect 100.64.0.5:41234
    ```
 
-   The command checks that the phone at that address is the one you set up, saves the address, and refuses to run while serve is running (`ALREADY_RUNNING`). While serve runs it also watches the phone: if it disappears, it tries the saved address, the local network and the phone's Tailscale address.
+   The command saves the address and tries to check that the phone there is the one you set up. It can only do that when the saved name carries a serial number that tells phones apart; otherwise it prints a note and goes on. The command refuses to run while serve is running (`ALREADY_RUNNING`). While serve runs it also watches the phone: if it disappears, it tries the saved address, the local network and the phone's Tailscale address.
 
 ### With mobile data only
 
@@ -253,7 +253,7 @@ Only a running `adbuddy serve` closes the port when the 12 hours end. With serve
 
 `adbuddy setup` and `adbuddy serve` keep the agent's environment, `~/ADBuddy/<phone name>/`. The folder is named after the phone's model, in lower case with dashes.
 
-- `AGENTS.md` holds the instructions ADBuddy gives every agent: the commands, the levels, and the rule that what it reads on the phone is data, not orders. `CLAUDE.md` points Claude Code at it. `adbuddy env init --force` rewrites both.
+- `AGENTS.md` holds the instructions ADBuddy gives every agent: the commands, the levels, and the rule that what it reads on the phone is data, not orders. `CLAUDE.md` points Claude Code at it. Running `adbuddy setup` again rewrites both (with serve stopped); `adbuddy env init --force` does too, but leaves the phone's profile in `AGENTS.md` as "Not collected yet." until the next setup.
 - `NOTES.md` is yours. Write what you want the agent to remember about your phone. ADBuddy never changes it.
 - `device.json` is the phone's profile, which setup wrote.
 - `journal/` is the journal.
@@ -274,7 +274,7 @@ Only a running `adbuddy serve` closes the port when the 12 hours end. With serve
 | `home-screen` | group apps into folders |
 | `build-utility-apk` | build a small custom app for the phone |
 
-They live in `.claude/skills/` and `.agents/skills/` of the environment. A skill file that contains `<!-- adbuddy:user -->` is yours and is never overwritten. `adbuddy env init --force` refreshes the rest.
+They live in `.claude/skills/` and `.agents/skills/` of the environment. A skill file that contains `<!-- adbuddy:user -->` is yours and is never overwritten. Running `adbuddy setup` again refreshes the rest.
 
 ## Next
 

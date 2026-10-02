@@ -6,7 +6,7 @@ lang: en
 
 # Install ADBuddy
 
-ADBuddy has two parts: the `adbuddy` program on your PC (the **host**) and a small app on your Android phone. This page installs the host. The app is installed by `adbuddy setup` over the connection it pairs, so you do not install it by hand.
+ADBuddy has two parts: the `adbuddy` program on your PC (the **host**) and a small app on your Android phone. This page installs the host. `adbuddy setup` installs the app on the phone over the connection it pairs. Until there is a release, you build the APK and pass it with `--apk`.
 
 **There is no public release yet.** Today the way in is [Build from source](#build-from-source). The release downloads below describe what will work once a release is published; the [Releases page](https://github.com/hybriqtech/adbuddy/releases) is where it will appear.
 
@@ -31,12 +31,14 @@ This works today, on any of the three systems. You need [Git](https://git-scm.co
 
    On Windows, build `adbuddy.exe` instead: `go build -o adbuddy.exe ./cmd/adbuddy`.
 
-2. Put the program in a folder that is in your `PATH`, for example `~/.local/bin` on Linux and macOS.
+2. Put the program in a folder that is in your `PATH`. On Linux and macOS, `~/.local/bin` is the usual one:
 
    ```sh
    mkdir -p ~/.local/bin
    cp adbuddy ~/.local/bin/
    ```
+
+   On Windows, copy `adbuddy.exe` to a folder of your own and add it to your `PATH` as in the Windows steps further down. After each `git pull` and new build, copy the program again.
 
 3. Check it. A build from source has no version number, so it says `dev`.
 
@@ -57,7 +59,7 @@ This works today, on any of the three systems. You need [Git](https://git-scm.co
 
    The APK is `app/build/outputs/apk/debug/app-debug.apk`. Keep its path for setup's `--apk` option.
 
-A build from source pins no release certificate for the app, so `adbuddy setup` never downloads the app for it. You give it the APK yourself (from the `android` folder, or with the full path):
+Today the source pins no release certificate for the app, so `adbuddy setup` does not download it. You give it the APK yourself (from the `android` folder, or with the full path):
 
 ```sh
 adbuddy setup --apk app/build/outputs/apk/debug/app-debug.apk
@@ -69,7 +71,7 @@ Because that APK is not signed with the project's release key, **that exact file
 
 ### Linux and macOS
 
-One command installs the latest release in `~/.local/bin`, without `sudo`:
+These steps apply once a release exists. One command installs the latest release in `~/.local/bin`, without `sudo`:
 
 ```sh
 curl -fsSL https://github.com/hybriqtech/adbuddy/releases/latest/download/install.sh | sh
@@ -77,7 +79,7 @@ curl -fsSL https://github.com/hybriqtech/adbuddy/releases/latest/download/instal
 
 The script needs `curl` or `wget`, `tar`, `awk` and `sha256sum` or `shasum`. It picks the archive for your system (Linux on x86-64 or arm64, macOS on Intel or Apple silicon), downloads `checksums.txt` and the archive, checks the archive's SHA-256 and refuses to install on a mismatch. If `~/.local/bin` is not in your `PATH`, it says so.
 
-The checksum file comes from the same release as the archive. It catches a damaged download; it is not a signature.
+The checksum file comes from the same release as the archive. It catches a damaged download; the checksum is not a signature.
 
 Change what it does with two variables:
 
@@ -105,7 +107,7 @@ sh install.sh
 
    `<version>` has no leading `v`. To see which one you have, run `$env:PROCESSOR_ARCHITECTURE` in PowerShell: `AMD64` or `ARM64`.
 
-2. Check the archive. This prints `True` when the archive's SHA-256 is the one in `checksums.txt`. Run it in the folder with both files and change the file name to yours.
+2. Check the archive. This prints `True` when the archive's SHA-256 is the one in `checksums.txt`. Run it in the folder with both files and change the file name to yours. On an ARM PC, also change `windows_amd64` to `windows_arm64` in `-Pattern`. The checksum is not a signature: it catches a damaged download, not a tampered release.
 
    ```powershell
    $want = (Select-String -Path .\checksums.txt -Pattern 'windows_amd64\.zip').Line.Split(' ')[0]
@@ -121,8 +123,12 @@ sh install.sh
    New-Item -ItemType Directory -Force $dir
    Expand-Archive .\adbuddy_<version>_windows_amd64.zip -DestinationPath $dir -Force
    $path = [Environment]::GetEnvironmentVariable("Path", "User")
-   [Environment]::SetEnvironmentVariable("Path", "$path;$dir", "User")
+   if (($path -split ';') -notcontains $dir) {
+     [Environment]::SetEnvironmentVariable("Path", "$path;$dir", "User")
+   }
    ```
+
+   This edits your user `PATH`. If it holds entries with `%VAR%` in them, check them afterwards in the Windows settings: this call can store them already expanded.
 
 4. Open a new terminal and check it:
 
@@ -150,7 +156,7 @@ With the host in your `PATH`, no cable is needed. Put the phone on the same Wi-F
 adbuddy setup
 ```
 
-It goes step by step and skips what is already done, so you can run it again at any time:
+It goes step by step and skips what is already done, so you can run it again. It refuses to run while `adbuddy serve` is running (`ALREADY_RUNNING`): stop serve first.
 
 1. Downloads Android platform-tools, checked against Google's checksum.
 2. Pairs the phone with a QR code (or with `--code`, a pairing code) and connects.
@@ -165,16 +171,16 @@ Then see [Use ADBuddy](usage.md).
 
 1. Stop `adbuddy serve` (Ctrl+C in its terminal).
 2. Replace the program:
-   - **Linux and macOS:** run the install command again. It replaces the old program.
-   - **Windows:** download the new archive, check it, and unzip it over the old folder.
-   - **Built from source:** run `git pull` and build again.
-3. Refresh the files in the agent's environment. `adbuddy serve` already refreshes the `adb` and `adbuddy` programs the agent uses. The instructions and skills only change with:
+   - **Linux and macOS, once there is a release:** run the install command again. It replaces the old program.
+   - **Windows, once there is a release:** download the new archive, check it, and unzip it over the old folder.
+   - **Built from source:** run `git pull`, build again and copy the program again.
+3. Refresh the files in the agent's environment. `adbuddy serve` already refreshes the `adb` and `adbuddy` programs the agent uses. The instructions and skills change when you run setup again (with serve stopped), which also rewrites the phone's profile in `AGENTS.md`:
 
    ```sh
-   adbuddy env init --force
+   adbuddy setup
    ```
 
-   `NOTES.md` is never touched, and a skill file that contains `<!-- adbuddy:user -->` is kept.
+   `NOTES.md` is never touched, and a skill file that contains `<!-- adbuddy:user -->` is kept. `adbuddy env init --force` also rewrites them, but it leaves the phone's profile in `AGENTS.md` as "Not collected yet." until the next setup.
 
 4. Update the app by giving setup the newer APK: `adbuddy setup --apk <file>`. Plain `adbuddy setup` installs the app only when the phone has none, so it does not replace an older one by itself.
 
