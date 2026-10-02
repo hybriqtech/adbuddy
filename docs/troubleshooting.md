@@ -201,7 +201,8 @@ When a command fails, it prints `Error: <CODE> — <message>` and, when there is
 2. Check that the phone and the PC are on the same Wi-Fi, and that the network does not isolate its devices (guest networks often do).
 3. If the phone was never paired with this PC, run `adbuddy setup`.
 4. If the phone is on another network, for example over Tailscale, or the Wi-Fi blocks mDNS, connect by address with the IP address and port on the Wireless debugging screen: `adbuddy connect <ip:port>`. Stop `adbuddy serve` first.
-5. Run `adbuddy doctor` and follow the first `✗` line.
+5. After restarting the PC, or after the phone switched its Wi-Fi off and on, ADBuddy's own adb server may not see the phone for a while even though it is paired and visible in the system's adb. Connect by address as in step 4 (`adbuddy connect <ip:port>`, with `adbuddy serve` stopped); it saves the address, so the next start finds the phone.
+6. Run `adbuddy doctor` and follow the first `✗` line.
 
 On Windows, see also [Windows and the firewall](#windows-and-the-firewall).
 
