@@ -44,6 +44,10 @@ const (
 // it is open (opened true): a hook for the tests.
 var inboxHook = func(opened bool) {}
 
+// moveHook runs in endUpload just before the written file is filed, with its
+// descriptor, which must still be open: a hook for the tests.
+var moveHook = func(f *os.File) {}
+
 var (
 	// inboxQuota is what inbox/ may weigh, partial uploads included.
 	inboxQuota int64 = 2 << 30
@@ -605,14 +609,22 @@ func (l *phoneLink) endUpload(id string) (bridge.Attachment, string, string, str
 	if err != nil {
 		return fail(bridge.CodeFailed, "Could not save the file.")
 	}
-	if err := u.f.Close(); err != nil {
-		return fail(bridge.CodeFailed, "Could not save the file.")
-	}
+	// The descriptor stays open until the file is filed: while it is open the
+	// inode cannot be freed and reused by a file put in place of .partial/<id>,
+	// which would fool the SameFile check of moveExclusive (Linux reuses it at
+	// once).
+	wf := u.f
 	u.f = nil
 	// Out of the map while it moves: nothing else touches it (the reader of
 	// this connection is the one here).
 	delete(fs.uploads, id)
 	fs.upMu.Unlock()
+	closed := false
+	defer func() {
+		if !closed {
+			wf.Close()
+		}
+	}()
 
 	root, err := openInbox(ws)
 	if err != nil {
@@ -627,10 +639,16 @@ func (l *phoneLink) endUpload(id string) (bridge.Attachment, string, string, str
 	}
 	stem := filesNow().Format("20060102-150405") + "-" + strings.TrimSuffix(name, ext)
 	partial := filepath.Join(partialDir, id)
+	moveHook(wf)
 	final, err := moveExclusive(root, partial, stem, ext, written)
 	root.Remove(partial + ".json")
 	if err != nil {
 		root.Remove(partial)
+		return bridge.Attachment{}, "", bridge.CodeFailed, "Could not save the file."
+	}
+	closed = true
+	if err := wf.Close(); err != nil {
+		root.Remove(final)
 		return bridge.Attachment{}, "", bridge.CodeFailed, "Could not save the file."
 	}
 	mime := u.mime

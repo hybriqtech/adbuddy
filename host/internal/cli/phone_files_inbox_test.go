@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -154,6 +155,12 @@ func TestInboxSwappedAfterTheCheckIsContained(t *testing.T) {
 				m := readApp(t, r.c)
 				select {
 				case err := <-swapped:
+					if err != nil && op == "end" && runtime.GOOS == "windows" {
+						// The written file is held open until it is filed, and
+						// Windows renames no folder with an open file: nothing
+						// can be swapped there.
+						t.Skip(err)
+					}
 					if err != nil {
 						t.Fatalf("swap: %v", err)
 					}
@@ -270,6 +277,31 @@ func TestEndUploadFilesOnlyTheFileWritten(t *testing.T) {
 	}
 	if files := r.inboxFiles(t); len(files) != 0 {
 		t.Fatalf("filed: %v", files)
+	}
+}
+
+// The written file's descriptor is still open when it is filed: its inode
+// cannot be reused by a file put in its place (Linux does it at once).
+func TestEndUploadKeepsTheWrittenFileOpenWhileFiling(t *testing.T) {
+	var openErr error
+	called := false
+	setVar(t, &moveHook, func(f *os.File) {
+		called = true
+		_, openErr = f.Stat() // fails with os.ErrClosed once closed
+	})
+	r := newFilesRig(t, nil)
+	data := testBytes(20)
+	id := fileID(2)
+	r.begin(t, "r_1", id, "a.bin", data)
+	wantReady(t, readApp(t, r.c), "r_1", 0)
+	sendData(t, r.c, id, data, 0, 20)
+	sendApp(t, r.c, bridge.TypeAttachEnd, "r_2", bridge.AttachEnd{ID: id})
+	readApp(t, r.c)
+	if !called {
+		t.Fatal("moveHook was not called")
+	}
+	if openErr != nil {
+		t.Fatalf("the written file was closed before filing: %v", openErr)
 	}
 }
 
