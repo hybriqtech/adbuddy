@@ -40,6 +40,11 @@ func TestStdinCommandsHaveNoSessionKey(t *testing.T) {
 		// H1: awk runs what comes through stdin, though it is not called sh.
 		{[]string{"shell", "awk '{system($0)}'"}, false},
 		{[]string{"shell", "sed e"}, false},
+		// H2: abb_exec is exec-in for a system service; pm install -S<n> reads the APK.
+		{[]string{"abb_exec", "package", "install", "-S", "1234"}, true},
+		{[]string{"abb", "package", "install", "-S", "1234"}, true},
+		{[]string{"shell", "pm install -S1234"}, false},
+		{[]string{"shell", "pm install-write 123 base.apk"}, false},
 	}
 	for _, c := range cases {
 		e.execStdin(t, "ls\n", c.argv...)

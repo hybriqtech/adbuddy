@@ -151,6 +151,10 @@ func (c *Classifier) classifyAdb(argv []string) []Finding {
 		// adb pipes the agent's stdin into the command: decided before the
 		// rules, so a user rule cannot lower it.
 		return []Finding{unanalysable("shell.stdin", reason("exec-in: the command reads what comes through stdin, which is not analysed"), argv, textStdinCmd)}
+	case argv[0] == "abb_exec" || argv[0] == "abb":
+		// exec-in for a system service: adb hands it the agent's stdin (adb
+		// install streams the APK this way). Before the rules, like exec-in.
+		return []Finding{unanalysable("shell.stdin", reason("abb_exec and abb: the system service reads what comes through stdin, which is not analysed"), argv, textStdinCmd)}
 	case strings.HasPrefix(argv[0], "wait-for-") && len(argv) > 1:
 		// adb runs the rest of the line once the device is there.
 		return append([]Finding{c.evalRule("adb", lits(argv[:1]))}, c.classifyAdb(argv[1:])...)

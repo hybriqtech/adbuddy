@@ -21,7 +21,7 @@ import (
 // (nonReaders) or to read it only as data it filters to its output
 // (dataReaders), none of which writes it to a file. Yes for anything else:
 // adb shell or exec-out without a command or with options ADBuddy does not
-// know, adb exec-in, a program on the line that is not in those lists (awk,
+// know, adb exec-in, abb_exec and abb, a program on the line that is not in those lists (awk,
 // sed, a shell, a wrapper, one ADBuddy does not know…), and, wherever on the
 // line, a shell, su, eval, source, `.`, xargs, read, dd, tee, a command
 // substitution, stdin itself or an install or content write that may read it.
@@ -33,8 +33,8 @@ func StdinDecides(argv []string) bool {
 		return false
 	}
 	switch argv[0] {
-	case "exec-in":
-		return true
+	case "exec-in", "abb_exec", "abb":
+		return true // stdin goes to the command, or to a system service (H2)
 	case "shell", "exec-out":
 		args := argv[1:]
 		if argv[0] == "shell" {
@@ -97,8 +97,9 @@ var stdinReaders = map[string]bool{
 // given (rm -i, cp -i, mv -i), which the key covers. The system's services
 // (settings, am, pm, wm, input, appops, svc, sm, dumpsys, service) get their
 // arguments, not stdin; cmd is not here: it hands stdin to any service, and
-// some read it. pm and content stay here for their other subcommands: their
-// install and write are looked at in lineReadsStdin.
+// some read it. pm and content stay here for their other subcommands: pm's
+// installs (install, install-write…) are not inert (inertCommand), and
+// content write is looked at in lineReadsStdin.
 var nonReaders = map[string]bool{
 	// files
 	"rm": true, "rmdir": true, "mv": true, "cp": true, "ln": true, "mkdir": true, "touch": true,
@@ -171,8 +172,8 @@ func lineReadsStdin(line string) bool {
 		switch {
 		case strings.HasPrefix(base, "install"):
 			install = true // pm install, cmd package install-write…
-		case w == "-S":
-			sizeFromStdin = true // the APK comes through stdin
+		case w == "-S" || strings.HasPrefix(w, "-S") && strings.Trim(w[2:], "0123456789") == "":
+			sizeFromStdin = true // the APK comes through stdin: -S 1234 or -S1234
 		case base == "content":
 			content = true
 		case w == "write":
@@ -246,6 +247,12 @@ func inertCommand(name string, args []string) bool {
 	switch {
 	case p == "":
 		return false
+	case p == "pm":
+		for _, a := range args {
+			if strings.HasPrefix(a, "install") {
+				return false // pm install and install-write may read the APK from stdin (H2)
+			}
+		}
 	case p == "sort":
 		for _, a := range args {
 			if strings.HasPrefix(a, "-o") || strings.HasPrefix(a, "--output") {

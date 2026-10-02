@@ -35,6 +35,12 @@ func TestStdinShellsAreSpecial(t *testing.T) {
 		{"exec-in", "sh"},
 		{"exec-in", "rm"},
 		{"exec-in", "cp", "/dev/stdin", "/sdcard/x"},
+		// H2: abb_exec and abb are exec-in for a system service (adb
+		// install streams the APK this way).
+		{"abb_exec", "package", "install", "-S", "1234"},
+		{"abb", "package", "install", "-S", "1234"},
+		{"abb_exec", "package", "list", "packages"},
+		{"wait-for-device", "abb_exec", "package", "install-write", "1", "base.apk"},
 		// A shell or su on the phone reading the forwarded stdin.
 		{"exec-out", "sh"},
 		{"shell", "-t", "sh"},
@@ -65,9 +71,39 @@ func TestStdinShellsAreSpecial(t *testing.T) {
 
 // A user rule cannot lower exec-in: it is decided before the rules.
 func TestExecInCannotBeLowered(t *testing.T) {
-	c := mustNew(t, "rules:\n  - {id: u.execin, scope: adb, cmd: exec-in, level: green}\n")
-	if r := c.Classify([]string{"exec-in", "sh"}); r.Level != Red || !r.Special {
-		t.Errorf("exec-in sh with a user rule: %v special=%v (%s)", r.Level, r.Special, r.Primary.Rule)
+	c := mustNew(t, "rules:\n  - {id: u.execin, scope: adb, cmd: exec-in, level: green}\n"+
+		"  - {id: u.abbexec, scope: adb, cmd: abb_exec, level: green}\n  - {id: u.abb, scope: adb, cmd: abb, level: green}\n")
+	for _, argv := range [][]string{{"exec-in", "sh"}, {"abb_exec", "package", "list"}, {"abb", "package", "list"}} {
+		if r := c.Classify(argv); r.Level != Red || !r.Special {
+			t.Errorf("%q with a user rule: %v special=%v (%s)", argv, r.Level, r.Special, r.Primary.Rule)
+		}
+	}
+	// The reason names what reads stdin, in both languages.
+	r := c.Classify([]string{"abb_exec", "package", "list"})
+	if !strings.Contains(r.Primary.Reason.EN, "abb_exec") || !strings.Contains(r.Primary.Reason.ES, "entrada estándar") {
+		t.Errorf("abb_exec reason %+v", r.Primary.Reason)
+	}
+}
+
+// H2: the installs that read the APK from stdin, however they are written,
+// and the other adb and phone commands that restore or install from it.
+func TestStdinDecidesInstallsFromStdin(t *testing.T) {
+	for _, argv := range [][]string{
+		{"abb_exec", "package", "install", "-S", "1234"}, {"abb", "package", "install", "-S", "1234"},
+		{"abb_exec", "package", "install-write", "1", "base.apk"},
+		sh("pm install -S1234"), sh("pm install -r -S1234"), sh("pm install-write 123 base.apk"), sh("pm install-write -S 5 1 x"),
+		sh("pm install --stdin"), sh("pm install"), sh("pm install-create; pm install-write 1 b"),
+		sh("cmd package install -S1234"), sh("bu restore"), sh("bu 1 restore"),
+	} {
+		if !StdinDecides(argv) {
+			t.Errorf("%q: StdinDecides false, want true", argv)
+		}
+	}
+	// pm's other subcommands keep the key.
+	for _, argv := range [][]string{sh("pm uninstall com.x"), sh("pm clear com.x"), sh("pm grant com.x android.permission.CAMERA")} {
+		if StdinDecides(argv) {
+			t.Errorf("%q: StdinDecides true, want false", argv)
+		}
 	}
 }
 
