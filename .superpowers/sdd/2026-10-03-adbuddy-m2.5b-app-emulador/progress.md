@@ -330,3 +330,30 @@ last: 21:14:03 device
 ```
 
 Sale de `device` en ~1-2 s y vuelve solo a los ~20 s del corte (justo cuando corre la restauración), sin `reconnect`. Después: `adb_enabled=1`, `adb_wifi_enabled=0`, pids 422/558 sin cambios. Lectura: lo que impidió volver en R1 fue que la restauración murió con el grupo de adbd; el servidor adb 5060 sí reengancha solo a 5600 cuando adbd vuelve (≤20 s aquí). Existe red de seguridad desde el shell (como root, fuera del cgroup de adbd).
+
+### S4, R3 (paso 7): Reactivar desde la app — vuelve solo
+
+Fichero temporal `CutAccessOnEmulatorTest.kt` con el contenido exacto del paso 7. `gradle --no-daemon -q :app:assembleDebug :app:assembleDebugAndroidTest` (21:14:24 → 21:14:41, rc 0). Instalación (`install -r --no-incremental`, las dos `Success`), `pm grant tech.hybriq.adbuddy android.permission.WRITE_SECURE_SETTINGS` (rc 0; `dumpsys package`: `WRITE_SECURE_SETTINGS: granted=true`, targetSdk=37 instalado en API 34 sin problema), `logcat -c`. CI-LIBRE `0`; RAM libre 15.08 GB.
+
+```
+$ guard: emulator-5600	device;
+$ (21:14:59) EMU; "$ADB" -s "$S" shell 'am instrument -r -e class tech.hybriq.adbuddy.CutAccessOnEmulatorTest#cutThenReactivate -e adbuddyCut 1 -e reactivateAfterMs 15000 tech.hybriq.adbuddy.test/androidx.test.runner.AndroidJUnitRunner'
+rc=0 (21:15:00)
+registro 150 s:
+21:14:57 device
+21:15:01 gone
+21:15:02 offline
+21:15:16 device
+last: 21:17:38 device
+$ EMU; "$ADB" -s "$S" shell 'logcat -d -v time -s ADBuddyEmuCut:I; settings get global adb_enabled; settings get global adb_wifi_enabled; ...'
+10-02 21:14:59.341 I/ADBuddyEmuCut( 6078): listening before the cut: true
+10-02 21:14:59.355 I/ADBuddyEmuCut( 6078): cut=true isCut=true
+10-02 21:14:59.357 I/ADBuddyEmuCut( 6078): listening after the cut: false
+10-02 21:15:14.366 I/ADBuddyEmuCut( 6078): restored=true isCut=false
+1
+0
+422 558
+I/TestRunner( 6078): run finished: 1 tests, 0 failed, 0 ignored
+```
+
+Medidas: (i) sale de `device` ~2 s después del corte (21:14:59.355 → gone 21:15:01); (ii) vuelve a `device` solo a las 21:15:16, ~17 s desde el corte (~2 s después de `restored`), sin `reconnect`; (iii) `cut=true isCut=true`, `restored=true isCut=false`, `adb_enabled=1` (y `adb_wifi_enabled=0`, como antes). `listening before the cut: true` sin modo tcpip: es el transporte del emulador en 5555 (ver S2), no tcpip. system_server y surfaceflinger no cambian.
