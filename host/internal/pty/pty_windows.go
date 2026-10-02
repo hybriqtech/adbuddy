@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +29,37 @@ import (
 
 var procUpdateProcThreadAttribute = windows.NewLazySystemDLL("kernel32.dll").NewProc("UpdateProcThreadAttribute")
 
+// Seams for the tests of the "no job" decision (replaced before a PTY starts,
+// restored when the test ends) and the channel for that warning.
+var (
+	createJobObject    = windows.CreateJobObject
+	assignProcessToJob = windows.AssignProcessToJobObject
+	warnf              = log.Printf
+)
+
+// newJob makes the job object that holds the program and everything it
+// starts: closing its last handle (this process dying included) kills them
+// all. It is not inheritable (nil SecurityAttributes) and breakaway is not
+// allowed, so no child can leave it. It returns 0 when it cannot.
+func newJob() windows.Handle {
+	job, err := createJobObject(nil, nil)
+	if err != nil {
+		warnf("pty: no job object, the program's children may outlive it: %v", err)
+		return 0
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		warnf("pty: no job object, the program's children may outlive it: %v", err)
+		_ = windows.CloseHandle(job)
+		return 0
+	}
+	return job
+}
+
 type winPTY struct {
+	job    windows.Handle // 0 if there is none
 	hpc    windows.Handle // the pseudo console
 	proc   windows.Handle
 	thread windows.Handle
@@ -70,13 +101,38 @@ func Start(o Options) (PTY, error) {
 		closeAll(cmdIn, cmdOut)
 		return nil, err
 	}
-	pi, err := spawn(hpc, cmdLine, o.Dir, o.Env)
+	// The program starts suspended, goes into the job and only then runs,
+	// so nothing it starts can be outside it.
+	job := newJob()
+	pi, err := spawn(hpc, cmdLine, o.Dir, o.Env, job != 0)
 	if err != nil {
+		if job != 0 {
+			_ = windows.CloseHandle(job)
+		}
 		windows.ClosePseudoConsole(hpc)
 		closeAll(cmdIn, cmdOut)
 		return nil, err
 	}
+	if job != 0 {
+		if err := assignProcessToJob(job, pi.Process); err != nil {
+			warnf("pty: could not put the program in a job object, its children may outlive it: %v", err)
+			_ = windows.CloseHandle(job)
+			job = 0
+		}
+		if _, err := windows.ResumeThread(pi.Thread); err != nil {
+			if job != 0 {
+				_ = windows.TerminateJobObject(job, 1)
+				_ = windows.CloseHandle(job)
+			}
+			_ = windows.TerminateProcess(pi.Process, 1)
+			closeAll(pi.Thread, pi.Process)
+			windows.ClosePseudoConsole(hpc)
+			closeAll(cmdIn, cmdOut)
+			return nil, err
+		}
+	}
 	p := &winPTY{
+		job:    job,
 		hpc:    hpc,
 		proc:   pi.Process,
 		thread: pi.Thread,
@@ -90,7 +146,7 @@ func Start(o Options) (PTY, error) {
 }
 
 // spawn starts the program attached to the pseudo console.
-func spawn(hpc windows.Handle, cmdLine, dir string, env []string) (*windows.ProcessInformation, error) {
+func spawn(hpc windows.Handle, cmdLine, dir string, env []string, suspended bool) (*windows.ProcessInformation, error) {
 	attrs, err := windows.NewProcThreadAttributeList(1)
 	if err != nil {
 		return nil, err
@@ -119,6 +175,9 @@ func spawn(hpc windows.Handle, cmdLine, dir string, env []string) (*windows.Proc
 		}
 	}
 	flags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT)
+	if suspended {
+		flags |= windows.CREATE_SUSPENDED
+	}
 	var block *uint16
 	if env != nil {
 		flags |= windows.CREATE_UNICODE_ENVIRONMENT
@@ -236,15 +295,22 @@ func (p *winPTY) Hangup() error { return nil }
 // the console and releases the handles. Read returns io.EOF.
 func (p *winPTY) Kill() error {
 	p.killOnce.Do(func() {
+		if p.job != 0 {
+			// The whole tree, also what is left after the program ended
+			// (children with their own console: taskkill finds no tree under
+			// a pid that is gone).
+			_ = windows.TerminateJobObject(p.job, 1)
+		}
 		select {
 		case <-p.done:
-			// Ended: taskkill finds no tree under a pid that is gone, and
-			// closing the console ends what is still attached to it.
+			// Ended: closing the console ends what is still attached to it.
 		default:
-			kill := exec.Command(taskkill(), "/T", "/F", "/PID", strconv.Itoa(p.pid))
-			kill.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-			_ = kill.Run() // it may have ended meanwhile
-			// The process itself, if taskkill could not.
+			if p.job == 0 {
+				kill := exec.Command(taskkill(), "/T", "/F", "/PID", strconv.Itoa(p.pid))
+				kill.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+				_ = kill.Run() // it may have ended meanwhile
+			}
+			// The process itself, if the rest could not.
 			_ = windows.TerminateProcess(p.proc, 1)
 		}
 		<-p.done // watch is done with the process handle
@@ -252,6 +318,9 @@ func (p *winPTY) Kill() error {
 		_ = p.in.Close()
 		_ = p.out.Close() // a blocked Read gets io.EOF
 		closeAll(p.thread, p.proc)
+		if p.job != 0 {
+			_ = windows.CloseHandle(p.job)
+		}
 	})
 	return nil
 }
