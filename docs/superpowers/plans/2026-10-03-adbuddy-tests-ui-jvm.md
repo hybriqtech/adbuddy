@@ -8,7 +8,7 @@
 
 **Tecnologías:** Robolectric 4.17 (con su Android 14, `android-all-instrumented` `14-robolectric-10818077-i7`), `androidx.compose.ui:ui-test-junit4` (de la BOM 2026.09.00 del proyecto: 1.12.1), Roborazzi 1.76.0 (`io.github.takahirom.roborazzi:roborazzi`). Nada en el código de producción, en el APK ni en `protocol/`.
 
-**Verificación del plan (réplica):** este documento se ha aplicado tal cual, **desde cero y tarea a tarea, con un script**, sobre una copia limpia (`git archive HEAD` de `test/ui-jvm`, a154ec9) con Java 17 y Gradle 9.8.0 en `--offline`: el script escribe los bloques `Crear`, aplica los pares "reemplazar / por" (cada texto "reemplazar" aparece una sola vez en su fichero), ejecuta cada bloque `bash expect=fail|pass` comprobando que falla o pasa como dice el plan (y, si lleva `reason=`, que la salida contiene ese texto) y hace los commits en un repositorio desechable. Resultado en "Autorrevisión del plan".
+**Verificación del plan (réplica):** este documento se ha aplicado tal cual, **desde cero y tarea a tarea, con un script**, sobre una copia limpia (`git archive HEAD` de `test/ui-jvm`, 65909f9) con Java 17 y Gradle 9.8.0 en `--offline`: el script escribe los bloques `Crear`, aplica los pares "reemplazar / por" (cada texto "reemplazar" aparece una sola vez en su fichero), ejecuta cada bloque `bash expect=fail|pass` comprobando que falla o pasa como dice el plan (y, si lleva `reason=`, que la salida contiene ese texto) y hace los commits en un repositorio desechable. Resultado en "Autorrevisión del plan".
 
 ## Decisión de herramienta (con la evidencia)
 
@@ -24,7 +24,7 @@ Antes de este plan no había **ninguna** biblioteca de tests de Compose, Robolec
 | Determinismo | Grabar y comparar en dos ejecuciones: mismos píxeles (`md5` iguales); una imagen cambiada da `… is changed` y una que falta, `The original file(…) was not found`. |
 | Comprobaciones de texto | `didOverflowWidth` no sirve (un `Text` que envuelve su contenido es más estrecho que el ancho en el que se maquetó: da "desbordado" en todos); con las líneas con elipsis, las que no caben en alto y las más anchas que la caja, sí. En el modo de gráficos *legacy* de Robolectric el texto no se mide de verdad y nada sale recortado: hace falta `GraphicsMode.NATIVE`. |
 | Mutaciones (código de producción tocado y devuelto) | `firstRun = true` en la burbuja: los 3 tests de la burbuja fallan. `remember` en vez de `rememberSaveable` en la selección: falla la rotación. `maxLines = 1` en el resumen de una fila de Ajustes: fallan **solo** los modos de letra al 200 % ("cut short"). 14 dp de relleno en vez de 16 en las tarjetas del acceso: fallan sus imágenes en todos los modos. |
-| Suite completa en la copia, `--offline` | 620 tests en verde (todos los existentes más los nuevos); el tiempo, en "Autorrevisión del plan". |
+| Suite completa en la copia, `--offline` | 631 tests en verde (571 que ya había más 60 nuevos), +13 s de reloj en este PC ("Autorrevisión del plan"). |
 
 **Paparazzi** (`app.cash.paparazzi`, 2.0.0-alpha05 la última) se descartó sin instalarlo: pinta con `layoutlib` pero no ejecuta actividades, clics, navegación ni rotaciones, así que la validación 34 (y los flujos de la 27) necesitarían Robolectric igualmente: serían dos pilas, con un plugin de Gradle más y el `layoutlib` entero. **Solo aserciones semánticas** (sin imágenes) se descartó porque Roborazzi cuesta 1,1 MB sobre Robolectric y es lo único que ve un color, un relleno o un icono cambiados.
 
@@ -1496,9 +1496,45 @@ EOF
 
 ## Autorrevisión del plan
 
-Tras las correcciones de la revisión Opus se volvió a aplicar este documento tal cual (un script lee los bloques `Crear` y `Editar`, y ejecuta cada bloque `expect=fail|pass`, comprobando que falla o pasa como dice el plan) sobre una copia limpia de `main` f9f4422, tarea a tarea y en orden. Entorno: Windows 11, Go 1.27.0, Gradle 9.8.0 y JDK 17. Resultado: **22 ejecuciones, todas como se esperaba, a la primera.**
+### Réplica tarea a tarea
 
-- **Tareas 2-10 (con tests):** cada una **falla** con sus tests antes de implementar (error de compilación o test rojo) y **pasa** después (Go: `go vet`, `gofmt -l` y `go test` del paquete; Kotlin: `:app:testDebugUnitTest` con la suite completa y `:app:assembleDebug`, y `:app:lintDebug` en las tareas 6, 7 y 9). Las tareas 7 y 8 se intercambiaron respecto a la primera versión (la puerta de lectura necesita el estado del acceso, y el ejecutor la puerta), y cada una sigue compilando y pasando sola.
-- **Tareas 11-13 (Compose, sin test JVM):** `:app:testDebugUnitTest :app:assembleDebug :app:lintDebug` pasan, sin avisos de lint nuevos (quedan solo `InlinedApi` en `Overlay.kt` y `home_title` sin uso).
-- **Tarea 14:** la suite completa del host (`go build`, `go vet`, `gofmt -l`, `go test ./...`) y la de la app pasan (`TestAgentInterrupt`, intermitente bajo carga, no falló esta vez).
-- **Tarea 1 y ediciones de la 14 (documentos):** cada texto "reemplazar" aparece una sola vez en su fichero, también en los `.md` y en `ChatRoot.kt`, que están en CRLF en el árbol de trabajo.
+Un script (`replay.py`, en la carpeta temporal de la sesión, nunca en el repo) lee este documento en orden: escribe cada bloque `Crear`, aplica cada par "reemplazar / por" (falla si el texto no aparece exactamente una vez; en los ficheros CRLF pasa los saltos a CRLF), ejecuta cada bloque `bash expect=…` comprobando el código de salida y, si lleva `reason=`, que la salida contenga ese texto, y ejecuta los bloques de commit. La copia sale de `git archive HEAD` de `test/ui-jvm` (65909f9, con el borrador de este plan) en una carpeta del scratchpad, con un repositorio desechable con identidad hybriqtech. Entorno: Windows 11, JDK 17.0.20.1, Gradle 9.8.0 `--no-daemon --offline` (la caché ya tenía las bibliotecas nuevas, descargadas en la prueba de la herramienta).
+
+**Resultado de la última pasada, desde cero:** 22 ejecuciones, **todas como se esperaba** (8 `expect=fail` que fallan por la razón escrita y 14 `expect=pass` que pasan), los 6 commits del plan con el trailer exacto, ningún "reemplazar" ambiguo ni ausente, y `git diff --exit-code android/app/src/main` limpio tras cada mutación. Las pasadas anteriores encontraron dos fallos **del propio plan**, ya corregidos: el RED de la Tarea 1 buscaba `Unresolved reference 'robolectric'` en las cinco primeras líneas de error y salía antes `'test'` (ahora lista las referencias sin repetir), y los bloques de RED perdían el código de salida de Gradle tras un `| grep` (ahora lo guardan en `s` antes de filtrar).
+
+### Tiempo, tamaño y descargas
+
+- **Suite** (`:app:testDebugUnitTest --rerun`, todo compilado, reloj de pared con el arranque de Gradle): antes 571 tests en 27,6 s; después 631 (60 nuevos) en 40,6 s: **+13 s** en este PC. La tarea completa de la CI (`testDebugUnitTest assembleDebug lintDebug assembleDebugAndroidTest`) tardó 66 s en la Tarea 6 con lo demás compilado.
+- **Primera descarga** en una máquina o un runner sin caché: ~160 MB de `org.robolectric` (casi todo `nativeruntime-dist-compat`) más el jar de Android 14 (151 MB), una vez; Roborazzi 1,1 MB.
+- **Imágenes:** 44 PNG, 3,0 MB en el repositorio (cada regrabación completa añade otro tanto al historial).
+
+### Cobertura frente a las validaciones
+
+| Lo que se miraba a mano | Dónde queda |
+|---|---|
+| 27: onboarding paso 1 de 2 y 2 de 2, "Ahora no", atrás | Imágenes (Tarea 2) y `OnboardingFlowTest` (Tarea 4: "Ahora no", atrás del 2 al 1, atrás en el 1 sale sin saltarse los pasos, confirmar y "Hecho") |
+| 27: Ajustes (filas, aviso de propuesta, tarjeta del modo remoto) | `SettingsScreensTest` (Tarea 2) y la pantalla con estado en `ProtectedAppsFlowTest`/`BubbleFlowTest` |
+| 27: lista de apps (búsqueda, rotación que conserva la selección, descartar cambios) | `ProtectedAppsScreensTest` (Tarea 3) y `ProtectedAppsFlowTest` (Tarea 4: búsqueda, rotación con `+land` y `recreate()`, descartar, cancelar, guardar) |
+| 27: los estados del acceso | `NotificationAccessScreensTest` (Tarea 3): los cuatro y "comprobando" |
+| 27: claro, oscuro, letra al 200 % | Los cuatro modos de `ScreenMode` (más el 200 % en español) |
+| 27: con el host apagado, el aviso dice que la recibirá al conectar | `savingConfirmsTheListAndSaysThePcGetsItLater` (toast `protected_saved_later`) |
+| 27: el PC recibe la lista y `adbuddy foreground` la marca | **Sigue manual** (host y móvil) |
+| 34: la burbuja abre Ajustes, Apps protegidas y el acceso; el botón de confirmar funciona; no monta el onboarding | `BubbleFlowTest` (Tarea 5) |
+| 34: `adbuddy tap` da `protected`, `adb shell input tap` lo bloquea la guarda, `dumpsys` con el host caído | **Sigue manual** (necesita el host y el móvil) |
+
+### Revisión de placeholders y tipos
+
+- Sin "TBD", "TODO" ni "similar a la Tarea N": todo el código sale de ficheros que compilan y pasan (la réplica los escribe byte a byte desde este documento).
+- **Nombres coherentes entre tareas:** `PHONE`, `ScreenMode`, `screenModes()`, `ScreenModeRule`, `ComponentActivityRule`, `shot`, `assertTextsFit` (Tarea 1) → Tareas 2 y 3 (y `PHONE` → 4 y 5); `SAMPLE_ROWS` (Tarea 2) → Tarea 3; `installLauncherApps` (Tarea 4) → Tarea 4. Ninguna tarea usa nada de una posterior.
+
+### Hallazgo de UI visto al grabar (no se arregla en este plan)
+
+- **Letra al 200 % en español:** el título de la barra superior "Acceso a las notificaciones" ocupa dos líneas (`access_*_font_200_es.png`). `assertTextsFit` no lo marca (el texto cabe en su propia caja y no pisa a otro), pero la `TopAppBar` de Material 3 tiene 64 dp de alto: en el Pixel puede quedar montado sobre la barra de estado. Mirarlo en la validación 27 de M5c; si se confirma, el arreglo es de la app (título más corto o `maxLines` con elipsis), en otro plan.
+
+### Riesgos abiertos
+
+- Las imágenes solo fallan en Windows (ruling 5): en `ubuntu-latest` una regresión visual solo deja el artefacto `screen-differences`; las comprobaciones semánticas sí fallan en todos los sistemas (validación 1).
+- Robolectric pinta Android 14 con la paleta estática: lo propio de Android 17, el color dinámico, las fuentes del sistema y los insets reales siguen en el Pixel (ruling 2).
+- Los flujos esperan hasta 5 s a lecturas en `Dispatchers.IO` (`waitUntil`): en un runner muy cargado podrían ir justos; subir el tope es una constante por test.
+- `AgentNotificationListener.connected` es de todo el proceso: `BubbleFlowTest` lo desenlaza en `@After`; un test nuevo que lo enlace debe hacer lo mismo.
+- Subir Robolectric obliga a subir `robolectricAndroidAll` a la vez (ruling 3); si no casan, el test falla cerrado con el nombre del jar que pide.
