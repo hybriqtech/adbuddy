@@ -10,11 +10,13 @@
 
 **Fuentes:** triage `C:\Users\Jose\orca\workspaces\adbuddy\skimmer\.superpowers\sdd\2026-10-02-adbuddy-v1-diferidos\triage.md` (filas V11, V38, V29, V21, V42, V43) · ledger de M5b `.superpowers/sdd/2026-10-01-adbuddy-m5b-modo-remoto/progress.md` (rulings del modo remoto) · `docs/superpowers/plans/pendientes-m3-m5.md` (M3: `Bridge` y reductores, `TermWebPolicyTest`, revisión final de M3b; M4: Markdown y herramientas; M5: menores aplazados de M5b) · spec v1 `docs/superpowers/specs/2026-09-29-adbuddy-v1-design.md` (§4.1 IPC, §3.3 modo remoto) · spec M5 `2026-10-01-adbuddy-m5-ayudas-remoto-design.md` (§4.3 guarda, §7.2 modo remoto).
 
-**Verificación del plan (réplica acumulada):** todo el código de este plan sale de una copia de `fix/v1-diferidos-b` en 2fcf8e2 (`git archive`), donde se aplicó **tarea a tarea** y se comprobó cada RED y cada GREEN con los comandos de cada tarea (salidas reales citadas en los pasos). Al final de la réplica: `go build ./... && go vet ./... && gofmt -l .` limpios, `GOOS=linux go vet ./...` y `GOOS=darwin go vet ./...` limpios, `go test -count=1 -timeout 15m ./...` con los 29 paquetes en `ok`, y `gradle :app:testDebugUnitTest --offline` en verde (57 clases). Los ficheros nuevos son byte a byte los del plan; los cambios a ficheros existentes son pares "reemplazar / por" para la herramienta Edit (cada texto "reemplazar" es único en su fichero) o "añadir al final".
+**Verificación del plan (réplica acumulada):** el código de este plan salió de una copia de `fix/v1-diferidos-b` en 2fcf8e2 (`git archive`), donde se aplicó **tarea a tarea** y se comprobó cada RED y cada GREEN con los comandos de cada tarea (salidas reales citadas en los pasos). Al final de la réplica: `go build ./... && go vet ./... && gofmt -l .` limpios, `GOOS=linux go vet ./...` y `GOOS=darwin go vet ./...` limpios, `go test -count=1 -timeout 15m ./...` con los 29 paquetes en `ok`, y `gradle :app:testDebugUnitTest --offline` en verde (57 clases). Los ficheros nuevos son byte a byte los del plan; los cambios a ficheros existentes son pares "reemplazar / por" para la herramienta Edit (cada texto "reemplazar" es único en su fichero) o "añadir al final".
+
+**Actualización tras M6c (rama rebasada sobre `origin/main` 0aaa593, con el catálogo i18n de M6c y los docs de M6d):** el plan se revisó contra esta rama. De los ficheros que toca, M6c solo cambió `cli/phone_watch.go` (textos al catálogo; el `step` y `watchTryWait` que edita la Tarea 3 siguen iguales), `cli/serve.go` (el `DEVICE_NOT_FOUND` ya sale del catálogo: la Tarea 3 cambia ahora `catalog/en.toml` y `catalog/es.toml` en vez de `serve.go`) y `cli/remote_test.go` (un import). `daemon/guard.go`, `remote/`, `ipc/`, los tests de `daemon` y todo lo de la app que toca el plan no cambiaron. El plan entero se volvió a aplicar con el script sobre un `git archive` limpio de esta rama: resultado en "Réplica acumulada tarea a tarea".
 
 ## Global Constraints
 
-- Rama `fix/v1-diferidos-b`, sobre `origin/main` 2fcf8e2 (M5c ya integrada). Commits con identidad local hybriqtech (nunca `git config --global`) y trailer **exacto** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (también en fixups; comprobarlo con `git log -1 --format=%B`). Nunca `--no-verify`, nunca `--force`, sin `git stash`. Sin push ni PR salvo que lo pida el controlador; a `main` integra el usuario. `git grep` de seriales e IPs antes de cualquier push.
+- Rama `fix/v1-diferidos-b`, sobre `origin/main` 0aaa593 (M5c, M6c y M6d integradas). Commits con identidad local hybriqtech (nunca `git config --global`) y trailer **exacto** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (también en fixups; comprobarlo con `git log -1 --format=%B`). Nunca `--no-verify`, nunca `--force`, sin `git stash`. Sin push ni PR salvo que lo pida el controlador; a `main` integra el usuario. `git grep` de seriales e IPs antes de cualquier push.
 - **Sin IPs RFC 1918** en código, tests ni docs: `100.64.0.5`, `198.51.100.x`, `192.0.2.x`. Sin seriales reales (los tests usan los de sus fixtures).
 - **El móvil del usuario no se toca.** Los tests usan el adb falso (`testutil/fakeadb`, `fakeADB` del daemon, `ctlADB`/`env` del modo remoto), `FakeChannel`, MockWebServer y la JVM. Lo que necesita un móvil va a "Validaciones manuales pendientes" y solo se hace con permiso explícito del usuario.
 - **Rulings de M5b que no se rompen:** el estado del modo remoto es de tres valores y lo desconocido nunca es "apagado" (un falso apagado oculta un 5555 abierto); `Enable` guarda la caducidad antes de `adb tcpip`; `Closing` sigue siendo "encendido" hasta que `adb usb` cierra; toda pregunta al usuario pasa por la puerta del daemon (`AskUser`); falla cerrado ante lo que no se entiende.
@@ -22,7 +24,7 @@
 - **IPC:** ni el formato de las tramas, ni `Request`/`Exit`, ni la comprobación del secreto cambian. El secreto sigue siendo de 64 hex, legible solo por el usuario (0600 en Unix; en Windows, la ACL heredada de la carpeta de datos, como hasta ahora).
 - `host/internal/classify/` no se toca; `testdata/habitual.jsonl` intacto. Ningún motivo nuevo de `classify`.
 - **Cada tarea compila y pasa sus tests por sí sola;** nada usa símbolos de tareas posteriores.
-- **Textos nuevos de cara al usuario:** inglés llano, sin emojis nuevos; están listados en "Textos nuevos" (para avisar a tern-51 y su catálogo i18n de M6c).
+- **Textos nuevos de cara al usuario:** siguen las reglas de M6c (spec `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md` §3 y §4.2, y su receta de añadir cadenas): lo que lee una persona va al catálogo `host/internal/i18n/catalog/{en,es}.toml` con la misma clave en los dos y verbos con índice (`%[1]s`), y lo vigilan `TestCatalogParity`, `TestKeyUsesAnalyzer` y `TestKeysExist`; lo que lee el agente («Blocked by ADBuddy: …» y las razones de la guarda) y las causas técnicas de paquetes internos (el `err.Error()` que va dentro de `error.cause`) se quedan en inglés a propósito. Lista en "Textos nuevos".
 - **Go:** `cd host && go build ./... && go vet ./... && gofmt -l . && go test -count=1 -timeout 5m ./<paquete>/...`; la suite completa (`-timeout 15m ./...`) en el último paso de cada tarea de host. Este PC no corre `-race`: la concurrencia se razona en cada tarea y la corre la CI. Las tareas de IPC además: `GOOS=linux go vet ./internal/ipc && GOOS=darwin go vet ./internal/ipc` (el cerrojo tiene una versión por sistema).
 - **Kotlin:** `export JAVA_HOME="/c/Users/Jose/AppData/Local/Android/jdk-17.0.20.1+1"; export PATH="$JAVA_HOME/bin:/c/Users/Jose/AppData/Local/Gradle/gradle-9.8.0/bin:$PATH"; cd android && gradle :app:testDebugUnitTest --offline` (sin wrapper). Para una clase: `--tests 'tech.hybriq.adbuddy.<paquete>.<Clase>'`. Los fallos se leen en `app/build/test-results/testDebugUnitTest/*.xml` (`grep -h -A3 "<failure"`).
 - `docs/superpowers/plans/pendientes-m3-m5.md` y `docs/troubleshooting.md` están en **CRLF** en este árbol (`core.autocrlf=true`, sin atributo `eol`): sus ediciones usan anclas de **una sola línea**. `host/**` es LF (`.gitattributes`).
@@ -35,7 +37,7 @@
 2. **Ruling: `Disable` sin caducidad guardada lee el puerto antes de `adb usb`.** — Con el modo apagado, `adb usb` reinicia adbd y corta la conexión del móvil por nada (la CLI sin serve ya no lo hace desde la revisión final de M5b, menor 3). Se lee `service.adb.tcp.port`: si no es 5555 no se hace nada; si es 5555 **o no se puede leer**, `adb usb` como antes (falla cerrado: cierra también un 5555 abierto a mano). No cambia ningún estado: sin caducidad ya era "apagado". — Si me equivoco: una lectura de adb más en cada "off" con el modo apagado.
 3. **Ruling: tras un `adb usb` que cerró el puerto y un `SetUntil` que falló, los reintentos de esa misma caducidad solo intentan borrarla.** — Hoy cada reintento de `Expire` (espaciados hasta 2 min, ruling 41 de M5b) vuelve a reiniciar adbd y a cortar la conexión. El controlador recuerda en memoria (`closedFor`, bajo su mutex) la caducidad cuyo puerto ya cerró; cualquier otra caducidad (un `Enable` guarda una nueva) vuelve a pasar por `adb usb`. El estado sigue siendo `Closing` (encendido) hasta que la caducidad se borra: nunca un falso apagado. — Si me equivoco: si alguien abre el 5555 fuera del controlador entre el fallo y el reintento, el reintento no lo cierra (igual que hoy no se cierra un 5555 abierto a mano con el modo apagado).
 4. **Ruling: cada mirada del vigilante a `adb devices` se corta a `TryWait` (8 s).** — Un `adb devices` colgado dejaba la gorrutina de `watchPhone` parada para siempre dentro de un `step`. Un corte es "adb falla", que ya no cambia nada. — Si me equivoco: con un adb lentísimo (> 8 s) el vigilante no ve el móvil en esa mirada y lo vuelve a intentar en la siguiente.
-5. **Ruling: el texto de `DEVICE_NOT_FOUND` con direcciones guardadas dice que no funcionó ninguna, cuáles se probaron y que el error es el último.** — Decía "its saved address did not work (a, b: <error de b>)": en singular y con el error de una sola como si fuera de todas. Va con su línea de `docs/troubleshooting.md`. — Si me equivoco: un texto que tern-51 traducirá con su catálogo.
+5. **Ruling: el texto de `DEVICE_NOT_FOUND` con direcciones guardadas dice que no funcionó ninguna, cuáles se probaron y que el error es el último.** — Decía "its saved address did not work (a, b: <error de b>)": en singular y con el error de una sola como si fuera de todas. Desde M6c el texto es la clave `err.serve.device_not_found` del catálogo: se cambia en inglés y en español con los mismos argumentos (`serve.go` no cambia), y va con su línea de `docs/troubleshooting.md` (solo existe en inglés). — Si me equivoco: una frase del catálogo que se retoca en los dos idiomas.
 6. **Ruling: el daemon guarda un cerrojo de sistema (`adbuddy.lock`, `flock` en Unix, `LockFileEx` en Windows) mientras sirve.** — `Listen` hacía Stat, Dial y Remove sin exclusión: dos `serve` que arrancan a la vez con un socket muerto podían quitarse el socket vivo el uno al otro. El cerrojo se suelta en `Close` y con la muerte del proceso, sea como sea; el fichero se queda en disco (borrarlo abriría otra carrera). La comprobación por Dial se mantiene para un daemon de una versión anterior, que no toma el cerrojo. — Si me equivoco: en un sistema de ficheros sin cerrojos (una carpeta de datos en red rara) `serve` no arranca y lo dice; `ADBUDDY_DATA_DIR` local lo arregla.
 7. **Ruling: el secreto se escribe entero con otro nombre en la misma carpeta y se renombra, con un cerrojo de creación (`ipc.secret.lock`), y `ReadSecret` reintenta un momento lo que no puede leer entero.** — Con `O_EXCL` y luego la escritura, un lector veía un secreto vacío o a medias (la réplica lo reproduce: 2 de 10 ejecuciones de `TestSecretCreatedOnceUnderARace` fallan con el código de hoy, con un creador que devuelve `""`). Renombrar no basta solo (el último en renombrar ganaría y el primero serviría con un secreto que ya no está en el fichero): por eso el cerrojo. En Windows un renombrado en curso hace fallar la apertura con "being used by another process": `ReadSecret` reintenta 20 veces cada 10 ms todo error que no sea "no existe" (también un secreto corto de un host antiguo que lo escribe en dos pasos). El fichero temporal se crea en la misma carpeta, así que hereda los mismos permisos y la misma ACL que antes. — Si me equivoco: un secreto de verdad corrupto tarda 200 ms más en dar su error.
 8. **Ruling: como mucho 32 conexiones esperan a autenticarse a la vez, y `ReadFrame` no reserva más de 64 KiB antes de que lleguen los bytes.** — Cada conexión sin autenticar podía hacer que el servidor reservara 1 MiB durante 5 s, sin límite de conexiones. La 33.ª se cierra al aceptarla; la plaza se devuelve en cuanto la conexión se autentica, se rechaza o se va. Por encima de 64 KiB el búfer se dobla solo con lo leído, así que la memoria es a lo sumo el doble de lo recibido. Las tramas grandes siguen llegando enteras. — Si me equivoco: con más de 32 clientes legítimos a la vez en la fase previa a autenticar (microsegundos cada uno), alguno recibe un cierre y su orden falla ("lost the connection"); el agente la repite.
@@ -53,7 +55,7 @@
 | V38 `Disable` sin modo remoto reinicia adbd | Sí (`remote.go:169-183`; con serve, `remote off` o `remote.set` apagado lanzan `adb usb`) | Tarea 2 |
 | V38 `adb usb` repetido si `SetUntil` falla | Sí, mitigado por el espaciado (ruling 41 de M5b) | Tarea 2 |
 | V38 `REMOTE_UNAVAILABLE` depende del texto de adb | Sí (`remote.NoPhone`), pero falla al lado seguro | Diferido (abajo) |
-| V38 `DEVICE_NOT_FOUND` ambiguo | Sí (`serve.go:123`, el mensaje con varias direcciones) | Tarea 3 |
+| V38 `DEVICE_NOT_FOUND` ambiguo | Sí, también tras M6c (`err.serve.device_not_found` en `catalog/{en,es}.toml`, con varias direcciones y un solo error, en los dos idiomas) | Tarea 3 (catálogo) |
 | V38 ~900 ms de adb por llamada de la guarda | Sí (`guard.go:230`, `focusCmd` en cada llamada guardada, y `windowsCmd` sin app) | Diferido (abajo) |
 | V29 Stat/Dial/Remove sin cerrojo | Sí (`server.go:192-201`; reproducido quitando el socket) | Tarea 4 |
 | V29 secreto sin escritura atómica | Sí (reproducido: 2/10 ejecuciones del test de carrera) | Tarea 5 |
@@ -71,21 +73,21 @@
 
 - **V38 · `REMOTE_UNAVAILABLE` depende del texto de adb** (`remote.NoPhone` busca "no devices/emulators found", "device offline", "no devices", "no phone connected"). Es inherente: adb solo lo dice en texto. Falla al lado seguro: un texto que no reconoce cuenta como "la orden pudo llegar", así que `Enable` deja la caducidad nueva (falso "encendido", nunca falso apagado) y la CLI dice `REMOTE_FAILED` en vez de `REMOTE_UNAVAILABLE`; lo cubren `TestEnableTimeoutKeepsUntil` y `TestEnableTcpipFailsPortUnreadableKeepsUntil`. Cambiarlo (por ejemplo, preguntar `adb get-state` tras el fallo) toca la invariante central de M5b y debe validarse con versiones reales de adb: decisión de diseño, no de este plan.
 - **V38 · ~900 ms de consultas a adb por llamada de la guarda.** Real: `systemUIReason` lanza `dumpsys window | grep mCurrentFocus` en cada orden guardada, y sin app además `dumpsys window windows`. Unirlas en una consulta exige muestras reales de `dumpsys window windows` (ruling 62 de M5b: el emulador no sirve; validación 17 de M5b, bloqueante) y tocar el parser de la guarda. Coste: latencia, no seguridad. Para v1.1, tras la validación 17.
-- **V43 · herramientas atascadas en `running`.** Real: si el transcript no trae el `tool_result` (herramienta interrumpida), el chip sigue en `running` hasta que salen otras cinco o hasta la sesión siguiente, y con el agente en `waiting` hace visible la tira. La app no tiene con qué arreglarlo bien: no conoce el fin de turno, y `ToolActivity` no trae hora. Una heurística por `messageId` (una herramienta posterior de otro mensaje del asistente) falla cuando el turno siguiente no usa herramientas. Arreglo correcto: el host, con el hook `Stop`, publica un estado final para las herramientas que siguen en `running` (`cli/phone_agent.go`, que solapa con M6c), o un campo de hora en el protocolo. Para después de M6c.
-- **V43 · `PickMultipleVisualMedia(10)` no descuenta los borradores.** Real, pero es UI: el lanzador se crea en la composición de `ChatRoot` con un máximo fijo y el contrato exige un máximo ≥ 2; descontar exige rehacer el lanzador al cambiar los borradores (Compose, sin test JVM). `Composer.canSend` ya rechaza más de 10, así que el usuario ve que no puede enviar; `Drafts` además está en M6c. Para la siguiente ronda de UI.
+- **V43 · herramientas atascadas en `running`.** Real: si el transcript no trae el `tool_result` (herramienta interrumpida), el chip sigue en `running` hasta que salen otras cinco o hasta la sesión siguiente, y con el agente en `waiting` hace visible la tira. La app no tiene con qué arreglarlo bien: no conoce el fin de turno, y `ToolActivity` no trae hora. Una heurística por `messageId` (una herramienta posterior de otro mensaje del asistente) falla cuando el turno siguiente no usa herramientas. Con M6c integrada ya no hay solape con `cli/phone_agent.go`, pero el arreglo sigue siendo una decisión de diseño, no un menor: el hook `Stop` **no se dispara cuando el usuario interrumpe** (Esc), que es justo el caso de la herramienta interrumpida, así que la señal útil sería el `UserPromptSubmit` (o el `SessionStart`) siguiente cerrando las que sigan en `running`; y el protocolo solo tiene `running`, `done` y `error` (¿una interrumpida es `error`, o un estado nuevo, con cambio de protocolo en las dos partes?). Para la spec de v1.1 o un plan propio del adaptador de Claude Code.
+- **V43 · `PickMultipleVisualMedia(10)` no descuenta los borradores.** Real, pero es UI: el lanzador se crea en la composición de `ChatRoot` con un máximo fijo y el contrato exige un máximo ≥ 2; descontar exige rehacer el lanzador al cambiar los borradores (Compose, sin test JVM). `Composer.canSend` ya rechaza más de 10, así que el usuario ve que no puede enviar. Para la siguiente ronda de UI.
 - **V21 (resto de su línea en pendientes):** el WebView recreado sin límite si el renderizador muere en bucle y `onReceivedError` visibles son UI y no estaban en el encargo.
 
-## Textos nuevos de cara al usuario (para tern-51 y el catálogo i18n)
+## Textos nuevos de cara al usuario (según las reglas de M6c)
 
-1. Guarda (`daemon/guard.go`, `encodedReason`), tras "Blocked by ADBuddy: ": `the app this command opens is hidden under too many layers of %-encoding; ADBuddy does not open an app without knowing which`
-2. `serve`, `DEVICE_NOT_FOUND` (`cli/serve.go`), sustituye a "the phone did not show up, and its saved address did not work (…)": `the phone did not show up, and none of its saved addresses worked (tried <direcciones>; last error: <error>)` (y la misma frase en `docs/troubleshooting.md`, "The Wireless debugging port changed").
-3. IPC (`ipc/ipc.go`, `EnsureSecret`), dentro de `SECRET_FAILED`: `another ADBuddy is creating <ruta>/ipc.secret: the lock is held` (solo si otro proceso tarda más de 5 s en crear el secreto).
+1. **Al catálogo (en y es), Tarea 3:** `err.serve.device_not_found` (lo usa `serve.go` con `TransientErrorT`). Inglés: `the phone did not show up, and none of its saved addresses worked (tried %[1]s; last error: %[2]s)`. Español: `el móvil no apareció, y no funcionó ninguna de sus direcciones guardadas (probadas: %[1]s; último error: %[2]s)`. El arreglo (`err.serve.device_not_found.fix`, con `%[3]s`) no cambia. `--json` y la sesión del agente siguen viendo el inglés (`NewErrorT` calcula `Message` en inglés). Y la misma frase inglesa en `docs/troubleshooting.md` ("The Wireless debugging port changed"), que no tiene versión en español ni test que compare su texto con el catálogo (los `TestDocs*` de `cli/docs_test.go` miran vallas, enlaces, órdenes y privacidad).
+2. **En inglés a propósito, Tarea 1:** la razón nueva de la guarda (`daemon/guard.go`, `encodedReason`), tras "Blocked by ADBuddy: ": `the app this command opens is hidden under too many layers of %-encoding; ADBuddy does not open an app without knowing which`. Spec de M6c §3: los mensajes de bloqueo de la shim y las razones de la guarda son salida para el agente y no se traducen (M6c no tocó `guard.go`; `protectedReason` y `screenProtectedReason` siguen en inglés).
+3. **En inglés a propósito, Tarea 5:** `another ADBuddy is creating <ruta>/ipc.secret: the lock is held` es la causa técnica que devuelve `ipc.EnsureSecret`; `serve.go` ya la mete como argumento de `error.cause` dentro de `SECRET_FAILED` (`NewErrorT("SECRET_FAILED", "error.cause", "err.serve.secret_failed.fix", err.Error(), e.dirs.Data)`), y M6c deja en inglés las causas de paquetes internos (pendientes, "Se quedan en inglés a propósito"). Solo sale si otro proceso tarda más de 5 s en crear el secreto.
 
 La app no gana cadenas: ninguna tarea toca `strings.xml`.
 
 ## Mapa de ficheros
 
-**Host (modificado):** `daemon/guard.go`, `daemon/ui_test.go` (T1) · `remote/remote.go`, `remote/remote_test.go`, `cli/remotecmd_test.go` (T2) · `cli/phone_watch.go`, `cli/phone_watch_test.go`, `cli/serve.go`, `cli/remote_test.go`, `docs/troubleshooting.md` (T3) · `ipc/server.go`, `ipc/ipc_test.go` (T4, T6) · `ipc/ipc.go` (T5, T6) · `ipc/lock.go` (T4, T5).
+**Host (modificado):** `daemon/guard.go`, `daemon/ui_test.go` (T1) · `remote/remote.go`, `remote/remote_test.go`, `cli/remotecmd_test.go` (T2) · `cli/phone_watch.go`, `cli/phone_watch_test.go`, `i18n/catalog/en.toml`, `i18n/catalog/es.toml`, `cli/remote_test.go`, `docs/troubleshooting.md` (T3) · `ipc/server.go`, `ipc/ipc_test.go` (T4, T6) · `ipc/ipc.go` (T5, T6) · `ipc/lock.go` (T4, T5).
 
 **Host (nuevo):** `ipc/lock.go`, `ipc/lock_unix.go`, `ipc/lock_windows.go` (T4).
 
@@ -626,13 +628,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `host/internal/cli/phone_watch.go` (comentario de `watchTryWait`, `step`)
 - Test: `host/internal/cli/phone_watch_test.go` (test al final)
-- Modify: `host/internal/cli/serve.go:123` (mensaje de `DEVICE_NOT_FOUND`)
-- Test: `host/internal/cli/remote_test.go` (test nuevo antes de `TestSetupQRHintWhenNoPhoneIsVisible`)
-- Modify: `docs/troubleshooting.md:209` (CRLF: ancla de una línea)
+- Modify: `host/internal/i18n/catalog/en.toml:340` y `host/internal/i18n/catalog/es.toml:339` (clave `err.serve.device_not_found`, que `serve.go:122` ya usa con `TransientErrorT` desde M6c: `serve.go` **no se toca**)
+- Test: `host/internal/cli/remote_test.go` (test nuevo antes de `TestSetupQRHintWhenNoPhoneIsVisible`, en inglés y en español; import de `i18ntest`)
+- Modify: `docs/troubleshooting.md:209` (CRLF: ancla de una línea; solo existe en inglés)
 
 **Interfaces:**
-- Consumes: `newRig`, `testutil.FakeRule{SleepMs}`, `newActivePhone`, `tsConfig`, `serveOnce`, `shortWaits`, `phoneGone`, `lanAddr` (`phone_watch_test.go`), `tsAddr` (`connect_test.go`).
-- Produces: nada nuevo; `watcher.step` acota `Online` con `w.tryWait`.
+- Consumes: `newRig`, `testutil.FakeRule{SleepMs}`, `newActivePhone`, `tsConfig`, `serveOnce`, `shortWaits`, `phoneGone`, `lanAddr` (`phone_watch_test.go`), `tsAddr` (`connect_test.go`); `i18ntest.Lang` (`internal/i18n/i18ntest`); la llamada de M6c `TransientErrorT("DEVICE_NOT_FOUND", "err.serve.device_not_found", "err.serve.device_not_found.fix", strings.Join(addrs, ", "), AsError(k.AddrErr).Message, reconnect)`, que pasa `%[1]s` (direcciones), `%[2]s` (último error) y `%[3]s` (el arreglo).
+- Produces: nada nuevo; `watcher.step` acota `Online` con `w.tryWait`; el patrón de `err.serve.device_not_found` cambia en los dos idiomas con los mismos verbos (`%[1]s`, `%[2]s`), así que `TestCatalogParity` y `TestKeyUsesAnalyzer` siguen igual.
 
 - [ ] **Step 1: Tests que fallan.** Añadir al final de `host/internal/cli/phone_watch_test.go`:
 
@@ -659,9 +661,24 @@ func TestWatchPhoneAHungDevicesIsCut(t *testing.T) {
 }
 ```
 
-Y en `host/internal/cli/remote_test.go`:
+Y en `host/internal/cli/remote_test.go` (el import de `i18ntest` y el test):
 
-**Editar `host/internal/cli/remote_test.go`:** reemplazar
+**Editar `host/internal/cli/remote_test.go`:** (cambio 1 de 2) reemplazar
+
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+```
+
+por
+
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n/i18ntest"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+```
+
+**Editar `host/internal/cli/remote_test.go`:** (cambio 2 de 2) reemplazar
 
 ```go
 // In QR mode, a network where no phone announces wireless debugging gets one
@@ -672,7 +689,7 @@ por
 ```go
 // V38: with several saved addresses, the error says that none worked, which
 // ones were tried, and that the error shown is the last one (not the error
-// of every address).
+// of every address). For a person it is in their language (M6c catalog).
 func TestServeSavedAddressesGoneSaysWhichWereTried(t *testing.T) {
 	shortWaits(t)
 	cfg := config.Default()
@@ -687,6 +704,12 @@ func TestServeSavedAddressesGoneSaysWhichWereTried(t *testing.T) {
 	want := "none of its saved addresses worked (tried " + lanAddr + ", " + tsAddr + "; last error: "
 	if code != ExitTransient || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, want) {
 		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	i18ntest.Lang(t, i18n.ES)
+	code, errOut, _, _ = serveOnce(t, rules, cfg)
+	wantES := "no funcionó ninguna de sus direcciones guardadas (probadas: " + lanAddr + ", " + tsAddr + "; último error: "
+	if code != ExitTransient || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, wantES) {
+		t.Fatalf("Spanish: exit %d stderr %q", code, errOut)
 	}
 }
 
@@ -738,16 +761,30 @@ func (w *watcher) step(ctx context.Context) {
 	if err != nil || ctx.Err() != nil {
 ```
 
-**Editar `host/internal/cli/serve.go`:** reemplazar
+El texto vive en el catálogo de M6c (la receta de M6c: la misma clave en `en.toml` y `es.toml`, con los mismos verbos con índice; `serve.go` no cambia). Los dos ficheros son LF.
 
-```go
-				return TransientError("DEVICE_NOT_FOUND", "the phone did not show up, and its saved address did not work ("+strings.Join(addrs, ", ")+": "+AsError(k.AddrErr).Message+")",
+**Editar `host/internal/i18n/catalog/en.toml`:** reemplazar
+
+```toml
+"err.serve.device_not_found" = "the phone did not show up, and its saved address did not work (%[1]s: %[2]s)"
 ```
 
 por
 
-```go
-				return TransientError("DEVICE_NOT_FOUND", "the phone did not show up, and none of its saved addresses worked (tried "+strings.Join(addrs, ", ")+"; last error: "+AsError(k.AddrErr).Message+")",
+```toml
+"err.serve.device_not_found" = "the phone did not show up, and none of its saved addresses worked (tried %[1]s; last error: %[2]s)"
+```
+
+**Editar `host/internal/i18n/catalog/es.toml`:** reemplazar
+
+```toml
+"err.serve.device_not_found" = "el móvil no apareció, y su dirección guardada no funcionó (%[1]s: %[2]s)"
+```
+
+por
+
+```toml
+"err.serve.device_not_found" = "el móvil no apareció, y no funcionó ninguna de sus direcciones guardadas (probadas: %[1]s; último error: %[2]s)"
 ```
 
 **Editar `docs/troubleshooting.md`** (CRLF; ancla de una línea): reemplazar
@@ -767,7 +804,7 @@ Every time Wireless debugging is turned on again, the phone picks a new port. If
 - [ ] **Step 4: Ver que pasan.**
 
 ```bash
-cd host && gofmt -l ./internal/cli && go vet ./internal/cli && go test -count=1 -timeout 5m ./internal/cli -run 'TestWatchPhone|TestServeSavedAddress|TestDocs'
+cd host && gofmt -l ./internal/cli && go vet ./internal/cli && go test -count=1 -timeout 5m ./internal/cli -run 'TestWatchPhone|TestServeSavedAddress|TestDocs' && go test -count=1 -timeout 5m ./internal/i18n/...
 ```
 
 Esperado: `ok` (réplica: 2.2 s; `TestServeSavedAddressGone` sigue en verde: busca `DEVICE_NOT_FOUND` y `adbuddy connect <new ip:port>`, que no cambian).
@@ -781,7 +818,7 @@ cd host && go build ./... && go vet ./... && gofmt -l . && go test -count=1 -tim
 - [ ] **Step 6: Commit.**
 
 ```bash
-git add host/internal/cli/phone_watch.go host/internal/cli/phone_watch_test.go host/internal/cli/serve.go host/internal/cli/remote_test.go docs/troubleshooting.md
+git add host/internal/cli/phone_watch.go host/internal/cli/phone_watch_test.go host/internal/i18n/catalog/en.toml host/internal/i18n/catalog/es.toml host/internal/cli/remote_test.go docs/troubleshooting.md
 git commit -m "fix(host): el vigilante acota adb devices y DEVICE_NOT_FOUND dice qué direcciones se probaron
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -2735,14 +2772,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 **Files:**
 - Modify: `docs/superpowers/plans/pendientes-m3-m5.md` (CRLF: ancla de una sola línea)
 
-- [ ] **Step 1: Apuntar lo hecho y lo diferido.** Añadir tras la última línea del fichero (la que empieza por `- **Conflación de \`connected\` en \`ChatController\`**`; si ya no es la última, tras la que lo sea), con CRLF como el resto:
+- [ ] **Step 1: Apuntar lo hecho y lo diferido.** Añadir al final del fichero (hoy termina con la sección `## M6c · Idiomas (en/es)`, cuya última línea empieza por `- **\`AGENTS.md\` (M6b) y \`adbuddy doctor\`:**`), con CRLF como el resto:
 
 ```markdown
 
 ## v1 · Diferidos B (plan `docs/superpowers/plans/2026-10-02-adbuddy-v1-diferidos-b.md`)
 
 - **HECHO:** la guarda decodifica `%XX` (hasta 4 capas, hex en mayúsculas o minúsculas) y parte por todo lo que no es de un nombre de paquete, también `?` y `@` (V11); `Disable` con el modo apagado lee el puerto antes de `adb usb`, y tras un `SetUntil` fallido los reintentos no repiten `adb usb` (V38); el vigilante acota `adb devices` a `TryWait` y `DEVICE_NOT_FOUND` dice qué direcciones se probaron (V38); un cerrojo de sistema por carpeta de datos (`adbuddy.lock`), el secreto con renombrado bajo cerrojo (`ipc.secret.lock`) y relectura, como mucho 32 conexiones sin autenticar y `ReadFrame` que crece con lo que llega (V29); `TermWebPolicy` solo admite nombres llanos de la carpeta (V21); tests de `Bridge` de socket viejo y de reentrada `onResult → request`, y fuzz determinista de los reductores (V42); `Markdown.MAX_BLOCKS` exacto y la imagen enlazada como enlace con su alt, `TerminalFeed` con pila de vistas (V43). Con esto quedan hechos, de M3, los tests de `Bridge` que faltaban, "ningún reductor lanza" y los casos de borde de `TermWebPolicyTest`; de M3b, la pila de sinks; de M4, lo de Markdown; de M5b, `Online(ctx)`, `Disable` sin modo, `adb usb` repetido y `DEVICE_NOT_FOUND`.
-- **Diferido:** `REMOTE_UNAVAILABLE` depende del texto de adb (falla al lado seguro; cambiarlo toca la invariante de M5b), las consultas de ~900 ms de la guarda (tras la validación 17 de M5b), las herramientas atascadas en `running` (necesita el `Stop` del host, `phone_agent.go`, tras M6c) y `PickMultipleVisualMedia(10)` sin descontar borradores (UI). Motivos en "Fuera de alcance" del plan.
+- **Diferido:** `REMOTE_UNAVAILABLE` depende del texto de adb (falla al lado seguro; cambiarlo toca la invariante de M5b), las consultas de ~900 ms de la guarda (tras la validación 17 de M5b), las herramientas atascadas en `running` (decisión de diseño: `Stop` no salta al interrumpir, y falta el estado de una interrumpida en el protocolo) y `PickMultipleVisualMedia(10)` sin descontar borradores (UI). Motivos en "Fuera de alcance" del plan.
 ```
 
 Comprobar con `file docs/superpowers/plans/pendientes-m3-m5.md` que sigue en CRLF y con `git diff` que solo se añaden líneas al final.
@@ -2800,7 +2837,9 @@ Sin "TBD" ni pasos sin código. Nombres cruzados comprobados: `tryLock`/`errLock
 
 Hecha sobre `git archive` de 2fcf8e2 en una carpeta temporal, con un commit por tarea. Host: T1, T2, T3 (suite completa `ok`), después T4, T5, T6 (suite completa, `vet` de los tres sistemas y `gofmt` limpios: 29 paquetes `ok`). App: T7, T8, T9, T10, T11 (suite completa de la app en verde, 57 clases de test). Cada RED de los pasos es la salida real de esa réplica; los RED por mutación (T8, T9) se comprobaron y se deshicieron. El paso de pendientes (T12) no se replicó (es texto).
 
-Después, **un script volvió a aplicar este documento** (bloques `Crear`, pares `reemplazar`/`por` y "añadir al final", en orden de tareas) sobre otro `git archive` limpio de 2fcf8e2: cada texto "reemplazar" apareció exactamente una vez, y el árbol resultante pasó `go build`, `go vet` (Windows, Linux y macOS), `gofmt -l`, `go test -count=1 -timeout 15m ./...` y `gradle :app:testDebugUnitTest --offline`, todo en verde. Aplicado hasta cada tarea de host (1 a 5), `go vet ./...` compila y el paquete tocado pasa (en esa comprobación parcial solo se extrajeron `host/` y `docs/`, así que `TestDocsAreGuarded` falló por los ficheros del repo que faltaban, no por el plan). Diferencias con la primera réplica: el orden de los tests en `ipc_test.go`, el CRLF de `docs/troubleshooting.md` (que el plan conserva) y un caso de `TermWebPolicyTest` (la primera réplica tenía `"a\b"`, que en Kotlin es un retroceso; el plan dice `"a\\b"`, la barra invertida que se quería probar, y pasa).
+Después, **un script volvió a aplicar este documento** (bloques `Crear`, pares `reemplazar`/`por` y "añadir al final", en orden de tareas) sobre otro `git archive` limpio de 2fcf8e2: cada texto "reemplazar" apareció exactamente una vez, y el árbol resultante pasó `go build`, `go vet` (Windows, Linux y macOS), `gofmt -l`, `go test -count=1 -timeout 15m ./...` y `gradle :app:testDebugUnitTest --offline`, todo en verde. Aplicado hasta cada tarea de host (1 a 5), `go vet ./...` compila y el paquete tocado pasa (en esa comprobación parcial solo se extrajeron `host/` y `docs/`, así que `TestDocsAreGuarded` falló por los ficheros del repo que faltaban, no por el plan). **Tras el rebase sobre 0aaa593 (M6c y M6d):** el mismo script aplicó el plan actualizado sobre un `git archive` limpio de la rama rebasada: 57 operaciones, cada texto "reemplazar" encontrado una vez (la única que había dejado de valer era la edición de `serve.go`, sustituida por las dos del catálogo), y el árbol pasó `go build ./...`, `go vet ./...` (también `GOOS=linux` y `GOOS=darwin`), `gofmt -l .` vacío, `go test -count=1 -timeout 15m ./...` con los 31 paquetes en `ok` (incluidos `i18n` y `i18n/i18ntest`: paridad del catálogo, claves usadas y existentes) y `gradle :app:testDebugUnitTest --offline` en verde (61 clases de test). El RED de `TestServeSavedAddressesGoneSaysWhichWereTried` sobre esa rama, con el catálogo sin tocar, es el mismo texto de antes (`Error: DEVICE_NOT_FOUND — the phone did not show up, and its saved address did not work (198.51.100.7:40000, 100.64.0.5:41234: adb connect 100.64.0.5:41234: failed to connect: Connection refused)`).
+
+Diferencias con la primera réplica: el orden de los tests en `ipc_test.go`, el CRLF de `docs/troubleshooting.md` (que el plan conserva) y un caso de `TermWebPolicyTest` (la primera réplica tenía `"a\b"`, que en Kotlin es un retroceso; el plan dice `"a\\b"`, la barra invertida que se quería probar, y pasa).
 
 ### Riesgos abiertos para el revisor Opus
 
@@ -2813,6 +2852,6 @@ Después, **un script volvió a aplicar este documento** (bloques `Crear`, pares
 
 ### Decisiones y dudas para el controlador
 
-- **DEVICE_NOT_FOUND y el texto de la guarda** cambian textos del host que M6c (tern) cataloga: avisar a tern-51 con la lista de "Textos nuevos" antes de integrar, o dejar que esos dos cambios se rebasen sobre M6c.
+- **Textos:** con M6c integrada, `DEVICE_NOT_FOUND` va al catálogo en los dos idiomas dentro de la Tarea 3; la razón de la guarda y la causa del cerrojo del secreto se quedan en inglés por la spec de M6c (§3: salida para el agente y causas técnicas). Nada que pedir a tern-51 salvo, si quiere, revisar el español de `err.serve.device_not_found`.
 - **`docs/troubleshooting.md`** pertenece a la documentación de M6d (skimmer): el cambio es una frase citada; avisar al dueño de los docs.
-- **Herramientas atascadas en `running`:** si se quiere para la v1, el arreglo correcto es del host (hook `Stop` → `tool.activity` final para las que siguen en `running`), en `cli/phone_agent.go`, después de integrar M6c.
+- **Herramientas atascadas en `running`:** ya no hay solape con M6c, pero sigue diferido por diseño (ver "Fuera de alcance"): `Stop` no salta al interrumpir y el estado de una herramienta interrumpida no existe en el protocolo.
