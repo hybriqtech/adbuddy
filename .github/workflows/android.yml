@@ -45,3 +45,19 @@ jobs:
           yes | "$sm" "platforms;android-37.0"
       - name: "Unit tests, debug build, lint, and the instrumented tests compile (they run on an emulator by hand: see android/README.md)"
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest
+      # The screen tests' golden images that came out different (android/README.md, "Screen tests"): verify fails on
+      # Windows, compare only reports elsewhere, so it is said in the run's summary too. The folder exists only when
+      # something changed.
+      - name: Warn about screen differences
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -d app/build/outputs/roborazzi ]; then
+            echo "::warning title=Screen differences::golden images differ (compare mode does not fail off Windows): see the screen-differences artifact"
+          fi
+      - name: Screen differences
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: screen-differences
+          path: android/app/build/outputs/roborazzi
+          if-no-files-found: ignore

@@ -366,3 +366,16 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
   - Flake: `session.TestResumeFallsBackToANewConversation` (visto dos veces con carga, antes de tocar `ipc`), junto a `TestRemoteOnClientGoneWhileAsking`; mismo género que V37.
   - Validaciones en dispositivo 36 a 41 de este plan (`%XX` en `android-app://`, "off" sin cortar la conexión, burbuja sobre la terminal, badge en el chat, dos `serve` a la vez): ya están en "Validaciones manuales pendientes" del plan, no se repiten aquí.
   - `remote.Reconcile` y el camino de fallo de `Enable` siguen con `port != Port` y, con una caducidad guardada y otro puerto abierto (p. ej. 7777), borran la caducidad sin `adb usb` (visto en la revisión final; el arranque de `serve` probablemente lo cierra con `EnsureNoTCPPort`: por comprobar). Fuera del diff de esta rama.
+
+## Tests de UI en la JVM (validaciones 27 y 34)
+
+- **Qué hay** (plan `2026-10-03-adbuddy-tests-ui-jvm.md`): Robolectric (SDK 34, por Java 17), Compose `ui-test` y Roborazzi; imágenes de referencia verificadas al píxel en Windows y solo comparadas en Linux y macOS hasta comprobar que salen iguales (validación 1 de ese plan). Lo que sigue necesitando el Pixel está en las validaciones 27 y 34 de M5c. `android.yml` corre hoy en `ubuntu-latest` salvo que `CI_RUNNER_ANDROID` diga otra cosa: ahí las imágenes solo avisan (`::warning`).
+- **Hallazgo de UI:** al 200 % en español el título "Acceso a las notificaciones" ocupa dos líneas y se sale de la barra superior de 64 dp (`KNOWN_UI_ISSUES` en `screens/ScreenTestSupport.kt`). Comprobarlo en el Pixel (validación 27 de M5c); el arreglo es de la app y, al hacerlo, se quita la entrada y se regraban sus imágenes.
+- **Sesiones que toquen el onboarding, Ajustes, la lista de apps protegidas o el acceso a notificaciones:** en Windows `testDebugUnitTest` verifica sus imágenes; en la misma tarea, regrabar solo la clase afectada (`-Padbuddy.screens=record --tests '*SettingsScreensTest'`), mirar cada imagen que cambie y hacer commit de ellas.
+- **Diferidos (con motivo):**
+  - Ruido `Invalid ID 0x00000000.` de Robolectric en system-err: sin rastrear; no falla nada.
+  - `createAndroidComposeRule`/`createComposeRule` están deprecados: la v2 cambia el dispatcher, así que se migran juntos todos los tests (6 o más), no uno a uno.
+  - T1: el test de elipsis no tiene el caso `softWrap = false` para `getLineRight`.
+  - T3: `access_unknown_marked` no tiene imagen; el párrafo final del acceso a 200 % queda sin cubrir por imagen.
+  - T3: los shots `_below` y `_rows` son condicionales y no hay test de huérfanos; candidato: un test que compare los PNG de `screenshots/` con los nombres de shot esperados.
+  - T3: faltan asserts de la razón de Mi Banco, de que WhatsApp no lleva razón, y de Guardar desactivado en la búsqueda sin resultados.
