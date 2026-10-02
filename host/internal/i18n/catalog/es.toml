@@ -5,6 +5,7 @@
 "confirm.header" = "🔴 Hace falta tu confirmación (caduca en %[1]s)"
 "confirm.why" = "Motivo:"
 "confirm.special" = "⚠ Esto puede cortar la conexión con el móvil o afectar a ADBuddy."
+"confirm.rtl_escaped" = "Algunos caracteres se leen de derecha a izquierda; se muestran como \\uXXXX (por ejemplo \\u05d0) para que el orden que ves sea el que se ejecuta."
 "confirm.howto" = "Para permitirlo escribe %[1]s y pulsa Intro; cualquier otra cosa lo deniega."
 "confirm.code" = "Código:"
 "confirm.allowed" = "→ permitido"

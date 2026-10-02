@@ -82,7 +82,7 @@ Solo se leen estos campos; todo lo desconocido se ignora (la lista de `type` cre
 
 ### 5.1 Flujo
 1. Llega `PermissionRequest`. Si **no hay app conectada**, el daemon responde sin decisión al instante (la persona está en el PC: pregunta normal de la terminal). Con 8 pendientes ya, igual.
-2. Si hay app: id `p_<aleatorio>` (el payload no trae `tool_use_id`), `permission.request{id, tool, summary, detail, expiresAt = ahora+600 s, allowAlways}` como evento (entra en el `snapshot.permissions`). `summary` = resumen de herramienta (§4.2); `detail` = comando completo (Bash) o ruta (Edit/Write/Read) o `tool_input` recortado, ≤ 2000 caracteres.
+2. Si hay app: id `p_<aleatorio>` (el payload no trae `tool_use_id`), `permission.request{id, tool, summary, detail, expiresAt = ahora+600 s, allowAlways}` como evento (entra en el `snapshot.permissions`). `summary` = resumen de herramienta (§4.2); `detail` = comando completo (Bash) o ruta (Edit/Write/Read) o `tool_input` recortado, ≤ 2000 caracteres. La tarjeta solo se envía si `claudecode.CardSafe` la da por apta: el texto con letras o dígitos de escritura de derecha a izquierda (la clase de `classify.RTL`) no es apto, y la pregunta queda en la terminal. **Límite:** cuando la pregunta va a la terminal, el diálogo de Claude Code pinta el texto tal cual y, en terminales con bidi (VTE/GNOME Terminal, Konsole), puede reordenarlo; ADBuddy no lo controla.
 3. Espera la primera de: `permission.reply` del móvil; resolución por la terminal (§5.2); 600 s (`timeout`); `SessionEnd`; cierre de la conexión del hook.
 4. Respuesta del hook (stdout):
    - `allow` → `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`

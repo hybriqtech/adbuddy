@@ -205,6 +205,7 @@ Tailscale es opcional y se recomienda en la documentación y en la app.
   - `title` y `detail`, generados **por la regla y nunca por el agente**;
   - `rawCommand`;
   - `expiresAt`: 2 minutos.
+  - Lo que se enseña para decidir (título, detalle y comando) se muestra con las letras y dígitos de derecha a izquierda escapados como `\uXXXX` (`\UXXXXXXXX` por encima de U+FFFF), y si se escapó alguno, una última línea fija avisa en el idioma del PC (`confirm.rtl_escaped`). El comando que se ejecuta no cambia.
 - **En el móvil** llega como notificación de prioridad alta con los botones **Permitir**, **Rechazar** y **Permitir esto durante la sesión**. Esta última opción solo cubre la misma regla con los mismos argumentos. Si la app está en primer plano, se muestra además como diálogo.
   - En Android 12+ se usa `setAuthenticationRequired(true)`, que obliga a desbloquear el móvil para aprobar.
 - **Si la app no está conectada,** se confirma en la terminal de `adbuddy serve` (en M3, también en un cliente conectado con `adbuddy attach`). Si no hay ninguna de las dos opciones, se rechaza con `Denied: nobody could confirm: <title>`. Si la app se desconecta con una pregunta en pantalla, la pregunta pasa a la terminal y, al volver la app, un `snapshot` la retira del móvil.
