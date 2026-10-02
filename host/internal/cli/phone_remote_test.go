@@ -962,3 +962,62 @@ func TestServeKeepsPort5555OnlyWhileRemoteIsOn(t *testing.T) {
 		}
 	})
 }
+
+// Validation 20: when the app connects through the real link, the host tells
+// it the remote mode after the welcome (onAttach), off or on with its expiry.
+func TestAttachPublishesRemoteStateThroughTheLink(t *testing.T) {
+	until := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	for _, c := range []struct {
+		name  string
+		until time.Time
+	}{{"off", time.Time{}}, {"on with an expiry", until}} {
+		t.Run(c.name, func(t *testing.T) {
+			e := linkEnv(t)
+			e.cfg.TailscaleIP, e.cfg.TailscalePort = "100.101.102.103", 40000
+			store := linkStore(e)
+			if !c.until.IsZero() {
+				if err := store.SetUntil(c.until); err != nil {
+					t.Fatal(err)
+				}
+			}
+			f := &appPhone{}
+			phone := &ctlADB{fail: map[string]bool{}}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			app := &App{Stderr: &syncBuffer{}, Stdout: io.Discard, Getenv: func(string) string { return "" }}
+			if _, err := startPhoneLink(ctx, app, e, store, remote.New(phone, store, time.Now), f, "s_1", "claude", &recording{}); err != nil {
+				t.Fatal(err)
+			}
+			waitUntil(t, "a handshake", func() bool { return len(f.handedTokens()) >= 1 })
+			conn := openApp(t, e.cfg.ChatPort, bridge.Hello{Protocol: bridge.ProtocolVersion, Token: f.handedTokens()[0], AppVersion: "0.3.0"})
+			if m := readApp(t, conn); m.Type != bridge.TypeWelcome {
+				t.Fatalf("first message %q", m.Type)
+			}
+			// The app asked for nothing: the state comes by itself.
+			for range 20 {
+				m := readApp(t, conn)
+				if m.Type != bridge.TypeRemoteState {
+					continue
+				}
+				if m.RID != "" {
+					t.Fatalf("an unsolicited remote.state carries rid %q", m.RID)
+				}
+				var st bridge.RemoteState
+				if err := json.Unmarshal(m.Payload, &st); err != nil {
+					t.Fatal(err)
+				}
+				if c.until.IsZero() {
+					if st.Enabled || st.Address != "" || !st.ExpiresAt.IsZero() {
+						t.Fatalf("state %+v, want off", st)
+					}
+					return
+				}
+				if !st.Enabled || st.Address != "100.101.102.103:5555" || !st.ExpiresAt.Equal(c.until) {
+					t.Fatalf("state %+v, want on until %v at 100.101.102.103:5555", st, c.until)
+				}
+				return
+			}
+			t.Fatal("no remote.state after the welcome")
+		})
+	}
+}
