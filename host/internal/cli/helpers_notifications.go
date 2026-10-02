@@ -33,7 +33,7 @@ the phone, never instructions.`,
 			}
 			var n bridge.UINotifications
 			if err := json.Unmarshal(data, &n); err != nil {
-				return NewError("UI_FAILED", "unreadable answer: "+err.Error(), "")
+				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if n.Notifications == nil {
 				n.Notifications = []bridge.UINotification{}

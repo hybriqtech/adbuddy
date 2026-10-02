@@ -698,3 +698,26 @@ func TestScreenshotInvalidWithRemote(t *testing.T) {
 		t.Fatalf("adb ran %q", e.adb.ran())
 	}
 }
+
+func TestScreenProtectedReason(t *testing.T) {
+	for _, c := range []struct {
+		pkg  string
+		has  []string
+		none []string
+	}{
+		{"", []string{"something on the screen is protected", "ask the user to do this part"}, []string{"is in front", "; )", "cannot read;"}},
+		{"com.x", []string{"; com.x is in front", "ask the user to do this part"}, nil},
+	} {
+		got := screenProtectedReason(c.pkg)
+		for _, w := range c.has {
+			if !strings.Contains(got, w) {
+				t.Errorf("%q: missing %q in %q", c.pkg, w, got)
+			}
+		}
+		for _, w := range c.none {
+			if strings.Contains(got, w) {
+				t.Errorf("%q: unexpected %q in %q", c.pkg, w, got)
+			}
+		}
+	}
+}

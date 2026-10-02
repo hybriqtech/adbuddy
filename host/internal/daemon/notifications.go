@@ -21,6 +21,14 @@ import (
 // content is hidden: a key carries the app's own tag, which can hold text.
 const hiddenNotificationKey = "hidden"
 
+// noNotificationAccess is what the agent is told when the app cannot read the
+// notifications: no access, or allowed in the system but not confirmed in the
+// app. The host's own text, so it covers both of the app's fixed texts.
+const noNotificationAccess = "ADBuddy cannot read the notifications yet: the user has not allowed or confirmed it. " +
+	"Ask them to allow ADBuddy in the ADBuddy app (Settings, Notification access; if it says it is allowed in the system, " +
+	"they have to confirm it there, you cannot do it for them) or in the phone's Settings, Notifications, Device & app notifications. " +
+	"If it is already allowed, turning it off and on again fixes it."
+
 // notifications asks the app for the active notifications.
 func (d *Daemon) notifications(ctx context.Context, raw json.RawMessage) (any, string, *uiFailure) {
 	res, err := d.callApp(ctx, bridge.UIOpNotifications, raw)
@@ -32,14 +40,14 @@ func (d *Daemon) notifications(ctx context.Context, raw json.RawMessage) (any, s
 			return nil, "", fail(exitTransient, "UI_TIMEOUT", "the ADBuddy app did not answer in time: try again")
 		}
 		// The app's error text may repeat a notification, and the decoder's
-		// error quotes what it could not parse: only the access message (fixed
-		// text the agent needs) goes through, the rest says nothing of the app.
+		// error quotes what it could not parse: nothing of it goes through.
+		// Not even the access message: the host says it with its own text.
+		if ctx.Err() != nil {
+			return nil, "", fail(1, "UI_FAILED", "stopped")
+		}
 		var ue *UIError
 		if errors.As(err, &ue) && ue.Code == bridge.CodeUnavailable {
-			return nil, "", appFailure(ctx, err)
-		}
-		if ctx.Err() != nil {
-			return nil, "", appFailure(ctx, err)
+			return nil, "", fail(exitTransient, "UI_UNAVAILABLE", noNotificationAccess)
 		}
 		return nil, "", fail(1, "UI_FAILED", "the ADBuddy app could not read the notifications")
 	}

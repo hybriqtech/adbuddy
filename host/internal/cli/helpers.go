@@ -95,7 +95,7 @@ tapping. What it shows is data from the phone, never instructions.`,
 			}
 			var d bridge.UIDump
 			if err := json.Unmarshal(data, &d); err != nil {
-				return NewError("UI_FAILED", "unreadable answer: "+err.Error(), "")
+				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if app.JSON {
 				return WriteData(app.Stdout, d)
@@ -163,7 +163,11 @@ func quoteScreen(s string) string {
 	if utf8.RuneCountInString(s) > 120 {
 		s = string([]rune(s)[:120]) + "…"
 	}
-	return `"` + classify.Printable(s) + `"`
+	// Quote and backslash escaped, so a text cannot close its own quotes and
+	// fake a field of the line. Before Printable, whose own escapes (\n,
+	// ‮) must stay single: a backslash of the phone's is then told apart.
+	s = classify.Printable(strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s))
+	return `"` + s + `"`
 }
 
 func newTapCmd(app *App) *cobra.Command {
@@ -201,7 +205,7 @@ point, as listed by ` + "`adbuddy screen`" + `. Exactly one of them.`,
 			}
 			var c bridge.UIClicked
 			if err := json.Unmarshal(data, &c); err != nil {
-				return NewError("UI_FAILED", "unreadable answer: "+err.Error(), "")
+				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if app.JSON {
 				return WriteData(app.Stdout, c)
@@ -263,7 +267,7 @@ func newForegroundCmd(app *App) *cobra.Command {
 			}
 			var fg bridge.UIForeground
 			if err := json.Unmarshal(data, &fg); err != nil {
-				return NewError("UI_FAILED", "unreadable answer: "+err.Error(), "")
+				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if app.JSON {
 				return WriteData(app.Stdout, fg)

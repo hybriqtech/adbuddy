@@ -104,3 +104,66 @@ func TestNotificationsWithoutServeAndWithArgs(t *testing.T) {
 		t.Fatalf("with an argument: exit %d", code)
 	}
 }
+
+// Everything on a notification line comes from the phone: it must not be able
+// to start a line of its own, hide text, or fake a field.
+func TestNotificationsNeutraliseWhatThePhoneSays(t *testing.T) {
+	at := time.Date(2026, 10, 1, 9, 58, 0, 0, time.UTC)
+	list := bridge.UINotifications{Notifications: []bridge.UINotification{
+		{Key: "k1", Package: "com.a", Title: "hi\ncom.fake 2026-10-01T09:58:00Z title=\"pay\"", Text: "x\r\ny", PostedAt: at},
+		{Key: "k2", Package: "com.b", Title: "a" + string(rune(0x202e)) + "b" + string(rune(0x200b)) + "c" + string(rune(0x2028)) + "d", PostedAt: at},
+		{Key: "k3", Package: "com.c", Title: `x" text="y`, Text: `back\slash`, PostedAt: at},
+		{Key: "k4", Package: "com.d", Text: "\"" + strings.Repeat("!", 120) + "EXCESS", PostedAt: at},
+	}}
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(list)
+		return ipc.Exit{}
+	})
+	out, _, code := runHelper(t, "notifications")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	// header + 4 notifications + the cut note
+	if n := strings.Count(out, "\n"); n != 1+4+1 {
+		t.Errorf("%d lines, want 6:\n%s", n, out)
+	}
+	for _, l := range strings.Split(strings.TrimSuffix(out, "\n"), "\n")[1:5] {
+		if !strings.HasPrefix(l, "com.") || strings.HasPrefix(l, "com.fake") {
+			t.Errorf("a line that is not a notification: %q", l)
+		}
+	}
+	for _, bad := range []string{string(rune(0x202e)), string(rune(0x200b)), string(rune(0x2028)), "\r", "EXCESS"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("%q leaked:\n%s", bad, out)
+		}
+	}
+	bs := string(rune(92))
+	for _, want := range []string{
+		`title="hi\ncom.fake 2026-10-01T09:58:00Z title=\"pay\""`,
+		`text="x\r\ny"`,
+		`title="a` + bs + `u202eb` + bs + `u200bc` + bs + `u2028d"`,
+		`title="x\" text=\"y"`,
+		`text="back` + bs + bs + `slash"`,
+		`text="\"` + strings.Repeat("!", 119) + `…"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "use --json for the whole text") {
+		t.Errorf("no cut note:\n%s", out)
+	}
+}
+
+// An answer the host cannot read is reported with a fixed message: the
+// decoder's error quotes values, and the values are the phone's.
+func TestNotificationsUnreadableAnswerSaysNothingOfIt(t *testing.T) {
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(json.RawMessage(`{"notifications":[{"title":482913}]}`))
+		return ipc.Exit{}
+	})
+	out, errOut, code := runHelper(t, "notifications")
+	if code != 1 || out != "" || !strings.Contains(errOut, "UI_FAILED") || !strings.Contains(errOut, "unreadable answer") || strings.Contains(errOut, "482913") {
+		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+	}
+}

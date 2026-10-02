@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 )
 
@@ -247,6 +249,43 @@ func TestNotificationsUnreadableAnswersDoNotQuoteTheApp(t *testing.T) {
 		}
 		if b, _ := json.Marshal(j); strings.Contains(string(b), "482913") {
 			t.Errorf("%s: the journal quotes the app: %s", name, b)
+		}
+	}
+}
+
+// A cancelled context must not bring back the text of the app's error: it
+// can repeat a notification.
+func TestNotificationsCancelledWithAnAppErrorSaysNothingOfIt(t *testing.T) {
+	e := newEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	e.d.o.UI = func(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+		cancel()
+		return nil, &UIError{Code: bridge.CodeFailed, Text: bankCode}
+	}
+	raw, _ := json.Marshal(struct{}{})
+	s := &stream{}
+	exit := e.d.Handle(ctx, ipc.Request{Kind: ipc.KindUI, UIOp: bridge.UIOpNotifications, UIArgs: raw,
+		Env: map[string]string{"ADBUDDY_SOURCE": "agent"}}, s)
+	if exit.Code == 0 || exit.ErrorCode != "UI_FAILED" || !strings.Contains(exit.Error, "stopped") || strings.Contains(exit.Error, "482913") {
+		t.Fatalf("%+v", exit)
+	}
+	b, _ := json.Marshal(e.last(t))
+	if strings.Contains(string(b), "482913") {
+		t.Fatalf("journal %s", b)
+	}
+}
+
+// The no-access answer is the host's own text: whatever the app put in it
+// does not reach the agent.
+func TestNotificationsNoAccessIsFixedHostText(t *testing.T) {
+	for _, text := range []string{"Your code is 482913", "ADBuddy cannot read the notifications yet: the user has to confirm it"} {
+		e := newEnv(t)
+		a := e.withApp()
+		a.errs[bridge.UIOpNotifications] = &UIError{Code: bridge.CodeUnavailable, Text: text}
+		_, exit := e.helper(t, bridge.UIOpNotifications, struct{}{})
+		if exit.Code != exitTransient || exit.ErrorCode != "UI_UNAVAILABLE" || !strings.Contains(exit.Error, "allow ADBuddy") ||
+			!strings.Contains(exit.Error, "confirm") || strings.Contains(exit.Error, "482913") {
+			t.Errorf("%q: %+v", text, exit)
 		}
 	}
 }
