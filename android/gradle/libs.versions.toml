@@ -11,6 +11,11 @@ junit = "4.13.2"
 androidxTestRunner = "1.7.0"
 androidxTestExt = "1.3.0"
 webkit = "1.14.0"
+# Tests of the screens in the JVM (plan tests-ui-jvm). robolectricAndroidAll is the Android 14 jar that this Robolectric
+# runs (SDK 34, src/test/resources/robolectric.properties): it changes with robolectric.
+robolectric = "4.17"
+robolectricAndroidAll = "14-robolectric-10818077-i7"
+roborazzi = "1.76.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -29,6 +34,10 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 junit = { module = "junit:junit", version.ref = "junit" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
 androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestExt" }
+compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+robolectric-android-all = { module = "org.robolectric:android-all-instrumented", version.ref = "robolectricAndroidAll" }
+roborazzi = { module = "io.github.takahirom.roborazzi:roborazzi", version.ref = "roborazzi" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

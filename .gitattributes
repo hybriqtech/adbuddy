@@ -23,6 +23,8 @@ android/**/*.txt text eol=lf
 android/**/*.pro text eol=lf
 android/**/*.md text eol=lf
 android/.gitignore text eol=lf
+# The golden images of the screen tests: never touched by line-ending conversion
+android/**/*.png binary
 
 # protocol/: the shared fixtures, read byte for byte by Go and Kotlin
 protocol/** text eol=lf

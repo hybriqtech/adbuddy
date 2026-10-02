@@ -36,6 +36,11 @@ android {
         compose = true
     }
 
+    // Robolectric reads the merged resources and manifest (the screen tests).
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     // Compose and Material bring strings in dozens of languages the app does not offer (it has two: spec v1 section 6).
     androidResources {
         localeFilters += listOf("en", "es")
@@ -60,6 +65,30 @@ tasks.withType<Test>().configureEach {
     systemProperty("adbuddy.kotlinDir", file("src/main/kotlin").absolutePath)
 }
 
+// Screen tests (plan tests-ui-jvm). Robolectric's Android jar (SDK 34: src/test/resources/robolectric.properties) comes
+// through Gradle like any other dependency, so --offline works once it is in the cache: the tests never download it.
+val robolectricAndroid: Configuration by configurations.creating { isTransitive = false }
+val robolectricJars = layout.buildDirectory.dir("robolectric-jars")
+val syncRobolectricJars = tasks.register<Sync>("syncRobolectricJars") {
+    from(robolectricAndroid)
+    into(robolectricJars)
+}
+// Golden images (src/test/screenshots): -Padbuddy.screens=record records them; verify (the default on Windows, where they
+// are recorded) fails on a change beyond Roborazzi's default tolerance (0.7 % colour per pixel); compare (the default elsewhere) writes the differences to build/outputs/roborazzi
+// and never fails, until the same images are shown to come out on that system too.
+val screens = providers.gradleProperty("adbuddy.screens")
+    .getOrElse(if (System.getProperty("os.name").startsWith("Windows")) "verify" else "compare")
+require(screens in setOf("record", "verify", "compare")) { "adbuddy.screens is record, verify or compare, not $screens" }
+tasks.withType<Test>().configureEach {
+    dependsOn(syncRobolectricJars)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricJars.get().asFile.absolutePath)
+    inputs.files(fileTree("src/test/screenshots")).withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("roborazzi.test.record", (screens == "record").toString())
+    systemProperty("roborazzi.test.verify", (screens == "verify").toString())
+    systemProperty("roborazzi.test.compare", (screens == "compare").toString())
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -76,6 +105,11 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    robolectricAndroid(libs.robolectric.android.all)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
 }
