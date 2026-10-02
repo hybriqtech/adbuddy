@@ -2,26 +2,26 @@
 
 # ADBuddy
 
-Chat from your phone with a coding agent on your PC, and let it manage your Android phone over Wi-Fi adb, with every command ranked by risk, every change journaled and anything irreversible confirmed first.
+Chat from your phone with a coding agent on your PC, and let it manage your Android phone over Wi-Fi adb, with every command ranked by risk, every change journaled and the commands it ranks red (irreversible, dangerous or not understood) confirmed first.
 
 ## What it does
 
 - **The agent manages your Android over Wi-Fi adb.** The coding agent you already use on your PC (Claude Code, Codex, Gemini CLI or OpenCode) runs adb commands on your phone: no USB cable, and you do not need to know what adb is.
-- **You chat with it from the phone.** A small ADBuddy app on the phone has the chat, shows what the agent does and asks you before anything irreversible.
-- **Safe by default.** Every command is ranked green, yellow or red, changes are journaled with their undo, and red commands wait for your answer. The app has a Pause and a **Cut access** button.
+- **You chat with it from the phone.** A small ADBuddy app on the phone has the chat, shows what the agent does and asks you before the commands it ranks red.
+- **Guarded by default.** Every command is ranked green, yellow or red, changes are journaled, with their undo when they have one, and red commands wait for your answer. The app has a Pause and a **Cut access** button.
 
 ## How it works
 
 ```text
   Phone (Android 11+)                      PC (Windows, macOS or Linux)
   +--------------------+                   +-----------------------------------------+
-  | ADBuddy app        |  local channel    | host: adbuddy serve                     |
-  |  chat, questions,  | <---------------> |  ranks, journals, asks you              |
-  |  Pause, Cut access |  (carried by adb) |        ^                      |         |
-  |                    |                   |        | shim "adb"           v         |
-  | Wireless debugging | <---------------- |  coding agent  ---->  real adb          |
-  +--------------------+     Wi-Fi adb     |  (in the environment)  (ADBuddy's own   |
-                                           |                         platform-tools) |
+  | ADBuddy app        |  local channel    | coding agent (in the environment)       |
+  |  chat, questions,  | <---------------> |      | runs its "adb" = the shim        |
+  |  Pause, Cut access |  (carried by adb) |      v                                  |
+  |                    |                   | host: adbuddy serve                     |
+  | Wireless debugging | <---------------- |  ranks, journals, asks you,             |
+  +--------------------+     Wi-Fi adb     |  then runs the real adb                 |
+                                           |  (ADBuddy's own platform-tools)         |
                                            +-----------------------------------------+
 ```
 
@@ -43,7 +43,7 @@ There is no public release yet, so today you build the host from source. [Instal
    cp adbuddy ~/.local/bin/
    ```
 
-   When there is a public release, a single `curl … | sh` command will install it: see [Install ADBuddy](docs/install.md).
+   When there is a public release, a single `curl … | sh` command will install it on Linux and macOS (Windows will use a downloaded archive): see [Install ADBuddy](docs/install.md).
 
 2. **Prepare the phone.** Turn on Developer options and Wireless debugging. [Set up your phone](https://hybriqtech.github.io/adbuddy/setup/) has the steps with pictures (in the repository: [docs/setup/index.md](docs/setup/index.md)).
 
@@ -77,8 +77,8 @@ Claude Code (recommended), Codex, Gemini CLI and OpenCode. ADBuddy does not inst
 
 - Every `adb` command the agent runs passes through the shim and the host, which ranks it: green (read-only), yellow (reversible or harmless) or red (irreversible, dangerous or not understood). A command the host does not understand is red.
 - Green and yellow commands run at once and are journaled; yellow ones with their undo when they have one (`adbuddy journal`, `adbuddy undo`). Taps and typing are yellow and have no undo. A yellow command becomes red when ADBuddy cannot read the state it needs or the change would overwrite something.
-- Red commands wait for your answer, on the phone (it must be unlocked to allow) or in the host's terminal. An unanswered question counts as a no after 2 minutes.
-- Banking, payments, password and 2FA apps are protected while they are in front, but the list is a guess from app names and you cannot edit it yet.
+- Red commands wait for your answer, on the phone (it must be unlocked to allow) or in the host's terminal. An unanswered question counts as a no (after 2 minutes by default).
+- With the app installed, banking, payments, password and 2FA apps are protected while they are in front (a guess from their names today; you cannot edit the list yet). Without the app, only ADBuddy itself is protected.
 - ADBuddy has no telemetry and no server of its own. What the agent reads on your phone goes to the agent's own provider.
 - **The shim protects against mistakes and prompt injection. It does not protect against an agent determined to find another adb.** The real guarantee is **Cut access** in the app, which turns debugging off from the phone: with it off, the PC cannot reach the phone.
 
@@ -86,7 +86,7 @@ ADBuddy lowers the risk of letting an agent drive your phone; it does not remove
 
 ## Why ADBuddy
 
-You use the coding agent you already have, with the subscription you already pay for: ADBuddy has no model of its own and needs no API keys. As of September 2026, Google's open source ARTEMIS runs its own LLM and needs its own API keys, while ADBuddy uses the agent and the subscription you already have.
+ADBuddy has no model of its own and needs no API keys. As of September 2026, Google's open source ARTEMIS needs its own LLM and API keys; ADBuddy uses the agent and subscription you already have.
 
 ## Requirements
 
@@ -132,14 +132,6 @@ These are the commands of `adbuddy --help`; `adbuddy <command> --help` shows the
 - The same guides as a website: https://hybriqtech.github.io/adbuddy/
 - For developers: [host/README.md](host/README.md).
 
-## Status
-
-There is no public release yet: the [Releases page](https://github.com/hybriqtech/adbuddy/releases) is where one will appear. ADBuddy is under active development, and today you build it from source. Homebrew, winget and signed Windows binaries are not available yet.
-
-## License
-
-Apache-2.0. See [LICENSE](LICENSE).
-
 <!-- Enable when the GitHub Sponsors and Ko-fi pages exist (docs/pre-public-checklist.md):
 
 ## Support the project
@@ -148,3 +140,11 @@ ADBuddy is free and open source; if it saves you time, you can support its devel
 
 [GitHub Sponsors](https://github.com/sponsors/hybriqtech) · [Ko-fi](https://ko-fi.com/<handle>)
 -->
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
+
+## Status
+
+There is no public release yet: the [Releases page](https://github.com/hybriqtech/adbuddy/releases) is where one will appear. ADBuddy is under active development, and today you build it from source. Homebrew, winget and signed Windows binaries are not available yet.

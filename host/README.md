@@ -2,6 +2,8 @@
 
 The `adbuddy` program: the host that sits between a coding agent and an Android phone. This page is for people who work on its code. To use ADBuddy, see the [project README](../README.md), [Install ADBuddy](../docs/install.md) and [Use ADBuddy](../docs/usage.md).
 
+Installing on Windows? See [Install ADBuddy](../docs/install.md#windows).
+
 Licensed under Apache-2.0 (`LICENSE`, at the repository root).
 
 ## Build
@@ -21,11 +23,11 @@ A build from source pins no signing certificate for the phone app, so `adbuddy s
 go test ./...
 ```
 
-The tests never touch a phone: they use a fake adb (`internal/testutil/fakeadb`). The Windows PC does not run `go test -race`; the CI does.
+The tests never touch a phone: they use a fake adb (`internal/testutil/fakeadb`). Run `go test -race ./...` in CI (the race detector needs cgo, which a plain Windows setup may lack).
 
 ### The documentation guard
 
-`TestDocs*` in `internal/cli/docs_test.go` checks the user guides (the READMEs and the pages of `docs/` that GitHub Pages publishes):
+`TestDocs*` in `internal/cli/docs_test.go` checks the user guides: `README.md`, `README.es.md` and the pages of `docs/` that GitHub Pages publishes (this file, `host/README.md`, is not checked):
 
 - every `adbuddy` command in a code block or in inline code is valid against the real command tree (command, flags and arguments);
 - relative links point to files that exist, and a published page does not link outside `docs/`;
@@ -73,7 +75,7 @@ ADBUDDY_REAL_CLAUDE=1 go test ./internal/cli -run TestRealClaudeCode -v -timeout
 
 ## The agent's environment
 
-`adbuddy env init [--force]` creates or refreshes the agent's environment (`~/ADBuddy/<phone model>/`) without starting anything; `adbuddy setup` and `adbuddy serve` do the same. With Claude Code as the agent, it also puts six hooks in the environment's `.claude/settings.json` (`SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`, `PermissionRequest`, `SessionEnd`), each running the environment's own `adbuddy hook <event>`; your own hooks in that file are kept. `adbuddy hook` fails open: if the host is down or anything is wrong, it says nothing and exits 0, so Claude Code asks in the terminal as usual. The design is in `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md`, and the recordings the tests use are in `internal/claudecode/testdata`.
+`adbuddy env init [--force]` creates or refreshes the agent's environment (`~/ADBuddy/<phone name>/`) without starting anything; `adbuddy setup` and `adbuddy serve` do the same. With Claude Code as the agent, it also puts six hooks in the environment's `.claude/settings.json` (`SessionStart`, `UserPromptSubmit`, `Stop`, `Notification`, `PermissionRequest`, `SessionEnd`), each running the environment's own `adbuddy hook <event>`; your own hooks in that file are kept. `adbuddy hook` fails open: if the host is down or anything is wrong, it says nothing and exits 0, so Claude Code asks in the terminal as usual. The design is in `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md`, and the recordings the tests use are in `internal/claudecode/testdata`.
 
 ## Skills
 
@@ -85,14 +87,18 @@ To add a skill: create its folder, add its name to `requiredSkills` in `internal
 - recipes never clear app data, wipe, reboot, install granting permissions or delete recursively; the one exception is the exact `shell rm -r /sdcard/ADBuddy-papelera` in `storage-cleanup`;
 - scripts go in single quotes, and a line that starts with `adb` or `adbuddy` outside a checked block is an error.
 
+## Security invariants
+
+For anyone who contributes: the IPC socket between the shim and the host is reachable only by the user (mode 0600 on Linux and macOS; on Windows it inherits the permissions of the data folder) and needs a per-installation secret, and if the journal cannot be written the host blocks every yellow and red command (`internal/ipc/server.go`, `internal/daemon/daemon.go`).
+
 ## Manual check with a real phone
 
 Only with a phone you can afford to experiment on. With the phone paired and Wireless debugging on:
 
 ```sh
-adbuddy serve --confirm deny     # deny: every red command is refused without asking
+adbuddy serve --no-agent --confirm deny     # deny: every red command is refused without asking
 # in another terminal, using the environment's shim:
-~/ADBuddy/<phone model>/.adbuddy/bin/adb shell getprop ro.product.model
-~/ADBuddy/<phone model>/.adbuddy/bin/adb shell settings get global window_animation_scale
+~/ADBuddy/<phone name>/.adbuddy/bin/adb shell getprop ro.product.model
+~/ADBuddy/<phone name>/.adbuddy/bin/adb shell settings get global window_animation_scale
 adbuddy journal
 ```

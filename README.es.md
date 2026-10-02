@@ -2,26 +2,26 @@
 
 # ADBuddy
 
-Chatea desde el móvil con un agente de código de tu PC y deja que gestione tu Android por adb Wi-Fi, con cada comando clasificado por riesgo, cada cambio anotado en un diario y lo irreversible confirmado antes.
+Chatea desde el móvil con un agente de código de tu PC y deja que gestione tu Android por adb Wi-Fi, con cada comando clasificado por riesgo, cada cambio anotado en un diario y los comandos que clasifica en rojo (irreversibles, peligrosos o no entendidos) confirmados antes.
 
 ## Qué hace
 
 - **El agente gestiona tu Android por adb Wi-Fi.** El agente de código que ya usas en el PC (Claude Code, Codex, Gemini CLI u OpenCode) ejecuta comandos adb en tu móvil: sin cable USB y sin que tengas que saber qué es adb.
-- **Chateas con él desde el móvil.** Una pequeña app de ADBuddy en el móvil tiene el chat, muestra lo que hace el agente y te pregunta antes de nada irreversible.
-- **Seguro por defecto.** Cada comando se clasifica en verde, amarillo o rojo, los cambios se anotan en un diario con su forma de deshacerlos y los comandos rojos esperan tu respuesta. La app tiene un botón Pausar y otro **Cortar acceso**.
+- **Chateas con él desde el móvil.** Una pequeña app de ADBuddy en el móvil tiene el chat, muestra lo que hace el agente y te pregunta antes de los comandos que clasifica en rojo.
+- **Con protecciones por defecto.** Cada comando se clasifica en verde, amarillo o rojo, los cambios se anotan en un diario, con su forma de deshacerlos cuando la tienen, y los comandos rojos esperan tu respuesta. La app tiene un botón Pausar y otro **Cortar acceso**.
 
 ## Cómo funciona
 
 ```text
   Móvil (Android 11+)                      PC (Windows, macOS o Linux)
   +--------------------+                   +-----------------------------------------+
-  | App de ADBuddy     |  canal local      | host: adbuddy serve                     |
-  |  chat, preguntas,  | <---------------> |  clasifica, anota, te pregunta          |
-  |  Pausar, Cortar    |  (lo lleva adb)   |        ^                      |         |
-  |  acceso            |                   |        | shim "adb"           v         |
-  | Depuración         | <---------------- |  agente de código ---> adb real         |
-  |  inalámbrica       |    adb por Wi-Fi  |  (en el entorno)       (las platform-   |
-  +--------------------+                   |                         tools propias)  |
+  | App de ADBuddy     |  canal local      | agente de código (en el entorno)        |
+  |  chat, preguntas,  | <---------------> |      | ejecuta su "adb" = el shim       |
+  |  Pausar, Cortar    |  (lo lleva adb)   |      v                                  |
+  |  acceso            |                   | host: adbuddy serve                     |
+  | Depuración         | <---------------- |  clasifica, anota, te pregunta,         |
+  |  inalámbrica       |    adb por Wi-Fi  |  y luego ejecuta el adb real            |
+  +--------------------+                   |  (las platform-tools propias)           |
                                            +-----------------------------------------+
 ```
 
@@ -43,7 +43,7 @@ Todavía no hay versión pública, así que hoy compilas el host desde el códig
    cp adbuddy ~/.local/bin/
    ```
 
-   Cuando haya una versión pública, un solo comando `curl … | sh` la instalará: consulta [Instalar ADBuddy](docs/install.md) (en inglés).
+   Cuando haya una versión pública, un solo comando `curl … | sh` la instalará en Linux y macOS (en Windows será un archivo descargado): consulta [Instalar ADBuddy](docs/install.md) (en inglés).
 
 2. **Prepara el móvil.** Activa las opciones de desarrollador y la depuración inalámbrica. [Prepara tu móvil](docs/setup/es/index.md) tiene los pasos (la guía en inglés, con capturas, está en [Set up your phone](https://hybriqtech.github.io/adbuddy/setup/)).
 
@@ -77,8 +77,8 @@ Claude Code (recomendado), Codex, Gemini CLI y OpenCode. ADBuddy no instala agen
 
 - Todo comando `adb` que ejecuta el agente pasa por el shim y por el host, que lo clasifica: verde (solo lectura), amarillo (reversible o inofensivo) o rojo (irreversible, peligroso o no entendido). Un comando que el host no entiende es rojo.
 - Los comandos verdes y amarillos se ejecutan al instante y quedan en el diario; los amarillos con su forma de deshacerlos cuando la tienen (`adbuddy journal`, `adbuddy undo`). Los toques y la escritura son amarillos y no se pueden deshacer. Un comando amarillo pasa a rojo cuando ADBuddy no puede leer el estado que necesita o el cambio sobrescribiría algo.
-- Los comandos rojos esperan tu respuesta, en el móvil (para permitir, debe estar desbloqueado) o en la terminal del host. Una pregunta sin respuesta cuenta como un no a los 2 minutos.
-- Las apps de banca, pagos, contraseñas y 2FA están protegidas mientras están en primer plano, pero la lista es una suposición a partir de los nombres de las apps y aún no puedes editarla.
+- Los comandos rojos esperan tu respuesta, en el móvil (para permitir, debe estar desbloqueado) o en la terminal del host. Una pregunta sin respuesta cuenta como un no (a los 2 minutos por defecto).
+- Con la app instalada, las apps de banca, pagos, contraseñas y 2FA están protegidas mientras están en primer plano (una suposición a partir de sus nombres hoy; aún no puedes editar la lista). Sin la app, solo está protegido ADBuddy.
 - ADBuddy no tiene telemetría ni servidor propio. Lo que el agente lee en tu móvil va al proveedor del propio agente.
 - **El shim protege contra errores e inyecciones de prompts. No protege contra un agente empeñado en buscar otro adb.** La garantía real es **Cortar acceso** en la app, que apaga la depuración desde el móvil: con ella apagada, el PC no puede alcanzar el móvil.
 
@@ -86,7 +86,7 @@ ADBuddy reduce el riesgo de dejar que un agente maneje tu móvil; no lo elimina.
 
 ## Por qué ADBuddy
 
-Usas el agente de código que ya tienes, con la suscripción que ya pagas: ADBuddy no tiene modelo propio y no necesita claves de API. A septiembre de 2026, ARTEMIS, la herramienta de código abierto de Google, lleva su propio LLM y necesita sus propias claves de API, mientras que ADBuddy usa el agente y la suscripción que ya tienes.
+ADBuddy no tiene modelo propio y no necesita claves de API. A septiembre de 2026, ARTEMIS, la herramienta de código abierto de Google, necesita su propio LLM y claves de API; ADBuddy usa el agente y la suscripción que ya tienes.
 
 ## Requisitos
 
@@ -134,14 +134,6 @@ Las guías están en inglés, salvo la de preparación del móvil.
 - Las mismas guías como sitio web: https://hybriqtech.github.io/adbuddy/
 - Para desarrolladores: [host/README.md](host/README.md) (en inglés).
 
-## Estado
-
-Todavía no hay versión pública: la [página de Releases](https://github.com/hybriqtech/adbuddy/releases) es donde aparecerá. ADBuddy está en desarrollo activo y hoy se compila desde el código. Homebrew, winget y los binarios de Windows firmados todavía no están disponibles.
-
-## Licencia
-
-Apache-2.0. Consulta [LICENSE](LICENSE).
-
 <!-- Enable when the GitHub Sponsors and Ko-fi pages exist (docs/pre-public-checklist.md):
 
 ## Apoya el proyecto
@@ -150,3 +142,11 @@ ADBuddy es libre y de código abierto; si te ahorra tiempo, puedes apoyar su des
 
 [GitHub Sponsors](https://github.com/sponsors/hybriqtech) · [Ko-fi](https://ko-fi.com/<handle>)
 -->
+
+## Licencia
+
+Apache-2.0. Consulta [LICENSE](LICENSE).
+
+## Estado
+
+Todavía no hay versión pública: la [página de Releases](https://github.com/hybriqtech/adbuddy/releases) es donde aparecerá. ADBuddy está en desarrollo activo y hoy se compila desde el código. Homebrew, winget y los binarios de Windows firmados todavía no están disponibles.
