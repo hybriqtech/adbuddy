@@ -21,9 +21,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The agent's helpers (M5 spec §3): adbuddy screen, tap, type, foreground and
-// screenshot. Each one asks the running serve, which does it through the
-// ADBuddy app or adb, under the same rules as an adb command.
+// The agent's helpers (M5 spec §3): adbuddy screen, tap, type, foreground,
+// screenshot and notifications. Each one asks the running serve, which does
+// it through the ADBuddy app or adb, under the same rules as an adb command.
 
 // helperFixes are the fixes of the helpers' error codes (M5 spec §8).
 var helperFixes = map[string]string{
@@ -36,7 +36,7 @@ var helperFixes = map[string]string{
 
 // newHelperCmds builds the helpers' commands.
 func newHelperCmds(app *App) []*cobra.Command {
-	return []*cobra.Command{newScreenCmd(app), newTapCmd(app), newTypeCmd(app), newForegroundCmd(app), newScreenshotCmd(app)}
+	return []*cobra.Command{newScreenCmd(app), newTapCmd(app), newTypeCmd(app), newForegroundCmd(app), newScreenshotCmd(app), newNotificationsCmd(app)}
 }
 
 // callHelper runs a helper on the serve that runs and returns its data.
