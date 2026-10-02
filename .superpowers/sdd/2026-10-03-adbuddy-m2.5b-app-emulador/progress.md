@@ -145,3 +145,68 @@ Tras el corte: ningún qemu/emulator con `-port 5600` (solo el vigilante `emulat
 BLOQUEADO: la imagen android-37.0 google_apis (rev 6) con el emulador 37.2.12 reinicia surfaceflinger y system_server cada ~8 s con swiftshader_indirect y con swangle_indirect (que aquí es el mismo SwiftShader); la app no puede correr en ella. Según el encargo, no se prueban otras imágenes ni GPUs. No se hicieron S2-S7 ni se creó el test temporal; ficheros temporales borrados (`/tmp/adbuddy-m25b-timeline.sh`, `/tmp/adbuddy-m25b-emu.env`).
 
 Opciones para quien decide (no probadas): `-gpu host` (GPU real del PC; en la CI el runner es este mismo PC), otra imagen (android-36 google_apis, o una revisión posterior de android-37.0 cuyo mapper no aborte) o desactivar el muestreo de regiones (RegionSampling) si hubiera una propiedad para ello. Cualquiera necesita que `scripts/emulator.sh` cambie (es de puffin) o decisión del usuario sobre la imagen.
+
+### S1 con ADBUDDY_EMU_GPU=host (tercer intento, ruling del supervisor): mismo bucle — BLOQUEADO
+
+Base: rama en 799785e; origin/main tiene 5b0ff91 (solo `.github/workflows/emulator.yml`: el oráculo corre en PR y a mano), no integrado (no afecta al spike). CI-LIBRE imprimía `2` (un job en curso y otro en cola) sin emulador de la CI encendido al empezar; coexistencia autorizada por el supervisor. RAM libre 15.46 GB, ningún qemu `-port 5600`; vigilante de RAM en segundo plano (cada 5 s; por debajo de 6 GB, `adb -P 5060 -s emulator-5600 emu kill`; no llegó a dispararse). Variables: `ADBUDDY_EMU_AVD=adbuddy-dev ADBUDDY_EMU_PORT=5600 ADBUDDY_EMU_ADB_PORT=5060 ADBUDDY_EMU_GPU=host`, `ANDROID_SERIAL=emulator-5600`, `ANDROID_ADB_SERVER_PORT=5060`, `ADB_MDNS=0`, `ADB_MDNS_AUTO_CONNECT=0`, `JAVA_HOME` al JDK 17. `adb devices` (servidor 5060) antes de cada orden: solo `emulator-5600`.
+
+Arranque 19:21:55 → `scripts/emulator.sh start` rc 0 a las 19:22:40 (45 s). El log del emulador confirma la GPU real:
+
+```
+emuglConfig_init: vulkan_mode_selected:host gles_mode_selected:host
+emuglConfig_get_vulkan_hardware_gpu_support_info: Found physical GPU 'NVIDIA GeForce RTX 5080', type: VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU, apiVersion: 1.4.325, driverVersion: 591.86
+Graphics Adapter Android Emulator OpenGL ES Translator (NVIDIA GeForce RTX 5080/PCIe/SSE2)
+Graphics API Version OpenGL ES 3.0 (4.5.0 NVIDIA 591.86)
+```
+
+Vigilante de estabilidad (dentro del emulador; pids y líneas del buffer `crash` a boot+5 s y hasta +120 s):
+
+```
+$ EMU; "$ADB" -s "$S" shell 'a=$(pidof system_server); f=$(pidof surfaceflinger); c0=$(logcat -d -b crash | wc -l); echo "t5 ..."; for t in 30 60 115; do sleep ...; echo "t$((t+5)) system_server $a -> $(pidof system_server); surfaceflinger $f -> $(pidof surfaceflinger); crashlines=...; dma=$(logcat -d -b crash | grep -c hasReadColorBufferDma)"; done'
+t5 system_server=4466 surfaceflinger=4390 crashlines=217
+t35 system_server 4466 -> 9431; surfaceflinger 4390 -> 9369; crashlines=433; dma=11
+t65 system_server 4466 -> 14358; surfaceflinger 4390 -> 14289; crashlines=675; dma=17
+t120 system_server 4466 -> 22800; surfaceflinger 4390 -> 22741; crashlines=1101; dma=28
+(sys.boot_completed=1, ro.hardware.egl=emulation, ro.build.version.release=17)
+```
+
+No sirve: los dos pid cambian y hay 28 aserciones `hasReadColorBufferDma` en 2 min (una cada ~5 s, más rápido que con SwiftShader). 30 líneas del buffer `crash` (`logcat -d -b crash | grep -i -E "Fatal signal|Abort message|mapper|RegionSampling" | tail -30`, recortados los BuildId y las firmas largas de los marcos #04 y #10):
+
+```
+10-02 19:24:29.039 21162 21162 F DEBUG   :       #06 pc 00000000000338d6  /system/lib64/libui.so (android::GraphicBufferMapper::lock(...)+198)
+10-02 19:24:29.039 21162 21162 F DEBUG   :       #09 pc 000000000042059b  /system/bin/surfaceflinger (android::RegionSamplingThread::threadMain()+2571)
+10-02 19:24:29.039 21162 21162 F DEBUG   :       #10 pc 00000000004c9727  /system/bin/surfaceflinger (std::__thread_proxy<... RegionSamplingThread ...>+39)
+10-02 19:24:33.556 21207 21258 F libc    : Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE) in tid 21258 (RegionSampling), pid 21207 (surfaceflinger)
+10-02 19:24:33.771 21881 21881 F DEBUG   : pid: 21207, ppid: 1, tid: 21258, name: RegionSampling  >>> /system/bin/surfaceflinger <<<
+10-02 19:24:33.771 21881 21881 F DEBUG   : Abort message: 'Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma'
+10-02 19:24:33.771 21881 21881 F DEBUG   :       #03 pc 0000000000005adf  /vendor/lib64/hw/mapper.ranchu.so ((anonymous namespace)::GoldfishMapper::readFromHost(cb_handle_t const&) const+543)
+10-02 19:24:33.771 21881 21881 F DEBUG   :       #04 pc 00000000000055b0  /vendor/lib64/hw/mapper.ranchu.so ((anonymous namespace)::GoldfishMapper::GoldfishMapper()::lambda::__invoke+704)
+10-02 19:24:33.771 21881 21881 F DEBUG   :       #05 pc 00000000000498cf  /system/lib64/libui.so (android::Gralloc5Mapper::lock(...)+63)
+10-02 19:24:33.771 21881 21881 F DEBUG   :       #06 pc 00000000000338d6  /system/lib64/libui.so (android::GraphicBufferMapper::lock(...)+198)
+10-02 19:24:33.771 21881 21881 F DEBUG   :       #09 pc 000000000042059b  /system/bin/surfaceflinger (android::RegionSamplingThread::threadMain()+2571)
+10-02 19:24:33.771 21881 21881 F DEBUG   :       #10 pc 00000000004c9727  /system/bin/surfaceflinger (std::__thread_proxy<... RegionSamplingThread ...>+39)
+10-02 19:24:38.525 21966 22014 F libc    : Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE) in tid 22014 (RegionSampling), pid 21966 (surfaceflinger)
+10-02 19:24:38.871 22672 22672 F DEBUG   : pid: 21966, ppid: 1, tid: 22014, name: RegionSampling  >>> /system/bin/surfaceflinger <<<
+10-02 19:24:38.871 22672 22672 F DEBUG   : Abort message: 'Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma'
+10-02 19:24:38.871 22672 22672 F DEBUG   :       #03 pc 0000000000005adf  /vendor/lib64/hw/mapper.ranchu.so ((anonymous namespace)::GoldfishMapper::readFromHost(cb_handle_t const&) const+543)
+10-02 19:24:38.871 22672 22672 F DEBUG   :       #04 pc 00000000000055b0  /vendor/lib64/hw/mapper.ranchu.so ((anonymous namespace)::GoldfishMapper::GoldfishMapper()::lambda::__invoke+704)
+10-02 19:24:38.871 22672 22672 F DEBUG   :       #05 pc 00000000000498cf  /system/lib64/libui.so (android::Gralloc5Mapper::lock(...)+63)
+10-02 19:24:38.871 22672 22672 F DEBUG   :       #06 pc 00000000000338d6  /system/lib64/libui.so (android::GraphicBufferMapper::lock(...)+198)
+10-02 19:24:38.871 22672 22672 F DEBUG   :       #09 pc 000000000042059b  /system/bin/surfaceflinger (android::RegionSamplingThread::threadMain()+2571)
+10-02 19:24:38.871 22672 22672 F DEBUG   :       #10 pc 00000000004c9727  /system/bin/surfaceflinger (std::__thread_proxy<... RegionSamplingThread ...>+39)
+10-02 19:24:44.181 22741 22790 F libc    : Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE) in tid 22790 (RegionSampling), pid 22741 (surfaceflinger)
+10-02 19:24:44.375 23507 23507 F DEBUG   : pid: 22741, ppid: 1, tid: 22790, name: RegionSampling  >>> /system/bin/surfaceflinger <<<
+10-02 19:24:44.375 23507 23507 F DEBUG   : Abort message: 'Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma'
+10-02 19:24:44.375 23507 23507 F DEBUG   :       #03 pc 0000000000005adf  /vendor/lib64/hw/mapper.ranchu.so ((anonymous namespace)::GoldfishMapper::readFromHost(cb_handle_t const&) const+543)
+10-02 19:24:44.375 23507 23507 F DEBUG   :       #04 pc 00000000000055b0  /vendor/lib64/hw/mapper.ranchu.so ((anonymous namespace)::GoldfishMapper::GoldfishMapper()::lambda::__invoke+704)
+10-02 19:24:44.375 23507 23507 F DEBUG   :       #05 pc 00000000000498cf  /system/lib64/libui.so (android::Gralloc5Mapper::lock(...)+63)
+10-02 19:24:44.375 23507 23507 F DEBUG   :       #06 pc 00000000000338d6  /system/lib64/libui.so (android::GraphicBufferMapper::lock(...)+198)
+10-02 19:24:44.375 23507 23507 F DEBUG   :       #09 pc 000000000042059b  /system/bin/surfaceflinger (android::RegionSamplingThread::threadMain()+2571)
+10-02 19:24:44.376 23507 23507 F DEBUG   :       #10 pc 00000000004c9727  /system/bin/surfaceflinger (std::__thread_proxy<... RegionSamplingThread ...>+39)
+```
+
+Parada 19:24:49 (`scripts/emulator.sh stop`, rc 0). Tras el stop (19:24:55): ningún qemu con `-port 5600`; solo el vigilante `emulator -kill <pid> -sleep 20` (sale solo) y el emulador de la CI (`-avd adbuddy-ci-api37 -port 5590`, arrancado por el job en curso mientras medía), sin tocar. RAM libre 10.87 GB (con el de la CI encendido).
+
+Lectura: el aborto no depende del backend gráfico del host. Con la GPU real (NVIDIA, OpenGL 4.5 y Vulkan 1.4) el traductor de gfxstream tampoco anuncia `hasReadColorBufferDma`, y el `mapper.ranchu.so` de la imagen android-37.0 google_apis rev 6 lo exige en `readFromHost` cuando RegionSampling bloquea un buffer para la CPU. Es la combinación imagen rev 6 + emulador 37.2.12, no la GPU.
+
+BLOQUEADO: la imagen android-37.0 google_apis reinicia el sistema (surfaceflinger) con swiftshader_indirect, swangle_indirect y host; la app no puede correr en ella. Según el ruling, no se prueban otras imágenes ni GPUs (el plan B, imagen android-34, lo despacha el supervisor). No se hicieron S2-S7 ni se creó el test temporal; temporales borrados.
