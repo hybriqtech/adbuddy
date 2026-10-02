@@ -26,6 +26,7 @@ var undoFixKeys = map[string]string{
 	"UNDO_FAILED":        "err.undo.fix.undo_failed",
 	"WAITING_FOR_ANSWER": "err.undo.fix.waiting_for_answer",
 	"PAUSED":             "err.undo.fix.paused",
+	"UNDO_DENIED":        "err.undo.fix.undo_denied",
 }
 
 // undoTransient are the failures that go away by themselves: the pause ends,

@@ -284,7 +284,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			release = func() {}
 			// What the person reads comes from the classifier, never from the
 			// journal: the agent can forge its records.
-			detail := "Undoing a change from the journal needs a command that asks for confirmation.\n" + classify.Printable(ires.Detail(d.o.Lang))
+			detail := d.lang().T("undo.confirm.detail") + "\n" + classify.Printable(ires.Detail(d.o.Lang))
 			decision, askErr := d.AskUser(ctx, confirm.Request{
 				ID: journal.NewID("j_", d.o.Now().UTC()), Title: ires.Description(d.o.Lang), Detail: detail,
 				RawCommand: classify.DisplayCommand(e.Inverse.Argv), Special: ires.Special,

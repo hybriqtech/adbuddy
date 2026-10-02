@@ -81,6 +81,23 @@ func TestUndoOtherDeviceHasAFix(t *testing.T) {
 	}
 }
 
+// A 🔴 inverse left unconfirmed gets a fix, in the language of the PC; the
+// daemon's reason stays as it is.
+func TestUndoDeniedHasAFix(t *testing.T) {
+	const reason = "1 inverse(s) needed your confirmation and did not get it"
+	for _, c := range []struct{ lang, fix string }{
+		{"en", "Run adbuddy undo again and allow the 🔴 question"},
+		{"es", "Vuelve a ejecutar adbuddy undo y permite la pregunta 🔴"},
+	} {
+		data := isolate(t)
+		t.Setenv("ADBUDDY_LANG", c.lang)
+		fakeDaemon(t, data, nil, ipc.Exit{Code: daemon.ExitDenied, ErrorCode: "UNDO_DENIED", Error: reason})
+		if _, errOut, code := run(t, "undo"); code == 0 || !strings.Contains(errOut, "UNDO_DENIED") || !strings.Contains(errOut, reason) || !strings.Contains(errOut, c.fix) {
+			t.Fatalf("%s: exit %d, stderr %q", c.lang, code, errOut)
+		}
+	}
+}
+
 // T3 re-review 2, minor: the fix for WAITING_FOR_ANSWER fits both cases,
 // whether the question is already on screen or still waits to be asked.
 func TestUndoWaitingForAnswerFixFitsBothCases(t *testing.T) {

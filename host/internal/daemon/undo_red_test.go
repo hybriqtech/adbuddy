@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n/i18ntest"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 )
@@ -170,6 +171,34 @@ func TestUndoQuestionTextComesFromTheClassifier(t *testing.T) {
 	e.undoLast(t)
 	if len(e.conf.asked) != 1 || strings.Contains(e.conf.asked[0].Title+e.conf.asked[0].Detail, "brightness") {
 		t.Fatalf("%+v", e.conf.asked)
+	}
+}
+
+// M6c: the question of a 🔴 inverse is in the language of the PC, like any
+// other question; the command it asks about is the same in both.
+func TestUndoQuestionInTheLanguageOfThePC(t *testing.T) {
+	asked := map[string]confirm.Request{}
+	for _, lang := range []string{"en", "es"} {
+		e := newEnv(t)
+		e.d.o.Lang = lang
+		e.conf.decision = confirm.Deny
+		e.forge(t, "j_f1", putArgv, "shell", "settings", "delete", "global", "a")
+		e.undoLast(t)
+		if len(e.conf.asked) != 1 {
+			t.Fatalf("%s: asked %d", lang, len(e.conf.asked))
+		}
+		asked[lang] = e.conf.asked[0]
+	}
+	en, es := asked["en"], asked["es"]
+	if !strings.HasPrefix(en.Detail, "Undoing a change from the journal needs a command that asks for confirmation.\n") {
+		t.Fatalf("en detail: %q", en.Detail)
+	}
+	if !strings.HasPrefix(es.Detail, "Para deshacer un cambio del diario hace falta un comando que pide confirmación.\n") {
+		t.Fatalf("es detail: %q", es.Detail)
+	}
+	i18ntest.NoEnglish(t, es.Title+"\n"+es.Detail)
+	if es.RawCommand != en.RawCommand || es.Special != en.Special || es.Key != en.Key {
+		t.Fatalf("what decides differs:\n%+v\n%+v", en, es)
 	}
 }
 
