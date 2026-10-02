@@ -206,7 +206,7 @@ On Windows, see also [Windows and the firewall](#windows-and-the-firewall).
 
 ### The Wireless debugging port changed
 
-Every time Wireless debugging is turned on again, the phone picks a new port. If the saved address stops working, `adbuddy serve` says `the phone did not show up, and its saved address did not work` and suggests the fix:
+Every time Wireless debugging is turned on again, the phone picks a new port. If the saved address stops working, `adbuddy serve` says `the phone did not show up, and none of its saved addresses worked` and suggests the fix:
 
 1. Stop `adbuddy serve` (Ctrl+C). `adbuddy connect <ip:port>` does not run while serve runs.
 2. On the phone, open **Wireless debugging** and read the IP address and port on its main screen.

@@ -336,7 +336,7 @@ Códigos de salida:
 "err.serve.adb_not_configured" = "el adb de ADBuddy no está instalado"
 "err.serve.adb_not_configured.fix" = "Ejecuta `adbuddy setup` (o pasa --adb <ruta de un adb 37 o posterior>)."
 "err.serve.workspace_failed.fix" = "Pasa --workspace con una ruta absoluta."
-"err.serve.device_not_found" = "el móvil no apareció, y su dirección guardada no funcionó (%[1]s: %[2]s)"
+"err.serve.device_not_found" = "el móvil no apareció, y no funcionó ninguna de sus direcciones guardadas (probadas: %[1]s; último error visto: %[2]s)"
 "err.serve.device_not_found.fix" = "El puerto cambia cada vez que se activa la depuración inalámbrica: %[3]s"
 "err.serve.device_not_found_2" = "ningún móvil en estado `device` en el puerto %[1]s del servidor de adb"
 "err.serve.device_not_found_2.fix" = "Activa la depuración inalámbrica en el móvil y mantenlo en la misma Wi-Fi que este PC; si nunca se emparejó, ejecuta `adbuddy setup`; en otra red (p. ej. Tailscale), ejecuta `adbuddy connect <ip:puerto>`."

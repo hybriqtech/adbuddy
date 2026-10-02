@@ -22,7 +22,7 @@ import (
 var (
 	watchEvery   = 10 * time.Second // between two looks at `adb devices`
 	watchMisses  = 2                // looks in a row without the phone before trying other addresses
-	watchTryWait = 8 * time.Second  // bounds each `adb connect` of a candidate
+	watchTryWait = 8 * time.Second  // bounds each look at `adb devices` and each `adb connect` of a candidate
 )
 
 // candidateAddrs are the addresses worth trying to reach the phone at, in
@@ -120,9 +120,12 @@ func (w *watcher) hostRunner() adb.Runner {
 	return r
 }
 
-// step is one look at the connection.
+// step is one look at the connection. A hung `adb devices` is cut at
+// tryWait: otherwise the watcher would stop for good inside one step.
 func (w *watcher) step(ctx context.Context) {
-	online, err := w.hostRunner().Online(ctx)
+	octx, cancel := context.WithTimeout(ctx, w.tryWait)
+	online, err := w.hostRunner().Online(octx)
+	cancel()
 	if err != nil || ctx.Err() != nil {
 		return // adb itself failing says nothing about the phone
 	}
