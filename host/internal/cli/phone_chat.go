@@ -33,10 +33,20 @@ type storedAttachment struct {
 	Path string
 }
 
-// attachmentRegistry knows the attachments that exist (task 8 fills it).
+// maxRegistered is how many attachments the registry keeps, the oldest
+// forgotten first (V22): the history refers to at most keptChat messages of
+// maxChatAttachments each, and as many again may wait for their message
+// (uploaded or captured and not sent yet, or sent by the agent while the app
+// is away). A forgotten one answers not_found to file.get and chat.send; its
+// file stays on disk.
+const maxRegistered = 2 * keptChat * maxChatAttachments
+
+// attachmentRegistry knows the attachments that exist (task 8 fills it), up
+// to maxRegistered.
 type attachmentRegistry struct {
-	mu sync.Mutex
-	m  map[string]storedAttachment
+	mu    sync.Mutex
+	m     map[string]storedAttachment
+	order []string // the ids in m, oldest first
 }
 
 func (r *attachmentRegistry) put(a bridge.Attachment, path string) {
@@ -45,7 +55,14 @@ func (r *attachmentRegistry) put(a bridge.Attachment, path string) {
 	if r.m == nil {
 		r.m = map[string]storedAttachment{}
 	}
+	if _, ok := r.m[a.ID]; !ok {
+		r.order = append(r.order, a.ID)
+	}
 	r.m[a.ID] = storedAttachment{Attachment: a, Path: path}
+	for len(r.order) > maxRegistered {
+		delete(r.m, r.order[0])
+		r.order = r.order[1:]
+	}
 }
 
 func (r *attachmentRegistry) get(id string) (storedAttachment, bool) {
