@@ -247,3 +247,27 @@ tcp6       0      0 [::]:5555               [::]:*                  LISTEN      
 ```
 
 Hallazgo: en el emulador, adbd escucha en 5555 **sin** modo tcpip (`service.adb.tcp.port` vacío): es el transporte del propio emulador (el puerto 5601 del PC se reenvía al 5555 del invitado). La nota de la regla de decisión "sin modo tcpip nada escucha en 5555" no vale en el emulador: `listening before the cut` será `true` también sin tcpip.
+
+### S3, R1 (paso 5): corte desde el shell con restauración programada — no vuelve
+
+```
+$ guard: emulator-5600	device;
+$ (20:40:34) EMU; "$ADB" -s "$S" shell 'setsid sh -c "sleep 20; settings put global adb_enabled 1" </dev/null >/dev/null 2>&1 & sleep 1; settings put global adb_enabled 0'
+rc=255   (la orden pierde su adbd; 20:40:35)
+registro 120 s (cambios de estado):
+20:40:32 device
+20:40:35 gone
+20:40:36 offline
+last: 20:42:41 offline
+```
+
+Sale de `device` en ~1-2 s (gone 20:40:35, offline 20:40:36) y no vuelve en 2 min. `adb -s emulator-5600 reconnect` (20:42:49, `reconnecting emulator-5600 [offline]`, rc 0), registro 60 s:
+
+```
+20:42:47 offline
+20:42:49 gone
+20:42:51 offline
+last: 20:43:51 offline
+```
+
+Tampoco vuelve con `reconnect`. Según el paso 5, se hace aquí la segunda mitad del paso 8 (S6 y S7). Si la restauración programada (`sleep 20; settings put global adb_enabled 1`) llegó a correr se verá en S7 por el valor de `adb_enabled` al arrancar.
