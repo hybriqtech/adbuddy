@@ -176,17 +176,22 @@ func (c *Controller) Enable(ctx context.Context) (State, error) {
 // adb fails the mode stays on (and says so) and is tried again. With no
 // expiry saved (off as far as the host knows) it first reads the port:
 // `adb usb` would restart adbd, and drop the phone's connection, for nothing.
-// A port that reads 5555, or cannot be read, is closed all the same.
+// A port that reads open (5555 or any other), or cannot be read, is closed all the same.
 func (c *Controller) Disable(ctx context.Context) (State, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.st.Until().IsZero() {
-		if port, err := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); err == nil && port != Port {
+		if port, err := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); err == nil && portClosed(port) {
 			return State{}, nil
 		}
 	}
 	return c.disable(ctx)
 }
+
+// portClosed says whether service.adb.tcp.port reads as no network port (empty
+// or 0, the criterion of device.EnsureNoTCPPort, spec 3.3): any other value,
+// 5555 or not, is open and `adb usb` closes it.
+func portClosed(port string) bool { return port == "" || port == "0" }
 
 // disable runs `adb usb` and clears the expiry. When clearing failed after
 // `adb usb` closed the port, the next call for the same expiry skips `adb usb`
@@ -196,7 +201,7 @@ func (c *Controller) Disable(ctx context.Context) (State, error) {
 func (c *Controller) disable(ctx context.Context) (State, error) {
 	until := c.st.Until()
 	if !c.closedFor.IsZero() && until.Equal(c.closedFor) {
-		if port, err := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); err != nil || port == Port {
+		if port, err := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); err != nil || !portClosed(port) {
 			c.closedFor = time.Time{}
 		}
 	}

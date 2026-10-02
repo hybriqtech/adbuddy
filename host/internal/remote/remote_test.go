@@ -464,7 +464,8 @@ func TestDisableWithoutTheModeLooksAtThePortFirst(t *testing.T) {
 		want      string
 	}{
 		{"closed", "", false, "adb " + getprop},
-		{"another port", "37123", false, "adb " + getprop},
+		{"zero", "0", false, "adb " + getprop},
+		{"another port", "37123", false, "adb " + getprop + "|adb usb|save zero"},
 		{"open", "5555", false, "adb " + getprop + "|adb usb|save zero"},
 		{"unreadable", "", true, "adb " + getprop + "|adb usb|save zero"},
 	} {
@@ -568,7 +569,7 @@ func TestRetryAfterAFailedSaveLooksAtThePortBeforeSkippingUsb(t *testing.T) {
 	}{
 		{"closed", "", false, "adb " + getprop + "|save zero"},
 		{"zero", "0", false, "adb " + getprop + "|save zero"},
-		{"another port", "37123", false, "adb " + getprop + "|save zero"},
+		{"another port", "37123", false, "adb " + getprop + "|adb usb|save zero"},
 		{"reopened", "5555", false, "adb " + getprop + "|adb usb|save zero"},
 		{"unreadable", "", true, "adb " + getprop + "|adb usb|save zero"},
 	} {
