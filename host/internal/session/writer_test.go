@@ -105,8 +105,8 @@ func TestTypingDoesNotWaitForAStuckTerminal(t *testing.T) {
 	r := newRig(t)
 	r.m.Start("codex", false)
 	ty := r.m.NewTyper()
-	start := time.Now()
 	r.stuck(t, 0, ty, "a")
+	start := time.Now() // after the setup: only the typing is timed
 	for i := 0; i < 5; i++ {
 		if err := ty.Input([]byte("b")); !errors.Is(err, ErrBusy) {
 			t.Fatalf("Input into a full queue: %v", err)
