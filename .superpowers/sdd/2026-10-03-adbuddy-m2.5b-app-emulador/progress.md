@@ -210,3 +210,40 @@ Parada 19:24:49 (`scripts/emulator.sh stop`, rc 0). Tras el stop (19:24:55): nin
 Lectura: el aborto no depende del backend gráfico del host. Con la GPU real (NVIDIA, OpenGL 4.5 y Vulkan 1.4) el traductor de gfxstream tampoco anuncia `hasReadColorBufferDma`, y el `mapper.ranchu.so` de la imagen android-37.0 google_apis rev 6 lo exige en `readFromHost` cuando RegionSampling bloquea un buffer para la CPU. Es la combinación imagen rev 6 + emulador 37.2.12, no la GPU.
 
 BLOQUEADO: la imagen android-37.0 google_apis reinicia el sistema (surfaceflinger) con swiftshader_indirect, swangle_indirect y host; la app no puede correr en ella. Según el ruling, no se prueban otras imágenes ni GPUs (el plan B, imagen android-34, lo despacha el supervisor). No se hicieron S2-S7 ni se creó el test temporal; temporales borrados.
+
+## Spike (Tarea 1), cuarto intento: imagen android-34 google_apis (2026-10-02, implementador opus)
+
+Base: rama en 9f7a58a (contiene 67d6e1e de puffin: `scripts/emulator.sh` lee ADBUDDY_EMU_IMAGE y ADBUDDY_EMU_STABLE_SECS). Emulador 37.2.12; imagen `system-images;android-34;google_apis;x86_64` rev 14 (ya instalada; no se instaló nada); AVD nuevo `adbuddy-dev34` (lo creó el script con avdmanager, pixel_6); emulator-5600, servidor adb 5060, GPU por defecto del script (swiftshader_indirect).
+Variables en todas las órdenes: `JAVA_HOME` al JDK 17, `ADBUDDY_EMU_IMAGE='system-images;android-34;google_apis;x86_64' ADBUDDY_EMU_AVD=adbuddy-dev34 ADBUDDY_EMU_PORT=5600 ADBUDDY_EMU_ADB_PORT=5060 ADBUDDY_EMU_STABLE_SECS=120`, `ANDROID_SERIAL=emulator-5600 ANDROID_ADB_SERVER_PORT=5060 ADB_MDNS=0 ADB_MDNS_AUTO_CONNECT=0`; toda orden con `-s emulator-5600`. Antes de cada paso, `adb -P 5060 devices` comprobado: solo `emulator-5600` (se anota como `guard`).
+Condiciones: CI-LIBRE imprimía `2` y el emulador de la CI (`-avd adbuddy-ci-api37 -port 5590`, con un `run.sh` del oráculo en marcha) estaba encendido: coexistencia autorizada por el supervisor, sin tocarlo. RAM libre 15.19 GB al comprobarla; al arrancar el vigilante de RAM (cada 5 s; por debajo de 6 GB, `adb -P 5060 -s emulator-5600 emu kill`) ya era 11.55 GB (la carga de la CI subió entre medias) — desviación menor sobre el umbral de 12 GB, anotada; el mínimo durante el arranque fue 6.46 GB (20:37:12) y a las 20:39:54 había 8.14 GB libres (dos qemu de 3.0 y 3.6 GB).
+
+### S1 (paso 2): el sistema aguanta — SIRVE
+
+`bash scripts/emulator.sh start` 20:36:45 → rc 0 a las 20:39:44 (incluye la creación del AVD y el vigilante de estabilidad de 120 s del script, que pasó: exit 0 e imprimió el env). Medida propia en paralelo (dentro del emulador, desde `sys.boot_completed=1`):
+
+```
+boot_completed 20:37:40
+t5 20:37:45 system_server=567 surfaceflinger=430 crash_sf=0
+t120 20:39:40 system_server 567 -> 567; surfaceflinger 430 -> 430; crash_sf=0
+release=14 sdk=34 hw=ranchu egl=emulation fp=google/sdk_gphone64_x86_64/emu64xa:14/UE1A.230829.050/12077443:userdebug/dev-keys
+```
+
+Los dos pid no cambian y el buffer `crash` está vacío (`logcat -d -b crash | wc -l` = 0 a los ~2 min). Sirve.
+
+### S2 (paso 3): línea base
+
+```
+$ guard: emulator-5600	device;
+$ EMU; "$ADB" -s "$S" shell 'for k in adb_enabled adb_wifi_enabled; do echo "$k=$(settings get global $k)"; done; getprop init.svc.adbd; getprop service.adb.tcp.port; getprop persist.adb.tcp.port; netstat -ltn 2>/dev/null | grep -E ":5555 " || echo "nada en 5555"'
+adb_enabled=1
+adb_wifi_enabled=0
+running
+(vacío)
+(vacío)
+tcp6       0      0 [::]:5555               [::]:*                  LISTEN
+$ ... shell 'su 0 netstat -ltnp | grep 5555; getprop | grep -iE "adb"'
+tcp6       0      0 [::]:5555               [::]:*                  LISTEN      444/adbd
+[persist.sys.usb.config]: [adb]  [sys.usb.config]: [adb]  [sys.usb.state]: [adb]  [ro.adb.secure]: [0]
+```
+
+Hallazgo: en el emulador, adbd escucha en 5555 **sin** modo tcpip (`service.adb.tcp.port` vacío): es el transporte del propio emulador (el puerto 5601 del PC se reenvía al 5555 del invitado). La nota de la regla de decisión "sin modo tcpip nada escucha en 5555" no vale en el emulador: `listening before the cut` será `true` también sin tcpip.
