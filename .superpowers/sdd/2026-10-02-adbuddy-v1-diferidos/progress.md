@@ -37,3 +37,6 @@ Plan reescrito con los hallazgos de la revisión opus del plan y las órdenes de
 - T3 despachada (implementador opus ac9a016bfeb2cff63, BASE ffdd4ff).
 - T3 ronda 0: 717e83d (V04), ca34d84 (V05); revision opus ✅✅ con 2 Important. Ruling: arreglar ambos en T3 (hook no procesado => held; Edit/Write a .claude/.git/.mcp.json => terminal) — cuesta que esas ediciones se aprueben siempre en terminal. Aplazados: bajar held al ver Request interrupted; elicitation_dialog; TOCTOU preexistente phone_chat.go:265. Ronda 1 enviada.
 - Task 3: complete (717e83d, ca34d84, ade4c86, e814735; re-revision sin hallazgos). Sin textos nuevos para tern en T3.
+- T4a (V24) despachada (implementador opus affa7fd1f622da366, BASE bceb578). T4b (V25 PTY Job object, Sonnet) despues.
+- T4a (V24): d1fe7df; revision opus ✅✅ sin Critical/Important; arreglo de comentario en curso. Validacion manual pendiente: usuario con .claude como junction y transcript_path ya resuelto (falla cerrado, igual que antes). Para el PR: cambia API ValidTranscript->Transcript, NewTailer lo recibe.
+- Task 4a: complete (d1fe7df, 9cccd65).
