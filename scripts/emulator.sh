@@ -4,8 +4,15 @@
 # own adb server (port 5039 by default), so it never touches the one a real
 # phone is on. The AVD, the emulator port and the adb server port can be
 # overridden with ADBUDDY_EMU_AVD, ADBUDDY_EMU_PORT and ADBUDDY_EMU_ADB_PORT
-# (the CI job does, to coexist with an emulator started by hand).
+# (the CI job does, to coexist with an emulator started by hand). The emulator's
+# GPU mode can be set with ADBUDDY_EMU_GPU (swiftshader_indirect by default).
 set -euo pipefail
+
+# The adb server of the tests must never auto-connect a real phone: a phone
+# with Wireless debugging on is found over mDNS by any adb server, and every
+# adb without -s (or Gradle without ANDROID_SERIAL) would then reach it.
+export ADB_MDNS=0
+export ADB_MDNS_AUTO_CONNECT=0
 
 AVD="${ADBUDDY_EMU_AVD:-adbuddy-api37}"
 IMAGE="system-images;android-37.0;google_apis;x86_64"
@@ -34,6 +41,8 @@ BAT=""
 ADB="$SDK/platform-tools/adb$EXE"
 
 print_env() {
+  echo "export ADB_MDNS=0"
+  echo "export ADB_MDNS_AUTO_CONNECT=0"
   echo "export ANDROID_ADB_SERVER_PORT=$ANDROID_ADB_SERVER_PORT"
   echo "export ADBUDDY_MKSH_SERIAL=$SERIAL"
   echo "export ADBUDDY_MKSH_ADB='$ADB'"
@@ -42,6 +51,8 @@ print_env() {
 }
 
 start() {
+  # An old server of our port may have been started with mDNS on.
+  "$ADB" kill-server >/dev/null 2>&1 || true
   if [[ ! -x "$SDK/emulator/emulator$EXE" || ! -d "$SDK/system-images/android-37.0/google_apis/x86_64" ]]; then
     echo "missing SDK packages; install them with:" >&2
     echo "  sdkmanager emulator '$IMAGE'" >&2
@@ -56,13 +67,26 @@ start() {
     # 2047 MB on Windows: its emulator caps it there and exits on 4096.
     args=(-avd "$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim -no-snapshot)
     if [[ -z "$EXE" ]]; then args+=(-partition-size 4096); else args+=(-partition-size 2047); fi
-    args+=(-gpu swiftshader_indirect)
+    args+=(-gpu "${ADBUDDY_EMU_GPU:-swiftshader_indirect}")
     nohup "$SDK/emulator/emulator$EXE" "${args[@]}" >"${TMPDIR:-/tmp}/adbuddy-emulator.log" 2>&1 &
   fi
   if ! MSYS_NO_PATHCONV=1 timeout 600 "$ADB" -s "$SERIAL" wait-for-device shell \
     'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done' </dev/null; then
     echo "the emulator did not finish booting in 10 minutes; its log: ${TMPDIR:-/tmp}/adbuddy-emulator.log" >&2
     exit 124
+  fi
+  # Safety net: this adb server must see the emulator and nothing else.
+  local line other=""
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == "List of devices"* || "$line" == "*"* ]] && continue
+    line=${line%%[[:space:]]*}
+    [[ "$line" != "$SERIAL" ]] && other="$line"
+  done < <("$ADB" devices | tr -d '\r')
+  if [[ -n "$other" ]]; then
+    "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
+    "$ADB" kill-server >/dev/null 2>&1 || true
+    echo "the emulator's adb server sees $other, which is not the emulator: refusing to continue" >&2
+    exit 3
   fi
   print_env
 }
