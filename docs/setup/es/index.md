@@ -72,6 +72,44 @@ El código QR solo funciona en la misma red. Por Tailscale, o en una Wi-Fi que b
 - **`protocol fault` al emparejar con código:** el cuadro se cerró antes de terminar el emparejamiento. También se cierra si cambias a otra app para copiar el código. Mantenlo abierto y escribe el código desde el PC (o desde otro dispositivo), o ábrelo de nuevo para obtener un código nuevo.
 - **Windows pregunta por el cortafuegos:** permite adb (la herramienta de depuración de Android, que ADBuddy descarga) en redes privadas; solo habla con dispositivos de tu Wi-Fi.
 
+## Qué pasa después
+
+Tras "Paired", `adbuddy setup` hace el resto por sí solo, en este orden. No tienes que escribir nada salvo que te lo pida.
+
+1. **Conecta.** Se conecta al móvil y comprueba que es el que acabas de emparejar. Si el móvil no aparece solo, pide la dirección de la pantalla de Depuración inalámbrica. Si hay en la red un móvil emparejado antes, setup lo encuentra ("Found it: already paired.") y se salta el emparejamiento.
+2. **Lee el perfil del móvil.** Imprime "Phone: <modelo>, Android <versión>." El perfil pasa después a las instrucciones del agente.
+3. **Instala la app de ADBuddy en el móvil.** Setup instala la app solo si el móvil aún no la tiene, o si pasas `--apk <archivo>`. Solo la descarga de una release pública cuando exista una, y solo si el host conoce el certificado de firma del proyecto. Hoy no hay release pública, así que setup dice que se salta la app y sigue. Para instalar la app ahora, compila el APK ([Instalación](../../install.md#build-from-source)) y ejecuta:
+
+   ```sh
+   adbuddy setup --apk <file>
+   ```
+
+   Ese APK no está firmado con la clave del proyecto, así que setup confía en ese archivo exacto como tu build de desarrollo y lo dice. Tras instalar, setup comprueba el certificado de firma de la app y su versión. Si la comprobación falla, se salta la app y sigue. Sin la app, el host funciona igual, pero confirmas en el terminal y no hay chat en el móvil.
+4. **Pide tu consentimiento en el móvil.** La app de ADBuddy se abre en el móvil con "Configurar ADBuddy con <nombre del PC>". Dice que, si aceptas, el PC va a:
+   - dar a ADBuddy el permiso para cambiar ajustes seguros, que usa para cortar y reactivar desde el móvil el acceso del PC por adb;
+   - quitar a ADBuddy de la optimización de batería, para que el canal con el PC siga abierto;
+   - activar el servicio de accesibilidad de ADBuddy, sin quitar ninguno de los que ya uses.
+
+   Toca **Aceptar** o **Ahora no**. Setup espera hasta 5 minutos. Si tocas **Ahora no** o no respondes, setup sigue sin la app y puedes volver a ejecutar `adbuddy setup` más tarde. Cuando aceptas, setup imprime "The ADBuddy app is ready".
+5. **Elige el agente.** Busca Claude Code, Codex, Gemini CLI y OpenCode en tu `PATH`. Si tienes varios, pregunta cuál usar. `--agent <nombre>` y `--yes` se saltan la pregunta. Si no hay ninguno instalado, dice cómo instalar uno. ADBuddy no instala agentes.
+6. **Crea el entorno.** El entorno es la carpeta donde trabaja el agente: `~/ADBuddy/<nombre del móvil>/`. Contiene las instrucciones y las skills del agente, con el perfil del móvil, y el shim (un sustituto de `adb` que clasifica cada comando por riesgo y lo apunta en el diario). Setup también guarda tus elecciones. Después imprime una línea que empieza por "Ready:".
+
+Puedes volver a ejecutar setup sin miedo: se salta lo que ya está hecho. Para `adbuddy serve` antes de volver a ejecutarlo.
+
+## Siguiente: arranca ADBuddy
+
+1. En un terminal, arranca el host y déjalo abierto:
+
+   ```sh
+   adbuddy serve
+   ```
+
+   Por defecto también arranca el agente. Abre la app de ADBuddy en el móvil para chatear con él, o ejecuta `adbuddy attach` en un segundo terminal.
+
+2. Si prefieres ejecutar el agente en un terminal propio, arranca el host con `adbuddy serve --no-agent` y ejecuta `adbuddy run` en otro terminal. Pierdes el chat en el móvil.
+
+[Usar ADBuddy](../../usage.md) tiene los detalles. Si algo falla, mira [Resolución de problemas](../../troubleshooting.md). Para instalar o actualizar el host, mira [Instalación](../../install.md).
+
 ## Qué hace ADBuddy con este acceso
 
 Cada comando que envía el agente pasa por ADBuddy: se clasifica por riesgo, se apunta en un diario con su forma de deshacerlo, y lo irreversible espera a que lo confirmes. Nunca se pide ni se guarda el PIN del móvil.

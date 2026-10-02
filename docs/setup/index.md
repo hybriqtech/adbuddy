@@ -72,6 +72,44 @@ The QR code only works on the same network. Over Tailscale, or on a Wi-Fi that b
 - **`protocol fault` when pairing with a code**: the popup closed before pairing finished. It also closes when you switch to another app to copy the code. Keep it open, type the code from the PC (or from another device), or open it again for a new code.
 - **Windows asks about the firewall**: allow adb (Android's debugging tool, which ADBuddy downloads) on private networks; it only talks to devices on your Wi-Fi.
 
+## What happens next
+
+After "Paired", `adbuddy setup` does the rest by itself, in this order. You do not need to type anything unless it asks.
+
+1. **Connects.** It connects to the phone and checks that it is the phone you just paired. If the phone does not show up by itself, it asks for the address on the Wireless debugging screen. If a phone paired before is on the network, setup finds it ("Found it: already paired.") and skips pairing.
+2. **Reads the phone's profile.** It prints "Phone: <model>, Android <version>." The profile goes into the agent's instructions later.
+3. **Installs the ADBuddy app on the phone.** Setup installs the app only if the phone does not have it yet, or if you pass `--apk <file>`. Setup downloads it from a public release only once there is one, and only if the host knows the project's signing certificate. Today there is no public release, so setup says it skips the app and goes on. To install the app now, build the APK ([Install](../install.md#build-from-source)) and run:
+
+   ```sh
+   adbuddy setup --apk <file>
+   ```
+
+   That APK is not signed with the project's key, so setup trusts that exact file as your development build and says so. After installing, setup checks the app's signing certificate and its version. If the check fails, it skips the app and goes on. Without the app the host still works, but you confirm in the terminal and there is no chat on the phone.
+4. **Asks for your consent on the phone.** The ADBuddy app opens on the phone with "Set up ADBuddy with <PC name>". It says that, if you accept, the PC will:
+   - give ADBuddy the permission to change secure settings, used to cut and restore the PC's adb access from the phone;
+   - exempt ADBuddy from battery optimisation, so the channel with the PC stays open;
+   - turn on ADBuddy's accessibility service, keeping any other one you use.
+
+   Tap **Accept**, or **Not now**. Setup waits up to 5 minutes. If you tap **Not now** or do not answer, setup goes on without the app, and you can run `adbuddy setup` again later. After you accept, setup prints "The ADBuddy app is ready".
+5. **Picks the agent.** It looks for Claude Code, Codex, Gemini CLI and OpenCode in your `PATH`. If you have several, it asks which one to use. `--agent <name>` and `--yes` skip the question. If none is installed, it says how to install one. ADBuddy does not install agents.
+6. **Creates the environment.** The environment is the folder where the agent works: `~/ADBuddy/<phone name>/`. It holds the agent's instructions and skills, with the phone's profile, and the shim (a small stand-in for `adb` that ranks every command by risk and journals it). Setup also saves your choices. Then it prints a line that starts with "Ready:".
+
+Setup is safe to run again: it skips what is done. Stop `adbuddy serve` before you run it again.
+
+## Next: start ADBuddy
+
+1. In a terminal, start the host and keep it open:
+
+   ```sh
+   adbuddy serve
+   ```
+
+   By default it also starts the agent. Open the ADBuddy app on the phone to chat with it, or run `adbuddy attach` in a second terminal.
+
+2. If you prefer to run the agent in a terminal of your own, start the host with `adbuddy serve --no-agent` and run `adbuddy run` in another terminal. You lose the chat on the phone.
+
+[Use ADBuddy](../usage.md) has the details. If something fails, see [Troubleshooting](../troubleshooting.md). To install or update the host, see [Install](../install.md).
+
 ## What ADBuddy does with this access
 
 Every command the agent sends goes through ADBuddy: it is classified by risk, written to a journal with its undo, and anything irreversible waits for your confirmation. Your PIN is never asked for or stored.
