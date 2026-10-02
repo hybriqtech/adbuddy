@@ -71,7 +71,7 @@ func printNotifications(w io.Writer, n bridge.UINotifications) {
 			b.WriteString(" ongoing")
 		}
 		if x.Title == "" && x.Text == "" {
-			b.WriteString(" (no text: it is empty, or hidden because the app is protected)")
+			b.WriteString(" (no text: empty, or hidden: a protected app or a notification marked private)")
 		}
 		if x.Title != "" {
 			b.WriteString(" title=" + quoteScreen(x.Title))
