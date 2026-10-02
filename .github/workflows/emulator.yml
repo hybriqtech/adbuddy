@@ -1,4 +1,6 @@
 name: emulator
+# Runners come from repository variables (docs/ci-self-hosted.md); with none
+# set, GitHub-hosted runners are used.
 
 # Tests that need a real Android: the classifier's oracle (what the phone's
 # mksh does with each differential case) and the read-only examples of the
@@ -17,31 +19,46 @@ permissions:
 jobs:
   mksh:
     name: oracle against the emulator's mksh
-    runs-on: ubuntu-latest
+    # Fork pull requests never reach a self-hosted runner.
+    if: ${{ vars.CI_RUNNER_EMULATOR != '"none"' && (vars.CI_RUNNER_EMULATOR == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_EMULATOR || '"ubuntu-latest"') }}
     timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash -e {0}
     # On the runner avdmanager writes the AVD under $XDG_CONFIG_HOME/.android
     # whatever ANDROID_AVD_HOME says, and the emulator looks under
-    # ANDROID_AVD_HOME or $HOME/.android: point the emulator where it is.
-    env:
-      ANDROID_AVD_HOME: /home/runner/.config/.android/avd
+    # ANDROID_AVD_HOME or $HOME/.android: the step "Point the emulator at the
+    # AVD" makes the emulator look where avdmanager wrote it.
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: host/go.mod
+          cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: host/go.sum
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: "17"
+      - name: Point the emulator at the AVD (Linux runners)
+        if: runner.os == 'Linux'
+        run: '[ -z "$XDG_CONFIG_HOME" ] || echo "ANDROID_AVD_HOME=$XDG_CONFIG_HOME/.android/avd" >> "$GITHUB_ENV"'
       - name: Enable KVM
+        if: runner.os == 'Linux'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       # The image's SDK package is "android-37.0", as in android.yml.
+      # On Windows sdkmanager is sdkmanager.bat.
       - name: Install the emulator and the system image
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" emulator "system-images;android-37.0;google_apis;x86_64" > /dev/null
+        run: |
+          sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -e "$sm" ] || sm="$sm.bat"
+          yes | "$sm" emulator "system-images;android-37.0;google_apis;x86_64" > /dev/null
       - name: Start the emulator
         shell: bash # with pipefail: a failed start fails this step, not the next one
         run: scripts/emulator.sh start | sed "s/^export //; s/'//g" >> "$GITHUB_ENV"
@@ -58,7 +75,7 @@ jobs:
       # Evidence for a failed start or recording: why the emulator did not
       # boot. The emulator has its own adb server (scripts/emulator.sh).
       - name: Emulator diagnostics
-        if: failure()
+        if: failure() && runner.os == 'Linux'
         env:
           ANDROID_ADB_SERVER_PORT: "5039"
         run: |
