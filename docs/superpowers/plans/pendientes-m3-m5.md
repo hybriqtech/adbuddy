@@ -430,3 +430,13 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
   - `appops set … SYSTEM_ALERT_WINDOW allow` y `MANAGE_EXTERNAL_STORAGE allow` siguen 🟡 (decisión de producto: no capar al agente).
   - Siguen 🔴 simple (no especial): `cmd location …` y lo demás de `cmd` que no está arriba.
 - **Validación manual pendiente (nadie la ha corrido):** comprobar en Android 14+ que `appops set <pkg> PROJECT_MEDIA allow` sigue saltándose el diálogo de consentimiento de la captura de pantalla (Android 14 pide consentimiento por sesión de MediaProjection). Si ya no lo salta, el 🔴 especial sigue siendo correcto pero sobra; no cambiarlo sin esa prueba.
+
+### Área A4: tarjetas y confirmaciones (rama `fix/v1-confirm-hardening`)
+
+- **Resueltos:** A4-1 (`adb shell`/`exec-out` sin comando, opciones de `adb shell` desconocidas y `exec-in` son 🔴 especial; segunda barrera `classify.StdinDecides`: sin clave de sesión ni `AllowSession`), A4-2 (comando recortado: sin Permitir en la notificación ni de sesión; diálogo con todo y Permitir tras desplazar hasta el final; `␠×N` en el host), A4-3 (⚠ primero, detalle de la notificación a 3 líneas, especial sin Permitir en la notificación, palabras del agente en títulos y motivos a 80 caracteres), A4-4 (barra invertida doblada en `rawCommand`) y A4-5 (una respuesta que llega con la caducidad cuenta como caducada y retira su `allow_session`).
+- **Límites que quedan:**
+  - `StdinDecides` es una heurística por palabras que se equivoca hacia el sí. Un filtro que no está en su lista (`sed`, `awk`…) y escribe su stdin en un fichero (`sed s/a/b/ > /sdcard/x`) conserva la clave de sesión: es como `adb push` de un fichero local que cambió desde que se permitió (el mismo comando con otro contenido), no código.
+  - En los títulos y el detalle la barra invertida del agente no se dobla (pasan por `Printable`, que también enseña rutas de Windows en otros mensajes): la ambigüedad de A4-4 solo se quita en `rawCommand`, que es el texto completo.
+  - El aviso ⚠ de la app (`confirm_special`: «puede cortar la conexión o afectar a ADBuddy») no habla del stdin; el motivo concreto va en el detalle.
+  - Cuánto enseña de verdad una notificación expandida depende del fabricante: 3 líneas de detalle y 300 caracteres de comando pueden no caber en todos los móviles (sin validar).
+- **Validación manual pendiente (nadie la ha corrido en un móvil):** con una pregunta especial y con un comando de más de 300 caracteres, la notificación solo muestra Rechazar y Abrir; el diálogo no activa Permitir hasta llegar al final y dice cuántos caracteres oculta un comando de más de 20 000.
