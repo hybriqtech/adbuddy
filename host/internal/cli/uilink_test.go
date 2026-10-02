@@ -112,6 +112,49 @@ func TestUILinkAnswers(t *testing.T) {
 	}
 }
 
+// A request whose context is already done is never sent (V12): a click
+// sent and then reported "stopped" would have happened without the journal
+// knowing.
+func TestUILinkDoneContextSendsNothing(t *testing.T) {
+	u := newUILink("", &bytes.Buffer{})
+	srv := &fakeUIServer{current: true}
+	u.setServer(srv)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := u.Call(ctx, bridge.UIOpClick, json.RawMessage("{}")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+	srv.mu.Lock()
+	n := len(srv.sent)
+	srv.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d requests sent with a cancelled context", n)
+	}
+	// With no app, no app is still what it says, not the context.
+	u.setServer(nil)
+	if _, err := u.Call(ctx, bridge.UIOpClick, nil); err == nil {
+		t.Fatal("no error")
+	}
+}
+
+// ok:true without a result is a broken answer, not an empty result (V12).
+func TestUILinkOKWithoutResultIsAnError(t *testing.T) {
+	for _, tail := range []string{``, `,"result":null`} {
+		u := newUILink("", &bytes.Buffer{})
+		srv := &fakeUIServer{current: true}
+		u.setServer(srv)
+		ch := call(u, bridge.UIOpClick)
+		req := srv.sentNth(t, 1)
+		raw := json.RawMessage(`{"id":"` + req.ID + `","ok":true` + tail + `}`)
+		u.area().handlers[bridge.TypeUIResponse](bridge.Message{V: bridge.ProtocolVersion, Type: bridge.TypeUIResponse, Payload: raw})
+		r := <-ch
+		var ue *daemon.UIError
+		if !errors.As(r.err, &ue) || ue.Code != bridge.CodeFailed || r.res != nil {
+			t.Fatalf("answer %s: %s, %v", raw, r.res, r.err)
+		}
+	}
+}
+
 func TestUILinkWithoutAnApp(t *testing.T) {
 	u := newUILink("", &bytes.Buffer{})
 	if _, err := u.Call(context.Background(), bridge.UIOpDump, nil); !errors.Is(err, daemon.ErrNoApp) {
