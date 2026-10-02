@@ -120,8 +120,9 @@ func TestChatSendAsksAgainWhenItIsTyped(t *testing.T) {
 	r.typeAndWait(t, "a")
 	sendApp(t, r.c, bridge.TypeChatSend, "r_1", bridge.ChatSend{ID: "m_1", Text: "hello agent"})
 	// The reader checks agentBusy, queues the paste and waits for it (up to
-	// session.writeWait): the question comes while it waits.
-	time.Sleep(300 * time.Millisecond)
+	// session.writeWait): the question comes once it is queued, so that only
+	// the writer's own check can stop it.
+	waitUntil(t, "the paste in the writer's queue", func() bool { return r.m.Queued() == 1 })
 	r.l.adapter.mu.Lock()
 	r.l.adapter.attention = time.Now().Add(time.Minute)
 	r.l.adapter.mu.Unlock()
