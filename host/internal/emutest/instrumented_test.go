@@ -13,8 +13,8 @@ import (
 )
 
 // The app's instrumented tests run with `am instrument` through the
-// emulator's own adb server, never through Gradle's connected* tasks (M2.5b
-// spec §2.4): AGP's test engine reaches adb server 5037, where the user's
+// emulator's own adb server, never through Gradle's connected* tasks (plan
+// M2.5b, rulings de la Tarea 2): AGP's test engine reaches adb server 5037, where the user's
 // phone may be.
 const instrumentRunner = phoneapp.Package + ".test/androidx.test.runner.AndroidJUnitRunner"
 
@@ -90,6 +90,20 @@ func parseInstrument(out string) (tests int, classes, skipped []string, failed b
 	}
 	failed = failed || tests == 0 || failuresRe.MatchString(out)
 	return tests, classes, skipped, failed
+}
+
+// minInstrumentedTests is how many tests the app's APK has (the cut, skipped
+// here, included): fewer means a class was dropped from the run.
+const minInstrumentedTests = 16
+
+func enoughInstrumentedTests(n int) bool { return n >= minInstrumentedTests }
+
+func TestEnoughInstrumentedTests(t *testing.T) {
+	for n, want := range map[int]bool{0: false, 15: false, 16: true, 17: true} {
+		if got := enoughInstrumentedTests(n); got != want {
+			t.Errorf("%d tests: enough = %v, want %v", n, got, want)
+		}
+	}
 }
 
 func TestParseInstrument(t *testing.T) {
@@ -186,6 +200,9 @@ func TestInstrumentedSuite(t *testing.T) {
 	tests, classes, skipped, failed := parseInstrument(out)
 	if failed {
 		t.Fatalf("the instrumented tests failed (%d tests ran):\n%s", tests, out)
+	}
+	if !enoughInstrumentedTests(tests) {
+		t.Errorf("%d tests ran, want at least %d (the skipped cut included)", tests, minInstrumentedTests)
 	}
 	have := map[string]bool{}
 	for _, c := range classes {

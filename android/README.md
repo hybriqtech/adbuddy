@@ -29,8 +29,11 @@ Instrumented tests run only on an emulator, never on your own phone, through
 `am instrument` on the emulator's own adb server (`TestInstrumentedSuite` in
 `host/internal/emutest`). From the repository root:
 
+Use the android-34 image (install it with `sdkmanager "system-images;android-34;google_apis;x86_64"`): android-37 does not work for this, its surfaceflinger loops. `stop` needs the same `ADBUDDY_EMU_*` variables as `start`.
+
 ```sh
 (cd android && gradle :app:assembleDebug :app:assembleDebugAndroidTest)
+export ADBUDDY_EMU_IMAGE='system-images;android-34;google_apis;x86_64' ADBUDDY_EMU_AVD=adbuddy-dev34 ADBUDDY_EMU_STABLE_SECS=120
 eval "$(scripts/emulator.sh start)"   # the emulator, with an adb server of its own
 cd host && go test -count=1 -timeout 15m -run TestInstrumentedSuite ./internal/emutest
 cd .. && scripts/emulator.sh stop

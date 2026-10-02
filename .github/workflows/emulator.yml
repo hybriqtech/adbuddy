@@ -13,7 +13,7 @@ name: emulator
 # that already passed it, so main's tree is the one it validated.
 on:
   pull_request:
-    paths: ["host/internal/classify/**", "host/internal/workspace/skills/**", "host/internal/cli/skills_*_test.go", "host/internal/emutest/**", "host/internal/phoneapp/**", "host/internal/adb/**", "host/internal/bridge/**", "android/**", "scripts/emulator.sh", ".github/workflows/emulator.yml"]
+    paths: ["host/internal/classify/**", "host/internal/workspace/skills/**", "host/internal/cli/skills_*_test.go", "host/internal/emutest/**", "host/internal/phoneapp/**", "host/internal/adb/**", "host/internal/bridge/**", "host/internal/shq/**", "host/internal/safeio/**", "host/internal/journal/**", "host/internal/confirm/**", "host/internal/i18n/**", "host/go.mod", "host/go.sum", "android/**", "scripts/emulator.sh", ".github/workflows/emulator.yml"]
   workflow_dispatch:
 
 permissions:
@@ -126,10 +126,13 @@ jobs:
           ADBUDDY_EMU_PORT: "5590"
           ADBUDDY_EMU_ADB_PORT: "5049"
           ADBUDDY_EMU_STABLE_SECS: "120"
+          ADBUDDY_EMULATOR_CUT: ""
         run: scripts/emulator.sh start | sed "s/^export //; s/'//g" >> "$GITHUB_ENV"
       - name: The host against the app on the emulator
         working-directory: host
         # Without the variables the tests would skip and the step would pass.
+        env:
+          ADBUDDY_EMULATOR_CUT: ""
         run: test -n "$ADBUDDY_EMULATOR_SERIAL" && test -n "$ADBUDDY_EMULATOR_ADB" && go test -timeout 20m -count=1 -v ./internal/emutest
       # Evidence for a failed start or recording: why the emulator did not
       # boot. The emulator has its own adb server (scripts/emulator.sh).

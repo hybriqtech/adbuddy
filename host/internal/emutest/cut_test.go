@@ -13,8 +13,7 @@ import (
 
 // The app's instrumented half of the cut (android/app/src/androidTest/…/CutAccessOnEmulatorTest.kt).
 const (
-	cutTest   = phoneapp.Package + ".CutAccessOnEmulatorTest#cutThenReactivate"
-	cutRunner = instrumentRunner
+	cutTest = phoneapp.Package + ".CutAccessOnEmulatorTest#cutThenReactivate"
 	// How long the app waits between Cut access and Reactivar. The emulator's
 	// adb comes back by itself about 2 s after Reactivar (M2.5b plan, Task 1).
 	reactivateAfter = 15 * time.Second
@@ -133,7 +132,7 @@ func (e *emu) cutCycle(t *testing.T, tcpip bool) {
 	ctx, cancel := context.WithTimeout(e.ctx, time.Minute)
 	defer cancel()
 	out, errOut, code, err := e.adb.Output(ctx, "shell", "am instrument -r -e class "+cutTest+" -e adbuddyCut 1 -e reactivateAfterMs "+
-		strconv.FormatInt(reactivateAfter.Milliseconds(), 10)+" "+cutRunner)
+		strconv.FormatInt(reactivateAfter.Milliseconds(), 10)+" "+instrumentRunner)
 	// The cut: the emulator's adb goes away.
 	if s, ok := e.waitState(func(s string) bool { return s != "device" }, 30*time.Second); !ok {
 		t.Fatalf("the emulator is still %q 30 s after Cut access; am instrument: exit %d, %v: %s %s\nlogcat:\n%s",

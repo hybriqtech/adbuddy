@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,6 +33,40 @@ type emu struct {
 	server adb.Runner // without Serial: `adb devices`
 }
 
+// checkEmuEnv validates the serial and the adb server port of the
+// environment and returns the port: the serial must be an emulator, and the
+// port that of the emulator's own adb server, never adb's default 5037 nor
+// 5038 (the one ADBuddy's own server uses), where a phone may be.
+func checkEmuEnv(serial, portEnv string) (int, error) {
+	if !strings.HasPrefix(serial, "emulator-") {
+		return 0, fmt.Errorf("ADBUDDY_EMULATOR_SERIAL=%q is not an emulator: these tests never run on a real phone", serial)
+	}
+	port, err := strconv.Atoi(portEnv)
+	if err != nil || port <= 0 || port == 5037 || port == 5038 {
+		return 0, fmt.Errorf("ANDROID_ADB_SERVER_PORT=%q: the emulator has an adb server of its own, never adb's default 5037 nor ADBuddy's 5038 where a phone may be (scripts/emulator.sh start prints its port)", portEnv)
+	}
+	return port, nil
+}
+
+func TestCheckEmuEnv(t *testing.T) {
+	for _, c := range []struct {
+		serial, port string
+		ok           bool
+	}{
+		{"emulator-5590", "5049", true},
+		{"emulator-5590", "5037", false},
+		{"emulator-5590", "5038", false},
+		{"emulator-5590", "", false},
+		{"emulator-5590", "0", false},
+		{"emulator-5590", "x", false},
+		{"R5CT123", "5049", false},
+	} {
+		if _, err := checkEmuEnv(c.serial, c.port); (err == nil) != c.ok {
+			t.Errorf("checkEmuEnv(%q, %q) = %v, want ok=%v", c.serial, c.port, err, c.ok)
+		}
+	}
+}
+
 // newEmu returns the emulator, or skips the test without one. It refuses a
 // serial that is not an emulator and a missing adb server port: nothing here
 // runs on a real phone or on the adb server a phone is on.
@@ -41,13 +76,14 @@ func newEmu(t *testing.T) *emu {
 	if serial == "" || path == "" {
 		t.Skip("set ADBUDDY_EMULATOR_SERIAL and ADBUDDY_EMULATOR_ADB (scripts/emulator.sh start prints them)")
 	}
-	if !strings.HasPrefix(serial, "emulator-") {
-		t.Fatalf("ADBUDDY_EMULATOR_SERIAL=%q is not an emulator: these tests never run on a real phone", serial)
+	port, err := checkEmuEnv(serial, os.Getenv("ANDROID_ADB_SERVER_PORT"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	port, err := strconv.Atoi(os.Getenv("ANDROID_ADB_SERVER_PORT"))
-	if err != nil || port <= 0 || port == 5037 {
-		t.Fatalf("ANDROID_ADB_SERVER_PORT=%q: the emulator has an adb server of its own, never adb's default 5037 where a phone may be (scripts/emulator.sh start prints its port)", os.Getenv("ANDROID_ADB_SERVER_PORT"))
-	}
+	// The emulator's adb server never auto-connects a phone over mDNS (adb.Runner
+	// passes the environment on).
+	t.Setenv("ADB_MDNS", "0")
+	t.Setenv("ADB_MDNS_AUTO_CONNECT", "0")
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 	t.Cleanup(cancel)
 	e := &emu{
@@ -165,9 +201,6 @@ func (e *emu) installTests(t *testing.T) {
 	e.uninstallAtCleanup(t, phoneapp.Package+".test")
 }
 
-// uninstallAtCleanup leaves the emulator as the test found it: the CI keeps
-// its AVD between jobs. Only while the emulator is online (a test that left
-// its adb cut has nothing to clean through it).
 // TestWhatIsInstalledIsUninstalled checks uninstallAtCleanup: once a test
 // that installed the app ends, the app is gone.
 func TestWhatIsInstalledIsUninstalled(t *testing.T) {
@@ -180,6 +213,9 @@ func TestWhatIsInstalledIsUninstalled(t *testing.T) {
 	}
 }
 
+// uninstallAtCleanup leaves the emulator as the test found it: the CI keeps
+// its AVD between jobs. Only while the emulator is online (a test that left
+// its adb cut has nothing to clean through it).
 func (e *emu) uninstallAtCleanup(t *testing.T, pkg string) {
 	t.Cleanup(func() {
 		// e.ctx comes from t.Context(), which is canceled before cleanups run.

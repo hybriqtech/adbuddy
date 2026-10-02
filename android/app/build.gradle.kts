@@ -89,7 +89,7 @@ tasks.withType<Test>().configureEach {
     systemProperty("roborazzi.test.compare", (screens == "compare").toString())
 }
 
-// The instrumented tests never run through Gradle's connected* tasks (M2.5b spec §2.4): AGP 9.4.1's test engine (UTP)
+// The instrumented tests never run through Gradle's connected* tasks (plan M2.5b, rulings de la Tarea 2): AGP 9.4.1's test engine (UTP)
 // runs `adb` in a Gradle worker with an empty environment on Windows, so it always talks to the default adb server
 // (5037), which on a developer PC is the one that holds the user's phone, and it fails silently (BUILD SUCCESSFUL, 0
 // tests) on an emulator behind another server. They run with `am instrument` against one emulator and its own adb

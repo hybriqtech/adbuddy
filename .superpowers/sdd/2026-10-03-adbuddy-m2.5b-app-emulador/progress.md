@@ -514,7 +514,7 @@ Una línea por tarea (veredictos de revisión: los que anote el controlador; no 
 - T6 (documentación): este commit; el plan de M2 queda con 10 textos "Automatizada en M2.5b" o "Sigue manual".
 
 Validaciones manuales pendientes de este plan, tal como quedaron:
-1. La primera ejecución del job `emulator` con los tests de la app en el runner Windows: duración total y que los pasos nuevos pasan como en el ensayo local.
+1. La primera ejecución del job `emulator` con los tests de la app en el runner Windows: duración total y que los pasos nuevos pasan (no hubo ensayo local: se validaron con actionlint y la primera ejecución en el runner es la verificación).
 2. El job `emulator` en un runner Linux: `setup-gradle`, la guarda de `ANDROID_SERIAL` y `emutest` no se han ejecutado en Linux.
 3. Las de M2 que siguen manuales: 4, 5, 7, 8, 9; la 2, 3 y 10 en Android 17 (y la 2 en Android 11-13); la 6 con la depuración inalámbrica real y el puerto tcpip en el Pixel. Lista completa en `pendientes-m3-m5.md`, "Validaciones que solo se pueden hacer en el Pixel".
 
