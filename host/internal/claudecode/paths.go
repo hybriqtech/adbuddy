@@ -3,6 +3,7 @@ package claudecode
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,47 +32,71 @@ func Inside(dir, path string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
 }
 
+// Transcript is a transcript path checked by ValidTranscript, kept as
+// Claude Code's projects directory and the path under it: every open goes
+// through an os.Root on that directory, so no component under it can take the
+// reading out of it, even one that becomes a link after the check (V24).
+type Transcript struct {
+	dir string // <configDir>/projects; a link here is the user's (a moved .claude or projects/)
+	rel string // the path under dir: none of its components may be a link out of dir
+}
+
+// String is the path, for messages.
+func (t Transcript) String() string { return filepath.Join(t.dir, t.rel) }
+
 // ValidTranscript checks a transcript_path that came in a hook payload,
 // which a process that is not to be trusted can write (spec M4 §4.1): it must
-// be absolute, end in .jsonl, be a regular file (not a link) and lie, once
-// links are resolved, under <configDir>/projects. It returns the path to
-// read. The file may not exist yet: then its directory is checked instead.
-func ValidTranscript(path, configDir string) (string, error) {
+// be absolute, end in .jsonl, lie under <configDir>/projects and be a regular
+// file (not a link) reached with no link under that directory: a link or
+// junction strictly under projects/ is refused, wherever it points; one in
+// the path of projects/ itself is followed. The file may not exist yet, nor
+// projects/ (Claude Code makes it with its first write).
+func ValidTranscript(path, configDir string) (Transcript, error) {
 	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(path), ".jsonl") {
-		return "", errors.New("the transcript path is not an absolute .jsonl path")
-	}
-	root, err := resolveLoose(filepath.Join(configDir, "projects")) // Claude Code makes it with its first write
-	if err != nil {
-		return "", fmt.Errorf("Claude Code's projects directory is not readable: %w", err)
+		return Transcript{}, errors.New("the transcript path is not an absolute .jsonl path")
 	}
 	path = filepath.Clean(path)
-	fi, err := os.Lstat(path)
+	dir := filepath.Join(configDir, "projects")
+	if !Inside(dir, path) {
+		// The path may name projects/ by another of its names (/private/var
+		// on macOS, an 8.3 short name on Windows).
+		real, err := resolveLoose(dir)
+		if err != nil {
+			return Transcript{}, fmt.Errorf("Claude Code's projects directory is not readable: %w", err)
+		}
+		dir = real
+	}
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || rel == "." || !Inside(dir, path) {
+		return Transcript{}, errOutside
+	}
+	root, err := os.OpenRoot(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Transcript{dir, rel}, nil // nothing under it yet: the tailer checks at every open
+	}
+	if err != nil {
+		return Transcript{}, fmt.Errorf("Claude Code's projects directory is not readable: %w", err)
+	}
+	defer root.Close()
+	fi, err := root.Lstat(rel)
 	switch {
 	case err == nil:
 		if !fi.Mode().IsRegular() {
-			return "", errors.New("the transcript is not a regular file")
+			return Transcript{}, errNotRegular
 		}
-		real, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			return "", err
-		}
-		if !Inside(root, real) {
-			return "", errors.New("the transcript is outside Claude Code's projects directory")
-		}
-		return real, nil
-	case errors.Is(err, os.ErrNotExist):
-		dir, err := resolveLoose(filepath.Dir(path))
-		if err != nil {
-			return "", err
-		}
-		if !Inside(root, dir) {
-			return "", errors.New("the transcript is outside Claude Code's projects directory")
-		}
-		return filepath.Join(dir, filepath.Base(path)), nil
+	case errors.Is(err, fs.ErrNotExist):
+		// Not written yet. The components are checked in order: one that
+		// exists and leads out of projects/ is an error, not ErrNotExist.
 	default:
-		return "", err
+		return Transcript{}, err // a link out of projects/: "path escapes from parent"
 	}
+	return Transcript{dir, rel}, nil
 }
+
+var (
+	errOutside    = errors.New("the transcript is outside Claude Code's projects directory")
+	errNotRegular = errors.New("the transcript is not a regular file")
+)
 
 // resolveLoose resolves the links of the part of path that exists and keeps
 // the rest as it is: a directory that is not there yet cannot hold a link.

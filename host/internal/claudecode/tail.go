@@ -23,7 +23,7 @@ const (
 // without its newline, waits. The file may not exist yet. Not safe for
 // concurrent use.
 type Tailer struct {
-	path    string
+	tr      Transcript
 	parser  *Parser
 	off     int64 // where the next read starts: after the last byte read (a partial line waits in partial)
 	partial []byte
@@ -34,11 +34,11 @@ type Tailer struct {
 	seen    bool // some line has been read
 }
 
-// NewTailer follows path. With fromEnd (a resumed or compacted session) what
+// NewTailer follows tr. With fromEnd (a resumed or compacted session) what
 // is already in the file is not read, only what is added; otherwise it is
 // read from the start.
-func NewTailer(path string, fromEnd bool) *Tailer {
-	return &Tailer{path: path, parser: NewParser(), fromEnd: fromEnd}
+func NewTailer(tr Transcript, fromEnd bool) *Tailer {
+	return &Tailer{tr: tr, parser: NewParser(), fromEnd: fromEnd}
 }
 
 // Parser gives the state of the reading: version, lines that were not JSON.
@@ -53,16 +53,27 @@ func (t *Tailer) Seen() bool { return t.seen }
 // Poll reads what was written since the last call. A missing file is not an
 // error (it may not exist yet): it returns nothing.
 func (t *Tailer) Poll() ([]Event, error) {
-	// The path is validated once when the owner gets it, but it can change
-	// afterwards: it is checked at every open that it is no link.
-	if li, err := os.Lstat(t.path); errors.Is(err, fs.ErrNotExist) {
+	// The path is checked once when the owner gets it, but it can change
+	// afterwards: every open goes through an os.Root on projects/, which
+	// refuses a component under it that leads out of it (V24), and the last
+	// one must be no link at all.
+	root, err := os.OpenRoot(t.tr.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	li, err := root.Lstat(t.tr.rel)
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	} else if !li.Mode().IsRegular() {
-		return nil, errors.New("the transcript is not a regular file")
+		return nil, errNotRegular
 	}
-	f, err := os.Open(t.path)
+	f, err := root.Open(t.tr.rel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -75,7 +86,10 @@ func (t *Tailer) Poll() ([]Event, error) {
 		return nil, err
 	}
 	if !fi.Mode().IsRegular() {
-		return nil, errors.New("the transcript is not a regular file")
+		return nil, errNotRegular
+	}
+	if !os.SameFile(li, fi) { // changed between the two: the next poll looks again
+		return nil, nil
 	}
 	size := fi.Size()
 	if !t.started {

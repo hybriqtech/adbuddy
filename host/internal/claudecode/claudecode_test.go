@@ -531,13 +531,18 @@ func write(t *testing.T, path string, mode int, s string) {
 	}
 }
 
+// tailerAt follows path with its own directory as projects/.
+func tailerAt(path string, fromEnd bool) *Tailer {
+	return NewTailer(Transcript{filepath.Dir(path), filepath.Base(path)}, fromEnd)
+}
+
 func textLine(uuid, id, text string) string {
 	return string(line("assistant", uuid, asst(id, map[string]any{"type": "text", "text": text}), nil)) + "\n"
 }
 
 func TestTailerWaitsForTheFileAndForCompleteLines(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
-	tl := NewTailer(path, false)
+	tl := tailerAt(path, false)
 	if ev, err := tl.Poll(); err != nil || len(ev) != 0 || tl.Started() {
 		t.Fatalf("no file yet: %v %v %v", ev, err, tl.Started())
 	}
@@ -560,7 +565,7 @@ func TestTailerWaitsForTheFileAndForCompleteLines(t *testing.T) {
 func TestTailerFromEndSkipsTheHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	write(t, path, os.O_TRUNC, textLine("u1", "m1", "viejo"))
-	tl := NewTailer(path, true)
+	tl := tailerAt(path, true)
 	if ev, _ := tl.Poll(); len(ev) != 0 {
 		t.Fatalf("history: %v", ev)
 	}
@@ -573,7 +578,7 @@ func TestTailerFromEndSkipsTheHistory(t *testing.T) {
 func TestTailerStartsAgainWhenTheFileShrinks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	write(t, path, os.O_TRUNC, textLine("u1", "m1", "uno")+textLine("u2", "m2", "dos"))
-	tl := NewTailer(path, false)
+	tl := tailerAt(path, false)
 	if ev, _ := tl.Poll(); len(ev) != 2 {
 		t.Fatal(ev)
 	}
@@ -587,7 +592,7 @@ func TestTailerSkipsAHugeLine(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	huge := `{"type":"attachment","x":"` + strings.Repeat("a", MaxLine+10) + "\"}\n"
 	write(t, path, os.O_TRUNC, textLine("u1", "m1", "antes")+huge+textLine("u2", "m2", "despues"))
-	tl := NewTailer(path, false)
+	tl := tailerAt(path, false)
 	var texts []string
 	for i := 0; i < 8; i++ { // the file is read in chunks
 		ev, err := tl.Poll()
@@ -610,7 +615,7 @@ func TestTailerCRLF(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	l := strings.TrimSuffix(textLine("u1", "m1", "uno"), "\n") + "\r\n"
 	write(t, path, os.O_TRUNC, l+strings.TrimSuffix(textLine("u2", "m2", "dos"), "\n")+"\r\n")
-	tl := NewTailer(path, false)
+	tl := tailerAt(path, false)
 	ev, _ := tl.Poll()
 	if len(ev) != 2 || ev[1].Text != "dos" || tl.Parser().BadRun() != 0 {
 		t.Fatalf("%v", ev)
@@ -621,7 +626,7 @@ func TestTailerStartsAgainWhenTheFileIsReplacedByALargerOne(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.jsonl")
 	write(t, path, os.O_TRUNC, textLine("u1", "m1", "uno"))
-	tl := NewTailer(path, false)
+	tl := tailerAt(path, false)
 	if ev, _ := tl.Poll(); len(ev) != 1 {
 		t.Fatal(ev)
 	}
@@ -644,7 +649,7 @@ func TestTailerRefusesALinkWhenReopening(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.jsonl")
 	write(t, path, os.O_TRUNC, textLine("u1", "m1", "uno"))
-	tl := NewTailer(path, false)
+	tl := tailerAt(path, false)
 	if ev, _ := tl.Poll(); len(ev) != 1 {
 		t.Fatal(ev)
 	}
@@ -665,7 +670,7 @@ func TestTailerFromEndDropsTheRestOfALineInProgress(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	l2 := textLine("u2", "m2", "a medias")
 	write(t, path, os.O_TRUNC, textLine("u1", "m1", "viejo")+l2[:15])
-	tl := NewTailer(path, true)
+	tl := tailerAt(path, true)
 	if ev, _ := tl.Poll(); len(ev) != 0 {
 		t.Fatalf("history: %v", ev)
 	}
@@ -682,7 +687,7 @@ func TestTailerFromEndDropsTheRestOfALineInProgress(t *testing.T) {
 func TestTailerFromEndOnACompleteLineKeepsTheNext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.jsonl")
 	write(t, path, os.O_TRUNC, textLine("u1", "m1", "viejo"))
-	tl := NewTailer(path, true)
+	tl := tailerAt(path, true)
 	tl.Poll()
 	write(t, path, os.O_APPEND, textLine("u2", "m2", "nuevo"))
 	if ev, _ := tl.Poll(); len(ev) != 1 || ev[0].Text != "nuevo" {
@@ -691,7 +696,7 @@ func TestTailerFromEndOnACompleteLineKeepsTheNext(t *testing.T) {
 }
 
 func TestTailerRefusesADirectory(t *testing.T) {
-	if _, err := NewTailer(t.TempDir(), false).Poll(); err == nil {
+	if _, err := tailerAt(t.TempDir(), false).Poll(); err == nil {
 		t.Error("a directory was read as a transcript")
 	}
 }
@@ -700,19 +705,13 @@ func TestTailerRefusesADirectory(t *testing.T) {
 
 func TestValidTranscript(t *testing.T) {
 	cfg := t.TempDir()
-	// ValidTranscript returns the resolved path: compare with the resolved root
-	// (/var -> /private/var on macOS, 8.3 short names on Windows).
-	realCfg, err := filepath.EvalSymlinks(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
 	proj := filepath.Join(cfg, "projects", "p1")
 	if err := os.MkdirAll(proj, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	good := filepath.Join(proj, "s.jsonl")
 	write(t, good, os.O_TRUNC, "")
-	if p, err := ValidTranscript(good, cfg); err != nil || !Inside(filepath.Join(realCfg, "projects"), p) {
+	if p, err := ValidTranscript(good, cfg); err != nil || p.String() != good {
 		t.Errorf("existing: %q %v", p, err)
 	}
 	if _, err := ValidTranscript(filepath.Join(proj, "later.jsonl"), cfg); err != nil {
@@ -750,6 +749,64 @@ func TestValidTranscript(t *testing.T) {
 			t.Error("a link out of the projects directory was accepted")
 		}
 	} // on Windows without the privilege a link cannot be made: the other cases hold
+}
+
+// V24 with symbolic links (the junctions are in paths_windows_test.go): a
+// linked directory under projects/ is refused, also when it appears after the
+// check; a linked projects/ is followed.
+func TestTranscriptLinksUnderAndAboveProjects(t *testing.T) {
+	out := t.TempDir()
+	write(t, filepath.Join(out, "s.jsonl"), os.O_TRUNC, textLine("u9", "m9", "secreto"))
+	cfg := t.TempDir()
+	p1 := filepath.Join(cfg, "projects", "p1")
+	if err := os.MkdirAll(p1, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(out, filepath.Join(cfg, "projects", "L")); err != nil {
+		t.Skip("symlinks not available:", err)
+	}
+	for _, name := range []string{"s.jsonl", "later.jsonl"} {
+		if _, err := ValidTranscript(filepath.Join(cfg, "projects", "L", name), cfg); err == nil {
+			t.Errorf("%s accepted through a linked directory", name)
+		}
+	}
+	path := filepath.Join(p1, "s.jsonl")
+	write(t, path, os.O_TRUNC, textLine("u1", "m1", "uno"))
+	tr, err := ValidTranscript(path, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tl := NewTailer(tr, false)
+	if ev, err := tl.Poll(); err != nil || len(ev) != 1 {
+		t.Fatalf("first poll: %v %v", ev, err)
+	}
+	if err := os.Rename(p1, p1+"-old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(out, p1); err != nil {
+		t.Fatal(err)
+	}
+	if ev, err := tl.Poll(); err == nil || len(ev) != 0 {
+		t.Errorf("read through a directory linked after the check: %v %v", ev, err)
+	}
+
+	moved := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(moved, "p1"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg2 := t.TempDir()
+	if err := os.Symlink(moved, filepath.Join(cfg2, "projects")); err != nil {
+		t.Fatal(err)
+	}
+	path = filepath.Join(cfg2, "projects", "p1", "s.jsonl")
+	write(t, path, os.O_TRUNC, textLine("u2", "m2", "dos"))
+	tr, err = ValidTranscript(path, cfg2)
+	if err != nil {
+		t.Fatalf("linked projects/: %v", err)
+	}
+	if ev, err := NewTailer(tr, false).Poll(); err != nil || len(ev) != 1 || ev[0].Text != "dos" {
+		t.Errorf("linked projects/: %v %v", ev, err)
+	}
 }
 
 func TestInsideAndConfigDir(t *testing.T) {
