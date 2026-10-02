@@ -83,7 +83,7 @@ func newServeCmd(app *App) *cobra.Command {
 				return NewError("EXECUTABLE_UNKNOWN", err.Error(), "")
 			}
 			if _, err := workspace.Init(workspace.Options{Dir: ws, Exe: exe}); err != nil {
-				return NewError("WORKSPACE_FAILED", err.Error(), workspaceHint(err, ws))
+				return NewErrorT("WORKSPACE_FAILED", "error.cause", "error.hint", err.Error(), workspaceHintMsg(err, ws))
 			}
 			cls, err := loadClassifier(e)
 			if err != nil {
@@ -111,7 +111,7 @@ func newServeCmd(app *App) *cobra.Command {
 				addrs = candidateAddrs(store.Config(), !store.Until().IsZero())
 			}
 			const reconnect = "run `adbuddy connect <new ip:port>` with the IP address and port on the phone's Wireless debugging screen, then `adbuddy serve` again."
-			k, err := findKnownPhone(ctx, runner, serial, addrs, deviceWait, app.Stderr)
+			k, err := findKnownPhone(ctx, runner, serial, addrs, deviceWait, app.Log())
 			switch {
 			case err != nil && ctx.Err() != nil:
 				return Interrupted()
@@ -157,7 +157,7 @@ func newServeCmd(app *App) *cobra.Command {
 				fmt.Fprintln(app.Stderr, remoteOnNotice(rs))
 			}
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
-			if err := applyInvariant(ctx, active.Runner(), deviceWait, app.Stderr, "adbuddy serve", keep); err != nil {
+			if err := applyInvariant(ctx, active.Runner(), deviceWait, app.Log(), "adbuddy serve", keep); err != nil {
 				if ctx.Err() != nil {
 					return Interrupted()
 				}

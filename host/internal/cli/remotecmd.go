@@ -203,7 +203,7 @@ func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, er
 	if err := startServer(ctx, runner); err != nil {
 		return remoteInfo{}, err
 	}
-	k, err := findKnownPhone(ctx, runner, e.cfg.Serial, candidateAddrs(e.cfg, true), deviceWait, app.Stderr)
+	k, err := findKnownPhone(ctx, runner, e.cfg.Serial, candidateAddrs(e.cfg, true), deviceWait, app.Log())
 	switch {
 	case ctx.Err() != nil:
 		return remoteInfo{}, Interrupted()

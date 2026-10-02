@@ -23,6 +23,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/device"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/platformtools"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
@@ -46,19 +47,17 @@ var (
 	qrHintDelay         = 10 * time.Second // when to say that no phone is visible while a QR code waits
 )
 
-// phoneGuide is the phone preparation text; step 3 depends on how it is paired.
-func phoneGuide(useCode bool) string {
-	network := "Keep the phone on the same Wi-Fi network as this PC."
+// phoneGuide is the phone preparation text in English; step 3 depends on how
+// it is paired.
+func phoneGuide(useCode bool) string { return phoneGuideIn(i18n.EN, useCode) }
+
+// phoneGuideIn is phoneGuide in lang.
+func phoneGuideIn(lang i18n.Lang, useCode bool) string {
+	network := lang.T("setup.guide.network")
 	if useCode {
-		network = "Keep the phone on the same Wi-Fi network as this PC, or reachable over Tailscale: then use the IP address and port the pairing popup shows."
+		network = lang.T("setup.guide.network_code")
 	}
-	return `Prepare your phone (only once):
-  1. Settings → About phone → tap "Build number" 7 times to turn on Developer options.
-  2. Developer options (Settings → System on a Pixel) → turn on "Wireless debugging".
-     When the phone asks, tick "Always allow on this network".
-  3. ` + network + `
-Step-by-step guide with pictures (scan it with the phone's camera):
-`
+	return lang.T("setup.guide", network)
 }
 
 type setupResult struct {
@@ -102,14 +101,15 @@ func newSetupCmd(app *App) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				say := func(format string, a ...any) { fmt.Fprintf(app.Stderr, format, a...) }
+				// say writes the message key (with its arguments) and a line break in the language of this run.
+				say := func(key string, a ...any) { fmt.Fprintln(app.Stderr, app.T(key, a...)) }
 				in := bufio.NewReader(app.Stdin)
 				type answer struct {
 					line string
 					err  error
 				}
 				ask := func(prompt string) (string, error) {
-					say("%s", prompt)
+					fmt.Fprint(app.Stderr, prompt)
 					ch := make(chan answer, 1)
 					go func() {
 						line, err := in.ReadString('\n')
@@ -154,7 +154,7 @@ func newSetupCmd(app *App) *cobra.Command {
 					adbPath = e.cfg.ADBPath
 				}
 				if adbPath == "" {
-					say("Getting Android platform-tools…\n")
+					say("setup.getting_android_platform_tools")
 					res, err := platformtools.Installer{DataDir: e.dirs.Data, BaseURL: repositoryURL(app), GOOS: runtime.GOOS, Log: app.Stderr}.Ensure(ctx)
 					switch {
 					case errors.Is(err, platformtools.ErrChecksum):
@@ -181,12 +181,12 @@ func newSetupCmd(app *App) *cobra.Command {
 					if known == "" {
 						known = e.cfg.Address
 					}
-					say("Looking for your phone…\n")
+					say("setup.looking_for_your_phone")
 					var knownAddrs []string
 					if known != "" {
 						knownAddrs = []string{known}
 					}
-					k, err := findKnownPhone(ctx, runner, e.cfg.Serial, knownAddrs, knownPhoneWait, app.Stderr)
+					k, err := findKnownPhone(ctx, runner, e.cfg.Serial, knownAddrs, knownPhoneWait, app.Log())
 					if ctx.Err() != nil {
 						return ctx.Err() // Ctrl+C: no guide nor QR code
 					}
@@ -199,9 +199,9 @@ func newSetupCmd(app *App) *cobra.Command {
 						serial, usedAddr = k.Active, k.Used
 						guid, _ = pairing.GuidOf(e.cfg.Serial) // keeps the saved name
 						if !k.Verified && (guid != "" || k.Used != "") {
-							say("Note: could not check that the phone at %s is the one you set up (%s).\n", serial, unverifiedWhy(e.cfg.Serial))
+							say("setup.note_could_not_check_that", serial, unverifiedWhy(e.cfg.Serial))
 						}
-						say("Found it: already paired.\n")
+						say("setup.found_it_already_paired")
 					}
 				}
 
@@ -211,7 +211,7 @@ func newSetupCmd(app *App) *cobra.Command {
 					if err != nil {
 						return err
 					}
-					say("Paired. Connecting…\n")
+					say("setup.paired_connecting")
 					// With --code the phone may be out of mDNS's reach
 					// (Tailscale): if an address can be had, it is asked for sooner.
 					wait, auto := connectWait, autoConnectWait
@@ -230,14 +230,14 @@ func newSetupCmd(app *App) *cobra.Command {
 							return err
 						}
 						if !k.Verified {
-							say("Note: could not check that the phone at %s is the one just paired.\n", serial)
+							say("setup.note_could_not_check_that_2", serial)
 						}
 					}
 					if err != nil {
 						addr := connectFlag
 						if addr == "" && canAsk {
-							say("The phone did not show up on this network by itself (mDNS does not reach it, e.g. over Tailscale).\n")
-							if addr, err = ask("Connection address (IP:port on the Wireless debugging screen): "); err != nil {
+							say("setup.the_phone_did_not_show")
+							if addr, err = ask(app.T("setup.prompt.connection_address")); err != nil {
 								return err
 							}
 							if !validPairAddr(addr) {
@@ -247,13 +247,13 @@ func newSetupCmd(app *App) *cobra.Command {
 						if addr == "" {
 							return TransientErrorT("DEVICE_NOT_FOUND", "err.setup.device_not_found", "err.setup.device_not_found.fix", err.Error())
 						}
-						say("Connecting to %s…\n", addr)
+						say("setup.connecting_to", addr)
 						s, verified, err := connectAddr(ctx, runner, addr, guid, connectAddrWait)
 						if err != nil {
 							return err
 						}
 						if !verified {
-							say("Note: could not check that the phone at %s is the one just paired.\n", addr)
+							say("setup.note_could_not_check_that_3", addr)
 						}
 						serial, usedAddr = s, addr
 					}
@@ -261,7 +261,7 @@ func newSetupCmd(app *App) *cobra.Command {
 				runner.Serial = serial
 
 				// Host invariant: no open adb network port unless remote mode is on.
-				if err := applyInvariant(ctx, runner, deviceWait, app.Stderr, "adbuddy setup", ""); err != nil {
+				if err := applyInvariant(ctx, runner, deviceWait, app.Log(), "adbuddy setup", ""); err != nil {
 					return err // Ctrl+C becomes INTERRUPTED below
 				}
 
@@ -270,7 +270,7 @@ func newSetupCmd(app *App) *cobra.Command {
 				if err != nil {
 					return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.setup.device_unreadable.fix", err.Error())
 				}
-				say("Phone: %s, Android %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android))
+				say("setup.phone_android", classify.Printable(prof.Model), classify.Printable(prof.Android))
 
 				// 5-6. The phone app.
 				appRes := appResult{Consent: "skipped", Note: noAppNote}
@@ -291,7 +291,7 @@ func newSetupCmd(app *App) *cobra.Command {
 				// phone's stable name, not the address it used this time.
 				saved := stableSerial(guid, serial)
 				if saved == "" {
-					say("Note: not saving the serial %s in the configuration: it is an address that changes when wireless debugging restarts. Pair again with `adbuddy setup` to save the phone's name.\n", classify.Printable(serial))
+					say("setup.note_not_saving_the_serial", classify.Printable(serial))
 				}
 				// The environment chosen before is kept for the same phone, and
 				// when config.toml does not say which phone it was for.
@@ -308,7 +308,7 @@ func newSetupCmd(app *App) *cobra.Command {
 					return NewError("EXECUTABLE_UNKNOWN", err.Error(), "")
 				}
 				if _, err := workspace.Init(workspace.Options{Dir: ws, Exe: exe, Profile: prof.Markdown(), Force: true}); err != nil {
-					return NewError("WORKSPACE_FAILED", err.Error(), workspaceHint(err, ws))
+					return NewErrorT("WORKSPACE_FAILED", "error.cause", "error.hint", err.Error(), workspaceHintMsg(err, ws))
 				}
 				if err := device.WriteJSON(ws, prof); err != nil {
 					return NewError("WORKSPACE_FAILED", err.Error(), "")
@@ -330,10 +330,10 @@ func newSetupCmd(app *App) *cobra.Command {
 				if cfg.RemoteUntil != "" {
 					// applyInvariant closed port 5555 above: setup always ends remote mode.
 					if samePhone {
-						fmt.Fprintln(app.Stderr, "Remote mode was on: closing it.")
+						fmt.Fprintln(app.Stderr, app.T("setup.remote_mode_was_on_closing"))
 					} else {
 						// The `adb usb` went to another phone.
-						fmt.Fprintln(app.Stderr, "Remote mode was on for the phone you had set up before: its adb port 5555 may stay open until that phone restarts. Turn remote mode off from its app or restart it.")
+						fmt.Fprintln(app.Stderr, app.T("setup.remote_mode_was_on_for"))
 					}
 					cfg.RemoteUntil = ""
 				}
@@ -345,8 +345,8 @@ func newSetupCmd(app *App) *cobra.Command {
 				if app.JSON {
 					return WriteData(app.Stdout, res)
 				}
-				fmt.Fprintf(app.Stdout, "Ready: %s (Android %s), environment %s, agent %s, %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android), ws, chosen, fmtApp(appRes))
-				say("Next: run `adbuddy serve` and keep it open, then `adbuddy run` in another terminal.\n")
+				fmt.Fprintln(app.Stdout, app.T("setup.ready_android_environment_agent", classify.Printable(prof.Model), classify.Printable(prof.Android), ws, chosen, fmtAppMsg(appRes)))
+				say("setup.next_run_adbuddy_serve_and")
 				return nil
 			}()
 			if err != nil && ctx.Err() != nil {
@@ -382,20 +382,20 @@ var pairingCodeRe = regexp.MustCompile(`^[0-9]{6}$`)
 
 // pair shows the guide and pairs by QR code or by code.
 func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask func(string) (string, error), say func(string, ...any)) (string, error) {
-	say("%s", phoneGuide(useCode))
+	fmt.Fprint(app.Stderr, phoneGuideIn(app.speaks(), useCode))
 	if art, err := pairing.RenderQR(HelpURL, colorOK(app)); err == nil {
-		say("%s", art)
+		fmt.Fprint(app.Stderr, art)
 	}
-	say("%s\n\n", HelpURL)
+	fmt.Fprintf(app.Stderr, "%s\n\n", HelpURL)
 	if useCode {
-		addr, err := ask("In Wireless debugging → Pair device with pairing code, type the IP address and port: ")
+		addr, err := ask(app.T("setup.prompt.pairing_address"))
 		if err != nil {
 			return "", err
 		}
 		if !validPairAddr(addr) {
 			return "", UsageErrorT("err.setup.usage_is_not_an_ip_address_2", classify.Printable(addr))
 		}
-		code, err := ask("Wi-Fi pairing code: ")
+		code, err := ask(app.T("setup.prompt.pairing_code"))
 		if err != nil {
 			return "", err
 		}
@@ -416,8 +416,8 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 	if err != nil {
 		return "", NewError("PAIRING_FAILED", err.Error(), "")
 	}
-	say("On the phone: Wireless debugging → Pair device with QR code, and scan:\n%s", art)
-	say("Waiting for the phone (up to %s)…\n", pairingWait)
+	fmt.Fprint(app.Stderr, app.T("setup.on_the_phone_qr", art))
+	say("setup.waiting_for_the_phone_up", pairingWait)
 	stopHint := qrHint(ctx, runner, say)
 	guid, err := pairing.PairQR(ctx, runner, q, pairingWait)
 	stopHint()
@@ -436,12 +436,12 @@ func chooseAgent(app *App, flag, current string, yes bool, ask func(string) (str
 	found := agent.Detect(exec.LookPath)
 	if flag != "" {
 		if len(found) == 0 || !containsAgent(found, flag) {
-			say("Note: %s is not in PATH yet. %s\n", flag, agent.InstallHint(flag))
+			say("setup.note_is_not_in_path", flag, agent.InstallHint(flag))
 		}
 		return flag, nil
 	}
 	if len(found) == 0 {
-		say("No coding agent found in PATH. %s\n", agent.InstallHint(agent.Known[0]))
+		say("setup.no_coding_agent_found_in", agent.InstallHint(agent.Known[0]))
 		if current != "" {
 			return current, nil
 		}
@@ -449,7 +449,7 @@ func chooseAgent(app *App, flag, current string, yes bool, ask func(string) (str
 	}
 	if current != "" && !containsAgent(found, current) {
 		// The user chose it before: never swap it silently.
-		say("Note: %s is not in PATH; keeping it as the agent (%s). Pass --agent to use another one.\n", current, agent.InstallHint(current))
+		say("setup.note_is_not_in_path_2", current, agent.InstallHint(current))
 		return current, nil
 	}
 	def := found[0].Name
@@ -457,7 +457,7 @@ func chooseAgent(app *App, flag, current string, yes bool, ask func(string) (str
 		def = current
 	}
 	if yes || len(found) == 1 || !isTerminal(app.Stdin) {
-		say("Agent: %s\n", def)
+		say("setup.agent", def)
 		return def, nil
 	}
 	names := make([]string, len(found))
@@ -465,7 +465,7 @@ func chooseAgent(app *App, flag, current string, yes bool, ask func(string) (str
 		names[i] = f.Name
 	}
 	for {
-		answer, err := ask(fmt.Sprintf("Agent to use (%s) [%s]: ", strings.Join(names, ", "), def))
+		answer, err := ask(app.T("setup.prompt.agent", strings.Join(names, ", "), def))
 		if err != nil {
 			return "", err
 		}
@@ -475,7 +475,7 @@ func chooseAgent(app *App, flag, current string, yes bool, ask func(string) (str
 		if containsAgent(found, answer) {
 			return answer, nil
 		}
-		say("Please choose one of: %s\n", strings.Join(names, ", "))
+		say("setup.please_choose_one_of", strings.Join(names, ", "))
 	}
 }
 
@@ -601,12 +601,9 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// noPhoneHint is said once when a QR code waits and no phone announces
-// wireless debugging on the network: the QR code needs mDNS.
-const noPhoneHint = "I can't see any phone with wireless debugging on this network. If the phone is on another network (for example Tailscale) or this Wi-Fi blocks mDNS, press Ctrl+C and run `adbuddy setup --code`.\n"
-
-// qrHint looks at the network once, after qrHintDelay, and says noPhoneHint
-// if no `_adb-tls-*` service (of this phone or any other) shows up. Setup
+// qrHint looks at the network once, after qrHintDelay, and says the hint
+// (setup.no_phone_hint: a QR code needs mDNS) if no `_adb-tls-*` service (of
+// this phone or any other) shows up. Setup
 // keeps waiting either way. The returned stop ends the look and waits for
 // it, so nothing is said after the wait for the QR code is over.
 func qrHint(ctx context.Context, runner adb.Runner, say func(string, ...any)) (stop func()) {
@@ -630,16 +627,20 @@ func qrHint(ctx context.Context, runner adb.Runner, say func(string, ...any)) (s
 				return
 			}
 		}
-		say("%s", noPhoneHint)
+		say("setup.no_phone_hint")
 	}()
 	return func() { cancel(); <-done }
 }
 
-// workspaceHint is the guidance for a workspace.Init failure: an unsafe path
-// is not a permissions problem.
-func workspaceHint(err error, ws string) string {
+// workspaceHint is the guidance for a workspace.Init failure, in English.
+func workspaceHint(err error, ws string) string { return workspaceHintMsg(err, ws).String() }
+
+// workspaceHintMsg is workspaceHint as a message of its own, to be the fix of
+// an error: NewErrorT(code, "error.cause", "error.hint", cause, workspaceHintMsg(err, ws)).
+// An unsafe path is not a permissions problem.
+func workspaceHintMsg(err error, ws string) i18n.Msg {
 	if errors.Is(err, workspace.ErrUnsafeHookPath) {
-		return "Use another path: it cannot contain backslashes (on Linux and macOS), quotes, $, backticks or line breaks."
+		return i18n.M("setup.workspace_unsafe_path")
 	}
-	return "Check that " + ws + " is writable."
+	return i18n.M("setup.workspace_not_writable", ws)
 }

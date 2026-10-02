@@ -21,6 +21,7 @@ var sameInBoth = map[string]string{
 	"error.line":                "the label of an error is Error in both languages",
 	"err.setup.usage_adb":       "a flag name and the message of the system: nothing to translate",
 	"err.setup.usage_workspace": "a flag name and the message of the system: nothing to translate",
+	"appsetup.summary.consent":  "a version and the state word of the JSON result: nothing to translate",
 }
 
 // keyTables are the variables that hold catalog keys by a code (a map from an
@@ -243,6 +244,8 @@ var callSpecs = map[string]callSpec{
 	"errorT":          {keys: []int{3, 4}, argStart: -1},           // cli/errors.go: the shared builder
 	"M":               {keys: []int{0}, argStart: 1, method: true}, // i18n.M: a message as an argument of another
 	"tell":            {keys: []int{1}, argStart: 2},               // cli/say.go: tell(w, key, args...)
+	"say":             {keys: []int{0}, argStart: 1},               // the say and warn closures of setup (since H3a): say(key, args...)
+	"warn":            {keys: []int{0}, argStart: 1},
 }
 
 // keyUses finds the catalog keys a Go source asks for (see callSpecs). A key

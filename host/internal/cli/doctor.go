@@ -371,7 +371,7 @@ func checkIdentity(ctx context.Context, phone adb.Runner, guid, saved string) ch
 		if guid == "" {
 			c.Detail = "cannot be checked: config.toml keeps this phone as " + saved + ", not by the name it paired with"
 		} else {
-			c.Detail = "cannot be checked: " + unverifiedWhy(guid)
+			c.Detail = "cannot be checked: " + unverifiedWhy(guid).String() // H3b: the doctor writes its checks as messages
 		}
 		if _, _, err := net.SplitHostPort(phone.Serial); err == nil {
 			c.Guidance = "Make sure the IP address and port under Wireless debugging on your phone are " + phone.Serial + "."

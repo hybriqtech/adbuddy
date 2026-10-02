@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"time"
 
@@ -32,7 +31,7 @@ func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, 
 	if !restarted {
 		return nil
 	}
-	fmt.Fprintln(log, "Closed adb's network port on the phone (adb usb); waiting for it to reconnect…")
+	tell(log, "invariant.closed_adb_s_network_port")
 	if err := waitDropped(ctx, runner, usbDropWait); err != nil {
 		return err
 	}

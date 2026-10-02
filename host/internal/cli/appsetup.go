@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
 )
 
@@ -64,8 +65,6 @@ func releaseURL(app *App) (string, error) {
 	}
 	return u, nil
 }
-
-const again = "Run `adbuddy setup` again to retry."
 
 // chooseAPK reads the --apk file once (at most MaxAPK: it could be a FIFO)
 // and returns a private copy to install, so nobody swaps it between the
@@ -120,15 +119,15 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 	res := appResult{Consent: "skipped"}
 	devDigest, devFile := "", "" // the --apk that becomes the trusted development build, and its path
 	// warn reports a problem, unless it is just Ctrl+C.
-	warn := func(format string, args ...any) {
+	warn := func(key string, args ...any) {
 		if ctx.Err() == nil {
-			say(format, args...)
+			say(key, args...)
 		}
 	}
 	version, err := phoneapp.InstalledVersion(ctx, a)
 	if err != nil {
 		res.note(err.Error())
-		warn("⚠ Could not check the ADBuddy app (%v): setup goes on without it; 🔴 confirmations will happen in the terminal. "+again+"\n", err)
+		warn("appsetup.could_not_check_the_adbuddy", err)
 		return res
 	}
 	if version == "" || apk != "" {
@@ -136,49 +135,49 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 			base, err := releaseURL(app)
 			if err != nil {
 				res.note(err.Error())
-				warn("⚠ %v. Setup goes on without the app; 🔴 confirmations will happen in the terminal.\n", err)
+				warn("appsetup.setup_goes_on_without_the", err)
 				return res
 			}
 			if releaseCert != "" {
-				say("Getting the ADBuddy app…\n")
+				say("appsetup.getting_the_adbuddy_app")
 			}
 			apk, err = phoneapp.Download(ctx, nil, base, filepath.Join(e.dirs.Data, "app"), releaseCert)
 			if err != nil {
 				res.note(err.Error())
 				switch {
 				case errors.Is(err, phoneapp.ErrUnpinned):
-					warn("This build of adbuddy has no pinned signing certificate for the app, so it does not download it: skipping it (pass --apk <file> to install one). 🔴 confirmations will happen in the terminal.\n")
+					warn("appsetup.this_build_of_adbuddy_has")
 				case errors.Is(err, phoneapp.ErrNoRelease):
-					warn("There is no published version of the ADBuddy app yet: skipping it (pass --apk <file> to install one). 🔴 confirmations will happen in the terminal.\n")
+					warn("appsetup.there_is_no_published_version")
 				case errors.Is(err, phoneapp.ErrChecksum):
-					warn("⚠ The downloaded ADBuddy app does not match its checksum, so nothing was installed. Try again later, or pass --apk <file>. 🔴 confirmations will happen in the terminal.\n")
+					warn("appsetup.the_downloaded_adbuddy_app_does")
 				case errors.Is(err, phoneapp.ErrSigner):
-					warn("⚠ The downloaded ADBuddy app is not signed by hybriqtech, so nothing was installed. Please report it at https://github.com/hybriqtech/adbuddy/issues, or pass --apk <file>. 🔴 confirmations will happen in the terminal.\n")
+					warn("appsetup.the_downloaded_adbuddy_app_is")
 				default:
-					warn("⚠ Could not get the ADBuddy app (%v): setup goes on without it; 🔴 confirmations will happen in the terminal. Try again later, or pass --apk <file>.\n", err)
+					warn("appsetup.could_not_get_the_adbuddy", err)
 				}
 				return res
 			}
 		} else if _, err := os.Stat(apk); err != nil {
 			res.note(err.Error())
-			warn("⚠ %v: skipping the app. Check the path of --apk, then "+again+"\n", err)
+			warn("appsetup.skipping_the_app_check_the", err)
 			return res
 		} else {
 			chosen, digest, err := chooseAPK(e, apk)
 			if err != nil {
 				res.note(err.Error())
-				warn("⚠ %v: skipping the app. Pass a signed APK to --apk, then "+again+"\n", err)
+				warn("appsetup.skipping_the_app_pass_a", err)
 				return res
 			}
 			devFile, devDigest, apk = apk, digest, chosen
 		}
-		say("Installing the ADBuddy app on the phone…\n")
+		say("appsetup.installing_the_adbuddy_app_on")
 		if err := phoneapp.Install(ctx, a, apk); err != nil {
 			res.note(err.Error())
 			if errors.Is(err, phoneapp.ErrOtherSigner) {
-				warn("⚠ The ADBuddy app on the phone was signed with another key (a development build?), so Android will not update it. Uninstall it on the phone (Settings › Apps › ADBuddy › Uninstall; it forgets its pairing with this PC) and run `adbuddy setup` again. Setup goes on without it.\n")
+				warn("appsetup.the_adbuddy_app_on_the")
 			} else {
-				warn("⚠ Could not install the app: %v. Setup goes on without it; try again later or with --apk <file>.\n", err)
+				warn("appsetup.could_not_install_the_app", err)
 			}
 			return res
 		}
@@ -186,14 +185,14 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 			path, err := phoneapp.TrustDevAPK(e.dirs.Data, devDigest)
 			if err != nil {
 				res.note(err.Error())
-				warn("⚠ Could not trust the development build (%v): setup goes on without the app.\n", err)
+				warn("appsetup.could_not_trust_the_development", err)
 				return res
 			}
-			warn("⚠ Trusting this development build of the app (SHA-256 %s of %s): adbuddy serve will hand the phone app's token to exactly this APK. Delete %s to stop.\n", devDigest, devFile, path)
+			warn("appsetup.trusting_this_development_build_of", devDigest, devFile, path)
 		}
 		if version, err = phoneapp.InstalledVersion(ctx, a); err != nil || version == "" {
 			res.note("the app does not appear as installed")
-			warn("⚠ The app does not appear as installed on the phone. Setup goes on without it. " + again + "\n")
+			warn("appsetup.the_app_does_not_appear")
 			return res
 		}
 	}
@@ -204,114 +203,123 @@ func setupApp(ctx context.Context, app *App, e *env, a phoneapp.ADB, apk string,
 		res.note(err.Error())
 		switch {
 		case errors.Is(err, phoneapp.ErrAppTooOld):
-			warn("⚠ The ADBuddy app on the phone is too old for this host: run `adbuddy setup` again to update it. 🔴 confirmations will happen in the terminal.\n")
+			warn("appsetup.the_adbuddy_app_on_the_2")
 		case errors.Is(err, phoneapp.ErrUnpinned):
-			warn("This build of adbuddy trusts no signing certificate for the app yet, so it skips it: pass --apk <file> to install and trust a development build. 🔴 confirmations will happen in the terminal.\n")
+			warn("appsetup.this_build_of_adbuddy_trusts")
 		case errors.Is(err, phoneapp.ErrSigner):
-			warn("⚠ The ADBuddy app on the phone is not signed by hybriqtech (a development build?), so ADBuddy will not trust it. Uninstall it on the phone and run `adbuddy setup` again, or pass --apk <that APK> to trust a development build. 🔴 confirmations will happen in the terminal.\n")
+			warn("appsetup.the_adbuddy_app_on_the_3")
 		default:
-			warn("⚠ Could not check the ADBuddy app on the phone (%v), so ADBuddy will not trust it. "+again+" 🔴 confirmations will happen in the terminal.\n", err)
+			warn("appsetup.could_not_check_the_adbuddy_2", err)
 		}
 		return res
 	}
 	if v.Dev() {
-		say("Note: the ADBuddy app on the phone is the development build you trusted (certificate %s).\n", v.Cert())
+		say("appsetup.note_the_adbuddy_app_on", v.Cert())
 	} else if removed, err := forgetDevBuild(e); err != nil {
-		warn("⚠ Could not stop trusting the development build (%v): delete %s by hand.\n", err, phoneapp.DevTrustPath(e.dirs.Data))
+		warn("appsetup.could_not_stop_trusting_the", err, phoneapp.DevTrustPath(e.dirs.Data))
 	} else if removed {
-		say("The app on the phone is a release: ADBuddy no longer trusts the development build.\n")
+		say("appsetup.the_app_on_the_phone")
 	}
 	store := newCfgStore(e.dirs.ConfigFile(), e.cfg)
 	_, err = chatPort(store)
 	e.cfg.ChatPort = store.Config().ChatPort // setup saves e.cfg later
 	if err != nil {
 		res.note(err.Error())
-		warn("⚠ %v. Setup goes on; the app's chat needs it. "+again+"\n", err)
+		warn("appsetup.setup_goes_on_the_app", err)
 	}
 
 	host, _ := os.Hostname()
-	say("Open the phone: the ADBuddy app explains what this PC will do. Accept there to continue (waiting up to %s).\n", waitText(consentWait))
+	say("appsetup.open_the_phone_the_adbuddy", waitText(consentWait))
 	switch err := phoneapp.AskConsent(ctx, a, v, phoneapp.HostName(host), consentWait, time.Second); {
 	case errors.Is(err, phoneapp.ErrConsentDenied):
 		res.Consent = "denied"
-		say("You said no in the app: ADBuddy works without it, and 🔴 confirmations happen in the terminal. Run `adbuddy setup` again to change it.\n")
+		say("appsetup.you_said_no_in_the")
 		return res
 	case errors.Is(err, phoneapp.ErrConsentTimeout):
 		res.Consent = "timeout"
-		say("No answer in the app: skipping it for now. Run `adbuddy setup` again when you have the phone at hand.\n")
+		say("appsetup.no_answer_in_the_app")
 		return res
 	case err != nil:
 		res.Consent = "skipped"
 		if ctx.Err() == nil {
 			res.note(err.Error())
-			say("⚠ Could not ask in the app: %v. Setup goes on without it; 🔴 confirmations will happen in the terminal. "+again+"\n", err)
+			say("appsetup.could_not_ask_in_the", err)
 		}
 		return res
 	}
 	res.Consent = "granted"
 	if err := phoneapp.Grant(ctx, a, v); err != nil {
 		res.note(err.Error())
-		warn("⚠ Could not give the app the permission to cut access: %v. "+again+"\n", err)
+		warn("appsetup.could_not_give_the_app", err)
 	} else {
 		res.Permission = true
 	}
 	if err := phoneapp.AllowBackground(ctx, a, v); err != nil {
 		res.note(err.Error())
-		warn("⚠ Could not exempt the app from battery optimisation (it may disconnect with the screen off): %v. "+again+"\n", err)
+		warn("appsetup.could_not_exempt_the_app", err)
 	} else {
 		res.Battery = true
 	}
 	if prev, err := phoneapp.EnableAccessibility(ctx, a, v); err != nil {
 		res.note(err.Error())
-		warn("⚠ Could not turn on the app's accessibility service: %v. Turn it on by hand: Settings > Accessibility > ADBuddy, or run `adbuddy setup` again to retry.\n", err)
+		warn("appsetup.could_not_turn_on_the", err)
 	} else {
 		res.Accessibility = true
 		if prev != "" && prev != "null" {
-			say("Accessibility services already on were kept: %s\n", prev)
+			say("appsetup.accessibility_services_already_on_were", prev)
 		}
 	}
 	if res.Permission && res.Battery && res.Accessibility {
-		say("The ADBuddy app is ready (version %s).\n", version)
+		say("appsetup.the_adbuddy_app_is_ready", version)
 	} else {
-		warn("The ADBuddy app is only partly ready (version %s); see the warnings above.\n", version)
+		warn("appsetup.the_adbuddy_app_is_only", version)
 	}
 	return res
 }
 
-// waitText says a wait in minutes (or as a duration when it is short).
-func waitText(d time.Duration) string {
+// waitText says a wait in minutes (or as a duration when it is short), as a
+// message of its own: it is a piece of a sentence in the language of the run.
+func waitText(d time.Duration) i18n.Msg {
 	if d >= time.Minute && d%time.Minute == 0 {
 		n := int(d / time.Minute)
 		if n == 1 {
-			return "1 minute"
+			return i18n.M("appsetup.wait.one_minute")
 		}
-		return fmt.Sprintf("%d minutes", n)
+		return i18n.M("appsetup.wait.minutes", n)
 	}
-	return d.Round(time.Millisecond).String()
+	return i18n.M("appsetup.wait.duration", d.Round(time.Millisecond).String())
 }
 
-// fmtApp is the human summary of the app.
-func fmtApp(r appResult) string {
+// fmtApp is the human summary of the app, in English (what the tests read).
+func fmtApp(r appResult) string { return fmtAppMsg(r).String() }
+
+// fmtAppMsg is the human summary of the app as a message of its own.
+func fmtAppMsg(r appResult) i18n.Msg {
 	switch {
 	case !r.Installed && r.Note == noAppNote:
-		return "app: skipped"
+		return i18n.M("appsetup.summary.skipped")
 	case !r.Installed:
-		return "app: not installed"
+		return i18n.M("appsetup.summary.not_installed")
 	case r.Consent != "granted":
-		return fmt.Sprintf("app %s (%s)", r.Version, r.Consent)
+		return i18n.M("appsetup.summary.consent", r.Version, r.Consent)
 	}
-	var off []string
+	var off []any
 	if !r.Permission {
-		off = append(off, "permission off")
+		off = append(off, i18n.M("appsetup.summary.permission_off"))
 	}
 	if !r.Battery {
-		off = append(off, "battery off")
+		off = append(off, i18n.M("appsetup.summary.battery_off"))
 	}
 	if !r.Accessibility {
-		off = append(off, "accessibility off")
+		off = append(off, i18n.M("appsetup.summary.accessibility_off"))
 	}
-	if len(off) == 0 {
-		return fmt.Sprintf("app %s (granted)", r.Version)
+	switch len(off) {
+	case 0:
+		return i18n.M("appsetup.summary.granted", r.Version)
+	case 1:
+		return i18n.M("appsetup.summary.granted_off_1", r.Version, off[0])
+	case 2:
+		return i18n.M("appsetup.summary.granted_off_2", r.Version, off[0], off[1])
 	}
-	return fmt.Sprintf("app %s (granted, %s)", r.Version, strings.Join(off, ", "))
+	return i18n.M("appsetup.summary.granted_off_3", r.Version, off[0], off[1], off[2])
 }

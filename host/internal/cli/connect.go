@@ -14,6 +14,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/platformtools"
 	"github.com/spf13/cobra"
@@ -72,14 +73,14 @@ func newConnectCmd(app *App) *cobra.Command {
 				if err := startServer(ctx, runner); err != nil {
 					return err
 				}
-				fmt.Fprintf(app.Stderr, "Connecting to %s…\n", addr)
+				fmt.Fprintln(app.Stderr, app.T("connect.connecting_to", addr))
 				guid, _ := pairing.GuidOf(e.cfg.Serial)
 				active, verified, err := connectAddr(ctx, runner, addr, guid, connectAddrWait)
 				if err != nil {
 					return err
 				}
 				if !verified {
-					fmt.Fprintf(app.Stderr, "Note: could not check that this is the phone you set up (%s).\n", unverifiedWhy(e.cfg.Serial))
+					fmt.Fprintln(app.Stderr, app.T("connect.note_could_not_check_that", unverifiedWhy(e.cfg.Serial)))
 				}
 				cfg := e.cfg
 				cfg.Address = addr
@@ -90,8 +91,8 @@ func newConnectCmd(app *App) *cobra.Command {
 				if app.JSON {
 					return WriteData(app.Stdout, res)
 				}
-				fmt.Fprintf(app.Stdout, "Connected to %s.\n", addr)
-				fmt.Fprintf(app.Stderr, "Saved the address in %s. Next: run `adbuddy serve`.\n", e.dirs.ConfigFile())
+				fmt.Fprintln(app.Stdout, app.T("connect.connected_to", addr))
+				fmt.Fprintln(app.Stderr, app.T("connect.saved_the_address_in_next", e.dirs.ConfigFile()))
 				return nil
 			}()
 			if err != nil && ctx.Err() != nil {
@@ -119,12 +120,13 @@ func configuredADB(e env, flag string) string {
 	return ""
 }
 
-// unverifiedWhy says why the phone at an address could not be checked.
-func unverifiedWhy(saved string) string {
+// unverifiedWhy says why the phone at an address could not be checked, as a
+// message of its own: it goes inside a sentence in the language of the run.
+func unverifiedWhy(saved string) i18n.Msg {
 	if saved == "" {
-		return "no phone is set up in config.toml yet"
+		return i18n.M("connect.unverified.no_phone")
 	}
-	return "its saved name does not carry a serial number that tells phones apart"
+	return i18n.M("connect.unverified.no_serial")
 }
 
 // connectAddr connects runner's adb server to the phone at addr (waiting at
@@ -253,7 +255,7 @@ func findKnownPhone(ctx context.Context, runner adb.Runner, serial string, addrs
 // the address does not serve; addrErr then says why (said on log too).
 func tryAddr(ctx context.Context, runner adb.Runner, online []adb.Device, addr, guid string, log io.Writer) (kp knownPhone, ok bool, addrErr error) {
 	if hasSerial(online, addr) {
-		fmt.Fprintf(log, "Checking the phone at %s (a saved address)…\n", addr)
+		tell(log, "connect.checking_the_phone_at_a", addr)
 		verified, err := verifyAt(ctx, runner, addr, guid)
 		if ctx.Err() != nil {
 			return knownPhone{}, false, ctx.Err()
@@ -264,7 +266,7 @@ func tryAddr(ctx context.Context, runner adb.Runner, online []adb.Device, addr, 
 		skipAddr(log, addr, err)
 		return knownPhone{}, false, err
 	}
-	fmt.Fprintf(log, "Connecting to %s (a saved address)…\n", addr)
+	tell(log, "connect.connecting_to_a_saved_address", addr)
 	active, verified, err := connectAddr(ctx, runner, addr, guid, knownAddrWait)
 	if ctx.Err() != nil {
 		return knownPhone{}, false, ctx.Err()
@@ -294,14 +296,14 @@ func checkFound(ctx context.Context, runner adb.Runner, active, guid string, byG
 // skipAddr says why the saved address addr is not used.
 func skipAddr(log io.Writer, addr string, err error) {
 	if hasCode(err, "WRONG_PHONE") {
-		fmt.Fprintf(log, "Warning: the phone at %s %s.\n", addr, wrongPhoneWarningText)
+		tell(log, "connect.warning_the_phone_at", addr, wrongPhoneWarningText)
 		return
 	}
-	fmt.Fprintf(log, "The address %s did not work (%s); waiting for the phone on this network…\n", addr, AsError(err).Message)
+	tell(log, "connect.the_address_did_not_work", addr, AsError(err).Message)
 }
 
 // wrongPhoneWarningText follows "the phone at <addr>" when it is another phone.
-const wrongPhoneWarningText = "is not the one you set up; not using that address"
+var wrongPhoneWarningText = i18n.M("connect.wrong_phone_warning")
 
 // hasCode reports whether err is an *Error with that code.
 func hasCode(err error, code string) bool {

@@ -1,13 +1,10 @@
 # Text literals left in internal/cli, per file and rule (textlint_test.go). It only goes down.
-appsetup.go print 34
 attach.go print 2
-connect.go print 8
 doctor.go check 33
 doctor.go print 5
 doctor_claude.go check 6
 envcmd.go print 1
 helpers.go print 6
-invariant.go print 1
 journal.go print 3
 phone.go print 15
 phone_agent.go print 5
@@ -18,7 +15,6 @@ root.go print 1
 run.go print 1
 serve.go print 7
 serve_session.go print 6
-setup.go print 22
 uilink.go print 4
 undo.go print 3
 version.go print 1

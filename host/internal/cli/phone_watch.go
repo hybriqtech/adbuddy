@@ -142,7 +142,7 @@ func (w *watcher) step(ctx context.Context) {
 	// to be the one in config.toml: a guid can be announced by anything on the
 	// network and an address can reach another phone.
 	if !w.canCheck {
-		w.warnOnce("The phone is not listed and its identity cannot be checked (" + unverifiedWhy(w.Serial) + "): waiting for it to come back as " + w.Active.Serial() + ".")
+		w.warnOnce("The phone is not listed and its identity cannot be checked (" + unverifiedWhy(w.Serial).String() + "): waiting for it to come back as " + w.Active.Serial() + ".")
 		return
 	}
 	// mDNS brought it back under another name.
