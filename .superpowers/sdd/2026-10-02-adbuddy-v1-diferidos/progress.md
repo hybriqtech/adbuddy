@@ -58,3 +58,5 @@ Plan reescrito con los hallazgos de la revisión opus del plan y las órdenes de
 - Tras T10: revision final opus de toda la rama (git diff origin/main..HEAD), una sola tanda de arreglos, git grep IPs/seriales, push fix/v1-diferidos y PR (hybriqtech).
 - Task 10: complete (1d72cab f2df7a6 4269146 + 4c86592 28f4529 097565a). Siguiente: reconciliar pendientes-m3-m5.md (doc) y revision final opus.
 - Doc pendientes reconciliado (f2e2703). Siguiente: revision final opus.
+- Revision final opus: ⚠️ sin Critical/Important. Tanda unica de arreglos (a97830f25b1c9c5e9): flake childOf 30s, nivel real del undo en el diario, tailer O_NONBLOCK (Unix), docs pendientes. Para la descripcion del PR: 3 commits intermedios de T2 con TestReasonsBilingual en rojo (2e530e6, 63afc0d, 4217c17) -> integrar con squash o avisar.
+- Re-revision de la tanda final: sin problemas; arreglada puntuacion en pendientes. Listo para push y PR.
