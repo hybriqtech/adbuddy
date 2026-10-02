@@ -168,13 +168,28 @@ func (e *emu) installTests(t *testing.T) {
 // uninstallAtCleanup leaves the emulator as the test found it: the CI keeps
 // its AVD between jobs. Only while the emulator is online (a test that left
 // its adb cut has nothing to clean through it).
+// TestWhatIsInstalledIsUninstalled checks uninstallAtCleanup: once a test
+// that installed the app ends, the app is gone.
+func TestWhatIsInstalledIsUninstalled(t *testing.T) {
+	e := newEmu(t)
+	t.Run("install", func(t *testing.T) { newEmu(t).installApp(t) })
+	for _, line := range strings.Split(e.shell(t, "pm list packages "+phoneapp.Package), "\n") {
+		if strings.TrimSpace(line) == "package:"+phoneapp.Package {
+			t.Errorf("%s is still installed after the test that installed it", phoneapp.Package)
+		}
+	}
+}
+
 func (e *emu) uninstallAtCleanup(t *testing.T, pkg string) {
 	t.Cleanup(func() {
-		if e.state() != "device" {
+		// e.ctx comes from t.Context(), which is canceled before cleanups run.
+		c := *e
+		c.ctx = context.WithoutCancel(e.ctx)
+		if c.state() != "device" {
 			return
 		}
-		ctx, cancel := context.WithTimeout(e.ctx, time.Minute)
+		ctx, cancel := context.WithTimeout(c.ctx, time.Minute)
 		defer cancel()
-		_, _, _, _ = e.adb.Output(ctx, "uninstall", pkg)
+		_, _, _, _ = c.adb.Output(ctx, "uninstall", pkg)
 	})
 }
