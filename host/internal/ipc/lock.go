@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // lockPath is the file a daemon keeps locked for as long as it serves
@@ -27,4 +28,16 @@ func tryLock(path string) (*os.File, error) {
 		return nil, err
 	}
 	return f, nil
+}
+
+// waitLock is tryLock retried every 10 ms until wait has passed.
+func waitLock(path string, wait time.Duration) (*os.File, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		f, err := tryLock(path)
+		if !errors.Is(err, errLocked) || time.Now().After(deadline) {
+			return f, err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

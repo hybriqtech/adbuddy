@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -411,4 +413,146 @@ func TestSecondServerRefusedEvenWithoutTheSocket(t *testing.T) {
 		t.Fatalf("after close: %v", err)
 	}
 	s3.Close()
+}
+
+// V29: many creators at once agree on one secret, and a reader never sees a
+// corrupt one meanwhile.
+func TestSecretCreatedOnceUnderARace(t *testing.T) {
+	dir := shortDir(t)
+	setTries(t, 500) // a slow CI must not turn a rename in progress into an error
+	const n = 16
+	got := make(chan string, n)
+	stop := make(chan struct{})
+	stopped := false
+	defer func() { // a Fatalf must not leave the reader running
+		if !stopped {
+			close(stop)
+		}
+	}()
+	readerErr := make(chan error, 1)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				readerErr <- nil
+				return
+			default:
+			}
+			if _, err := ReadSecret(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				readerErr <- err
+				return
+			}
+		}
+	}()
+	for range n {
+		go func() {
+			s, err := EnsureSecret(dir)
+			if err != nil {
+				t.Error(err)
+			}
+			got <- s
+		}()
+	}
+	first := <-got
+	for range n - 1 {
+		if s := <-got; s != first {
+			t.Fatalf("two secrets: %q and %q", first, s)
+		}
+	}
+	close(stop)
+	stopped = true
+	if err := <-readerErr; err != nil {
+		t.Fatalf("a reader saw %v", err)
+	}
+}
+
+// setTries lengthens (or shortens) ReadSecret's retries for one test.
+func setTries(t *testing.T, n int) {
+	t.Helper()
+	old := secretTries
+	secretTries = n
+	t.Cleanup(func() { secretTries = old })
+}
+
+// V29: a secret that is not whole yet (an older host writes it in two steps)
+// is read again for a moment instead of failing as corrupt.
+func TestReadSecretWaitsForAPartialOne(t *testing.T) {
+	dir := shortDir(t)
+	setTries(t, 500) // up to 5 s for a write that comes after 50 ms, on any CI
+	full := strings.Repeat("ab", 32)
+	if err := os.WriteFile(SecretPath(dir), []byte(full[:10]), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		done <- os.WriteFile(SecretPath(dir), []byte(full), 0o600)
+	}()
+	s, err := ReadSecret(dir)
+	if werr := <-done; werr != nil {
+		t.Fatal(werr)
+	}
+	if err != nil || s != full {
+		t.Fatalf("%q %v", s, err)
+	}
+	// A corrupt one stays corrupt, after the retries.
+	secretTries = 3
+	if err := os.WriteFile(SecretPath(dir), []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSecret(dir); err == nil || !strings.Contains(err.Error(), "is corrupt") {
+		t.Fatalf("corrupt: %v", err)
+	}
+}
+
+// V29: the secret is written whole under a temporary name and then renamed,
+// so nobody reads a part of it; and a second creator waits for the first and
+// takes its secret.
+func TestSecretIsNeverSeenHalfWritten(t *testing.T) {
+	dir := shortDir(t)
+	second := make(chan string, 1)
+	calls := 0
+	secretWritten = func(tmp string) {
+		calls++
+		if calls > 1 {
+			t.Error("the secret was created twice")
+			return
+		}
+		if _, err := ReadSecret(dir); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("before the rename a reader got %v, want no secret", err)
+		}
+		if b, err := os.ReadFile(tmp); err != nil || len(b) != 64 {
+			t.Errorf("temporary file %q: %d bytes, %v", tmp, len(b), err)
+		}
+		go func() {
+			s, err := EnsureSecret(dir) // waits for this one to finish
+			if err != nil {
+				t.Error(err)
+			}
+			second <- s
+		}()
+		time.Sleep(50 * time.Millisecond) // the second one is waiting by now
+	}
+	t.Cleanup(func() { secretWritten = nil })
+	first, err := EnsureSecret(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("secretWritten called %d times", calls)
+	}
+	select {
+	case s := <-second:
+		if s != first {
+			t.Fatalf("second creator got %q, want %q", s, first)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second creator never returned")
+	}
+	if s, err := ReadSecret(dir); err != nil || s != first {
+		t.Fatalf("file %q %v", s, err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "ipc.secret.*.tmp")); len(left) != 0 {
+		t.Fatalf("temporary files left: %q", left)
+	}
 }

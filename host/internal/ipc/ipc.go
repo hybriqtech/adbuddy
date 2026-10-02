@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Frame types.
@@ -126,8 +127,21 @@ func SocketPath(dataDir string) string { return filepath.Join(dataDir, "adbuddy.
 // SecretPath is the per-installation secret inside the data directory.
 func SecretPath(dataDir string) string { return filepath.Join(dataDir, "ipc.secret") }
 
+// secretLockPath is held while the secret is created: one creator at a time.
+func secretLockPath(dataDir string) string { return filepath.Join(dataDir, "ipc.secret.lock") }
+
+// secretWait bounds the wait for another process that is creating the secret.
+const secretWait = 5 * time.Second
+
+// secretWritten, when not nil (tests), is called with the temporary file once
+// the whole secret is in it, before it takes the secret's name.
+var secretWritten func(tmp string)
+
 // EnsureSecret returns the installation secret, creating it (256 random
-// bits, readable only by the user) on first use.
+// bits, readable only by the user) on first use. It is written whole under a
+// temporary name in the same folder (same permissions and, on Windows, the
+// folder's ACL) and then renamed, so a reader sees no secret or all of it;
+// creators take turns (secretLockPath) and a later one reads the first one's.
 func EnsureSecret(dataDir string) (string, error) {
 	if s, err := ReadSecret(dataDir); err == nil {
 		return s, nil
@@ -137,27 +151,73 @@ func EnsureSecret(dataDir string) (string, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return "", err
 	}
+	lock, err := waitLock(secretLockPath(dataDir), secretWait)
+	if err != nil {
+		return "", fmt.Errorf("another ADBuddy is creating %s: %w", SecretPath(dataDir), err)
+	}
+	defer lock.Close()
+	if s, err := ReadSecret(dataDir); err == nil {
+		return s, nil // another process created it meanwhile
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
 	secret := hex.EncodeToString(b[:])
-	f, err := os.OpenFile(SecretPath(dataDir), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, fs.ErrExist) {
-		return ReadSecret(dataDir) // another process won the race
-	}
+	f, err := os.CreateTemp(dataDir, "ipc.secret.*.tmp")
 	if err != nil {
 		return "", err
 	}
+	tmp := f.Name()
+	defer os.Remove(tmp) // nothing left once renamed
 	if _, err := f.WriteString(secret); err != nil {
 		f.Close()
 		return "", err
 	}
-	return secret, f.Close()
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	if secretWritten != nil {
+		secretWritten(tmp)
+	}
+	if err := os.Rename(tmp, SecretPath(dataDir)); err != nil {
+		return "", err
+	}
+	return secret, nil
 }
 
-// ReadSecret reads the installation secret.
+// A secret that cannot be read whole is read again for a moment: on Windows
+// a rename in progress refuses to open it, and a host of an older version
+// wrote it in two steps (create, then write). Variables so a test can
+// lengthen the wait (a slow CI with -race).
+var (
+	secretTries = 20
+	secretPause = 10 * time.Millisecond
+)
+
+// ReadSecret reads the installation secret. No secret at all is answered at
+// once (fs.ErrNotExist); any other failure is retried for secretTries.
 func ReadSecret(dataDir string) (string, error) {
+	var err error
+	for i := range secretTries {
+		if i > 0 {
+			time.Sleep(secretPause)
+		}
+		var s string
+		if s, err = readSecretOnce(dataDir); err == nil || errors.Is(err, fs.ErrNotExist) {
+			return s, err
+		}
+	}
+	return "", err
+}
+
+func readSecretOnce(dataDir string) (string, error) {
 	b, err := os.ReadFile(SecretPath(dataDir))
 	if err != nil {
 		return "", err
