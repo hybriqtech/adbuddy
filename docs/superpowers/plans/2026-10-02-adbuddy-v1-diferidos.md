@@ -19,7 +19,7 @@
 
 ## Reparto de revisiones
 
-**Opus** (seguridad: canal, token, journal, permisos, contención de escritura): T1, T2, T3, T4 (V24), T5, T8 (IPC) y T9 (V28). **Sonnet** (`adbuddy-reviewer`): T4 (V25), T6, T7, T10, T11. Revisión final de la rama: opus. La revisión opus del plan ya se hizo y sus hallazgos están aplicados. Las tareas van en serie, un subagente a la vez.
+**Opus** (seguridad: canal, token, journal, permisos, contención de escritura): T1, T2, T3, T4 (V24), T5, T9 (V28). **Sonnet** (`adbuddy-reviewer`): T4 (V25), T6, T7, T10. (T8 y T11 quitadas: las toma nautilus.) Revisión final de la rama: opus. La revisión opus del plan ya se hizo y sus hallazgos están aplicados. Las tareas van en serie, un subagente a la vez.
 
 ## Fuera de la ola 1
 
@@ -72,9 +72,9 @@ Remedio: `CardSafe` es falso (la pregunta va a la terminal) si esos campos viene
 
 **V10** (`uidump/uidump.go:226-232,245`): `uidump.Find` toma los bounds del ancestro clicable sin comprobar que no estén vacíos: tap en (0,0); bounds vacíos ⇒ no hay punto de toque (error, nunca (0,0)); y qué hacer cuando `Find` corta en `MaxDepth` sin señal (decidirlo o aplazarlo diciéndolo). **V12** (`cli/uilink.go:133,142-148`): `uiLink.Call` no mira `ctx` antes de `Send` (un click con ctx cancelado sale y el diario dice "stopped") y `OK:true` sin `result` da `(nil,nil)`: comprobar `ctx` antes de `Send` y tratar `OK:true` sin `result` como un **error** (no un resultado vacío); apuntar la carrera del `select` entre `w.ch` y `ctx.Done()`. **V13** (`cli/uilink.go:78-89`): `protected.json` con `{}` o `null` cuenta como lista conocida y se pierde el aviso de "sin lista": `return u`, para que avise `Protected()` con el mensaje que ya existe (ningún `Fprintf` nuevo), y un test que fije que `"protectedApps": []` (lista vacía explícita) SÍ sigue contando como lista conocida.
 
-### Task 8: IPC robusto (V29)
+### Task 8: IPC robusto (V29) — QUITADA: la toma nautilus (orden del supervisor, 2026-10-02)
 
-(Opus.) **V29** (`ipc/server.go:195-201`, `ipc/ipc.go:145-157,192-196`). La revisión del plan confirmó que `ReadFrame` hace `make([]byte, n)` con n ≤ 1 MiB tomado de la cabecera ANTES de autenticar (con 5 s de plazo y una goroutine por `Accept` sin límite) y que no hay lock alrededor de Stat/Dial/Remove (secuestro del socket entre dos `serve`). Diseño: (1) **leer el payload según llega**, sin reservar de antemano lo que dice la cabecera; (2) si se pone un tope, que cuente **solo las conexiones aún no autenticadas** (los hooks `PermissionRequest` esperan hasta 610 s y los `attach` duran mucho); un tope que cierre conexiones puede convertir un problema de memoria en una denegación del shim más fácil: decidirlo de forma explícita y documentarlo; (3) el lock debe durar **toda la vida del `Server`**, liberarse en `Close` y crearse con 0600 sin seguir enlaces (con el lock solo alrededor de la comprobación, un `Dial` que caduca contra un `serve` vivo pero ocupado sigue dejando borrar su socket); mantener el `Dial` para un `serve` antiguo sin lock; (4) **secreto atómico sin `Rename` sobre el existente** (`os.Rename` reemplaza el destino: dos `serve` arrancando a la vez dejarían a uno con un secreto que ya no está en el fichero, y el secreto también firma el diario: `journal.OpenSigned(..., []byte(secret))`, `cli/serve.go:215`): escribir un temporal (`os.CreateTemp`, 0600) y publicarlo con `os.Link(tmp, final)`, que no sobrescribe; si da `ErrExist`, leer el que ya está; si el sistema de ficheros no admite enlaces duros, volver al `O_EXCL` actual; un fichero vacío o corrupto sigue siendo un error y NO se regenera (regenerarlo invalidaría las firmas). Tests: N llamadas concurrentes a `EnsureSecret` devuelven el mismo valor y es el del fichero; un secreto existente nunca cambia; un lector nunca ve un secreto a medio escribir. No tocar `cli/serve.go` (m6c cambia 55 líneas; límite que se documenta: `serve` llama a `EnsureSecret` y arranca el canal del móvil antes de `Listen`, así que el lock no los ordena entre sí). Permisos 0600/0700 y el socket sin abrir a otros usuarios en Unix y Windows.
+Ya no es de este plan. No tocar `ipc/`.
 
 ### Task 9: Chat y ficheros del host (V23 V28 V41)
 
@@ -84,9 +84,9 @@ Remedio: `CardSafe` es falso (la pregunta va a la terminal) si esos campos viene
 
 **V37:** estabilizar con esperas por condición (no `Sleep`) los tests citados en el triage (`TestRemoteOnClientGoneWhileAsking` en `remotecmd_test.go:657`, `Sleep(300ms)` en `TestWatchRemoteResetsAfterASuccess`, esperas de 5 s) sin quitar cobertura; **no refactorizar `serve.go`** para `TestServeWiresRemoteActive` (m6c cambia 55 líneas): comprobar el literal con `go/ast` o dejarlo. **V33:** la guarda de ejemplos de las skills (`cli/skills_commands_test.go`) detecta un bloque ```adb tras una valla de 4 backticks o con info string `adb{.x}` y las recetas prohibidas que le faltan (`rm -r` dentro de `$(…)` o tras `;`, `find -delete`, `pm uninstall` sin `--user`, `MASTER_CLEAR`, `FACTORY_RESET`), con casos negativos. **V39 (solo `bridge`; lo de `cli/phone.go` va a pendientes):** tests de tramas de ids no aceptados, de `OnAttach` después de `OnConnect`, de `Publish` desde `OnAttach` y de `filled()` por `PublishSnapshot`.
 
-### Task 11: Tests JVM de la app (sin UI) (V21 V42)
+### Task 11: Tests JVM de la app (V21 V42 V43) — QUITADA: la toma nautilus (orden del supervisor, 2026-10-02)
 
-Entorno comprobado en este PC: Gradle 9.8.0 en `%LOCALAPPDATA%\Gradle\gradle-9.8.0`, JDK 17 en `%LOCALAPPDATA%\Android\jdk-17.0.20.1+1` y el SDK con `android-37.0` en `%LOCALAPPDATA%\Android\Sdk`; con `JAVA_HOME` y `ANDROID_HOME` definidas a esas carpetas (sin escribir rutas personales en lo que se sube), `gradle :app:testDebugUnitTest --tests ...` desde `android/`. Aplazar solo si eso falla (y decirlo). **V21:** casos de borde de `TermWebPolicyTest` (`android/.../term/TermWebPolicy.kt`: resto vacío, `?x=1`, `#frag`, `a?/../b`, `%2F`). **V42:** tests de socket viejo y de reentrada `onResult → request` de `Bridge`, y que ningún reductor lanza con ningún payload (fuzz acotado de `ChatReducer`, `Reducer`, `RemoteReducer`: una excepción dentro de `_state.updateAndGet` corta el socket y provoca un bucle de reconexión). Solo lógica sin UI (no tocar `ui/**`); ningún texto visible nuevo (el `NoHardcodedTextTest` de m6c lo vigila).
+Ya no es de este plan. No tocar `android/`. También pasan a nautilus V11 y V38 (`daemon/guard.go`).
 
 ---
 
