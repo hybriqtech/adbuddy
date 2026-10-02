@@ -901,6 +901,38 @@ func TestCardSafe(t *testing.T) {
 	}
 }
 
+// V18: what the card cannot show as it is (private use, unassigned, object
+// replacement, noncharacters, surrogates, invalid bytes) goes to the terminal;
+// text with a glyph does not.
+func TestCardSafeUnicodeTheCardCannotShow(t *testing.T) {
+	js := func(cmd, desc string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{"command": cmd, "description": desc})
+		return b
+	}
+	for _, r := range []rune{0xe000, 0xf8ff, 0x378, 0xfffc, 0xfffe, 0xfdd0, 0x10ffff, 0xf0000, 0xd800} {
+		if shownRune(r) || shown("a"+string(r)+"b") {
+			t.Errorf("U+%04X shown", r)
+		}
+		if CardSafe("Bash", js("echo a"+string(r)+"b", "")) {
+			t.Errorf("U+%04X accepted in the command", r)
+		}
+		if CardSafe("Bash", js("ls", "a"+string(r)+"b")) {
+			t.Errorf("U+%04X accepted in the description", r)
+		}
+	}
+	if shown("a\xffb") || CardSafe("Bash", json.RawMessage("{\"command\":\"a\xffb\"}")) {
+		t.Error("invalid bytes accepted")
+	}
+	for _, s := range []string{"é", "日本語", "Ж", "😀", "ñ", "\t", "\n", " ", "echo é日Ж😀ñ\n\tx"} {
+		if !shown(s) {
+			t.Errorf("%q refused", s)
+		}
+		if !CardSafe("Bash", js("x"+s+"y", "x"+s+"y")) {
+			t.Errorf("%q refused by CardSafe", s)
+		}
+	}
+}
+
 // V04: the card of a Bash shows the command and the description only. A field
 // that changes how it runs where the card does not say (out of the sandbox, in
 // the background, or one this host does not know) leaves the question on the
