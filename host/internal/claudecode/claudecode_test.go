@@ -1205,3 +1205,31 @@ func TestTwoTailersOfOneTranscriptGiveTheSameIDsInTheSameOrder(t *testing.T) {
 		})
 	}
 }
+
+// J2.7: NotebookEdit's only path field is notebook_path (its other fields are
+// cell_id, new_source, cell_type and edit_mode), and the card shows that one.
+// An input that also carries a file_path is judged on both: the config path
+// in either refuses the card.
+func TestCardSafeNotebookEditLooksAtNotebookPathAndAnyOtherPath(t *testing.T) {
+	in := func(nb, file string) json.RawMessage {
+		m := map[string]string{"notebook_path": nb, "new_source": "x", "edit_mode": "replace"}
+		if file != "" {
+			m["file_path"] = file
+		}
+		b, _ := json.Marshal(m)
+		return b
+	}
+	const cfg, ok = "/home/u/proj/.claude/settings.json", "/home/u/proj/a.ipynb"
+	if !CardSafe("NotebookEdit", in(ok, "")) {
+		t.Error("a plain notebook was refused")
+	}
+	if CardSafe("NotebookEdit", in(cfg, "")) {
+		t.Error("a notebook_path on the agent's config was accepted")
+	}
+	if CardSafe("NotebookEdit", in(cfg, ok)) || CardSafe("NotebookEdit", in(ok, cfg)) {
+		t.Error("a config path in one of two path fields was accepted")
+	}
+	if got := ToolDetail("NotebookEdit", in(ok, cfg)); got != ok {
+		t.Errorf("the card shows %q, not the notebook_path", got)
+	}
+}
