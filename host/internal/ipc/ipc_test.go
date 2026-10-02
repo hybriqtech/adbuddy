@@ -381,3 +381,34 @@ func TestAttachResizesReachTheHandler(t *testing.T) {
 		t.Fatalf("exit %+v, %v, got %q", exit, err, out.String())
 	}
 }
+
+// V29: the daemon holds a lock for as long as it serves, so a second Listen
+// in the same directory fails even when the first one's socket is gone: two
+// serve that start at once could otherwise both find a dead socket, and the
+// second remove the first one's live socket (Stat, Dial and Remove are not
+// one step).
+func TestSecondServerRefusedEvenWithoutTheSocket(t *testing.T) {
+	dir := shortDir(t)
+	s := startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit { return Exit{} })
+	secret, err := ReadSecret(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(SocketPath(dir)); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := Listen(dir, secret, func(ctx context.Context, req Request, c *Conn) Exit { return Exit{} })
+	if !errors.Is(err, ErrAlreadyRunning) {
+		if s2 != nil {
+			s2.Close()
+		}
+		t.Fatalf("second server: %v", err)
+	}
+	s.Close()
+	// The lock goes with the first server.
+	s3, err := Listen(dir, secret, func(ctx context.Context, req Request, c *Conn) Exit { return Exit{} })
+	if err != nil {
+		t.Fatalf("after close: %v", err)
+	}
+	s3.Close()
+}
