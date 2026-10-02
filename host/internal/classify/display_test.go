@@ -146,9 +146,16 @@ func TestDisplayCommandCompactsMixedBlanks(t *testing.T) {
 	}
 }
 
-// The title of a recursive delete padded with spaces and NBSP still shows
-// what it deletes.
-func TestTitlesCompactMixedBlanks(t *testing.T) {
+// The title of a recursive delete padded with blanks (spaces, tabs, NBSP and
+// the invisible fillers, mixed or not) still shows what it deletes: the run
+// is compacted.
+//
+// The title is not the guarantee (N3). Padding with characters that are
+// escaped one by one but are not blanks (combining marks) fills its 80 runes
+// before the target. That is not a hole: the whole command is in the raw
+// command, the host denies one of more than 20 000 units, and the dialog
+// only allows after scrolling to its end.
+func TestTitlesCompactBlankRuns(t *testing.T) {
 	c := mustNew(t, "")
 	nbsp, braille, hangul := string(rune(0x00a0)), string(rune(0x2800)), string(rune(0x3164))
 	for _, pad := range []string{
@@ -160,5 +167,15 @@ func TestTitlesCompactMixedBlanks(t *testing.T) {
 		if !strings.Contains(title, "/sdcard/DCIM") || utf8.RuneCountInString(title) > 160 {
 			t.Errorf("rm title %.200q", title)
 		}
+	}
+	// With combining marks in the padding the title is still short, but it
+	// does not reach the target; the full command does.
+	argv := sh(`rm -rf "` + strings.Repeat(" "+nbsp+string(rune(0x0300)), 100) + `" /sdcard/DCIM`)
+	title := Visible(c.Classify(argv).Primary.Title.EN)
+	if strings.Contains(title, "/sdcard/DCIM") || utf8.RuneCountInString(title) > 160 {
+		t.Errorf("rm title with marks %.200q: the limit the comment states has changed", title)
+	}
+	if !strings.Contains(DisplayCommand(argv), "/sdcard/DCIM") {
+		t.Errorf("the full command lacks the target: %.200q", DisplayCommand(argv))
 	}
 }
