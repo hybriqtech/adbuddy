@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
@@ -116,4 +117,16 @@ type recorderReq struct{ last confirm.Request }
 func (r *recorderReq) Confirm(_ context.Context, q confirm.Request) confirm.Decision {
 	r.last = q
 	return confirm.Deny
+}
+
+// With no app connected the question is the terminal's, and it shows no RTL.
+func TestQuestionWithoutAppIsShownByTheTerminalWithoutRTL(t *testing.T) {
+	var out bytes.Buffer
+	c := NewConfirmer(&fakeApp{connected: false}, confirm.NewTerminal(strings.NewReader(""), &out))
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	c.Confirm(ctx, hostileReq())
+	if out.Len() == 0 || rtlIn(out.String()) {
+		t.Fatalf("terminal output: %q", out.String())
+	}
 }
