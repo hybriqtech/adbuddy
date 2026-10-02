@@ -1,0 +1,22 @@
+Run the ADBuddy host in this terminal. It classifies every adb command the agent
+runs, journals it, shows it here and asks you before anything irreversible.
+Keep it open and start the agent in another terminal with `adbuddy run`.
+
+Usage:
+  adbuddy serve [flags]
+
+Examples:
+  adbuddy serve
+  adbuddy serve --adb ~/platform-tools/adb --serial adb-XXXX-yyyy._adb-tls-connect._tcp
+  adbuddy serve --json > journal.ndjson
+
+Flags:
+      --adb string             path to the real adb (default: adb_path in config.toml, else the adb installed by adbuddy setup)
+      --confirm string         where to confirm 🔴 commands: auto (this terminal if interactive, else deny), terminal (read the answers from stdin even when it is not interactive, e.g. a pipe) or deny (default "auto")
+  -h, --help                   help for serve
+      --no-agent adbuddy run   do not start the agent here: run it yourself with adbuddy run (no chat from the phone)
+      --serial string          the phone to use when several are connected
+      --workspace string       agent environment (default: workspace in config.toml, else ~/ADBuddy/default)
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

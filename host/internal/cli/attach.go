@@ -20,11 +20,9 @@ const detachKey = 0x1d
 func newAttachCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "attach",
-		Short: "Connect this terminal to the agent's session in adbuddy serve (Ctrl+] to detach)",
-		Long: `Connect this terminal to the agent that adbuddy serve runs. You see its
-screen and type into it; Ctrl+] detaches and leaves the agent running.
-While attached, this terminal's size is the agent's.`,
-		Args: cobra.NoArgs,
+		Short: app.T("help.attach.short"),
+		Long:  app.T("help.attach.long"),
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if app.Getenv("ADBUDDY_SOURCE") == "agent" {
 				return NewError("AGENT_SESSION", "`adbuddy attach` cannot be run from the agent's session", "Run it yourself in a terminal.")
@@ -138,7 +136,7 @@ func watchSize(ctx context.Context, out *os.File) <-chan [2]int {
 func newNewCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "new [agent]",
-		Short: "Start a new conversation in adbuddy serve, with another agent if given",
+		Short: app.T("help.new.short"),
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			argv := append([]string{"new"}, args...)
@@ -150,7 +148,7 @@ func newNewCmd(app *App) *cobra.Command {
 func newStopCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the agent that adbuddy serve runs (serve keeps running)",
+		Short: app.T("help.stop.short"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return sessionRequest(cmd.Context(), app, []string{"stop"})

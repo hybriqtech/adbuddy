@@ -1,0 +1,20 @@
+Save a screenshot of the phone's screen as a PNG or JPEG file, scaled by
+--scale (0.5 by default; 0.5 and JPEG while the remote mode is on). Without -o
+it goes to screenshots/ in this folder.
+
+Usage:
+  adbuddy screenshot [flags]
+
+Examples:
+  adbuddy screenshot
+  adbuddy screenshot --scale 1 -o screen.png
+  adbuddy screenshot --format jpeg --json
+
+Flags:
+      --format string   png or jpeg (default: from -o's extension, else png; jpeg in remote mode)
+  -h, --help            help for screenshot
+  -o, --output string   file to write (default: screenshots/<date>-<time>.png or .jpg)
+      --scale float     size relative to the screen, more than 0 and at most 1 (default 0.5; 0.5 and JPEG in remote mode)
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

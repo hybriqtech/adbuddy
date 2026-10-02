@@ -17,7 +17,7 @@ type versionInfo struct {
 func newVersionCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print the ADBuddy version",
+		Short: app.T("help.version.short"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			info := versionInfo{Version: Version, Go: runtime.Version(), OS: runtime.GOOS, Arch: runtime.GOARCH}

@@ -40,10 +40,9 @@ func newSendCmd(app *App) *cobra.Command {
 	var caption string
 	cmd := &cobra.Command{
 		Use:   "send <file> [--caption \"…\"]",
-		Short: "Send a file of the environment to the user's phone (for the agent)",
-		Long: `Send a file of the agent environment to the chat on the user's phone, with an
-optional caption. The file must be inside the environment and at most 200 MiB.`,
-		Args: cobra.ExactArgs(1),
+		Short: app.T("help.send.short"),
+		Long:  app.T("help.send.long"),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(caption) > maxSendCaption {
 				return UsageError("the caption is too large: at most 64 KiB")
@@ -70,7 +69,7 @@ optional caption. The file must be inside the environment and at most 200 MiB.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&caption, "caption", "", "text that goes with the file in the chat (at most 64 KiB)")
+	cmd.Flags().StringVar(&caption, "caption", "", app.T("help.send.flag.caption"))
 	return cmd
 }
 

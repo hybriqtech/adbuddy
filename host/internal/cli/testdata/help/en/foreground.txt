@@ -1,0 +1,14 @@
+Show the app and activity in the phone's foreground
+
+Usage:
+  adbuddy foreground [flags]
+
+Examples:
+  adbuddy foreground
+  adbuddy foreground --json
+
+Flags:
+  -h, --help   help for foreground
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

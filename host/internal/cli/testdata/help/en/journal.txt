@@ -1,0 +1,19 @@
+Show the journal of adb commands and their inverses
+
+Usage:
+  adbuddy journal [flags]
+
+Examples:
+  adbuddy journal
+  adbuddy journal --session current
+  adbuddy journal --session s_01J… --json
+  adbuddy journal --limit 0 --json | jq '.data.entries[] | select(.level=="red")'
+
+Flags:
+  -h, --help                      help for journal
+      --limit int                 show only the last N entries (0 = all) (default 50)
+      --session string            only this session: its id (s_…), or current for the one serve is running now
+      --workspace adbuddy serve   agent environment (default: the one adbuddy serve is watching, else ~/ADBuddy/default)
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

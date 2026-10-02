@@ -76,15 +76,9 @@ func newSetupCmd(app *App) *cobra.Command {
 	var adbFlag, agentFlag, wsFlag, connectFlag, apkFlag string
 	var useCode, yes, noApp bool
 	cmd := &cobra.Command{
-		Use:   "setup",
-		Short: "Set up ADBuddy: get adb, pair the phone over Wi-Fi and prepare the agent environment",
-		Long: `Set up ADBuddy step by step: download Android platform-tools (checked against
-Google's checksum), pair the phone over wireless debugging with a QR code (or
-with --code), connect, read the phone's profile, pick the agent and create the
-environment. Run it again at any time; it skips what is already done.
-
-Over Tailscale or another network without mDNS, pair with --code and give the
-connection address with --connect (or type it when asked).`,
+		Use:     "setup",
+		Short:   app.T("help.setup.short"),
+		Long:    app.T("help.setup.long"),
 		Example: "  adbuddy setup\n  adbuddy setup --code\n  adbuddy setup --code --connect 100.64.0.5:41234\n  adbuddy setup --agent codex --yes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -362,14 +356,14 @@ connection address with --connect (or type it when asked).`,
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&adbFlag, "adb", "", "use this adb (37 or newer) instead of downloading platform-tools")
-	cmd.Flags().StringVar(&agentFlag, "agent", "", "agent to use: claude, codex, gemini, opencode…")
-	cmd.Flags().StringVar(&wsFlag, "workspace", "", "agent environment (default: ~/ADBuddy/<phone model>)")
-	cmd.Flags().BoolVar(&useCode, "code", false, "pair with IP:port and the 6-digit code instead of a QR code")
-	cmd.Flags().StringVar(&connectFlag, "connect", "", "connect by this IP:port when mDNS does not find the phone (Tailscale or another network), as its Wireless debugging screen shows it")
-	cmd.Flags().BoolVar(&yes, "yes", false, "accept the recommended choices without asking")
-	cmd.Flags().StringVar(&apkFlag, "apk", "", "install this ADBuddy app APK instead of the latest release (a file you choose: if hybriqtech's release certificate did not sign it, exactly this APK becomes the trusted development build)")
-	cmd.Flags().BoolVar(&noApp, "no-app", false, "do not install or set up the phone app")
+	cmd.Flags().StringVar(&adbFlag, "adb", "", app.T("help.setup.flag.adb"))
+	cmd.Flags().StringVar(&agentFlag, "agent", "", app.T("help.setup.flag.agent"))
+	cmd.Flags().StringVar(&wsFlag, "workspace", "", app.T("help.setup.flag.workspace"))
+	cmd.Flags().BoolVar(&useCode, "code", false, app.T("help.setup.flag.code"))
+	cmd.Flags().StringVar(&connectFlag, "connect", "", app.T("help.setup.flag.connect"))
+	cmd.Flags().BoolVar(&yes, "yes", false, app.T("help.setup.flag.yes"))
+	cmd.Flags().StringVar(&apkFlag, "apk", "", app.T("help.setup.flag.apk"))
+	cmd.Flags().BoolVar(&noApp, "no-app", false, app.T("help.setup.flag.no_app"))
 	return cmd
 }
 

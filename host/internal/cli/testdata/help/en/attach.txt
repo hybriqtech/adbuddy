@@ -1,0 +1,12 @@
+Connect this terminal to the agent that adbuddy serve runs. You see its
+screen and type into it; Ctrl+] detaches and leaves the agent running.
+While attached, this terminal's size is the agent's.
+
+Usage:
+  adbuddy attach [flags]
+
+Flags:
+  -h, --help   help for attach
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

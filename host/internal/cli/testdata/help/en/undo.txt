@@ -1,0 +1,19 @@
+Undo the last change (default), one journal entry, or every change of a session,
+newest first. Inverses run without asking again; changes without an inverse
+are reported and skipped. Needs `adbuddy serve` running.
+
+Usage:
+  adbuddy undo [last|session|<id>] [flags]
+
+Examples:
+  adbuddy undo
+  adbuddy undo j_01J9Z…
+  adbuddy undo session
+  adbuddy undo session --session s_01J9Y…
+
+Flags:
+  -h, --help                   help for undo
+      --session undo session   session for undo session (default: the current one)
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

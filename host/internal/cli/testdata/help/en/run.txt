@@ -1,0 +1,18 @@
+Start the agent (claude, codex, gemini, opencode…) in the ADBuddy environment,
+with ADBuddy's adb first in its PATH and the phone selected. `adbuddy serve` must
+be running in another terminal. The exit code is the agent's.
+
+Usage:
+  adbuddy run [agent] [-- agent arguments] [flags]
+
+Examples:
+  adbuddy run
+  adbuddy run claude
+  adbuddy run codex -- --model o4
+
+Flags:
+  -h, --help                      help for run
+      --workspace adbuddy serve   agent environment; must be the one adbuddy serve is watching (default: that one)
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

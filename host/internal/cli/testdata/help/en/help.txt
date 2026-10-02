@@ -1,0 +1,11 @@
+Help provides help for any command in the application.
+Simply type adbuddy help [path to command] for full details.
+
+Usage:
+  adbuddy help [command] [flags]
+
+Flags:
+  -h, --help   help for help
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

@@ -1,0 +1,10 @@
+Stop the agent that adbuddy serve runs (serve keeps running)
+
+Usage:
+  adbuddy stop [flags]
+
+Flags:
+  -h, --help   help for stop
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

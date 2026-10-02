@@ -39,14 +39,9 @@ type connectResult struct {
 func newConnectCmd(app *App) *cobra.Command {
 	var adbFlag string
 	cmd := &cobra.Command{
-		Use:   "connect <ip:port>",
-		Short: "Connect to the phone by IP address and port (Tailscale or another network without mDNS)",
-		Long: `Connect to the phone by the IP address and port shown on its Wireless debugging
-screen, when ADBuddy cannot find it by itself: over Tailscale, or on a network
-that blocks mDNS. The phone must be paired with this PC first (` + "`adbuddy setup --code`" + `).
-The address is checked against the phone you set up and saved in config.toml, so
-` + "`adbuddy serve`" + ` uses it again. The port changes each time wireless debugging is
-turned on: run this command again with the new one.`,
+		Use:     "connect <ip:port>",
+		Short:   app.T("help.connect.short"),
+		Long:    app.T("help.connect.long"),
 		Example: "  adbuddy connect 100.64.0.5:41234\n  adbuddy connect 100.64.0.5:41234 --json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -108,7 +103,7 @@ turned on: run this command again with the new one.`,
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&adbFlag, "adb", "", "path to the real adb (default: adb_path in config.toml, else the adb installed by adbuddy setup)")
+	cmd.Flags().StringVar(&adbFlag, "adb", "", app.T("help.connect.flag.adb"))
 	return cmd
 }
 

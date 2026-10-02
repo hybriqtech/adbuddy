@@ -1,0 +1,30 @@
+Set up ADBuddy step by step: download Android platform-tools (checked against
+Google's checksum), pair the phone over wireless debugging with a QR code (or
+with --code), connect, read the phone's profile, pick the agent and create the
+environment. Run it again at any time; it skips what is already done.
+
+Over Tailscale or another network without mDNS, pair with --code and give the
+connection address with --connect (or type it when asked).
+
+Usage:
+  adbuddy setup [flags]
+
+Examples:
+  adbuddy setup
+  adbuddy setup --code
+  adbuddy setup --code --connect 100.64.0.5:41234
+  adbuddy setup --agent codex --yes
+
+Flags:
+      --adb string         use this adb (37 or newer) instead of downloading platform-tools
+      --agent string       agent to use: claude, codex, gemini, opencode…
+      --apk string         install this ADBuddy app APK instead of the latest release (a file you choose: if hybriqtech's release certificate did not sign it, exactly this APK becomes the trusted development build)
+      --code               pair with IP:port and the 6-digit code instead of a QR code
+      --connect string     connect by this IP:port when mDNS does not find the phone (Tailscale or another network), as its Wireless debugging screen shows it
+  -h, --help               help for setup
+      --no-app             do not install or set up the phone app
+      --workspace string   agent environment (default: ~/ADBuddy/<phone model>)
+      --yes                accept the recommended choices without asking
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

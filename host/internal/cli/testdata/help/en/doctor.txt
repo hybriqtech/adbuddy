@@ -1,0 +1,24 @@
+Check, in order, everything ADBuddy needs: configuration, ADBuddy's adb and its
+private server, `adbuddy serve`, the phone (connected, the one you set up, no open
+network port), the phone app and the agent environment. Every problem comes with
+a "Run:" line (a safe command) or a "Guidance:" line (something only you can do);
+in the agent's session, what only you can run becomes "Ask the user to run …".
+It only reads: nothing on the phone changes. With --fix it also restarts
+ADBuddy's private adb server when that is what fails and serve is not running.
+Doctor answers within 60 seconds.
+Exit code: 0 ready or degraded, 1 broken, 130 stopped with Ctrl+C.
+
+Usage:
+  adbuddy doctor [flags]
+
+Examples:
+  adbuddy doctor
+  adbuddy doctor --json
+  adbuddy doctor --fix
+
+Flags:
+      --fix    also restart ADBuddy's private adb server when it is what fails (never while serve runs)
+  -h, --help   help for doctor
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

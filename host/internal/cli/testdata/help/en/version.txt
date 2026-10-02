@@ -1,0 +1,10 @@
+Print the ADBuddy version
+
+Usage:
+  adbuddy version [flags]
+
+Flags:
+  -h, --help   help for version
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

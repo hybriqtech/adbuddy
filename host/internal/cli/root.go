@@ -26,21 +26,12 @@ type App struct {
 	Lang i18n.Lang
 }
 
-const exitCodesHelp = `Exit codes:
-  0    success
-  1    failure (see the error code)
-  2    invalid usage
-  75   temporary failure, retrying may help
-  78   configuration error
-  130  interrupted (Ctrl+C)
-`
-
 // NewRoot builds the command tree.
 func NewRoot(app *App) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "adbuddy",
-		Short:         "Let any coding agent manage your Android phone over Wi-Fi adb, safely",
-		Long:          "ADBuddy classifies every adb command, journals every change so it can be undone,\nand asks before anything irreversible.\n\n" + exitCodesHelp,
+		Short:         app.T("help.root.short"),
+		Long:          app.T("help.root.long"),
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -49,7 +40,7 @@ func NewRoot(app *App) *cobra.Command {
 	root.SetOut(app.Stdout)
 	root.SetErr(app.Stderr)
 	root.SetVersionTemplate("adbuddy {{.Version}}\n")
-	root.PersistentFlags().BoolVar(&app.JSON, "json", false, "print machine-readable JSON on stdout")
+	root.PersistentFlags().BoolVar(&app.JSON, "json", false, app.T("help.root.flag.json"))
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return UsageError(err.Error()) })
 	setup := newSetupCmd(app)
 	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app), newConnectCmd(app), newDoctorCmd(app), setup)
@@ -57,6 +48,7 @@ func NewRoot(app *App) *cobra.Command {
 	root.AddCommand(newSendCmd(app), newRemoteCmd(app))
 	root.AddCommand(newHookCmd(app))
 	root.AddCommand(newHelperCmds(app)...)
+	localizeHelp(app, root)
 	// `adbuddy` alone starts the setup the first time (spec §3.1), but only
 	// for a person at a terminal: a script, a CI job or an agent would get a
 	// download, a background adb server and a long wait for a QR code.

@@ -34,11 +34,9 @@ var undoTransient = map[string]bool{"PAUSED": true, "WAITING_FOR_ANSWER": true}
 func newUndoCmd(app *App) *cobra.Command {
 	var session string
 	cmd := &cobra.Command{
-		Use:   "undo [last|session|<id>]",
-		Short: "Undo journaled changes by running their inverses",
-		Long: `Undo the last change (default), one journal entry, or every change of a session,
-newest first. Inverses run without asking again; changes without an inverse
-are reported and skipped. Needs ` + "`adbuddy serve`" + ` running.`,
+		Use:     "undo [last|session|<id>]",
+		Short:   app.T("help.undo.short"),
+		Long:    app.T("help.undo.long"),
 		Example: "  adbuddy undo\n  adbuddy undo j_01J9Z…\n  adbuddy undo session\n  adbuddy undo session --session s_01J9Y…",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -93,7 +91,7 @@ are reported and skipped. Needs ` + "`adbuddy serve`" + ` running.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&session, "session", "", "session for `undo session` (default: the current one)")
+	cmd.Flags().StringVar(&session, "session", "", app.T("help.undo.flag.session"))
 	return cmd
 }
 

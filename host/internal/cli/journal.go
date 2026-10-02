@@ -24,7 +24,7 @@ func newJournalCmd(app *App) *cobra.Command {
 	var limit int
 	cmd := &cobra.Command{
 		Use:     "journal",
-		Short:   "Show the journal of adb commands and their inverses",
+		Short:   app.T("help.journal.short"),
 		Example: "  adbuddy journal\n  adbuddy journal --session current\n  adbuddy journal --session s_01J… --json\n  adbuddy journal --limit 0 --json | jq '.data.entries[] | select(.level==\"red\")'",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -96,8 +96,8 @@ func newJournalCmd(app *App) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&session, "session", "", "only this session: its id (s_…), or current for the one serve is running now")
-	cmd.Flags().IntVar(&limit, "limit", 50, "show only the last N entries (0 = all)")
-	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: the one `adbuddy serve` is watching, else ~/ADBuddy/default)")
+	cmd.Flags().StringVar(&session, "session", "", app.T("help.journal.flag.session"))
+	cmd.Flags().IntVar(&limit, "limit", 50, app.T("help.journal.flag.limit"))
+	cmd.Flags().StringVar(&wsDir, "workspace", "", app.T("help.journal.flag.workspace"))
 	return cmd
 }

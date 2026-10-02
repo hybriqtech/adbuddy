@@ -26,7 +26,7 @@ var hookWait = 620 * time.Second
 func newHookCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:                "hook <event>",
-		Short:              "Claude Code hook (installed by ADBuddy; not for people)",
+		Short:              app.T("help.hook.short"),
 		Hidden:             true,
 		Args:               cobra.ArbitraryArgs,
 		DisableFlagParsing: true,

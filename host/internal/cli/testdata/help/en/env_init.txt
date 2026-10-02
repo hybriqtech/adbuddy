@@ -1,0 +1,17 @@
+Create or refresh the agent environment (AGENTS.md, CLAUDE.md, skills, permissions, adb shim)
+
+Usage:
+  adbuddy env init [flags]
+
+Examples:
+  adbuddy env init
+  adbuddy env init --force
+  adbuddy env init --dir ~/ADBuddy/pixel --json
+
+Flags:
+      --dir string   environment directory (default: workspace in config.toml, else ~/ADBuddy/default)
+      --force        rewrite AGENTS.md, CLAUDE.md and the skills (NOTES.md is never touched; a skill file with <!-- adbuddy:user --> is kept)
+  -h, --help         help for init
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

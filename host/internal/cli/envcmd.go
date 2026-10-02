@@ -11,12 +11,12 @@ import (
 )
 
 func newEnvCmd(app *App) *cobra.Command {
-	env := &cobra.Command{Use: "env", Short: "Manage the agent environment"}
+	env := &cobra.Command{Use: "env", Short: app.T("help.env.short")}
 	var dir string
 	var force bool
 	initCmd := &cobra.Command{
 		Use:     "init",
-		Short:   "Create or refresh the agent environment (AGENTS.md, CLAUDE.md, skills, permissions, adb shim)",
+		Short:   app.T("help.init.short"),
 		Example: "  adbuddy env init\n  adbuddy env init --force\n  adbuddy env init --dir ~/ADBuddy/pixel --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -52,8 +52,8 @@ func newEnvCmd(app *App) *cobra.Command {
 			return nil
 		},
 	}
-	initCmd.Flags().StringVar(&dir, "dir", "", "environment directory (default: workspace in config.toml, else ~/ADBuddy/default)")
-	initCmd.Flags().BoolVar(&force, "force", false, "rewrite AGENTS.md, CLAUDE.md and the skills (NOTES.md is never touched; a skill file with <!-- adbuddy:user --> is kept)")
+	initCmd.Flags().StringVar(&dir, "dir", "", app.T("help.init.flag.dir"))
+	initCmd.Flags().BoolVar(&force, "force", false, app.T("help.init.flag.force"))
 	env.AddCommand(initCmd)
 	return env
 }

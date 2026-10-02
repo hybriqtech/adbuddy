@@ -1,0 +1,19 @@
+Remote mode opens adb's port 5555 on every network for 12 hours, so the host can
+reach the phone over Tailscale with only mobile data. `on` asks you first (in the
+ADBuddy app, or in the `adbuddy serve` terminal) and needs serve running;
+`off` closes the port (even with serve stopped) and `status` says whether it is
+open. Not available to the agent.
+
+Usage:
+  adbuddy remote on|off|status [flags]
+
+Examples:
+  adbuddy remote on
+  adbuddy remote status --json
+  adbuddy remote off
+
+Flags:
+  -h, --help   help for remote
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

@@ -15,11 +15,9 @@ import (
 func newRunCmd(app *App) *cobra.Command {
 	var wsDir string
 	cmd := &cobra.Command{
-		Use:   "run [agent] [-- agent arguments]",
-		Short: "Start a coding agent in the ADBuddy environment",
-		Long: `Start the agent (claude, codex, gemini, opencode…) in the ADBuddy environment,
-with ADBuddy's adb first in its PATH and the phone selected. ` + "`adbuddy serve`" + ` must
-be running in another terminal. The exit code is the agent's.`,
+		Use:     "run [agent] [-- agent arguments]",
+		Short:   app.T("help.run.short"),
+		Long:    app.T("help.run.long"),
 		Example: "  adbuddy run\n  adbuddy run claude\n  adbuddy run codex -- --model o4",
 		Args: func(cmd *cobra.Command, args []string) error {
 			before := args
@@ -91,6 +89,6 @@ be running in another terminal. The exit code is the agent's.`,
 			return ExitWith(code)
 		},
 	}
-	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment; must be the one `adbuddy serve` is watching (default: that one)")
+	cmd.Flags().StringVar(&wsDir, "workspace", "", app.T("help.run.flag.workspace"))
 	return cmd
 }

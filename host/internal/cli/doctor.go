@@ -70,17 +70,9 @@ var personOnly = []string{"adbuddy setup", "adbuddy serve", "adbuddy connect", "
 func newDoctorCmd(app *App) *cobra.Command {
 	var fix bool
 	cmd := &cobra.Command{
-		Use:   "doctor",
-		Short: "Check that ADBuddy, adb, the phone and the app are ready, and say how to fix what is not",
-		Long: `Check, in order, everything ADBuddy needs: configuration, ADBuddy's adb and its
-private server, ` + "`adbuddy serve`" + `, the phone (connected, the one you set up, no open
-network port), the phone app and the agent environment. Every problem comes with
-a "Run:" line (a safe command) or a "Guidance:" line (something only you can do);
-in the agent's session, what only you can run becomes "Ask the user to run …".
-It only reads: nothing on the phone changes. With --fix it also restarts
-ADBuddy's private adb server when that is what fails and serve is not running.
-Doctor answers within 60 seconds.
-Exit code: 0 ready or degraded, 1 broken, 130 stopped with Ctrl+C.`,
+		Use:     "doctor",
+		Short:   app.T("help.doctor.short"),
+		Long:    app.T("help.doctor.long"),
 		Example: "  adbuddy doctor\n  adbuddy doctor --json\n  adbuddy doctor --fix",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -132,7 +124,7 @@ Exit code: 0 ready or degraded, 1 broken, 130 stopped with Ctrl+C.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&fix, "fix", false, "also restart ADBuddy's private adb server when it is what fails (never while serve runs)")
+	cmd.Flags().BoolVar(&fix, "fix", false, app.T("help.doctor.flag.fix"))
 	return cmd
 }
 

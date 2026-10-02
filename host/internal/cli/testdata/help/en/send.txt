@@ -1,0 +1,12 @@
+Send a file of the agent environment to the chat on the user's phone, with an
+optional caption. The file must be inside the environment and at most 200 MiB.
+
+Usage:
+  adbuddy send <file> [--caption "…"] [flags]
+
+Flags:
+      --caption string   text that goes with the file in the chat (at most 64 KiB)
+  -h, --help             help for send
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

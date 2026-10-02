@@ -1,0 +1,18 @@
+Tap the element with that text (or description), the one with that id, or a
+point, as listed by `adbuddy screen`. Exactly one of them.
+
+Usage:
+  adbuddy tap ["<text>"] [--id <id>] [--xy <x,y>] [flags]
+
+Examples:
+  adbuddy tap "Network & internet"
+  adbuddy tap --id com.android.settings:id/search_action_bar
+  adbuddy tap --xy 540,1200
+
+Flags:
+  -h, --help                help for tap
+      --id adbuddy screen   the element's id, as adbuddy screen lists it
+      --xy string           a point on the screen, x,y in pixels
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

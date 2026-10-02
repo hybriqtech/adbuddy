@@ -59,13 +59,9 @@ var remoteFixes = map[string]string{
 
 func newRemoteCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "remote on|off|status",
-		Short: "Open adb's network port 5555 for 12 hours (remote mode), close it, or see its state",
-		Long: `Remote mode opens adb's port 5555 on every network for 12 hours, so the host can
-reach the phone over Tailscale with only mobile data. ` + "`on`" + ` asks you first (in the
-ADBuddy app, or in the ` + "`adbuddy serve`" + ` terminal) and needs serve running;
-` + "`off`" + ` closes the port (even with serve stopped) and ` + "`status`" + ` says whether it is
-open. Not available to the agent.`,
+		Use:       "remote on|off|status",
+		Short:     app.T("help.remote.short"),
+		Long:      app.T("help.remote.long"),
 		Example:   "  adbuddy remote on\n  adbuddy remote status --json\n  adbuddy remote off",
 		Args:      cobra.ArbitraryArgs,
 		ValidArgs: []string{"on", "off", "status"},

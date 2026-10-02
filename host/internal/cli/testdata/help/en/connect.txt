@@ -1,0 +1,20 @@
+Connect to the phone by the IP address and port shown on its Wireless debugging
+screen, when ADBuddy cannot find it by itself: over Tailscale, or on a network
+that blocks mDNS. The phone must be paired with this PC first (`adbuddy setup --code`).
+The address is checked against the phone you set up and saved in config.toml, so
+`adbuddy serve` uses it again. The port changes each time wireless debugging is
+turned on: run this command again with the new one.
+
+Usage:
+  adbuddy connect <ip:port> [flags]
+
+Examples:
+  adbuddy connect 100.64.0.5:41234
+  adbuddy connect 100.64.0.5:41234 --json
+
+Flags:
+      --adb string   path to the real adb (default: adb_path in config.toml, else the adb installed by adbuddy setup)
+  -h, --help         help for connect
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

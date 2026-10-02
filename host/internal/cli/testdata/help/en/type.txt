@@ -1,0 +1,16 @@
+Type the text in the field that has the focus: tap the field first. It
+replaces the field's text, with full Unicode through the ADBuddy app (plain
+ASCII without it). Never type passwords, PINs or keys: ask the user.
+
+Usage:
+  adbuddy type "<text>" [flags]
+
+Examples:
+  adbuddy tap "Search settings"
+  adbuddy type "Wi-Fi"
+
+Flags:
+  -h, --help   help for type
+
+Global Flags:
+      --json   print machine-readable JSON on stdout

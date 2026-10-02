@@ -1,0 +1,24 @@
+Comprueba, por orden, todo lo que ADBuddy necesita: la configuración, el adb de ADBuddy y su
+servidor privado, `adbuddy serve`, el móvil (conectado, el que configuraste, sin puerto de
+red abierto), la app del móvil y el entorno del agente. Cada problema trae una línea
+«Ejecuta:» (un comando seguro) o una línea «Qué hacer:» (algo que solo puedes hacer tú);
+en la sesión del agente, lo que solo puedes ejecutar tú pasa a ser «Ejecuta tú …».
+Solo lee: no cambia nada en el móvil. Con --fix también reinicia el servidor privado de adb
+de ADBuddy cuando es lo que falla y serve no está en marcha.
+Doctor responde en menos de 60 segundos.
+Código de salida: 0 listo o degradado, 1 roto, 130 detenido con Ctrl+C.
+
+Uso:
+  adbuddy doctor [flags]
+
+Ejemplos:
+  adbuddy doctor
+  adbuddy doctor --json
+  adbuddy doctor --fix
+
+Opciones:
+      --fix    reinicia también el servidor privado de adb de ADBuddy cuando es lo que falla (nunca mientras serve esté en marcha)
+  -h, --help   ayuda de doctor
+
+Opciones globales:
+      --json   escribe JSON legible por programas en la salida estándar

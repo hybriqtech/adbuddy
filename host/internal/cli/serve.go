@@ -40,11 +40,9 @@ func newServeCmd(app *App) *cobra.Command {
 	var adbPath, serial, wsDir, confirmMode string
 	var noAgent bool
 	cmd := &cobra.Command{
-		Use:   "serve",
-		Short: "Run the ADBuddy host: live journal and confirmations for the agent's adb commands",
-		Long: `Run the ADBuddy host in this terminal. It classifies every adb command the agent
-runs, journals it, shows it here and asks you before anything irreversible.
-Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + `.`,
+		Use:     "serve",
+		Short:   app.T("help.serve.short"),
+		Long:    app.T("help.serve.long"),
 		Example: "  adbuddy serve\n  adbuddy serve --adb ~/platform-tools/adb --serial adb-XXXX-yyyy._adb-tls-connect._tcp\n  adbuddy serve --json > journal.ndjson",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -261,11 +259,11 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&adbPath, "adb", "", "path to the real adb (default: adb_path in config.toml, else the adb installed by adbuddy setup)")
-	cmd.Flags().StringVar(&serial, "serial", "", "the phone to use when several are connected")
-	cmd.Flags().StringVar(&wsDir, "workspace", "", "agent environment (default: workspace in config.toml, else ~/ADBuddy/default)")
-	cmd.Flags().BoolVar(&noAgent, "no-agent", false, "do not start the agent here: run it yourself with `adbuddy run` (no chat from the phone)")
-	cmd.Flags().StringVar(&confirmMode, "confirm", "auto", "where to confirm 🔴 commands: auto (this terminal if interactive, else deny), terminal (read the answers from stdin even when it is not interactive, e.g. a pipe) or deny")
+	cmd.Flags().StringVar(&adbPath, "adb", "", app.T("help.serve.flag.adb"))
+	cmd.Flags().StringVar(&serial, "serial", "", app.T("help.serve.flag.serial"))
+	cmd.Flags().StringVar(&wsDir, "workspace", "", app.T("help.serve.flag.workspace"))
+	cmd.Flags().BoolVar(&noAgent, "no-agent", false, app.T("help.serve.flag.no_agent"))
+	cmd.Flags().StringVar(&confirmMode, "confirm", "auto", app.T("help.serve.flag.confirm"))
 	return cmd
 }
 
