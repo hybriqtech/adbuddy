@@ -487,20 +487,33 @@ func TestParserOnlySyntaxErrorsAreBadLines(t *testing.T) {
 
 func TestParserCapsAMessageBeforeJoining(t *testing.T) {
 	p := NewParser()
-	big := strings.Repeat("a", maxMessageText/4)
+	const block = 100000 // 2 whole blocks, the third cut to what is left of the limit
+	big := strings.Repeat("a", block)
+	var shown []Event // the last event of each line that gave one
 	var last []Event
 	for i := 0; i < 20; i++ {
 		last = p.Feed(line("assistant", fmt.Sprintf("u%d", i), asst("m", map[string]any{"type": "text", "text": big}), nil))
+		if len(last) > 0 {
+			shown = append(shown, last[0])
+		}
 	}
+	var sizes []int
 	total := 0
 	for _, s := range p.texts["m"] {
+		sizes = append(sizes, len(s))
 		total += len(s)
 	}
-	if total > maxMessageText {
-		t.Errorf("%d bytes accumulated, limit %d", total, maxMessageText)
+	if total != maxMessageText || len(sizes) != 3 || sizes[0] != block || sizes[1] != block || sizes[2] != maxMessageText-2*block {
+		t.Errorf("kept blocks %v (%d bytes), want %d, %d and %d: exactly the limit", sizes, total, block, block, maxMessageText-2*block)
 	}
-	if len(last) != 0 && len(last[0].Text) > maxMessageText+len("…") {
-		t.Errorf("event text %d", len(last[0].Text))
+	// Only the lines that added text give an event; the 17 that came after
+	// the message was full give none.
+	if len(shown) != 3 || len(last) != 0 {
+		t.Fatalf("%d events, and the last line gave %d: want 3 and 0", len(shown), len(last))
+	}
+	// The text is cut at the limit and no further: the limit, then the mark.
+	if got := shown[2].Text; len(got) != maxMessageText+len("…") || !strings.HasSuffix(got, "a…") || strings.Count(got, "a") != maxMessageText-4 {
+		t.Errorf("event text of %d bytes (%d of them a), want %d and the mark", len(got), strings.Count(got, "a"), maxMessageText)
 	}
 }
 
