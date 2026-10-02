@@ -73,7 +73,7 @@ func (t *Tailer) Poll() ([]Event, error) {
 	} else if !li.Mode().IsRegular() {
 		return nil, errNotRegular
 	}
-	f, err := root.Open(t.tr.rel)
+	f, err := openTail(root, t.tr.rel)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
@@ -160,4 +160,11 @@ func (t *Tailer) Poll() ([]Event, error) {
 		events = append(events, t.parser.Feed(line)...)
 	}
 	return events, nil
+}
+
+// openTail opens the transcript for reading without waiting for a writer, so
+// a FIFO swapped in after the Lstat does not stop the owner (Poll then sees
+// it is not a regular file).
+func openTail(root *os.Root, rel string) (*os.File, error) {
+	return root.OpenFile(rel, os.O_RDONLY|nonblock, 0)
 }
