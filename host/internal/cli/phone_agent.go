@@ -46,7 +46,17 @@ type sentText struct {
 	at   time.Time
 }
 
-const keepSent = 16
+const (
+	keepSent = 16 // how many chat.send texts are kept: the oldest leave first
+	// sentTTL is how long a chat.send text may wait for its prompt to show in
+	// the transcript: Claude Code can be slow to write it (a long turn that
+	// queues it), and a prompt that was late came out again as typed in the
+	// terminal.
+	sentTTL = 10 * time.Minute
+)
+
+// agentNow is the clock of sentText, a variable for the tests.
+var agentNow = time.Now
 
 // adapter is the state of the Claude Code adapter for the current
 // conversation.
@@ -109,7 +119,7 @@ func (l *phoneLink) adapterConversation(conv string, stopped bool) {
 	a.cancel, a.tail = nil, nil
 	a.active, a.degraded, a.hookState = false, false, ""
 	a.lastText, a.fallbacks, a.attention, a.droppedSeen, a.held = "", nil, time.Time{}, 0, false
-	a.unbound = nil
+	a.unbound, a.sent = nil, nil
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -139,25 +149,36 @@ func (l *phoneLink) noteSent(text string) {
 	a := &l.adapter
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.sent = append(a.sent, sentText{claudecode.Normalize(text), time.Now()})
+	a.sent = append(a.sent, sentText{claudecode.Normalize(text), agentNow()})
 	if len(a.sent) > keepSent {
 		a.sent = a.sent[len(a.sent)-keepSent:]
 	}
 }
 
 // wasSent reports whether a prompt of the transcript is a recent chat.send
-// (the prompt may carry the attachments' lines after the text).
+// (the prompt may carry the attachments' lines after the text). The text is
+// forgotten when it matches: one chat.send is one prompt, so the same words
+// typed in the terminal later are shown.
 func (l *phoneLink) wasSent(prompt string) bool {
 	a := &l.adapter
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	now := agentNow()
 	p := claudecode.Normalize(prompt)
+	live := a.sent[:0:0]
+	found := false
 	for _, s := range a.sent {
-		if s.text != "" && time.Since(s.at) < 2*time.Minute && strings.HasPrefix(p, s.text) {
-			return true
+		if now.Sub(s.at) >= sentTTL {
+			continue // too old: it never will show
 		}
+		if !found && s.text != "" && strings.HasPrefix(p, s.text) {
+			found = true // consumed
+			continue
+		}
+		live = append(live, s)
 	}
-	return false
+	a.sent = live
+	return found
 }
 
 // handleHook answers an `adbuddy hook <event>` (spec M4 §3.3): the payload is
