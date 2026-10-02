@@ -23,6 +23,8 @@ import (
 var adbuddyBin, fakeADB string
 
 func TestMain(m *testing.M) {
+	// The binaries the tests start inherit it: English whatever the machine.
+	os.Setenv("ADBUDDY_LANG", "en")
 	dir, err := os.MkdirTemp("", "e2e")
 	if err != nil {
 		panic(err)
