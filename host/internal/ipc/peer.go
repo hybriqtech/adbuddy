@@ -35,7 +35,9 @@ func (c *Conn) Peer() Peer {
 
 // Same reports whether the process that connected still runs and still has
 // PID: false once it ended, even if another process got its PID, and false
-// for a peer that is not Known or has Err.
+// for a peer that is not Known or has Err. Only meaningful while the request
+// is being handled: on Windows it waits on the process handle the server
+// closes when the handler returns, and after that its answer means nothing.
 func (p Peer) Same() bool {
 	if !p.Known || p.Err != nil {
 		return false

@@ -82,7 +82,7 @@ func newRemoteHost(t *testing.T, cfg config.Config, answer confirm.Decision) *re
 		if req.Kind != ipc.KindRemote {
 			return ipc.Exit{Code: 1, ErrorCode: "UNKNOWN_REQUEST"}
 		}
-		return l.handleRemote(ctx, req, c, d)
+		return l.handleRemote(ctx, req, c, d, nil)
 	})
 	if err != nil {
 		t.Skipf("no socket: %v", err)
@@ -715,7 +715,7 @@ func TestPauseWithdrawsTheRemoteQuestion(t *testing.T) {
 	r.l.OnPause(d.CancelConfirmations) // as serve wires it
 	done := make(chan ipc.Exit, 1)
 	go func() {
-		done <- r.l.handleRemote(context.Background(), ipc.Request{Kind: ipc.KindRemote, Argv: []string{"on"}}, nil, d)
+		done <- r.l.handleRemote(context.Background(), ipc.Request{Kind: ipc.KindRemote, Argv: []string{"on"}}, nil, d, nil)
 	}()
 	for {
 		if m := readApp(t, r.c); m.Type == bridge.TypeConfirmReq {

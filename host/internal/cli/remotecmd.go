@@ -19,6 +19,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
+	"github.com/hybriqtech/adbuddy/host/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -268,16 +269,18 @@ func remoteExit(code int, errCode, format string, a ...any) ipc.Exit {
 	return ipc.Exit{Code: code, ErrorCode: errCode, Error: fmt.Sprintf(format, a...)}
 }
 
-// handleRemote answers `adbuddy remote`. The agent is refused, but it declares
-// where it comes from itself, so the real defence of `on` is the question: the
-// user answers it (app or terminal), every time, and only for this request.
+// handleRemote answers `adbuddy remote`. The agent is refused (fromAgent: its
+// process tree, as serve sees it, or its declaration; sess may be nil), but a
+// process it detaches from its tree is not seen, so the real defence of `on`
+// is the question: the user answers it (app or terminal), every time, and
+// only for this request.
 // It is asked through d, serve's daemon, so that while it is open every
 // command of the agent is refused (an `input tap` could press Allow). The
 // change goes through serve's controller and its queue, behind the changes
 // asked before (the app's included); config.toml is only written by serve's
 // own store.
-func (l *phoneLink) handleRemote(ctx context.Context, req ipc.Request, c *ipc.Conn, d *daemon.Daemon) ipc.Exit {
-	if req.Env["ADBUDDY_SOURCE"] == "agent" {
+func (l *phoneLink) handleRemote(ctx context.Context, req ipc.Request, c *ipc.Conn, d *daemon.Daemon, sess *session.Manager) ipc.Exit {
+	if fromAgent(sess, req, c) {
 		return remoteExit(1, "AGENT_SESSION", "the agent cannot change the remote mode")
 	}
 	if len(req.Argv) != 1 || req.Argv[0] != "on" && req.Argv[0] != "off" && req.Argv[0] != "status" {

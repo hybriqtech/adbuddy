@@ -109,14 +109,15 @@ func startAgent(app *App, sess *session.Manager, name string) {
 var attachIDs atomic.Int64
 
 // sessionRequest answers the IPC requests of the session: attach, new, stop.
-// The agent may not use them: it would type into its own terminal.
+// The agent may not use them: it would type into its own terminal. Who is
+// the agent is fromAgent's to say (V07).
 func handleSession(ctx context.Context, sess *session.Manager, defaultAgent string, req ipc.Request, c *ipc.Conn) ipc.Exit {
 	return handleSessionIn(i18n.EN, ctx, sess, defaultAgent, req, c)
 }
 
 // handleSessionIn is handleSession with what it tells the person written in lang.
 func handleSessionIn(lang i18n.Lang, ctx context.Context, sess *session.Manager, defaultAgent string, req ipc.Request, c *ipc.Conn) ipc.Exit {
-	if req.Env["ADBUDDY_SOURCE"] == "agent" {
+	if fromAgent(sess, req, c) {
 		return ipc.Exit{Code: 1, ErrorCode: "AGENT_SESSION", Error: "the agent cannot control its own session"}
 	}
 	switch req.Kind {
