@@ -155,15 +155,12 @@ This is the procedure that was tested. The Linux runner lives in a WSL2 Ubuntu d
 
 6. Install the runner as `runner`: download the `linux-x64` package of `actions/runner` into `~/actions-runner`, check the SHA-256 of the release notes, and unpack it. As root, run `./bin/installdependencies.sh` in that folder.
 
-7. Register it. The registration token must go only through the stdin of the script: never in argv and never in a file. From PowerShell, send a first line that sets the variable, followed by the script, to `bash -s` (with `-c` the stdin does not arrive). If the token comes from `gh.exe`, trim the trailing `
-`:
+7. Register it. The registration token must go only through the stdin of the script: never in argv and never in a file. From PowerShell, send a first line that sets the variable, followed by the script, to `bash -s` (with `-c` the stdin does not arrive). If the token comes from `gh.exe`, trim the trailing CR and LF:
 
    ```sh
-   TOKEN=$(gh api -X POST repos/OWNER/REPO/actions/runners/registration-token --jq .token | tr -d '
-')
+   TOKEN=$(gh api -X POST repos/OWNER/REPO/actions/runners/registration-token --jq .token | tr -d '\r\n')
    {
-     printf "RT='%s'
-" "$TOKEN"
+     printf "RT='%s'\n" "$TOKEN"
      cat <<'EOF'
    cd ~/actions-runner
    ./config.sh --unattended --url https://github.com/OWNER/REPO --token "$RT" --labels self-hosted,linux,adbuddy-local
