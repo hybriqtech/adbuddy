@@ -19,7 +19,8 @@ import (
 // read stdin (inertAdb) with no stdin operand (-, /dev/stdin…), and for a
 // line on the phone whose every program is known not to read stdin
 // (nonReaders) or to read it only as data it filters to its output
-// (dataReaders), none of which writes it to a file. Yes for anything else:
+// (dataReaders), none of which writes it to a file, and whose cp, mv, ln and
+// cd only name plain paths that cannot be stdin (plainPath, N2). Yes for anything else:
 // adb shell or exec-out without a command or with options ADBuddy does not
 // know, adb exec-in, abb_exec and abb, a program on the line that is not in those lists (awk,
 // sed, a shell, a wrapper, one ADBuddy does not know…), and, wherever on the
@@ -99,7 +100,8 @@ var stdinReaders = map[string]bool{
 // arguments, not stdin; cmd is not here: it hands stdin to any service, and
 // some read it. pm and content stay here for their other subcommands: pm's
 // installs (install, install-write…) are not inert (inertCommand), and
-// content write is looked at in lineReadsStdin.
+// content write is looked at in lineReadsStdin. Some of the file commands
+// are held to plain paths, and service to list and check (inertCommand).
 var nonReaders = map[string]bool{
 	// files
 	"rm": true, "rmdir": true, "mv": true, "cp": true, "ln": true, "mkdir": true, "touch": true,
@@ -261,6 +263,16 @@ func inertCommand(name string, args []string) bool {
 				return false // writes what it read to a file
 			}
 		}
+	case p == "cp" || p == "mv" || p == "ln" || p == "cd":
+		for _, a := range args {
+			if !simpleOption(a) && !plainPath(a) {
+				return false // may copy stdin, link to it, or make a relative path name it (N2)
+			}
+		}
+	case p == "service":
+		if len(args) == 0 || args[0] != "list" && args[0] != "check" {
+			return false // service call may hand the service a descriptor (fd, nfd, afd)
+		}
 	}
 	return nonReaders[p] || dataReaders[p]
 }
@@ -280,7 +292,9 @@ func programName(w string) string {
 }
 
 // shellTokens splits a line (quotes already removed) into words and the
-// one-character operators ; | & ( ) { } < > and newline.
+// one-character operators ; | & ( ) { } < > and newline. The digits right
+// before < or > (2>, 3<>) name a descriptor, not an argument: they are left
+// out.
 func shellTokens(line string) []string {
 	var toks []string
 	var w strings.Builder
@@ -295,6 +309,9 @@ func shellTokens(line string) []string {
 		case r == ' ' || r == '\t' || r == '\r':
 			flush()
 		case strings.ContainsRune(";|&(){}<>\n", r):
+			if (r == '<' || r == '>') && w.Len() > 0 && strings.Trim(w.String(), "0123456789") == "" {
+				w.Reset()
+			}
 			flush()
 			toks = append(toks, string(r))
 		default:
@@ -305,9 +322,72 @@ func shellTokens(line string) []string {
 	return toks
 }
 
-// stdinPath is a file operand that is stdin itself (or the terminal adb shell
-// -t reads from).
+// stdinPath reports whether a word may name stdin, or the terminal adb shell
+// -t reads from, wherever on the line it is (N2). It looks at the path's
+// parts after resolving //, /./ and /../ by their spelling: yes for -, for a
+// part named like a descriptor (stdin, stdout, stderr, fd, pts, tty…: stdout
+// and stderr may be the same socket as stdin, and /dev/fd/3 a copy of it),
+// and for a part with a pattern or a variable after one that may be dev or
+// proc (/dev/std*, /de?/s?din, /proc/self/fd/$x, /$a/$b). That is a net for
+// any command; cp, mv, ln and cd are held to more (plainPath).
 func stdinPath(w string) bool {
-	return w == "-" || strings.Contains(w, "/dev/stdin") || strings.Contains(w, "/fd/0") ||
-		strings.Contains(w, "/dev/tty") || strings.Contains(w, "/dev/pts")
+	if w == "-" {
+		return true
+	}
+	afterSystem := false // a part that is or may be dev or proc came before
+	for _, part := range strings.Split(path.Clean(strings.ReplaceAll(w, `\`, "/")), "/") {
+		dynamic := strings.ContainsAny(part, "$*?[")
+		switch {
+		case dynamic && afterSystem:
+			return true
+		case dynamic:
+			afterSystem = mayBe(part, "dev") || mayBe(part, "proc")
+		case descriptorNames[part] || strings.HasPrefix(part, "tty"):
+			return true
+		case part == "dev" || part == "proc":
+			afterSystem = true
+		}
+	}
+	return false
+}
+
+// descriptorNames are the names of the parts of a path through which a
+// process reaches its own descriptors: /dev/stdin, /dev/fd/0,
+// /proc/self/fd/0, /proc/self/task/N/fd/0, /dev/pts/N (and /dev/tty…, by
+// prefix).
+var descriptorNames = map[string]bool{"stdin": true, "stdout": true, "stderr": true, "fd": true, "pts": true}
+
+// mayBe reports whether a part with a variable or a pattern may be name.
+func mayBe(part, name string) bool {
+	ok, err := path.Match(part, name)
+	return ok || err != nil || strings.Contains(part, "$")
+}
+
+// plainPath reports whether an operand of cp, mv, ln or cd is a path that is
+// not stdin however the shell reads it (N2): with no variable or pattern,
+// written in its plain form (no //, /./ or /../), with no part named dev or
+// proc (cd there makes a plain relative name such as stdin or 0 reach it, and
+// a link to them lets a later cp do the same) and not stdinPath. A relative
+// path is plain: the shell starts outside /dev and /proc, and cd only goes to
+// a plain path. Anything else counts as possibly stdin: a yes only costs
+// asking again.
+func plainPath(a string) bool {
+	if a == "" || strings.ContainsAny(a, "$*?[]{}") || stdinPath(a) {
+		return false
+	}
+	if a != "/" && path.Clean(a) != strings.TrimSuffix(a, "/") {
+		return false
+	}
+	for _, part := range strings.Split(a, "/") {
+		if part == "dev" || part == "proc" {
+			return false
+		}
+	}
+	return true
+}
+
+// simpleOption is an option of letters, digits and dashes (-r, -sf, --):
+// no path in it.
+func simpleOption(a string) bool {
+	return len(a) > 1 && a[0] == '-' && strings.Trim(a, "-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") == ""
 }

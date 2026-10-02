@@ -143,6 +143,57 @@ func TestStdinDecides(t *testing.T) {
 	}
 }
 
+// N2: a path that may be stdin loses the key however it is written. cp, mv
+// and ln (which may copy stdin to a file, or leave a link to it for a later
+// cp) and cd (after which a relative name may be stdin) keep it only with
+// plain paths outside /dev and /proc.
+func TestStdinDecidesStdinPaths(t *testing.T) {
+	yes := [][]string{
+		// Other spellings of /dev/stdin and /proc/self/fd/0.
+		sh("cp /dev//stdin /sdcard/x"), sh("cp /dev/./stdin /sdcard/x"), sh("cp /dev/std* /sdcard/x"),
+		sh("cp /de?/s?din /sdcard/x"), sh("cp /proc/self/fd/./0 /sdcard/x"), sh("cp /proc/self/fd//0 /sdcard/x"),
+		sh("cp /proc/thread-self/fd/0 /sdcard/x"), sh("cp /proc/self/task/1/fd/0 /sdcard/x"), sh("cp /proc/$$/fd/0 /sdcard/x"),
+		sh("cp /proc/self/fd/../fd/0 /sdcard/x"), sh("cp /proc/self/root/dev/stdin /sdcard/x"),
+		// Another descriptor that may be stdin, or a copy of it.
+		sh("cp /proc/self/fd/1 /sdcard/x"), sh("cp /dev/stdout /sdcard/x"), sh("cp /dev/stderr /sdcard/x"),
+		sh("cp /dev/fd/3 /sdcard/x 3<&0"), sh("cp /dev/tty /sdcard/x"), sh("cp /dev/pts/0 /sdcard/x"),
+		// A path known only at run time.
+		sh("x=0; cp /proc/self/fd/$x /sdcard/x"), sh("cp /dev/$x /sdcard/x"), sh("cp $f /sdcard/x"),
+		sh("cp ${d}stdin /sdcard/x"), sh("cp /$a/$b /sdcard/x"),
+		// Relative paths: after cd, or from the shell's own directory.
+		sh("cd /dev && cp stdin /sdcard/x"), sh("cd /proc/self/fd; cp 0 /sdcard/x"), sh("cd /proc && cp self/fd/0 /sdcard/x"),
+		sh("cp dev/stdin /sdcard/x"), sh("cp proc/self/fd/0 /sdcard/x"), sh("cd /dev"), sh("cd /proc/self"), sh("cd -"),
+		sh("cd $d && rm x"), sh("cd dev && cp stdin /sdcard/x"), sh("cd /data/../dev"), sh("cp ./dev/./stdin /sdcard/x"),
+		sh("cp /sdcard/a /sdcard/b; cd /dev; cp stdin /sdcard/x"),
+		// mv and ln, and a link through which a later cp reads stdin.
+		sh("mv /dev/./stdin /sdcard/x"), sh("ln -s /dev/./stdin /data/local/tmp/s"), sh("ln -s /proc/self/fd /data/local/tmp/f"),
+		sh("ln -s ../../dev /data/local/tmp/d"), sh("ln -s /dev /data/local/tmp/d"),
+		// A system service handed a descriptor.
+		sh("service call package 1 nfd 0"), sh("service call package 1 fd /dev/./stdin"),
+		// On the PC.
+		{"push", "/dev//stdin", "/sdcard/x"}, {"push", "/proc/self/fd/./0", "/sdcard/x"}, {"install", "/dev/fd/0"},
+		{"push", "/dev/stdout", "/sdcard/x"},
+	}
+	no := [][]string{
+		sh("cp /sdcard/a.txt /sdcard/b.txt"), sh("cp -r /sdcard/DCIM /sdcard/backup/"), sh("mv /sdcard/a /sdcard/b"),
+		sh("ln -s /sdcard/a /data/local/tmp/a"), sh("cd /sdcard && rm -rf x"), sh("cd; rm x"), sh("cp /sdcard/a /sdcard/b 2>/dev/null"),
+		sh("mv a b"), sh("cd /sdcard; cp a b"), sh("cd .. && cp a /sdcard/x"),
+		sh("rm -rf /sdcard/Download/*"), sh("rm -rf /sdcard/$x"), sh("cat /proc/cpuinfo | grep x"), sh("echo $HOME"),
+		sh("service list"), sh("service check package"),
+		{"push", "a.txt", "/sdcard/a.txt"}, {"push", `C:\Users\x\a.txt`, "/sdcard/a.txt"}, {"install", "./app.apk"},
+	}
+	for _, argv := range yes {
+		if !StdinDecides(argv) {
+			t.Errorf("%q: StdinDecides false, want true", argv)
+		}
+	}
+	for _, argv := range no {
+		if StdinDecides(argv) {
+			t.Errorf("%q: StdinDecides true, want false", argv)
+		}
+	}
+}
+
 // H1: StdinDecides is an allowlist. A program on the phone keeps the key only
 // if it is known not to read stdin, or to read it only as data it filters to
 // its output; anything else may be an interpreter of what comes through stdin
