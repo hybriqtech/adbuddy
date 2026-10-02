@@ -9,11 +9,13 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 
 /**
  * Binds NotificationAccess to the system: reads the list of enabled
@@ -61,6 +63,8 @@ object NotificationAccessStatus {
         }
         return combine(setting, AgentNotificationListener.connected) { listed, connected -> NotificationAccess.state(listed, connected) }
             .distinctUntilChanged()
+            // listed() talks to the system (binder): the first read and each change run off the main thread.
+            .flowOn(Dispatchers.IO)
     }
 
     /** Opens ADBuddy's own entry of the system's notification access; the list if the phone has no such entry. */

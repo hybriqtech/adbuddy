@@ -210,4 +210,32 @@ class ProtectedAppsTest {
         assertFalse(p.list().contains(Packages.ADBUDDY))
         assertFalse(p.isProtected("com.whatsapp"))
     }
+
+    @Test fun ensurePutsWhatItAddsBeforeTheListItAlreadyHasSoAFullOneDoesNotLeaveItOut() {
+        val prefs = FakePrefs()
+        val full = (1..UiLimits.MAX_PROTECTED_APPS).map { "com.example.app$it" }.toSet()
+        prefs.edit().putStringSet("list", full.toMutableSet()).commit()
+        val p = ProtectedApps(prefs)
+        assertTrue(p.ensure(ProtectedApps.Heuristic.NO_LAUNCHER_ICON))
+        assertEquals(UiLimits.MAX_PROTECTED_APPS, p.list().size)
+        assertTrue(p.list().containsAll(ProtectedApps.Heuristic.NO_LAUNCHER_ICON))
+    }
+
+    @Test fun anEmptyLauncherReadOrOneWithoutAdbuddyIsAFailureNotAnEmptyPhone() {
+        assertFalse(ProtectedApps.Heuristic.launcherUsable(emptyList()))
+        assertFalse(ProtectedApps.Heuristic.launcherUsable(listOf("com.bbva.bbvacontigo" to "BBVA")))
+        assertTrue(ProtectedApps.Heuristic.launcherUsable(listOf(Packages.ADBUDDY to "ADBuddy")))
+        assertTrue(ProtectedApps.Heuristic.launcherUsable(listOf("com.bbva.bbvacontigo" to "BBVA", Packages.ADBUDDY to "ADBuddy")))
+    }
+
+    @Test fun withoutALauncherTheFallbackProtectsWhatHasNoIconAndTheDefaultSms() {
+        val receivers = ProtectedApps.Heuristic.receivers("com.example.sms")
+        assertEquals(
+            setOf("com.google.android.gms", "com.example.sms"),
+            ProtectedApps.Heuristic.fallback(receivers, "com.example.sms"),
+        )
+        assertEquals(setOf("com.google.android.gms"), ProtectedApps.Heuristic.fallback(ProtectedApps.Heuristic.receivers(null), null))
+        // A default SMS that is not a valid package name is not added.
+        assertEquals(setOf("com.google.android.gms"), ProtectedApps.Heuristic.fallback(ProtectedApps.Heuristic.receivers("no spaces ok"), "no spaces ok"))
+    }
 }

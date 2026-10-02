@@ -223,4 +223,39 @@ class ListenerIsReadOnlyTest {
         )
         for (b in bad) assertFalse(b, clearsTheMarkFirst(code(b)))
     }
+
+    // UiHelpers is exempt from the white list above (it does the wiring), so its use is pinned exactly here: the class
+    // appears once, as the last argument of NotificationGate.read(...), as a reference `::read` and never called.
+    private val gateWiring = Regex("NotificationGate\\s*\\.\\s*read\\s*\\((?:[^()]|\\([^()]*\\))*,\\s*AgentNotificationListener\\s*::\\s*read\\s*,?\\s*\\)")
+    private val readRef = Regex("\\bAgentNotificationListener\\s*::\\s*read\\b")
+
+    /** What is wrong with the way [src] (UiHelpers, without comments and strings) reaches the listener; empty if right. */
+    private fun wiringProblems(src: String): List<String> {
+        val noImport = src.lines().filterNot { classImport.matches(it) }.joinToString("\n")
+        val problems = mutableListOf<String>()
+        val uses = name.findAll(noImport).count()
+        if (uses != 1) problems += "AgentNotificationListener appears $uses times (not once)"
+        if (!readRef.containsMatchIn(noImport)) problems += "not used as AgentNotificationListener::read"
+        if (!gateWiring.containsMatchIn(noImport)) problems += "not the last argument of NotificationGate.read("
+        return problems
+    }
+
+    @Test fun uiHelpersReadsOnlyThroughTheGate() {
+        val src = code(File(root, "tech/hybriq/adbuddy/a11y/UiHelpers.kt"))
+        assertEquals(emptyList<String>(), wiringProblems(src))
+    }
+
+    @Test fun theWiringCheckSeesTheGateRemoved() {
+        val right = "import tech.hybriq.adbuddy.listener.AgentNotificationListener\n" +
+            "val n = { NotificationGate.read(consent::confirmed, { NotificationAccessStatus.listed(app) }, consent::revoke, AgentNotificationListener::read) }\n"
+        assertEquals(emptyList<String>(), wiringProblems(code(right)))
+        val direct = right.replace("val n = {", "val m = AgentNotificationListener.read()\nval n = {")
+        assertTrue(wiringProblems(code(direct)).isNotEmpty())
+        val bypass = "import tech.hybriq.adbuddy.listener.AgentNotificationListener\nval n = { AgentNotificationListener.read() }\n"
+        assertTrue(wiringProblems(code(bypass)).isNotEmpty())
+        val notLast = "val n = { NotificationGate.read(AgentNotificationListener::read, consent::confirmed) }\n"
+        assertTrue(wiringProblems(code(notLast)).isNotEmpty())
+        val twice = right + "val f = AgentNotificationListener::read\n"
+        assertTrue(wiringProblems(code(twice)).isNotEmpty())
+    }
 }

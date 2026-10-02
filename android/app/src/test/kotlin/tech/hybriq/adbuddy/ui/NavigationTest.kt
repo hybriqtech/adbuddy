@@ -47,4 +47,18 @@ class NavigationTest {
         Onboarding(prefs).finish()
         assertTrue(Onboarding(prefs).done()) // a new instance reads it from the same preferences
     }
+
+    @Test fun theOnboardingIsNotDoneByDefaultEvenWithOtherKeysAndFinishWritesOnlyItsOwn() {
+        val prefs = FakePrefs()
+        prefs.edit().putBoolean("confirmed", true).putString("other", "x").commit()
+        assertFalse(Onboarding(prefs).done())
+        Onboarding(prefs).finish()
+        assertTrue(Onboarding(prefs).done())
+        assertEquals(setOf("confirmed", "other", "done"), prefs.map.keys)
+        assertEquals(true, prefs.map["confirmed"])
+        // On clean preferences, finish() writes just the done key.
+        val clean = FakePrefs()
+        Onboarding(clean).finish()
+        assertEquals(setOf("done"), clean.map.keys)
+    }
 }

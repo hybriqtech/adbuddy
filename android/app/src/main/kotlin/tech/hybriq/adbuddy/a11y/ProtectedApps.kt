@@ -50,7 +50,8 @@ open class ProtectedApps(private val prefs: SharedPreferences) {
     fun ensure(extra: Set<String>): Boolean = synchronized(LOCK) {
         if (confirmed) return@synchronized false
         val now = list()
-        val next = (now + extra.filter(UiLimits::validPackage)).filter { it != Packages.ADBUDDY }.take(UiLimits.MAX_PROTECTED_APPS).toSet()
+        // What is added goes first, like proposeWithReceivers: a full inherited list must not leave it out at the limit.
+        val next = (extra.filter(UiLimits::validPackage) + now).filter { it != Packages.ADBUDDY }.take(UiLimits.MAX_PROTECTED_APPS).toSet()
         if (next == now && prefs.contains(KEY_LIST)) return@synchronized false
         prefs.edit { putStringSet(KEY_LIST, next) }
         true
@@ -88,6 +89,19 @@ open class ProtectedApps(private val prefs: SharedPreferences) {
 
         /** Receivers that have no icon in the launcher, so "installed" cannot be told from the launcher's list. */
         val NO_LAUNCHER_ICON: Set<String> = setOf("com.google.android.gms")
+
+        /**
+         * Whether a read of the launcher can be trusted: ADBuddy always has an icon there, so an empty read, or one
+         * without ADBuddy, is a failure (a restricted query, a broken package manager), not a phone with no apps.
+         */
+        fun launcherUsable(apps: List<Pair<String, String>>): Boolean = apps.any { it.first == Packages.ADBUDDY }
+
+        /**
+         * What is protected when the launcher cannot be read: the receivers that have no icon of their own and the
+         * default SMS app (installed by definition), added with ensure().
+         */
+        fun fallback(receivers: Set<String>, defaultSms: String?): Set<String> =
+            (receivers intersect NO_LAUNCHER_ICON) + listOfNotNull(defaultSms?.takeIf(UiLimits::validPackage))
 
         /** CODE_RECEIVERS and the phone's default SMS app (null: unknown). */
         fun receivers(defaultSms: String?): Set<String> = CODE_RECEIVERS + listOfNotNull(defaultSms?.takeIf(UiLimits::validPackage))

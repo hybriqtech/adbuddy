@@ -323,6 +323,15 @@ class UiExecutorTest {
         assertEquals(ErrorCode.INVALID, error(sent.last()))
     }
 
+    @Test fun withoutTheNotificationsParameterTheExecutorIsClosed() {
+        // The default of `notifications` is closed: an executor wired without the gate never reads any.
+        val bare = UiExecutor({ screen }, { sent += it }, { now }, { false }, { false }, { false }, { false }, { it.run() })
+        val r = bare.run(req(UiOp.NOTIFICATIONS))
+        assertFalse(r.ok)
+        assertEquals(ErrorCode.UNAVAILABLE, error(r))
+        assertEquals(UiExecutor.NO_NOTIFICATION_ACCESS, r.error?.text)
+    }
+
     @Test fun aSendThatThrowsDoesNotEscapeTheExecutor() {
         val failing = UiExecutor({ screen }, { throw IllegalStateException("socket closed") }, { now }, { it in protected }, { question }, { paused }, { false }, { it.run() })
         failing.onMessage(raw("""{"id":"u_6","op":"foreground","args":{},"expiresAt":"2026-10-01T10:00:10Z"}"""))

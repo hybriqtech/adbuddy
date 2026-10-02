@@ -76,13 +76,24 @@ object UiHelpers {
         // host at once if it is connected; otherwise with the next welcome.
         work.execute {
             try {
-                val receivers = ProtectedApps.Heuristic.receivers(ProtectedApps.defaultSms(app))
-                val launcher = runCatching { ProtectedApps.launcherApps(app) }
+                val defaultSms = ProtectedApps.defaultSms(app)
+                val receivers = ProtectedApps.Heuristic.receivers(defaultSms)
+                val read = try {
+                    ProtectedApps.launcherApps(app)
+                } catch (e: RuntimeException) {
+                    Log.w(TAG, "launcher apps", e)
+                    null
+                }
+                // An empty read, or one without ADBuddy (which always has an icon), is a failure, not "no apps".
+                val launcher = read?.takeIf(ProtectedApps.Heuristic::launcherUsable)
+                if (read != null && launcher == null) Log.w(TAG, "launcher apps: unusable read (${read.size} apps)")
                 // If the launcher cannot be read, at least what needs no launcher icon is protected (and stays so).
-                val changed = launcher.getOrNull()?.let { protected.propose(it, receivers) }
-                    ?: protected.ensure(receivers intersect ProtectedApps.Heuristic.NO_LAUNCHER_ICON)
+                val changed = if (launcher != null) {
+                    protected.propose(launcher, receivers)
+                } else {
+                    protected.ensure(ProtectedApps.Heuristic.fallback(receivers, defaultSms))
+                }
                 if (changed) sendList()
-                launcher.exceptionOrNull()?.let { Log.w(TAG, "launcher apps", it) }
             } catch (e: RuntimeException) {
                 Log.w(TAG, "protected apps", e)
             }
