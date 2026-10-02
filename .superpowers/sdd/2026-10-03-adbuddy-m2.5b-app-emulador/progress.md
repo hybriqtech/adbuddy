@@ -484,3 +484,15 @@ Vía: `gradle -q :app:assembleDebug :app:assembleDebugAndroidTest`, `adb -P 5060
 - Paso 7: `OK (15 tests)` (`AdbWifiObserverTest` 3, `LocalesTest` 5, `TokenProviderTest` 7), ningún saltado, `Time: 1.999`. `adb_wifi_enabled=0` antes del paso 5 y después; `adb_enabled=1`.
 
 Específico de la API 34 (sigue manual en el Pixel, Android 17): `theAppCanReadAdbWifiEnabled` pasa aquí (la app lee `adb_wifi_enabled` sin `SecurityException`); que Android 17 lo deje leer a una app con targetSdk 37 no está probado. Los dos tests del observador tampoco prueban Android 17.
+
+### T3 Pasos 5 y 6 (emutest contra el emulador)
+
+- Paso 5: APK compilados; `go test -count=1 -timeout 15m -v ./internal/emutest` → PASS: `TestTheShellUserIsAnswered` (5.4 s), `TestTheHandshakeOnStdinReachesTheApp` (7.2 s), `TestTheServiceIsInTheForegroundAfterTheHandshake` (5.8 s; el `dumpsys` de la API 34 lo lee `inForeground`), `TestInForeground`; ninguno SKIP. Hallazgo: tras la ejecución la app seguía instalada: `uninstallAtCleanup` usaba `e.ctx` (de `t.Context()`, cancelado antes de los Cleanup), `state()` daba "gone" y no desinstalaba. RED con un test nuevo `TestWhatIsInstalledIsUninstalled` ("tech.hybriq.adbuddy is still installed after the test that installed it"); arreglo con `context.WithoutCancel`; GREEN, y la suite entera otra vez PASS (5 tests, 21.6 s) sin nada instalado al final. Commit ed28946.
+- Paso 6 (sin handshake): `FAIL: ping after the handshake = map[appVersion:0.2.0 nonce: ok:true port:0], want port 47123 and a nonce`. Revertido (`git diff` vacío en app_test.go).
+- gofmt vacío, `go vet ./...` en windows/linux/darwin limpio, `go test -count=1 -timeout 580s ./...` todo ok (emutest salta sin variables).
+
+Específico de la API 34: la validación 3 (servicio en primer plano desde el proveedor) y la 2 (`content write` por stdin) pasan en Android 14; en Android 17 siguen manuales en el Pixel.
+
+Parada 21:58:20 (`scripts/emulator.sh stop` rc 0); a las 21:58:24 solo quedaba el vigilante `emulator -kill <pid> -sleep 20`, y después ningún qemu/emulator en el PC. RAM libre 18.1 GB. AVD `adbuddy-dev34` con `adb_enabled=1`, `adb_wifi_enabled=0` y sin la app.
+
+Estado: T2 pasos 2, 3, 4, 6, 7 hechos (3-7 por `am instrument`, no por Gradle); T3 pasos 5 y 6 hechos. Pendiente de decisión del controlador: el defecto de `connectedDebugAndroidTest` (servidor 5037) y, con él, el README de T2 (paso 8: dice `gradle :app:connectedDebugAndroidTest`) y el job de la CI de la Tarea 5. Nada más pendiente con emulador de T2/T3.
