@@ -120,12 +120,13 @@ func TestJobHoldsTheTreeAndClosingItKillsIt(t *testing.T) {
 		t.Fatalf("job holds %v; want the agent %d and its child %d", pids, w.Pid(), child)
 	}
 	// Closing the last handle is what happens if this process dies.
-	if err := windows.CloseHandle(w.job); err != nil {
+	job := w.job
+	w.job = 0 // closed below: neither Cleanup nor Kill may touch it again
+	if err := windows.CloseHandle(job); err != nil {
 		t.Fatal(err)
 	}
 	waitDead(t, child, "child")
 	waitDead(t, w.Pid(), "agent")
-	w.job = 0 // already closed: Kill must not close it again
 	if err := p.Kill(); err != nil {
 		t.Fatal(err)
 	}
