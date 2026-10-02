@@ -157,3 +157,17 @@ func ExitWith(code int) error {
 	}
 	return &exitCodeError{code: code}
 }
+
+// msgs is the message and the fix as messages of their own, to be written in
+// another language later (doctor does it with the error of a bad config). An
+// error without keys gives its English, as it is.
+func (e *Error) msgs() (message, fix i18n.Msg) {
+	if e.key == "" {
+		return i18n.M("error.cause", e.Message), i18n.M("error.cause", e.Fix)
+	}
+	message = i18n.M(e.key, e.args...)
+	if e.fixKey != "" {
+		fix = i18n.M(e.fixKey, e.args...)
+	}
+	return message, fix
+}

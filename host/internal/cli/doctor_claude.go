@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
 // checkClaudeHooks warns about the user's own Claude Code hooks that can
@@ -18,18 +18,18 @@ import (
 func checkClaudeHooks() check {
 	dir, err := claudecode.ConfigDir(os.Getenv, os.UserHomeDir)
 	if err != nil {
-		return check{Name: "claude hooks", Status: checkOK, Detail: "no Claude Code settings found"}
+		return mk("claude hooks", checkOK, i18n.M("doctor.hooks.no_settings"))
 	}
 	path := filepath.Join(dir, "settings.json")
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return check{Name: "claude hooks", Status: checkOK, Detail: "no global Claude Code hooks (" + path + " not read)"}
+		return mk("claude hooks", checkOK, i18n.M("doctor.hooks.not_read", path))
 	}
 	var s struct {
 		Hooks map[string]json.RawMessage `json:"hooks"`
 	}
 	if json.Unmarshal(b, &s) != nil {
-		return check{Name: "claude hooks", Status: checkOK, Detail: path + " is not readable as JSON: not checked"}
+		return mk("claude hooks", checkOK, i18n.M("doctor.hooks.not_json", path))
 	}
 	var clash []string
 	for _, ev := range []string{claudecode.EventPermissionRequest, "PreToolUse"} {
@@ -40,11 +40,11 @@ func checkClaudeHooks() check {
 	}
 	sort.Strings(clash)
 	if len(clash) == 0 {
-		return check{Name: "claude hooks", Status: checkOK, Detail: "no global PermissionRequest or PreToolUse hooks"}
+		return mk("claude hooks", checkOK, i18n.M("doctor.hooks.none"))
 	}
-	return check{
-		Name: "claude hooks", Status: checkWarn,
-		Detail:   path + " has " + strings.Join(clash, " and ") + " hooks: if one answers the same request as ADBuddy, the phone may not be asked, or the two may disagree",
-		Guidance: "Review those hooks in " + path + ". ADBuddy keeps classifying every adb command either way.",
+	detail := i18n.M("doctor.hooks.clash_1", path, clash[0])
+	if len(clash) == 2 {
+		detail = i18n.M("doctor.hooks.clash_2", path, clash[0], clash[1])
 	}
+	return mk("claude hooks", checkWarn, detail).withGuide(i18n.M("doctor.hooks.review", path))
 }

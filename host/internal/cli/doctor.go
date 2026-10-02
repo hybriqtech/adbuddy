@@ -17,6 +17,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/device"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
@@ -38,19 +39,101 @@ const (
 // the person or the agent may run; Guidance is something only the person can
 // do (on the phone, in another terminal); they are never both empty on a
 // failure or a warning.
+//
+// Detail and Guidance are English: they are what --json, the agent and the
+// tests read. They are computed, with the checks' own texts as messages
+// (detail and guidance), by mk and withGuide; the human report writes those
+// messages again in the language of the run. Name and Run are not translated:
+// the name is an identifier of the JSON (the report shows it in the language
+// of the run) and Run is a command.
 type check struct {
 	Name     string `json:"name"`
 	Status   string `json:"status"`
 	Detail   string `json:"detail"`
 	Run      string `json:"run,omitempty"`
 	Guidance string `json:"guidance,omitempty"`
+
+	detail, guidance i18n.Msg
 }
 
-// doctorReport is the output of `adbuddy doctor`.
+// mk is a check whose detail is a message.
+func mk(name, status string, detail i18n.Msg) check {
+	return check{Name: name, Status: status, Detail: detail.String(), detail: detail}
+}
+
+// withRun adds the command to run.
+func (c check) withRun(cmd string) check {
+	c.Run = cmd
+	return c
+}
+
+// withGuide adds what only the person can do, as a message.
+func (c check) withGuide(m i18n.Msg) check {
+	c.Guidance, c.guidance = m.String(), m
+	return c
+}
+
+// detailMsg and guidanceMsg are the texts of c as messages. A check that was
+// not built with mk (a test's) has only its English, which is its message.
+func (c check) detailMsg() i18n.Msg {
+	if c.detail.Key == "" {
+		return i18n.M("doctor.plain", c.Detail)
+	}
+	return c.detail
+}
+
+func (c check) guidanceMsg() i18n.Msg {
+	if c.guidance.Key == "" {
+		return i18n.M("doctor.plain", c.Guidance)
+	}
+	return c.guidance
+}
+
+// doctorReport is the output of `adbuddy doctor`. fixed is Fixed as messages.
 type doctorReport struct {
 	Verdict string   `json:"verdict"` // ready, degraded or broken
 	Fixed   []string `json:"fixed,omitempty"`
 	Checks  []check  `json:"checks"`
+
+	fixed []i18n.Msg
+}
+
+// msgError is an error whose text is a message of the catalog: doctor writes
+// it in the language of the run, and Error is its English (what a log or a
+// test reads). causeMsg is how a check takes an error as the cause in its text.
+type msgError struct{ msg i18n.Msg }
+
+func (e msgError) Error() string { return e.msg.String() }
+
+func failf(key string, args ...any) error { return msgError{i18n.M(key, args...)} }
+
+// causeMsg is err as a message: its own when it is a msgError, else its text
+// as it is (a cause of the system or of another package is English and is not
+// translated, spec ruling 10).
+func causeMsg(err error) i18n.Msg {
+	var me msgError
+	if errors.As(err, &me) {
+		return me.msg
+	}
+	return i18n.M("doctor.plain", err.Error())
+}
+
+// listMsg is a list of up to three items, written in the language of the run.
+func listMsg(items ...i18n.Msg) i18n.Msg {
+	args := make([]any, len(items))
+	for i, m := range items {
+		args[i] = m
+	}
+	return i18n.M("doctor.list."+strconv.Itoa(len(items)), args...)
+}
+
+// checkName is the name of a check for people, in lang (the JSON keeps the identifier).
+func checkName(lang i18n.Lang, name string) string {
+	id := strings.ReplaceAll(name, " ", "_")
+	if i18n.Has("doctor.name." + id) {
+		return lang.T("doctor.name." + id)
+	}
+	return name
 }
 
 // Doctor time limits: every call is bounded, and so is the whole of doctor
@@ -101,8 +184,11 @@ func newDoctorCmd(app *App) *cobra.Command {
 						return Interrupted()
 					}
 				}
-				rep.Fixed = out.fixed
-				if out.note != "" {
+				rep.fixed = out.fixed
+				for _, m := range out.fixed {
+					rep.Fixed = append(rep.Fixed, m.String())
+				}
+				if out.note.Key != "" {
 					noteOnServer(&rep, out.note)
 				}
 			}
@@ -128,26 +214,27 @@ func newDoctorCmd(app *App) *cobra.Command {
 }
 
 func printReport(app *App, rep doctorReport) {
+	lang := app.speaks()
 	icon := map[string]string{checkOK: "✓", checkWarn: "⚠", checkFail: "✗", checkSkip: "·"}
-	for _, f := range rep.Fixed {
-		fmt.Fprintf(app.Stdout, "↻ %s\n", f)
+	for _, f := range rep.fixed {
+		fmt.Fprintf(app.Stdout, "↻ %s\n", classify.Printable(f.In(lang)))
 	}
 	for _, c := range rep.Checks {
-		fmt.Fprintf(app.Stdout, "%s %s: %s\n", icon[c.Status], c.Name, classify.Printable(c.Detail))
+		fmt.Fprintf(app.Stdout, "%s %s: %s\n", icon[c.Status], checkName(lang, c.Name), classify.Printable(c.detailMsg().In(lang)))
 		if c.Run != "" {
-			fmt.Fprintf(app.Stdout, "    Run: %s\n", classify.Printable(c.Run))
+			fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.run"), classify.Printable(c.Run))
 		}
 		if c.Guidance != "" {
-			fmt.Fprintf(app.Stdout, "    Guidance: %s\n", classify.Printable(c.Guidance))
+			fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.guidance"), classify.Printable(c.guidanceMsg().In(lang)))
 		}
 	}
 	switch rep.Verdict {
 	case "ready":
-		fmt.Fprintln(app.Stdout, "Verdict: ready.")
+		fmt.Fprintln(app.Stdout, lang.T("doctor.verdict.ready"))
 	case "degraded":
-		fmt.Fprintln(app.Stdout, "Verdict: degraded — ADBuddy works; the ⚠ lines are optional or can wait.")
+		fmt.Fprintln(app.Stdout, lang.T("doctor.verdict.degraded"))
 	default:
-		fmt.Fprintln(app.Stdout, "Verdict: broken — fix the ✗ lines first, from the top.")
+		fmt.Fprintln(app.Stdout, lang.T("doctor.verdict.broken"))
 	}
 }
 
@@ -158,29 +245,35 @@ func printReport(app *App, rep doctorReport) {
 // aside, as any adb call does).
 func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 	add := func(c check) { rep.Checks = append(rep.Checks, c) }
-	skip := func(why string, names ...string) {
+	skip := func(why i18n.Msg, names ...string) {
 		for _, n := range names {
-			add(check{Name: n, Status: checkSkip, Detail: "not checked: " + why})
+			add(mk(n, checkSkip, i18n.M("doctor.skipped", why)))
 		}
 	}
 	defer func() { rep.Verdict = verdict(rep.Checks) }()
 
 	e, err := loadEnv(app)
 	if err != nil {
+		// The message and the fix of the error, as messages: the report writes
+		// them in the language of the run (the JSON keeps the English).
+		detail, fix := i18n.M("doctor.plain", err.Error()), i18n.M("doctor.config.run_setup")
 		var ce *Error
-		fix := "Run `adbuddy setup`."
-		if errors.As(err, &ce) && ce.Fix != "" {
-			fix = ce.Fix
+		if errors.As(err, &ce) {
+			message, ceFix := ce.msgs()
+			detail = i18n.M("doctor.error", ce.Code, message)
+			if ce.Fix != "" {
+				fix = ceFix
+			}
 		}
-		add(check{Name: "config", Status: checkFail, Detail: err.Error(), Guidance: fix})
-		skip("no valid configuration", "adb", "adb server", "serve", "phone", "identity", "network port", "phone app", "environment")
+		add(mk("config", checkFail, detail).withGuide(fix))
+		skip(i18n.M("doctor.skip.no_config"), "adb", "adb server", "serve", "phone", "identity", "network port", "phone app", "environment")
 		return rep
 	}
 	configured := e.cfg.Serial != "" || e.cfg.Address != ""
 	if configured {
-		add(check{Name: "config", Status: checkOK, Detail: e.dirs.ConfigFile()})
+		add(mk("config", checkOK, i18n.M("doctor.plain", e.dirs.ConfigFile())))
 	} else {
-		add(check{Name: "config", Status: checkFail, Detail: "no phone set up yet (" + e.dirs.ConfigFile() + ")", Run: "adbuddy setup"})
+		add(mk("config", checkFail, i18n.M("doctor.config.no_phone", e.dirs.ConfigFile())).withRun("adbuddy setup"))
 	}
 
 	// serve first: whether doctor may offer to restart the adb server
@@ -189,7 +282,7 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 
 	adbPath := configuredADB(e, "")
 	runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
-	adbCheck := check{Name: "adb", Status: checkFail, Detail: "ADBuddy's adb is not installed", Run: "adbuddy setup"}
+	adbCheck := mk("adb", checkFail, i18n.M("doctor.adb.not_installed")).withRun("adbuddy setup")
 	if adbPath != "" {
 		adbCheck = checkADB(ctx, runner, adbPath)
 	}
@@ -198,29 +291,34 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 	var online []adb.Device
 	serverUp := false
 	if adbCheck.Status == checkFail {
-		skip("ADBuddy's adb does not work", "adb server")
+		skip(i18n.M("doctor.skip.adb_broken"), "adb server")
 	} else if online, err = callWithin(ctx, func(c context.Context) ([]adb.Device, error) { return runner.Online(c) }); err != nil {
 		add(serverDown(e.cfg.ADBServerPort, err, running, perr))
 	} else {
 		serverUp = true
-		add(check{Name: "adb server", Status: checkOK, Detail: fmt.Sprintf("port %d, %d phone(s) connected", e.cfg.ADBServerPort, len(online))})
+		// Plural by count (TN's convention: the count is %[1]d); the English is the same in both forms.
+		if n := len(online); n == 1 {
+			add(mk("adb server", checkOK, i18n.M("doctor.server.ok.one", n, e.cfg.ADBServerPort)))
+		} else {
+			add(mk("adb server", checkOK, i18n.M("doctor.server.ok.other", n, e.cfg.ADBServerPort)))
+		}
 	}
 	add(checkServe(running, ping, perr, e.dirs.Data))
 
 	switch active, guid := findConfiguredPhone(online, e.cfg.Serial, e.cfg.Address); {
 	case !serverUp:
-		skip("adb server down", "phone", "identity", "network port", "phone app")
+		skip(i18n.M("doctor.skip.server_down"), "phone", "identity", "network port", "phone app")
 	case !configured:
-		skip("no phone set up", "phone", "identity", "network port", "phone app")
+		skip(i18n.M("doctor.skip.no_phone"), "phone", "identity", "network port", "phone app")
 	case active == "":
-		how := "Turn on Wireless debugging on the phone and keep it on the same Wi-Fi as this PC."
+		how := i18n.M("doctor.phone.how_wifi")
 		if e.cfg.Address != "" {
-			how = "Turn on Wireless debugging on the phone. On another network (Tailscale), run `adbuddy connect <ip:port>` with the address shown on that screen."
+			how = i18n.M("doctor.phone.how_tailscale")
 		}
-		add(check{Name: "phone", Status: checkFail, Detail: "the phone you set up is not connected to ADBuddy's adb server", Guidance: how})
-		skip("phone not connected", "identity", "network port", "phone app")
+		add(mk("phone", checkFail, i18n.M("doctor.phone.not_connected")).withGuide(how))
+		skip(i18n.M("doctor.skip.not_connected"), "identity", "network port", "phone app")
 	default:
-		add(check{Name: "phone", Status: checkOK, Detail: active})
+		add(mk("phone", checkOK, i18n.M("doctor.plain", active)))
 		phone := runner
 		phone.Serial = active
 		add(checkIdentity(ctx, phone, guid, savedName(e)))
@@ -267,9 +365,9 @@ func callWithin[T any](ctx context.Context, f func(context.Context) (T, error)) 
 	if err != nil {
 		switch {
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):
-			err = fmt.Errorf("doctor's time limit (%s) ran out", doctorTotalWait)
+			err = failf("doctor.err.limit", doctorTotalWait.String())
 		case ctx.Err() == nil && errors.Is(c.Err(), context.DeadlineExceeded):
-			err = fmt.Errorf("no answer within %s", doctorCallWait)
+			err = failf("doctor.err.no_answer", doctorCallWait.String())
 		}
 	}
 	return v, err
@@ -279,37 +377,36 @@ func checkADB(ctx context.Context, runner adb.Runner, path string) check {
 	out, err := callWithin(ctx, func(c context.Context) (string, error) {
 		o, _, code, err := runner.Output(c, "version")
 		if err == nil && code != 0 {
-			err = fmt.Errorf("exit %d", code)
+			err = failf("doctor.err.exit", code)
 		}
 		return o, err
 	})
 	if err != nil {
-		return check{Name: "adb", Status: checkFail, Detail: path + ": " + err.Error(), Run: "adbuddy setup"}
+		return mk("adb", checkFail, i18n.M("doctor.adb.error", path, causeMsg(err))).withRun("adbuddy setup")
 	}
 	m := adbVersionRe.FindStringSubmatch(out)
 	if m == nil {
-		return check{Name: "adb", Status: checkWarn, Detail: path + ": unknown version", Run: "adbuddy setup"}
+		return mk("adb", checkWarn, i18n.M("doctor.adb.unknown_version", path)).withRun("adbuddy setup")
 	}
 	major, _ := strconv.Atoi(m[1])
 	version := m[1] + "." + m[2] + "." + m[3]
 	if major < 37 {
-		return check{Name: "adb", Status: checkFail, Detail: path + ": version " + version + ", ADBuddy needs 37 or newer (adb Wi-Fi 2.0)", Run: "adbuddy setup"}
+		return mk("adb", checkFail, i18n.M("doctor.adb.too_old", path, version)).withRun("adbuddy setup")
 	}
-	return check{Name: "adb", Status: checkOK, Detail: version + " (" + path + ")"}
+	return mk("adb", checkOK, i18n.M("doctor.adb.ok", version, path))
 }
 
 // serverDown is the adb server check when it does not answer. Restarting it
 // (--fix) is offered only when no serve can be using it.
 func serverDown(port int, err error, serveRunning bool, serveErr error) check {
-	c := check{Name: "adb server", Status: checkFail, Detail: fmt.Sprintf("ADBuddy's adb server (port %d) does not answer: %v", port, err)}
+	c := mk("adb server", checkFail, i18n.M("doctor.server.down", port, causeMsg(err)))
 	switch {
 	case serveRunning:
-		c.Guidance = "`adbuddy serve` is running and uses this server, so doctor does not restart it. Stop serve (Ctrl+C in its terminal) and run adbuddy doctor again."
+		c = c.withGuide(i18n.M("doctor.server.serve_running"))
 	case serveErr != nil:
-		c.Guidance = "The ADBuddy socket does not answer, so a serve may be using this server. Stop any `adbuddy serve` (Ctrl+C in its terminal) and run adbuddy doctor again."
+		c = c.withGuide(i18n.M("doctor.server.socket_stuck"))
 	default:
-		c.Run = "adbuddy doctor --fix"
-		c.Guidance = "If it keeps failing, stop other adb tools using port " + strconv.Itoa(port) + "."
+		c = c.withRun("adbuddy doctor --fix").withGuide(i18n.M("doctor.server.other_tools", port))
 	}
 	return c
 }
@@ -317,13 +414,11 @@ func serverDown(port int, err error, serveRunning bool, serveErr error) check {
 func checkServe(running bool, ping ipc.Ping, perr error, dataDir string) check {
 	switch {
 	case perr != nil:
-		return check{Name: "serve", Status: checkWarn, Detail: perr.Error(),
-			Guidance: "If `adbuddy serve` is running, it is stuck: stop it (Ctrl+C in its terminal) and start it again. If none is running, delete " + ipc.SocketPath(dataDir) + "."}
+		return mk("serve", checkWarn, causeMsg(perr)).withGuide(i18n.M("doctor.serve.stuck", ipc.SocketPath(dataDir)))
 	case running:
-		return check{Name: "serve", Status: checkOK, Detail: "running, session " + ping.Session + ", phone " + ping.Serial}
+		return mk("serve", checkOK, i18n.M("doctor.serve.running", ping.Session, ping.Serial))
 	}
-	return check{Name: "serve", Status: checkWarn, Detail: "not running: the agent cannot use the phone",
-		Run: "adbuddy serve", Guidance: "Keep it open in its own terminal while the agent works."}
+	return mk("serve", checkWarn, i18n.M("doctor.serve.not_running")).withRun("adbuddy serve").withGuide(i18n.M("doctor.serve.keep_open"))
 }
 
 func servePing(ctx context.Context, dataDir string) (bool, ipc.Ping, error) {
@@ -336,7 +431,7 @@ func servePing(ctx context.Context, dataDir string) (bool, ipc.Ping, error) {
 	case errors.Is(err, ipc.ErrNotRunning):
 		return false, ipc.Ping{}, nil
 	}
-	return false, ipc.Ping{}, fmt.Errorf("the ADBuddy socket does not answer within %s: %v", doctorPingWait, err)
+	return false, ipc.Ping{}, failf("doctor.serve.no_answer", doctorPingWait.String(), err.Error())
 }
 
 // findConfiguredPhone finds the phone of config.toml among the connected
@@ -367,32 +462,31 @@ func savedName(e env) string {
 
 func checkIdentity(ctx context.Context, phone adb.Runner, guid, saved string) check {
 	if _, ok := pairing.GuidSerialNo(guid); !ok {
-		c := check{Name: "identity", Status: checkWarn}
+		var c check
 		if guid == "" {
-			c.Detail = "cannot be checked: config.toml keeps this phone as " + saved + ", not by the name it paired with"
+			c = mk("identity", checkWarn, i18n.M("doctor.identity.cant_name", saved))
 		} else {
-			c.Detail = "cannot be checked: " + unverifiedWhy(guid).String() // H3b: the doctor writes its checks as messages
+			c = mk("identity", checkWarn, i18n.M("doctor.identity.cant_why", unverifiedWhy(guid)))
 		}
 		if _, _, err := net.SplitHostPort(phone.Serial); err == nil {
-			c.Guidance = "Make sure the IP address and port under Wireless debugging on your phone are " + phone.Serial + "."
+			c = c.withGuide(i18n.M("doctor.identity.check_address", phone.Serial))
 		} else {
-			c.Guidance = "Make sure no other phone paired with this PC has Wireless debugging on at the same time."
+			c = c.withGuide(i18n.M("doctor.identity.no_other_phone"))
 		}
 		return c
 	}
 	_, err := callWithin(ctx, func(c context.Context) (struct{}, error) { return struct{}{}, pairing.VerifyIdentity(c, phone, guid) })
 	switch {
 	case errors.Is(err, pairing.ErrWrongPhone):
-		return check{Name: "identity", Status: checkFail, Detail: "the phone at " + phone.Serial + " is not the one you set up",
-			Guidance: "Check the IP and port on the phone you set up; run `adbuddy connect <ip:port>` with them."}
+		return mk("identity", checkFail, i18n.M("doctor.identity.wrong", phone.Serial)).withGuide(i18n.M("doctor.identity.wrong.fix"))
 	case err != nil:
-		return check{Name: "identity", Status: checkWarn, Detail: "could not read the phone's serial number: " + err.Error(), Guidance: unlockAndRetry}
+		return mk("identity", checkWarn, i18n.M("doctor.identity.read_failed", causeMsg(err))).withGuide(unlockAndRetry)
 	}
-	return check{Name: "identity", Status: checkOK, Detail: "it is the phone you set up"}
+	return mk("identity", checkOK, i18n.M("doctor.identity.ok"))
 }
 
 // unlockAndRetry is the guidance when the phone did not answer a read.
-const unlockAndRetry = "Unlock the phone and run adbuddy doctor again."
+var unlockAndRetry = i18n.M("doctor.unlock")
 
 // checkRemotePort reads whether adbd listens on a TCP port. With the remote
 // mode on (mode: remote_until in config.toml as the controller reads it, so
@@ -402,39 +496,36 @@ func checkRemotePort(ctx context.Context, phone adb.Runner, mode remoteInfo, ser
 	port, err := callWithin(ctx, func(c context.Context) (string, error) { return device.TCPPort(c, phone) })
 	switch {
 	case err != nil:
-		return check{Name: "network port", Status: checkWarn, Detail: "could not read service.adb.tcp.port: " + err.Error(), Guidance: unlockAndRetry}
+		return mk("network port", checkWarn, i18n.M("doctor.port.read_failed", causeMsg(err))).withGuide(unlockAndRetry)
 	case port == "" || port == "0":
-		return check{Name: "network port", Status: checkOK, Detail: "closed (no adb tcpip mode)"}
+		return mk("network port", checkOK, i18n.M("doctor.port.closed"))
 	}
 	if mode.Enabled && mode.ExpiresAt != nil {
 		hm := mode.ExpiresAt.Local().Format("15:04")
-		c := check{Name: "network port", Status: checkWarn, Detail: "adb listens on port " + port + " (tcpip mode): remote mode on until " + hm}
+		c := mk("network port", checkWarn, i18n.M("doctor.port.remote_on", port, hm))
 		if mode.Closing {
-			c.Detail = "adb listens on port " + port + " (tcpip mode): remote mode expired at " + hm + " but the port is still open"
+			c = mk("network port", checkWarn, i18n.M("doctor.port.remote_expired", port, hm))
 		}
 		if serveRunning {
-			c.Guidance = "It stays open on any network until serve closes it when the remote mode expires; run `adbuddy remote off` to close it now."
-		} else {
-			c.Guidance = "Nothing closes it while serve is stopped, even after " + hm + ": run `adbuddy remote off` to close it."
+			return c.withGuide(i18n.M("doctor.port.stays_open"))
 		}
-		return c
+		return c.withGuide(i18n.M("doctor.port.serve_stopped", hm))
 	}
-	return check{Name: "network port", Status: checkWarn, Detail: "adb listens on port " + port + " (tcpip mode): `adbuddy serve` closes it with `adb usb` when it starts",
-		Guidance: "Nothing to do: serve closes it (remote mode is off)."}
+	return mk("network port", checkWarn, i18n.M("doctor.port.open", port)).withGuide(i18n.M("doctor.port.nothing_to_do"))
 }
 
 // checkApp: the phone app is optional; everything here is a warning at most.
 // A read that fails is "could not check", never a missing setting.
 func checkApp(ctx context.Context, phone adb.Runner, e env, serveRunning bool) check {
 	couldNot := func(err error) check {
-		return check{Name: "phone app", Status: checkWarn, Detail: "could not check: " + err.Error(), Guidance: unlockAndRetry}
+		return mk("phone app", checkWarn, i18n.M("doctor.app.could_not", causeMsg(err))).withGuide(unlockAndRetry)
 	}
 	version, err := callWithin(ctx, func(c context.Context) (string, error) { return phoneapp.InstalledVersion(c, phone) })
 	if err != nil {
 		return couldNot(err)
 	}
 	if version == "" {
-		return check{Name: "phone app", Status: checkWarn, Detail: "not installed: 🔴 confirmations happen in the terminal running serve", Run: "adbuddy setup"}
+		return mk("phone app", checkWarn, i18n.M("doctor.app.not_installed")).withRun("adbuddy setup")
 	}
 	pkg, err := readShell(ctx, phone, "dumpsys package "+phoneapp.Package)
 	if err != nil {
@@ -448,31 +539,30 @@ func checkApp(ctx context.Context, phone adb.Runner, e env, serveRunning bool) c
 	if err != nil {
 		return couldNot(err)
 	}
-	var missing []string
+	var missing []i18n.Msg
 	if !strings.Contains(pkg, phoneapp.SecureWrites+": granted=true") {
-		missing = append(missing, "permission for Cut access")
+		missing = append(missing, i18n.M("doctor.app.missing.permission"))
 	}
 	if !phoneapp.A11yEnabled(strings.TrimSpace(a11y)) {
-		missing = append(missing, "accessibility service")
+		missing = append(missing, i18n.M("doctor.app.missing.accessibility"))
 	}
 	if !batteryExempt(idle, phoneapp.Package) {
-		missing = append(missing, "battery exemption")
+		missing = append(missing, i18n.M("doctor.app.missing.battery"))
 	}
 	if len(missing) > 0 {
-		return check{Name: "phone app", Status: checkWarn, Detail: version + " installed, but without: " + strings.Join(missing, ", "),
-			Run: "adbuddy setup", Guidance: "Accept the consent screen in the ADBuddy app when setup asks."}
+		return mk("phone app", checkWarn, i18n.M("doctor.app.missing", version, listMsg(missing...))).
+			withRun("adbuddy setup").withGuide(i18n.M("doctor.app.accept_consent"))
 	}
 	if serveRunning && e.cfg.ChatPort != 0 {
 		open, err := callWithin(ctx, func(c context.Context) (bool, error) { return phoneapp.TunnelOpen(c, phone, e.cfg.ChatPort) })
 		switch {
 		case err != nil:
-			return check{Name: "phone app", Status: checkWarn, Detail: version + " installed, but the channel with serve could not be checked: " + err.Error(), Guidance: unlockAndRetry}
+			return mk("phone app", checkWarn, i18n.M("doctor.app.channel_unknown", version, causeMsg(err))).withGuide(unlockAndRetry)
 		case !open:
-			return check{Name: "phone app", Status: checkWarn, Detail: version + " installed, but the channel with serve is not open",
-				Guidance: "Wait 15 seconds and run adbuddy doctor again; if it stays closed, open the ADBuddy app."}
+			return mk("phone app", checkWarn, i18n.M("doctor.app.channel_closed", version)).withGuide(i18n.M("doctor.app.wait"))
 		}
 	}
-	return check{Name: "phone app", Status: checkOK, Detail: version + " installed and set up"}
+	return mk("phone app", checkOK, i18n.M("doctor.app.ok", version))
 }
 
 // readShell runs one read-only shell command on the phone; an exit code
@@ -481,7 +571,7 @@ func readShell(ctx context.Context, phone adb.Runner, command string) (string, e
 	return callWithin(ctx, func(c context.Context) (string, error) {
 		out, errOut, code, err := phone.Output(c, "shell", command)
 		if err == nil && code != 0 {
-			err = fmt.Errorf("adb shell %s: exit %d: %s", command, code, strings.TrimSpace(errOut))
+			err = failf("doctor.err.shell_exit", command, code, strings.TrimSpace(errOut))
 		}
 		return out, err
 	})
@@ -507,18 +597,17 @@ func checkWorkspace(ws string) check {
 		}
 	}
 	if len(missing) > 0 {
-		return check{Name: "environment", Status: checkFail, Detail: ws + ": missing " + strings.Join(missing, ", "), Run: "adbuddy env init --dir " + quoteArg(ws)}
+		return mk("environment", checkFail, i18n.M("doctor.env.missing", ws, strings.Join(missing, ", "))).withRun("adbuddy env init --dir " + quoteArg(ws))
 	}
 	jdir := workspace.JournalDir(ws)
 	firstUse, err := journalWritable(jdir)
 	if err != nil {
-		return check{Name: "environment", Status: checkFail, Detail: "the journal cannot be written (" + err.Error() + "): nothing 🟡 or 🔴 will run",
-			Guidance: "Make " + jdir + " and its files writable for your user, and free some disk space."}
+		return mk("environment", checkFail, i18n.M("doctor.env.journal_unwritable", causeMsg(err))).withGuide(i18n.M("doctor.env.make_writable", jdir))
 	}
 	if firstUse {
-		return check{Name: "environment", Status: checkOK, Detail: ws + " (journal created on first use)"}
+		return mk("environment", checkOK, i18n.M("doctor.env.first_use", ws))
 	}
-	return check{Name: "environment", Status: checkOK, Detail: ws}
+	return mk("environment", checkOK, i18n.M("doctor.plain", ws))
 }
 
 // journalWritable checks, without creating or writing anything, that the
@@ -533,25 +622,25 @@ func journalWritable(dir string) (firstUse bool, err error) {
 	case err != nil:
 		return false, err
 	case !fi.IsDir():
-		return false, errors.New(dir + " is not a folder")
+		return false, failf("doctor.err.not_folder", dir)
 	case runtime.GOOS != "windows" && fi.Mode().Perm()&0o200 == 0:
 		// On Windows the read-only attribute of a folder does not stop
 		// new files in it.
-		return false, errors.New(dir + " is read-only")
+		return false, failf("doctor.err.read_only", dir)
 	}
 	// The file journal.Store appends to this month.
 	f := filepath.Join(dir, time.Now().UTC().Format("2006-01")+".jsonl")
 	if fi, err := os.Stat(f); err == nil && fi.Mode().Perm()&0o200 == 0 {
-		return false, errors.New(f + " is read-only")
+		return false, failf("doctor.err.read_only", f)
 	}
 	return false, nil
 }
 
 // fixOutcome is what --fix did.
 type fixOutcome struct {
-	fixed     []string // what it fixed, checked afterwards
-	note      string   // why the adb server is not fixed, when --fix left it failing
-	restarted bool     // it touched the server: every check runs again
+	fixed     []i18n.Msg // what it fixed, checked afterwards
+	note      i18n.Msg   // why the adb server is not fixed, when --fix left it failing (empty: nothing to say)
+	restarted bool       // it touched the server: every check runs again
 }
 
 // doctorFix applies the only automatic fix: restarting ADBuddy's private adb
@@ -569,9 +658,9 @@ func doctorFix(ctx context.Context, app *App, rep doctorReport) fixOutcome {
 	// started after the checks.
 	switch running, _, perr := servePing(ctx, e.dirs.Data); {
 	case running:
-		return fixOutcome{note: "--fix did not restart it: adbuddy serve is running and uses it"}
+		return fixOutcome{note: i18n.M("doctor.fix.serve_running")}
 	case perr != nil:
-		return fixOutcome{note: "--fix did not restart it: the ADBuddy socket does not answer, so a serve may be using it"}
+		return fixOutcome{note: i18n.M("doctor.fix.socket_stuck")}
 	}
 	runner := adb.Runner{Path: configuredADB(e, ""), ServerPort: e.cfg.ADBServerPort}
 	_, _ = callWithin(ctx, func(c context.Context) (struct{}, error) {
@@ -581,25 +670,26 @@ func doctorFix(ctx context.Context, app *App, rep doctorReport) fixOutcome {
 	_, err = callWithin(ctx, func(c context.Context) (struct{}, error) {
 		_, errOut, code, err := runner.Output(c, "start-server")
 		if err == nil && code != 0 {
-			err = fmt.Errorf("exit %d: %s", code, strings.TrimSpace(errOut))
+			err = failf("doctor.err.exit_output", code, strings.TrimSpace(errOut))
 		}
 		return struct{}{}, err
 	})
 	if err != nil {
-		return fixOutcome{restarted: true, note: "--fix could not restart it: start-server: " + err.Error()}
+		return fixOutcome{restarted: true, note: i18n.M("doctor.fix.start_failed", causeMsg(err))}
 	}
 	if _, err := callWithin(ctx, func(c context.Context) ([]adb.Device, error) { return runner.Online(c) }); err != nil {
-		return fixOutcome{restarted: true, note: "--fix restarted it and it still does not answer"}
+		return fixOutcome{restarted: true, note: i18n.M("doctor.fix.still_down")}
 	}
-	return fixOutcome{restarted: true, fixed: []string{fmt.Sprintf("restarted ADBuddy's adb server (port %d)", e.cfg.ADBServerPort)}}
+	return fixOutcome{restarted: true, fixed: []i18n.Msg{i18n.M("doctor.fix.restarted", e.cfg.ADBServerPort)}}
 }
 
 // noteOnServer tells, on a failing adb server check, what --fix did about
 // it; --fix is not offered again.
-func noteOnServer(rep *doctorReport, note string) {
+func noteOnServer(rep *doctorReport, note i18n.Msg) {
 	for i, c := range rep.Checks {
 		if c.Name == "adb server" && c.Status == checkFail {
-			rep.Checks[i].Detail += " (" + note + ")"
+			rep.Checks[i].detail = i18n.M("doctor.with_note", c.detailMsg(), note)
+			rep.Checks[i].Detail = rep.Checks[i].detail.String()
 			if c.Run == "adbuddy doctor --fix" {
 				rep.Checks[i].Run = ""
 			}
@@ -614,11 +704,11 @@ func askTheUser(rep *doctorReport) {
 		if !isPersonOnly(c.Run) {
 			continue
 		}
-		g := "Ask the user to run " + c.Run + "."
+		g := i18n.M("doctor.ask_user", c.Run)
 		if c.Guidance != "" {
-			g += " " + c.Guidance
+			g = i18n.M("doctor.ask_user_guidance", c.Run, c.guidanceMsg())
 		}
-		rep.Checks[i].Run, rep.Checks[i].Guidance = "", g
+		rep.Checks[i].Run, rep.Checks[i].guidance, rep.Checks[i].Guidance = "", g, g.String()
 	}
 }
 

@@ -1,8 +1,5 @@
 # Text literals left in internal/cli, per file and rule (textlint_test.go). It only goes down.
 attach.go print 2
-doctor.go check 33
-doctor.go print 5
-doctor_claude.go check 6
 envcmd.go print 1
 helpers.go print 6
 journal.go print 3

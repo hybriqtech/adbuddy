@@ -22,6 +22,8 @@ var sameInBoth = map[string]string{
 	"err.setup.usage_adb":       "a flag name and the message of the system: nothing to translate",
 	"err.setup.usage_workspace": "a flag name and the message of the system: nothing to translate",
 	"appsetup.summary.consent":  "a version and the state word of the JSON result: nothing to translate",
+	"doctor.name.adb":           "adb is the name of the tool",
+	"doctor.name.serve":         "serve is the name of a command",
 }
 
 // keyTables are the variables that hold catalog keys by a code (a map from an
@@ -36,7 +38,10 @@ var keyTables = map[string]string{
 // dynamicPrefixes are the key prefixes that a call builds at run time
 // (`T("doctor.name."+id)`): every catalog key with one of them counts as used,
 // and the call is accepted without a literal key. Each one says where it is built.
-var dynamicPrefixes = map[string]string{}
+var dynamicPrefixes = map[string]string{
+	"doctor.name.": "cli/doctor.go: checkName builds the key of the name of a check from its identifier",
+	"doctor.list.": "cli/doctor.go: listMsg picks the pattern of a list by its length (1 to 3)",
+}
 
 // verbs lists the fmt verbs of a catalog pattern as "index:verb", and what is
 // wrong with it. Every verb needs an explicit index (%[1]s), so that Spanish
@@ -246,6 +251,7 @@ var callSpecs = map[string]callSpec{
 	"tell":            {keys: []int{1}, argStart: 2},               // cli/say.go: tell(w, key, args...)
 	"say":             {keys: []int{0}, argStart: 1},               // the say and warn closures of setup (since H3a): say(key, args...)
 	"warn":            {keys: []int{0}, argStart: 1},
+	"failf":           {keys: []int{0}, argStart: 1}, // cli/doctor.go: failf(key, args...), an error that is a message
 }
 
 // keyUses finds the catalog keys a Go source asks for (see callSpecs). A key
