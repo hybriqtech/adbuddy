@@ -1,6 +1,7 @@
 package classify
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -46,7 +47,7 @@ func TestDisplayCommandEscapesBackslashesAndCompactsBlanks(t *testing.T) {
 		{[]string{"shell", "ls    x"}, "adb shell ls␠×4x"},
 		{[]string{"shell", "ls\n\n\n\n\nreboot"}, `adb shell ls\n×5reboot`},
 		{[]string{"shell", "ls\t\t\t\treboot"}, `adb shell ls\t×4reboot`},
-		{[]string{"shell", "echo ␠×9"}, `adb shell echo \u2420×9`},
+		{[]string{"shell", "echo ␠×9"}, `adb shell echo \u2420\u00d79`}, // B1: the agent's × too
 		{[]string{"push", `C:\x\a b.txt`, "/sdcard/x"}, `adb push 'C:\\x\\a b.txt' /sdcard/x`},
 	}
 	for _, c := range cases {
@@ -82,6 +83,82 @@ func TestTitlesCompactBlanksAndCapTheAgentsWords(t *testing.T) {
 			if n := utf8.RuneCountInString(l); n > 400 {
 				t.Errorf("%.40q: detail line of %d runes", argv, n)
 			}
+		}
+	}
+}
+
+// bs is s with each ~ written as a backslash: the escapes read better so.
+func bs(s string) string { return strings.ReplaceAll(s, "~", string(rune(92))) }
+
+// H3: a space that is not U+0020 and the invisible fillers are escaped, and a
+// run of mixed blanks (spaces, NBSP, tabs, newlines…) is compacted too: padding
+// made of them cannot hide the end of the command nor of the title.
+func TestVisibleEscapesOtherSpacesAndFillers(t *testing.T) {
+	for _, r := range []rune{
+		0x00a0, 0x2000, 0x3000, 0x202f, 0x1680, // spaces that are not U+0020
+		0x2800, 0x3164, 0x115f, 0x1160, 0xffa0, // blank-looking letters and symbols
+		0x034f, 0xfe0f, 0x180b, 0x17b4, // invisible marks
+		0x0301, 0x20dd, // combining marks: thousands of them could cover other lines
+	} {
+		in := "a" + string(r) + "b"
+		want := "a" + bs(fmt.Sprintf("~u%04x", r)) + "b"
+		if got := Visible(in); got != want {
+			t.Errorf("Visible(%q) = %q, want %q", in, got, want)
+		}
+		if got := Printable(in); got != want {
+			t.Errorf("Printable(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got, want := Visible("a"+string(rune(0xe0100))+"b"), bs("a~U000e0100b"); got != want {
+		t.Errorf("Visible: %q, want %q", got, want)
+	}
+}
+
+func TestDisplayCommandCompactsMixedBlanks(t *testing.T) {
+	nbsp, braille := string(rune(0x00a0)), string(rune(0x2800))
+	alt := strings.Repeat(" "+nbsp, 3000)
+	cases := []struct {
+		argv []string
+		want string
+	}{
+		// Few kinds in a row: each one, in order.
+		{[]string{"shell", "ls\n    reboot"}, bs("adb shell ls~n␠×4reboot")},
+		{[]string{"shell", "ls \t\t\t\t reboot"}, bs("adb shell ls ~t×4 reboot")},
+		{[]string{"shell", "ls" + strings.Repeat(nbsp, 4) + "x"}, bs("adb shell ls~u00a0×4x")},
+		{[]string{"shell", "ls  " + nbsp + " x"}, bs("adb shell ls  ~u00a0 x")},
+		// Many: how many of each kind, in a mark of its own.
+		{[]string{"shell", "rm -rf '" + alt + "' /sdcard/DCIM"}, bs("adb shell rm -rf '×6000(␠×3000~u00a0×3000)' /sdcard/DCIM")},
+		{[]string{"shell", "ls" + strings.Repeat("\n \t", 100) + "x"}, bs("adb shell ls×300(~n×100␠×100~t×100)x")},
+		{[]string{"shell", "ls" + strings.Repeat(" "+braille, 50) + "x"}, bs("adb shell ls×100(␠×50~u2800×50)x")},
+		// B1: a × the agent wrote cannot pass for a count; nor a digit after a run.
+		{[]string{"shell", "echo \n×5"}, bs("adb shell echo ~n~u00d75")},
+		{[]string{"shell", "echo    5"}, bs("adb shell echo␠×4~u0035")},
+		{[]string{"shell", "echo    x5"}, bs("adb shell echo␠×4x5")},
+	}
+	for _, c := range cases {
+		got := DisplayCommand(c.argv)
+		if got != c.want {
+			t.Errorf("%.60q: got %.200q want %.200q", c.argv, got, c.want)
+		}
+		if Visible(got) != got {
+			t.Errorf("%.60q: Visible changes %.200q", c.argv, got)
+		}
+	}
+}
+
+// The title of a recursive delete padded with spaces and NBSP still shows
+// what it deletes.
+func TestTitlesCompactMixedBlanks(t *testing.T) {
+	c := mustNew(t, "")
+	nbsp, braille, hangul := string(rune(0x00a0)), string(rune(0x2800)), string(rune(0x3164))
+	for _, pad := range []string{
+		strings.Repeat(" "+nbsp, 3000), strings.Repeat(nbsp, 3000), strings.Repeat("\t ", 3000),
+		strings.Repeat(" "+braille+hangul, 2000),
+	} {
+		r := c.Classify(sh(`rm -rf "` + pad + `" /sdcard/DCIM`))
+		title := Visible(r.Primary.Title.EN)
+		if !strings.Contains(title, "/sdcard/DCIM") || utf8.RuneCountInString(title) > 160 {
+			t.Errorf("rm title %.200q", title)
 		}
 	}
 }

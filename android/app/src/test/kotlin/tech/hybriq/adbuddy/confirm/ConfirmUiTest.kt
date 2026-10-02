@@ -218,6 +218,29 @@ class ConfirmUiTest {
         assertEquals(501, s.hidden)
     }
 
+    // H3: past what the dialog shows, the person cannot have read the whole command: it can only be denied, and
+    // the notification and the dialog say why.
+    @Test fun aCommandTheDialogCannotShowWholeCanOnlyBeDenied() {
+        val long = q("j_1", allowSession = true).copy(rawCommand = "a".repeat(ConfirmUi.DIALOG_MAX_COMMAND + 1))
+        assertTrue(ConfirmUi.shown(long).hidden > 0)
+        assertEquals(listOf(Decision.DENY), ConfirmUi.decisions(long, ConfirmUi.Status.OPEN))
+        assertEquals(listOf(Decision.DENY), ConfirmUi.notificationDecisions(long, ConfirmUi.Status.OPEN))
+        val s = state(long)
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, notification = false))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, notification = false))
+        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = false, notification = false))
+        assertEquals(ConfirmUi.Why.TOO_LONG, ConfirmUi.why(long, ConfirmUi.Status.OPEN))
+        val fits = q("j_2").copy(rawCommand = "a".repeat(ConfirmUi.DIALOG_MAX_COMMAND))
+        assertEquals(listOf(Decision.DENY, Decision.ALLOW), ConfirmUi.decisions(fits, ConfirmUi.Status.OPEN))
+    }
+
+    @Test fun theNotificationSaysWhyItDoesNotAllow() {
+        assertEquals(ConfirmUi.Why.SPECIAL, ConfirmUi.why(q("j_1").copy(special = true), ConfirmUi.Status.OPEN))
+        assertEquals(ConfirmUi.Why.CUT, ConfirmUi.why(q("j_1").copy(rawCommand = "x".repeat(ConfirmUi.MAX_COMMAND + 1)), ConfirmUi.Status.OPEN))
+        assertNull(ConfirmUi.why(q("j_1"), ConfirmUi.Status.OPEN))
+        assertNull(ConfirmUi.why(q("j_1").copy(special = true), ConfirmUi.Status.EXPIRED))
+    }
+
     // --- what the notification itself may allow ---
 
     // A4-2/A4-3: a special question, or a command the notification cuts, is

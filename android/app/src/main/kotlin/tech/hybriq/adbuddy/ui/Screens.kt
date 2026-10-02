@@ -141,9 +141,9 @@ private fun ConsentScreenPreview() {
  * The same question as the notification, when the app is open (spec §4.5):
  * the ⚠ warning first, the host's rule, then the agent's command, and it
  * scrolls if long. The whole detail and up to ConfirmUi.DIALOG_MAX_COMMAND
- * characters of the command are shown, with how many more are hidden, and the
- * Allow buttons wait until the text has been scrolled to its end (A4-2), as
- * in the PermissionCard; Deny never waits. It offers its buttons only while
+ * characters of the command are shown, with how many more are hidden (then it
+ * can only be denied, H3), and the Allow buttons wait until the text has been
+ * scrolled to its end (A4-2), as in the PermissionCard; Deny never waits. It offers its buttons only while
  * the question is open, and says why otherwise. It can always be closed (back
  * or a tap outside; Close when it has no buttons): Pause and Cut access are
  * never hidden with no way out, and the notification is still there. Touches
@@ -185,8 +185,10 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
                 }
                 Text(shown.command, style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr))
                 if (shown.hidden > 0) {
+                    // H3: what is not shown cannot have been read: only Deny (ConfirmUi.decisions), and it says so.
                     Text(
-                        pluralStringResource(R.plurals.confirm_hidden, shown.hidden, shown.hidden),
+                        pluralStringResource(R.plurals.confirm_hidden, shown.hidden, shown.hidden) + " " +
+                            stringResource(R.string.confirm_too_long),
                         style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
                     )
                 }

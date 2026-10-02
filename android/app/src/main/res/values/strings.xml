@@ -46,6 +46,7 @@
     <string name="confirm_expired">Expired: it can no longer be answered.</string>
     <string name="confirm_open_cut">The command is cut here: open it in ADBuddy to read it all and answer.</string>
     <string name="confirm_open_special">Open ADBuddy to read the warning and allow it.</string>
+    <string name="confirm_too_long">The command is too long to show whole: it can only be denied.</string>
     <string name="confirm_scroll">Scroll to the end to allow it</string>
     <string name="action_open">Open</string>
     <plurals name="confirm_more">

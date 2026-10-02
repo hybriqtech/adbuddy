@@ -1,11 +1,9 @@
 package classify
 
 import (
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -326,11 +324,11 @@ func values(ws []Word) []string {
 }
 
 // display shortens a command, or one of its words, for titles: escaped,
-// runs of blanks compacted (so padding cannot push the rest out of the
-// title) and cut to 80 runes. The whole command is in the question's raw
+// runs of blanks of any mix compacted (compact: padding cannot push the rest
+// out of the title) and cut to 80 runes. The whole command is in the question's raw
 // command.
 func display(ws []string) string {
-	s := compactSpaces(Printable(strings.Join(ws, " ")))
+	s := compact(strings.Join(ws, " "), func(b *strings.Builder, r rune) { b.WriteString(Printable(string(r))) })
 	if utf8.RuneCountInString(s) > 80 {
 		r := []rune(s)
 		s = string(r[:79]) + "…"
@@ -338,9 +336,10 @@ func display(ws []string) string {
 	return s
 }
 
-// Printable escapes what could hide or rewrite text on a terminal: control
-// characters (ANSI sequences start with one), DEL, bidirectional overrides
-// and zero-width characters. Everything the agent chose that a person will
+// Printable escapes what could hide or rewrite text on a terminal (hidden):
+// control characters (ANSI sequences start with one), DEL, bidirectional
+// overrides, zero-width characters, spaces other than U+0020, fillers and
+// combining marks. Everything the agent chose that a person will
 // read (titles, the raw command, the journal view) goes through it.
 func Printable(s string) string {
 	var b strings.Builder
@@ -352,8 +351,8 @@ func Printable(s string) string {
 			b.WriteString(`\r`)
 		case r == '\t':
 			b.WriteString(`\t`)
-		case unicode.IsControl(r), unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp), r == utf8.RuneError:
-			fmt.Fprintf(&b, `\u%04x`, r)
+		case hidden(r):
+			escape(&b, r)
 		default:
 			b.WriteRune(r)
 		}

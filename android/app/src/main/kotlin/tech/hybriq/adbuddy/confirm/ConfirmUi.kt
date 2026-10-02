@@ -45,12 +45,14 @@ object ConfirmUi {
     }
 
     /**
-     * The buttons a question offers in the dialog, in order: none unless it can be answered. Allow during the
-     * session only when the host offers it and the notification shows the whole command (A4-2): what a person
-     * allows for the rest of the session must fit on screen at a glance.
+     * The buttons a question offers in the dialog, in order: none unless it can be answered. Only Deny for a
+     * command longer than the dialog shows (H3): nobody can have read its end. Allow during the session only when
+     * the host offers it and the notification shows the whole command (A4-2): what a person allows for the rest
+     * of the session must fit on screen at a glance.
      */
     fun decisions(r: ConfirmRequest, status: Status): List<String> = when {
         status != Status.OPEN -> emptyList()
+        tooLong(r) -> listOf(Decision.DENY)
         r.allowSession && !cut(r) -> listOf(Decision.DENY, Decision.ALLOW, Decision.ALLOW_SESSION)
         else -> listOf(Decision.DENY, Decision.ALLOW)
     }
@@ -62,6 +64,20 @@ object ConfirmUi {
      */
     fun notificationDecisions(r: ConfirmRequest, status: Status): List<String> =
         decisions(r, status).let { all -> if (r.special || cut(r)) all.filter { it == Decision.DENY } else all }
+
+    /** Why a notification does not allow what the question asks: the command is [TOO_LONG], [CUT] or [SPECIAL]. */
+    enum class Why { TOO_LONG, CUT, SPECIAL }
+
+    fun why(r: ConfirmRequest, status: Status): Why? = when {
+        status != Status.OPEN -> null
+        tooLong(r) -> Why.TOO_LONG
+        Decision.ALLOW in notificationDecisions(r, status) -> null
+        cut(r) -> Why.CUT
+        else -> Why.SPECIAL
+    }
+
+    /** Whether the command is longer than the dialog shows ([DIALOG_MAX_COMMAND]): it can only be denied. */
+    fun tooLong(r: ConfirmRequest): Boolean = r.rawCommand.length > DIALOG_MAX_COMMAND
 
     /** Whether the notification cuts the command (longer than [MAX_COMMAND]). */
     fun cut(r: ConfirmRequest): Boolean = r.rawCommand.length > MAX_COMMAND

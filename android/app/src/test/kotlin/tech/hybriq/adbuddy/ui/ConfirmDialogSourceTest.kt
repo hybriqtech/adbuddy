@@ -30,4 +30,12 @@ class ConfirmDialogSourceTest {
         assertTrue(dialog.contains("R.plurals.confirm_hidden"))
         assertTrue(dialog.contains("ConfirmUi.shown("))
     }
+
+    // H3: and that such a command can only be denied (ConfirmUi.decisions offers only Deny).
+    @Test fun theDialogSaysAHiddenCommandCanOnlyBeDenied() {
+        val hidden = dialog.indexOf("shown.hidden > 0")
+        assertTrue("no shown.hidden > 0", hidden >= 0)
+        assertTrue(dialog.indexOf("R.string.confirm_too_long", hidden) > hidden)
+        assertTrue("the buttons come from ConfirmUi.decisions", dialog.contains("ConfirmUi.decisions(r, status)"))
+    }
 }
