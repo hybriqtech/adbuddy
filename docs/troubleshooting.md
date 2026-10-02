@@ -356,7 +356,7 @@ The agent's environment is the folder `~/ADBuddy/<phone name>/`. The code `WORKS
 - `adbuddy setup` and `adbuddy serve`: `Check that <folder> is writable.`
 - `adbuddy serve` when it cannot work out the folder's absolute path: `Pass --workspace with an absolute path.`
 - A path with characters the agent's hooks cannot carry: `Use another path: it cannot contain backslashes (on Linux and macOS), quotes, $, backticks or line breaks.`
-- `adbuddy run`: `Close other agents running in <folder> and try again.` (when it cannot work out the path, `run` gives the code with no fix).
+- `adbuddy run`: `Check that <folder> is writable and that no other program (for example another agent using the adb of ADBuddy) has its files open, then try again.` (when it cannot work out the path, `run` gives the code with no fix).
 - `adbuddy env init`: the host suggests nothing. Check that the folder is writable and that no program has its files open.
 
 To make the folder again, once the cause is fixed, run `adbuddy env init`, or `adbuddy env init --dir <folder>` for another one.
