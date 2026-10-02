@@ -33,9 +33,9 @@
 ## Rulings de este plan (van al ledger tal cual)
 
 1. **Ruling: `daemon/pcwrite.go` usa `pathguard.ResolveLinks`, `pathguard.Within` y `pathguard.ReparseBelow` y borra su copia; `hasDotDot` se queda en el daemon.** — Las dos copias eran idénticas línea a línea (comprobado: mismo cuerpo, mismos comentarios), así que no cambia ninguna decisión: es quitar la posibilidad de que diverjan. `hasDotDot` es propia del `cwd` del agente (`send` limpia la ruta con `filepath.Clean` antes), y `pathguard` no la tiene. Un test de sintaxis (`TestPCWriteUsesPathguard`) impide que vuelva una copia, y uno de Windows (`TestPullThroughAJunctionSaysSo`) fija el texto de la junction, que ningún test miraba. — Si me equivoco: un cambio futuro de `pathguard` afecta a la vez a `adb pull`/`bugreport` y a `adbuddy send` (es lo que se quiere); el comentario del paquete lo dice.
-2. **Ruling: `adbuddy send` abre el fichero con `safeio.ReadFlags` (`O_RDONLY|O_NONBLOCK` en Unix, `O_RDONLY` en Windows) en vez de `os.Open`.** — Entre el `Lstat` que vio un fichero regular y el `open`, el agente puede poner una FIFO: `os.Open` esperaría un escritor para siempre, con el manejador del daemon y el cierre de `serve` detrás (`Close` espera a los manejadores). Con `O_NONBLOCK` la apertura vuelve al momento y el `Stat` de después (que ya existía, con `SameFile`) la rechaza como "changed while it was being opened". Para un fichero regular `O_NONBLOCK` no cambia nada al leer. Se reutiliza la constante de #21 (`safeio`), que hace lo mismo para el diario: una sola forma de abrir sin bloquear. **Windows:** no hay FIFOs en el sistema de ficheros; su residual, la ventana entre `ReparseBelow` y `Lstat` en la que una carpeta del camino puede volverse junction (la segunda resolución tampoco la ve, porque `EvalSymlinks` no sigue junctions), queda documentado en el código y en pendientes, sin cerrar: cerrarlo pide `GetFinalPathNameByHandle` sobre el handle abierto y la raíz resuelta del mismo modo. — Si me equivoco: en un Unix raro donde `O_NONBLOCK` cambie la lectura de un fichero regular, los tests de `send` de la CI (que leen y copian) fallarían a la vista.
+2. **Ruling: `adbuddy send` abre el fichero con `safeio.ReadFlags` (`O_RDONLY|O_NONBLOCK` en Unix, `O_RDONLY` en Windows) en vez de `os.Open`.** — Entre el `Lstat` que vio un fichero regular y el `open`, el agente puede poner una FIFO: `os.Open` esperaría un escritor para siempre, con el manejador del daemon y el cierre de `serve` detrás (`Close` espera a los manejadores). Con `O_NONBLOCK` la apertura vuelve al momento y el `Stat` de después (que ya existía, con `SameFile`) la rechaza como "changed while it was being opened". Para un fichero regular `O_NONBLOCK` no cambia nada al leer. Se reutiliza la constante de #21 (`safeio`), que hace lo mismo para el diario: una sola forma de abrir sin bloquear. **Windows:** no hay FIFOs en el sistema de ficheros; su residual, la ventana entre `ReparseBelow` y `Lstat` en la que una carpeta del camino puede volverse junction (la segunda resolución tampoco la ve, porque `EvalSymlinks` no sigue junctions), queda documentado en el código y en pendientes, sin cerrar: cerrarlo pide `GetFinalPathNameByHandle` sobre el handle abierto y la raíz resuelta del mismo modo. **Residual de Unix (revisión opus, M3, diferido):** si el agente cambia el último componente por un symlink entre el `Lstat` y el `open`, `OpenFile` lo sigue; el `Stat` + `SameFile` de después lo rechaza y `O_NONBLOCK` evita el cuelgue, así que solo queda el efecto de *abrir* aquello a lo que apunte. `O_NOFOLLOW` (o `os.OpenInRoot`) lo cerraría; no se hace aquí porque pide ficheros por sistema para un efecto menor, y queda en pendientes. Para el residual de Windows, la vía corta es `os.OpenInRoot` (M4, en pendientes). — Si me equivoco: en un Unix raro donde `O_NONBLOCK` cambie la lectura de un fichero regular, los tests de `send` de la CI (que leen y copian) fallarían a la vista.
 3. **Ruling: `outbox/` tiene una cuota de 2 GiB (`outboxQuota`), que cuenta los ficheros regulares de su primer nivel, también los que escribe el propio agente; un envío que no cabe es `TOO_LARGE` con "the outbox folder is full", y los envíos van por turnos desde la comprobación hasta el final de la copia.** — 2 GiB es el mismo tope que la spec M3 §6 da a `inbox/` (diez copias del fichero más grande, 200 MiB) y el que ya usa `inboxQuota`, que se aplica igual: se mide la carpeta en el momento de escribir y se libera borrando ficheros (aquí, los que el móvil ya tiene). Cuenta lo del agente porque `outbox/` es también donde las skills (spec M6b) dejan sus informes antes de enviarlos, y la copia va al mismo disco; las subcarpetas no cuentan (las copias van siempre al primer nivel, y lo que el agente escribe en otras carpetas es suyo, como el resto del entorno). Se comprueba antes de copiar con el tamaño medido y después con lo copiado (un fichero que crece entre medias). El turno (`filesState.sendMu`) evita que dos envíos a la vez quepan los dos en un hueco de uno; no se tiene mientras se llama a la sesión ni al servidor del canal. Se reutiliza el código `TOO_LARGE` (el protocolo ya lo usa para `inbox/` lleno) para no inventar uno nuevo que `docs/troubleshooting.md` no conoce. — Si me equivoco: un agente que envía mucho y no limpia `outbox/` recibe `TOO_LARGE` con el motivo y el arreglo en el texto; subir el tope es cambiar una variable.
-4. **Ruling: el registro de adjuntos guarda como mucho `maxRegistered = 2 × keptChat × maxChatAttachments = 2000` y olvida primero el más viejo; volver a poner un id lo cambia en su sitio.** — Hoy el registro solo crece (`put` y `get`, sin borrar nunca), con hasta 16 KiB de miniatura por entrada. El historial que la app ve son los últimos 100 mensajes con hasta 10 adjuntos cada uno (1000 ids); se guarda otro tanto para lo que espera su mensaje (subidas y capturas aún sin `chat.send`, envíos del agente con la app fuera). Un adjunto olvidado responde `not_found` a `file.get` y a `chat.send` (el mismo error que un id desconocido) y una subida repetida de uno olvidado se vuelve a subir; su fichero sigue en disco. No se vacía al cambiar de conversación: la app puede tener aún los mensajes anteriores y pedirlos. — Si me equivoco: con más de 1000 adjuntos pendientes a la vez, los más viejos fallan con `not_found` y la persona los vuelve a adjuntar.
+4. **Ruling: el registro de adjuntos guarda como mucho `maxRegistered = 2 × keptChat × maxChatAttachments = 2000` y olvida primero el más viejo; volver a poner un id lo cambia en su sitio, sin renovarlo (FIFO por inserción, no LRU).** — Un `put` repetido es un reintento del mismo adjunto (la subida repetida tras perderse `attach.done`), no un uso nuevo; con LRU, la app, al pedir miniaturas, mantendría vivos ids viejos para siempre. Es estricto: olvidar responde `not_found` y falla cerrado, y con 2000 de tope frente a los 1000 ids del historial es improbable. — Hoy el registro solo crece (`put` y `get`, sin borrar nunca), con hasta 16 KiB de miniatura por entrada. El historial que la app ve son los últimos 100 mensajes con hasta 10 adjuntos cada uno (1000 ids); se guarda otro tanto para lo que espera su mensaje (subidas y capturas aún sin `chat.send`, envíos del agente con la app fuera). Un adjunto olvidado responde `not_found` a `file.get` y a `chat.send` (el mismo error que un id desconocido) y una subida repetida de uno olvidado se vuelve a subir; su fichero sigue en disco. No se vacía al cambiar de conversación: la app puede tener aún los mensajes anteriores y pedirlos. — Si me equivoco: con más de 1000 adjuntos pendientes a la vez, los más viejos fallan con `not_found` y la persona los vuelve a adjuntar.
 5. **Ruling: `serve` toma el cerrojo de la carpeta de datos con `ipc.Lock` justo después de `serveRunning` y se lo da a `ipc.ListenLocked`; `ipc.Listen` sigue igual por fuera (toma el cerrojo y llama a `ListenLocked`).** — Hoy el cerrojo se toma dentro de `Listen`, cuando `serve` ya preparó el entorno, habló con adb y arrancó los vigilantes del móvil y del modo remoto (`serve.go`, `go watchRemote`/`go watchPhone` antes de `ipc.Listen`): dos `serve` a la vez llegaban los dos hasta ahí. Ahora el segundo sale con `ALREADY_RUNNING` antes de tocar nada. El `Server` suelta el cerrojo en `Close`, después de quitar el socket (como en #19); un `defer lock.Close()` en `serve` cubre todos los demás caminos de salida, y `Close` del cerrojo es idempotente. Si `ListenLocked` falla, el cerrojo sigue siendo de quien lo pasó; un cerrojo ya soltado se rechaza (nunca se sirve sin cerrojo). Un error al tomarlo que no sea "ya lo tiene otro" sale como `SOCKET_FAILED`, igual que cuando lo daba `Listen`. `serveRunning` se queda: un daemon de una versión anterior no toma el cerrojo pero contesta al ping. — Si me equivoco: con una carpeta de datos sin cerrojos de fichero (red rara), `serve` sale antes (ya salía en `Listen`).
 
 ## Verificación de los ítems del encargo (contra el código de b4e528c + #21)
@@ -60,7 +60,8 @@
 Ninguno de cara a la persona; nada entra en el catálogo. En inglés a propósito (salida para el agente y causas técnicas, spec M6c §3):
 
 1. **Tarea 3**, `cli/send.go`, error de `adbuddy send` con código `TOO_LARGE`: `the outbox folder is full (at most 2048 MiB): delete from it the files the phone already has` (el número sale de `outboxQuota>>20`).
-2. **Tarea 5**, `ipc/server.go`, causa técnica de `ListenLocked` con un cerrojo ya soltado: `the daemon lock is not held` (no sale en `serve`, que siempre pasa un cerrojo tomado; si saliera, iría dentro de `SOCKET_FAILED` como las demás causas de `Listen`).
+2. **Tarea 3**, `cli/send.go`, error de `adbuddy send` con código `SEND_FAILED` si no se puede listar `outbox/` para medirla: `could not measure the outbox folder`.
+3. **Tarea 5**, `ipc/server.go`, causa técnica de `ListenLocked` con un cerrojo ya soltado: `the daemon lock is not held` (no sale en `serve`, que siempre pasa un cerrojo tomado; si saliera, iría dentro de `SOCKET_FAILED` como las demás causas de `Listen`).
 
 ## Mapa de ficheros
 
@@ -632,7 +633,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `ensureOutbox`, `createExclusive`, `statSize`, `maxSendSize`, `filesNow`, `sendFail` (existentes).
-- Produces: `var outboxQuota int64 = 2 << 30`; `type outboxCopy struct{ name, path string; size int64; sha256 string }`; `func (l *phoneLink) copyToOutbox(ws, name, path string, src *os.File, fi os.FileInfo) (outboxCopy, ipc.Exit)`; `func outboxUsed(outbox string) int64`; `func outboxFull() ipc.Exit`; `var quotaPassed = func() {}` (gancho de test, como `afterOpen`; se declara en el paso 2 junto a la cuota); campo `filesState.sendMu sync.Mutex`.
+- Produces: `var outboxQuota int64 = 2 << 30`; `type outboxCopy struct{ name, path string; size int64; sha256 string }`; `func (l *phoneLink) copyToOutbox(ws, name, path string, src *os.File, fi os.FileInfo) (outboxCopy, ipc.Exit)`; `func outboxUsed(outbox string) (int64, error)`; `func outboxFull() ipc.Exit`; `var quotaPassed = func() {}` (gancho de test, como `afterOpen`; se declara en el paso 2 junto a la cuota); campo `filesState.sendMu sync.Mutex`.
 
 - [ ] **Step 1: Tests.** **Crear `host/internal/cli/send_outbox_test.go`:**
 
@@ -684,6 +685,19 @@ func TestSendOutboxQuotaCountsTheAgentsFiles(t *testing.T) {
 	wantSendError(t, e, "TOO_LARGE", "the outbox folder is full")
 	if got := outboxNames(t, ws); len(got) != 1 || got[0] != "informe.md" {
 		t.Fatalf("outbox %v", got)
+	}
+}
+
+// A folder that cannot be measured is not an empty one: the send fails and
+// nothing is copied (the quota fails closed).
+func TestSendOutboxQuotaFailsClosedIfItCannotMeasure(t *testing.T) {
+	setVar(t, &readOutbox, func(string) ([]os.DirEntry, error) { return nil, os.ErrPermission })
+	l, ws := bareLink(t)
+	p := writeIn(t, ws, "a.bin", make([]byte, 6))
+	_, e := l.sendFile(ws, sendReq(p, ""))
+	wantSendError(t, e, "SEND_FAILED", "could not measure the outbox folder")
+	if got := outboxNames(t, ws); len(got) != 0 {
+		t.Fatalf("copied %v", got)
 	}
 }
 
@@ -766,6 +780,9 @@ por
 	// quotaPassed runs in copyToOutbox once a send passed the quota check,
 	// before its copy: a hook for the tests.
 	quotaPassed = func() {}
+	// readOutbox lists outbox/ to measure it: a variable so that a test can
+	// make the listing fail.
+	readOutbox = os.ReadDir
 )
 ```
 
@@ -775,13 +792,15 @@ por
 cd host && go test -count=1 -timeout 5m ./internal/cli -run TestSendOutbox
 ```
 
-Esperado (réplica):
+Esperado (réplica; la línea de `TestSendOutboxQuotaFailsClosedIfItCannotMeasure`, añadida tras la revisión opus (M2), no se ha vuelto a replicar y su número de línea es aproximado; falla por comportamiento, porque sin la medida con error el envío pasa):
 
 ```
 --- FAIL: TestSendOutboxQuota (0.02s)
     send_outbox_test.go:25: exit {Code:0 ErrorCode: Error:}, want error TOO_LARGE containing "the outbox folder is full"
 --- FAIL: TestSendOutboxQuotaCountsTheAgentsFiles (0.00s)
     send_outbox_test.go:45: exit {Code:0 ErrorCode: Error:}, want error TOO_LARGE containing "the outbox folder is full"
+--- FAIL: TestSendOutboxQuotaFailsClosedIfItCannotMeasure (0.00s)
+    send_outbox_test.go:NN: exit {Code:0 ErrorCode: Error:}, want error SEND_FAILED containing "could not measure the outbox folder"
 --- FAIL: TestSendOutboxQuotaCountsWhatWasCopied (0.00s)
     send_outbox_test.go:59: exit {Code:0 ErrorCode: Error:}, want error TOO_LARGE containing "the outbox folder is full"
 --- FAIL: TestSendOutboxQuotaHoldsUnderConcurrentSends (0.01s)
@@ -873,7 +892,11 @@ func (l *phoneLink) copyToOutbox(ws, name, path string, src *os.File, fi os.File
 	if exit.Code != 0 {
 		return outboxCopy{}, exit
 	}
-	if outboxUsed(outbox)+statSize(fi) > outboxQuota {
+	used, err := outboxUsed(outbox)
+	if err != nil {
+		return outboxCopy{}, sendFail(1, "SEND_FAILED", "could not measure the outbox folder")
+	}
+	if used+statSize(fi) > outboxQuota {
 		return outboxCopy{}, outboxFull()
 	}
 	quotaPassed()
@@ -896,7 +919,13 @@ func (l *phoneLink) copyToOutbox(ws, name, path string, src *os.File, fi os.File
 	case n > maxSendSize:
 		os.Remove(dstPath)
 		return outboxCopy{}, sendFail(1, "TOO_LARGE", "%s is too large: at most %d MiB", filepath.Base(path), maxSendSize>>20)
-	case outboxUsed(outbox) > outboxQuota: // it grew after it was measured
+	}
+	used, err = outboxUsed(outbox) // it may have grown after it was measured
+	switch {
+	case err != nil:
+		os.Remove(dstPath)
+		return outboxCopy{}, sendFail(1, "SEND_FAILED", "could not measure the outbox folder")
+	case used > outboxQuota:
 		os.Remove(dstPath)
 		return outboxCopy{}, outboxFull()
 	}
@@ -906,15 +935,20 @@ func (l *phoneLink) copyToOutbox(ws, name, path string, src *os.File, fi os.File
 // outboxUsed is what outbox/ weighs for its quota: the regular files at its
 // top, where adbuddy send leaves its copies. The agent's own files there
 // count too; its subfolders are its own, like the rest of the environment.
-func outboxUsed(outbox string) int64 {
+// A folder that cannot be listed is an error, not an empty one: the quota
+// fails closed.
+func outboxUsed(outbox string) (int64, error) {
 	var total int64
-	entries, _ := os.ReadDir(outbox)
+	entries, err := readOutbox(outbox)
+	if err != nil {
+		return 0, err
+	}
 	for _, e := range entries {
 		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
 			total += info.Size()
 		}
 	}
-	return total
+	return total, nil
 }
 
 // outboxFull is the answer to a send that does not fit in outbox/.
@@ -1299,6 +1333,8 @@ import (
 )
 ```
 
+Y en el mismo fichero, en el comentario que dice que el daemon mantiene el cerrojo, reemplazar `// (Listen to Close).` por `// (Lock, or Listen, to Server.Close).` (localizarlo con `grep -n "Listen to Close" host/internal/ipc/lock.go`, hacia `:10-11`; si el texto difiere, ajustar solo esa referencia).
+
 **Añadir al final de `host/internal/ipc/lock.go`:**
 
 ```go
@@ -1617,7 +1653,7 @@ por
 			if err != nil {
 				return NewError("SOCKET_FAILED", err.Error(), "")
 			}
-			defer lock.Close()
+			defer func() { stop(); lock.Close() }() // watchers first, then the lock
 ```
 
 **Editar `host/internal/cli/serve.go`** (cambio 2 de 2): reemplazar
@@ -1657,7 +1693,7 @@ git commit -m "fix(host): serve toma el cerrojo de la carpeta de datos antes de 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-**Concurrencia y caminos de salida:** `ServeLock` protege `f` con su mutex, así que el `Close` del `Server` (desde la gorrutina de `serveUntil`) y el `defer lock.Close()` de `serve` pueden coincidir sin doble cierre. Caminos de `serve` tras tomar el cerrojo: todos los `return` (entorno, reglas, Ctrl+C, adb, invariante, secreto, `--confirm`, `startPhoneLink`, `ListenLocked`) pasan por el `defer`; el camino normal lo suelta antes, en `srv.Close()` dentro de `serveUntil`, después de quitar el socket y de esperar a los manejadores (como en #19), y el `defer` ya no hace nada. Un pánico también pasa por el `defer` (y el sistema suelta el cerrojo al morir el proceso, sea como sea). Orden de los `defer` de `serve`: `stop` (el primero, se ejecuta el último), `lock.Close`, `sess.Stop` (el primero en ejecutarse); igual que antes, el cerrojo se suelta en `Close` antes de que `sess.Stop` termine con el agente, lo que ya pasaba con #19 (ver "Riesgos").
+**Concurrencia y caminos de salida:** `ServeLock` protege `f` con su mutex, así que el `Close` del `Server` (desde la gorrutina de `serveUntil`) y el `defer lock.Close()` de `serve` pueden coincidir sin doble cierre. Caminos de `serve` tras tomar el cerrojo: todos los `return` (entorno, reglas, Ctrl+C, adb, invariante, secreto, `--confirm`, `startPhoneLink`, `ListenLocked`) pasan por el `defer`; el camino normal lo suelta antes, en `srv.Close()` dentro de `serveUntil`, después de quitar el socket y de esperar a los manejadores (como en #19), y el `defer` ya no hace nada. Un pánico también pasa por el `defer` (y el sistema suelta el cerrojo al morir el proceso, sea como sea). Orden de los `defer` de `serve` (revisión opus, M1): `stop` (el primero, se ejecuta el último), el cierre combinado `stop(); lock.Close()` (cancela el contexto de los vigilantes antes de soltar el cerrojo; llamar dos veces a `stop` no hace nada), `sess.Stop` (el primero en ejecutarse); así, en los caminos de error, el cerrojo no se suelta con el contexto de los vigilantes aún vivo. Sigue sin esperarse a que `watchRemote`/`watchPhone` acaben la operación de adb en curso (ver pendientes); igual que antes, el cerrojo se suelta en `Close` antes de que `sess.Stop` termine con el agente, lo que ya pasaba con #19 (ver "Riesgos").
 
 ---
 
@@ -1674,12 +1710,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ## v1 · Diferidos L (plan `docs/superpowers/plans/2026-10-02-adbuddy-v1-diferidos-l.md`)
 
-- **HECHO:** `daemon/pcwrite.go` usa `internal/pathguard` y ya no tiene copia propia de `resolveLinks`, `within` y `reparseBelow` (V09; `TestPCWriteUsesPathguard` impide que vuelva). `adbuddy send` abre con `safeio.ReadFlags` (`O_NONBLOCK` en Unix): una FIFO puesta entre el `Lstat` y el `open` ya no cuelga el manejador ni el cierre de `serve` (V19). `outbox/` tiene una cuota de 2 GiB como `inbox/` (los ficheros regulares de su primer nivel, también los del agente; `TOO_LARGE` con "the outbox folder is full"; los envíos van por turnos) y el registro de adjuntos guarda como mucho 2000, olvidando primero los más viejos (V22). `serve` toma el cerrojo de la carpeta de datos (`ipc.Lock`) justo después de `serveRunning`, antes de tocar el entorno, hablar con adb o arrancar los vigilantes, y se lo da a `ipc.ListenLocked` (diferido de #19). Con esto quedan hechas las notas de M3a de más arriba sobre la FIFO de `adbuddy send` y sobre `pcwrite.go` y `pathguard`.
+- **HECHO:** `daemon/pcwrite.go` usa `internal/pathguard` y ya no tiene copia propia de `resolveLinks`, `within` y `reparseBelow` (V09; `TestPCWriteUsesPathguard` impide que vuelva). `adbuddy send` abre con `safeio.ReadFlags` (`O_NONBLOCK` en Unix): una FIFO puesta entre el `Lstat` y el `open` ya no cuelga el manejador ni el cierre de `serve` (V19). `outbox/` tiene una cuota de 2 GiB como `inbox/` (los ficheros regulares de su primer nivel, también los del agente; `TOO_LARGE` con "the outbox folder is full"; los envíos van por turnos) y el registro de adjuntos guarda como mucho 2000, olvidando primero los más viejos (V22). `serve` toma el cerrojo de la carpeta de datos (`ipc.Lock`) justo después de `serveRunning`, antes de tocar el entorno, hablar con adb o arrancar los vigilantes, y se lo da a `ipc.ListenLocked` (diferido de #19). Con esto quedan hechas las notas de M3a de más arriba sobre la FIFO de `adbuddy send`, sobre `pcwrite.go` y `pathguard`, y sobre `outbox/` sin cuota y el registro de adjuntos que no se vacía.
 - **Sigue abierto:**
-  - la ventana de junction de `adbuddy send` en Windows entre `ReparseBelow` y `Lstat` (nota de M3a de más arriba): cerrarla pide comparar la ruta final del handle abierto (`GetFinalPathNameByHandle`) con la raíz del entorno resuelta del mismo modo;
+  - la ventana de junction de `adbuddy send` en Windows entre `ReparseBelow` y `Lstat` (nota de M3a de más arriba): cerrarla pide comparar la ruta final del handle abierto (`GetFinalPathNameByHandle`) con la raíz del entorno resuelta del mismo modo, o, más corto, abrir con `os.Root`/`os.OpenInRoot(raíz, rel)` (Go 1.24+; el repo ya lo usa para `inbox/`, V28), que se niega en la propia apertura a salir de la raíz por enlaces o puntos de reparse en cualquier componente;
+  - `adbuddy send` en Unix sigue un symlink puesto en el último componente entre el `Lstat` y el `open` (el `Stat` + `SameFile` de después lo rechaza y `O_NONBLOCK` evita el cuelgue, así que no hay fuga ni bloqueo; solo se *abre* aquello a lo que apunte). Cerrarlo: abrir con `safeio.ReadFlags|syscall.O_NOFOLLOW` (un `const` por sistema) y tratar `ELOOP` como "changed while it was being opened", o con `os.OpenInRoot` (arriba). Diferido: pide ficheros por sistema para un efecto menor;
   - un adjunto olvidado del registro responde `not_found` a `file.get` y a `chat.send` aunque su fichero siga en disco (solo con más de 2000 adjuntos en la sesión);
   - `docs/troubleshooting.md`, fila `TOO_LARGE`: no dice todavía que también sale con `outbox/` lleno (2 GiB; se arregla borrando de `outbox/` lo que el móvil ya tiene). Para el dueño de los docs;
-  - `serve` suelta el cerrojo en `srv.Close()`, antes de que `sess.Stop` termine con el agente: un `serve` nuevo puede arrancar mientras el agente del anterior aún se cierra (ya pasaba con #19).
+  - `serve` suelta el cerrojo en `srv.Close()`, antes de que `sess.Stop` termine con el agente: un `serve` nuevo puede arrancar mientras el agente del anterior aún se cierra (ya pasaba con #19), y sin esperar a que `watchRemote`/`watchPhone` terminen su operación de adb en curso (hasta `remoteOpTimeout`); esperarlos de verdad (un `WaitGroup` antes de soltar el cerrojo) es otro cambio.
   - Validaciones 42 y 43 de este plan: en su sección "Validaciones manuales pendientes", no se repiten aquí.
 ```
 
@@ -1712,12 +1749,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 Solo con permiso explícito del usuario; ninguna es bloqueante para integrar.
 
-42. **Dos `serve` a la vez, sin móvil** (solo el PC: no toca el móvil): con el móvil apagado o fuera de la red, `adbuddy serve` en una terminal (espera al móvil hasta 45 s); mientras espera, `adbuddy serve` en otra: el segundo sale al momento con el mensaje de "ya está en marcha" (`ALREADY_RUNNING`), sin la línea de espera del móvil y sin crear el entorno si no existía. Cuando el primero termina (Ctrl+C o `DEVICE_NOT_FOUND`), otro `adbuddy serve` ya no lo dice.
+42. **Dos `serve` a la vez, sin móvil** (solo el PC: no toca el móvil): con el móvil apagado o fuera de la red, `adbuddy serve` en una terminal (espera al móvil hasta 45 s); mientras espera, `adbuddy serve` en otra: el segundo sale al momento con el mensaje de "ya está en marcha" (`ALREADY_RUNNING`), sin la línea de espera del móvil y sin crear el entorno si no existía. Haz antes `adb kill-server`, para que sea el primer `serve` quien arranque el servidor de adb (si un proceso que sigue vivo heredara el cerrojo, se vería). Cuando el primero termina (Ctrl+C o `DEVICE_NOT_FOUND`), otro `adbuddy serve` ya no lo dice.
 43. **CI de Linux y macOS de la rama:** `TestSendFIFOSwappedInBeforeOpen` corre (no se omite) y pasa en menos de 5 s, `TestSendFIFO` sigue pasando, y los `TestSend*` que copian ficheros pasan (lectura con `O_NONBLOCK`). En este PC solo se compilan con `GOOS=linux`/`GOOS=darwin go vet`.
 
 ## Autorrevisión del plan
 
 ### Cobertura frente al encargo
+
+Revisión opus: M1, M2, M4, M5, M6, M7, M8 y M9 aplicados; M3 diferido (pide ficheros por sistema para `O_NOFOLLOW` con un efecto menor; queda en el ruling 2 y en pendientes de T6, con `os.OpenInRoot` como vía de cierre, igual que M4). M1: `defer func() { stop(); lock.Close() }()` en T5. M2: `outboxUsed` devuelve error, `readOutbox` como gancho y `TestSendOutboxQuotaFailsClosedIfItCannotMeasure` (determinista en Windows y Linux). M4/M5: pendientes de T6. M6: comentario de `lock.go` en T5. M7: riesgos de solape. M8: ruling 4. M9: validación 42.
 
 - V09 → Tarea 1: la copia desaparece y `pcwrite` llama a `pathguard`, sin ablandar nada: el código era idéntico, y los casos del encargo (enlaces simbólicos, junctions, `..`, rutas que no existen todavía, mayúsculas en Windows) los cubren los tests de `pcwrite_test.go` que siguen sin tocar (`TestPullThroughALinkOutOfTheEnvironmentIsRed`, `TestPullOverADanglingLinkIsRed`, `TestPullWithDotDotAfterALinkIsRed`, `TestPullComparesPathsWithoutCaseOnWindows`, el destino nuevo `out/new/y`) más el nuevo de la junction (con un camino que no existe y otra caja) y el de sintaxis.
 - V19 → Tarea 2: `O_NONBLOCK` vía `safeio.ReadFlags` (Unix) y el `Stat` tras abrir que ya había; test con `syscall.Mkfifo` en Unix y omitido con motivo en Windows; el residual de Windows, documentado en el código, en el ruling 2 y en pendientes.
@@ -1755,4 +1794,4 @@ Un script aplicó este documento sobre ese árbol (bloques `Crear`, pares `reemp
 
 - **Ledger:** los cinco rulings de arriba van tal cual a `.superpowers/sdd/<este plan>/progress.md`.
 - **Revisores:** Opus para T1 (daemon) y T5 (IPC y `serve`); Sonnet para T2, T3 y T4. T3 no toca confinamiento de rutas (ver su "Revisor"); si el controlador prefiere Opus para todo `send.go`, T3 es la candidata.
-- **Riesgos de solape:** #21 (ola 2 H) ya integrada: T2 usa su `safeio`; T5 no toca `handle()`, `Conn` ni `TestMain`. `doctor.go` (V20) no se toca. `docs/troubleshooting.md` y el catálogo no se tocan (la fila `TOO_LARGE` queda en pendientes). `pendientes-m3-m5.md` solo recibe una sección al final (cualquier otro PR que también añada al final puede chocar en las últimas líneas: se resuelve dejando las dos secciones). `remotecmd_test.go` no se toca.
+- **Riesgos de solape:** #21 (ola 2 H) ya integrada: T2 usa su `safeio`; T5 no toca `handle()`, `Conn` ni `TestMain`. `doctor.go` (V20) no se toca. `docs/troubleshooting.md` y el catálogo no se tocan (la fila `TOO_LARGE` queda en pendientes). `pendientes-m3-m5.md` solo recibe una sección al final (cualquier otro PR que también añada al final puede chocar en las últimas líneas: se resuelve dejando las dos secciones). `remotecmd_test.go` no se toca. La rama local `fix/v1-ola2-m` toca `host/internal/cli/phone_chat.go` (`onChatSend`, `typeKeys`; no las anclas de T4, que son el bloque de `attachmentRegistry`) y `docs/troubleshooting.md` (si edita la fila `TOO_LARGE`, coincide con la nota de pendientes de T6): quien integre las dos lo resuelve conservando ambas.
