@@ -5,7 +5,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -108,15 +107,9 @@ func ensureRealDirs(base, rel string) error {
 // hasUserMarker reports whether the regular file at path contains UserMarker
 // in its first MiB. Anything else (missing, a link, a pipe) is false.
 func hasUserMarker(path string) bool {
-	st, err := os.Lstat(path)
-	if err != nil || !st.Mode().IsRegular() {
+	b, err := readRegular(path)
+	if err != nil && !errors.Is(err, errTooLarge) {
 		return false
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	b, _ := io.ReadAll(io.LimitReader(f, 1<<20))
 	return bytes.Contains(b, []byte(UserMarker))
 }

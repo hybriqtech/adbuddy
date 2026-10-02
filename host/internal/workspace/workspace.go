@@ -139,10 +139,10 @@ func writeFile(path string, data []byte, overwrite bool) (changed, created bool,
 	if !overwrite {
 		return false, false, nil
 	}
-	// Read the old content only if it is a regular file of the same size: a
-	// FIFO, or a link to /dev/zero, must be replaced, never read.
-	if st, err := os.Lstat(path); err == nil && st.Mode().IsRegular() && st.Size() == int64(len(data)) {
-		if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
+	// Compare only with a regular file (readRegular): a FIFO, or a link to
+	// /dev/zero, must be replaced, never read.
+	if st, err := os.Lstat(path); err == nil && st.Size() == int64(len(data)) {
+		if old, err := readRegular(path); err == nil && bytes.Equal(old, data) {
 			return false, false, nil
 		}
 	}
@@ -309,13 +309,18 @@ func mergeClaudeSettings(path, hookExe string) (changed, created bool, err error
 
 // loadSettings reads a JSON settings file that must hold an object. A missing
 // file is an empty object and created is true. Anything else that is not a
-// JSON object is an error that tells the user to fix or delete the file.
+// JSON object, also a FIFO, a link or a file larger than 1 MiB (readRegular),
+// is an error that tells the user to fix or delete the file.
 func loadSettings(path string) (settings map[string]any, created bool, err error) {
 	settings = map[string]any{}
-	data, err := os.ReadFile(path)
+	data, err := readRegular(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		created = true
+	case errors.Is(err, errNotRegular):
+		return nil, false, fmt.Errorf("%s is not a regular file; fix it or delete it", path)
+	case errors.Is(err, errTooLarge):
+		return nil, false, fmt.Errorf("%s is larger than 1 MiB; fix it or delete it", path)
 	case err != nil:
 		return nil, false, err
 	default:
@@ -397,21 +402,30 @@ func mergeGeminiSettings(path string) (changed, created bool, err error) {
 }
 
 // copyIfDifferent copies src to dst unless dst already has the same content.
+// dst is only read if it is a regular file (openRegular) and only up to the
+// size of src: a FIFO, or a link to /dev/zero, planted there is replaced.
 func copyIfDifferent(src, dst string) (changed, created bool, err error) {
-	want, err := fileHash(src)
-	if err != nil {
-		return false, false, err
-	}
-	have, err := fileHash(dst)
-	if err == nil && have == want {
-		return false, false, nil
-	}
-	created = errors.Is(err, fs.ErrNotExist)
 	in, err := os.Open(src)
 	if err != nil {
 		return false, false, err
 	}
 	defer in.Close()
+	st, err := in.Stat()
+	if err != nil {
+		return false, false, err
+	}
+	want, err := hashOf(in)
+	if err != nil {
+		return false, false, err
+	}
+	same, err := sameContent(dst, st.Size(), want)
+	if same {
+		return false, false, nil
+	}
+	created = errors.Is(err, fs.ErrNotExist)
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		return false, false, err
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(dst), ".shim-*")
 	if err != nil {
 		return false, false, err
@@ -434,14 +448,24 @@ func copyIfDifferent(src, dst string) (changed, created bool, err error) {
 	return true, created, nil
 }
 
-func fileHash(path string) ([32]byte, error) {
-	f, err := os.Open(path)
+// sameContent reports whether path is a regular file (openRegular) of size
+// bytes whose hash is want. The error says why not, when it is not readable.
+func sameContent(path string, size int64, want [32]byte) (bool, error) {
+	f, st, err := openRegular(path)
 	if err != nil {
-		return [32]byte{}, err
+		return false, err
 	}
 	defer f.Close()
+	if st.Size() != size {
+		return false, nil
+	}
+	have, err := hashOf(io.LimitReader(f, size))
+	return err == nil && have == want, err
+}
+
+func hashOf(r io.Reader) ([32]byte, error) {
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, r); err != nil {
 		return [32]byte{}, err
 	}
 	var sum [32]byte
