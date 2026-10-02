@@ -75,6 +75,19 @@ func newServeCmd(app *App) *cobra.Command {
 			} else if running {
 				return alreadyRunning
 			}
+			// One serve per data folder from here on (ipc.Lock), taken before
+			// the workspace is touched and before the watchers of the phone
+			// and of the remote mode start: a second serve stops here. The
+			// server releases it on Close; the defer covers every other way
+			// out.
+			lock, err := ipc.Lock(e.dirs.Data)
+			if errors.Is(err, ipc.ErrAlreadyRunning) {
+				return alreadyRunning
+			}
+			if err != nil {
+				return NewError("SOCKET_FAILED", err.Error(), "")
+			}
+			defer func() { stop(); lock.Close() }() // watchers first, then the lock
 			ws, err := filepath.Abs(e.workspace(wsDir))
 			if err != nil {
 				return NewErrorT("WORKSPACE_FAILED", "error.cause", "err.serve.workspace_failed.fix", err.Error())
@@ -233,7 +246,7 @@ func newServeCmd(app *App) *cobra.Command {
 			defer sess.Stop()
 			link.useSession(sess)
 			link.useWorkspace(ws)
-			srv, err := ipc.Listen(e.dirs.Data, secret, serveHandler(link, e.cfg, app.Getenv, ws, agentName, sess, d))
+			srv, err := ipc.ListenLocked(lock, secret, serveHandler(link, e.cfg, app.Getenv, ws, agentName, sess, d))
 			if errors.Is(err, ipc.ErrAlreadyRunning) {
 				return alreadyRunning
 			}

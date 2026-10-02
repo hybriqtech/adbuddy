@@ -78,7 +78,7 @@ Claude Code (recommended), Codex, Gemini CLI and OpenCode. ADBuddy does not inst
 - Every `adb` command the agent runs passes through the shim and the host, which ranks it: green (read-only), yellow (reversible or harmless) or red (irreversible, dangerous or not understood). A command the host does not understand is red.
 - Green and yellow commands run at once and are journaled; yellow ones with their undo when they have one (`adbuddy journal`, `adbuddy undo`). Taps and typing are yellow and have no undo. A yellow command becomes red when ADBuddy cannot read the state it needs or the change would overwrite something.
 - Red commands wait for your answer, on the phone (it must be unlocked to allow) or in the host's terminal. An unanswered question counts as a no (after 2 minutes by default).
-- With the app installed, banking, payments, password and 2FA apps are protected while they are in front (a proposal from their names that you confirm or edit in the app). Without the app, only ADBuddy itself is protected.
+- With the app installed, banking, payments, password and 2FA apps are protected while they are in front (a proposal from their names that you confirm or edit in the app). Until the app has sent a list, only ADBuddy itself is protected; after that the PC keeps the last list it got.
 - ADBuddy has no telemetry and no server of its own. What the agent reads on your phone goes to the agent's own provider.
 - **The shim protects against mistakes and prompt injection. It does not protect against an agent determined to find another adb.** The real guarantee is **Cut access** in the app, which turns debugging off from the phone: with it off, the PC cannot reach the phone.
 

@@ -36,6 +36,11 @@ android {
         compose = true
     }
 
+    // Robolectric reads the merged resources and manifest (the screen tests).
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
     // Compose and Material bring strings in dozens of languages the app does not offer (it has two: spec v1 section 6).
     androidResources {
         localeFilters += listOf("en", "es")
@@ -60,17 +65,42 @@ tasks.withType<Test>().configureEach {
     systemProperty("adbuddy.kotlinDir", file("src/main/kotlin").absolutePath)
 }
 
-// The instrumented tests run only on an emulator, never on the user's phone (M2.5 spec §2.4): ANDROID_SERIAL
-// must name exactly one emulator (AGP splits it on commas, so "emulator-5554,<phone>" is refused too). Checked
-// when the task graph is built, before any task runs and so before anything is installed (the install tasks
-// that connected tasks depend on would otherwise install on every attached device).
+// Screen tests (plan tests-ui-jvm). Robolectric's Android jar (SDK 34: src/test/resources/robolectric.properties) comes
+// through Gradle like any other dependency, so --offline works once it is in the cache: the tests never download it.
+val robolectricAndroid: Configuration by configurations.creating { isTransitive = false }
+val robolectricJars = layout.buildDirectory.dir("robolectric-jars")
+val syncRobolectricJars = tasks.register<Sync>("syncRobolectricJars") {
+    from(robolectricAndroid)
+    into(robolectricJars)
+}
+// Golden images (src/test/screenshots): -Padbuddy.screens=record records them; verify (the default on Windows, where they
+// are recorded) fails on a change beyond Roborazzi's default tolerance (0.7 % colour per pixel); compare (the default elsewhere) writes the differences to build/outputs/roborazzi
+// and never fails, until the same images are shown to come out on that system too.
+val screens = providers.gradleProperty("adbuddy.screens")
+    .getOrElse(if (System.getProperty("os.name").startsWith("Windows")) "verify" else "compare")
+require(screens in setOf("record", "verify", "compare")) { "adbuddy.screens is record, verify or compare, not $screens" }
+tasks.withType<Test>().configureEach {
+    dependsOn(syncRobolectricJars)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricJars.get().asFile.absolutePath)
+    inputs.files(fileTree("src/test/screenshots")).withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("roborazzi.test.record", (screens == "record").toString())
+    systemProperty("roborazzi.test.verify", (screens == "verify").toString())
+    systemProperty("roborazzi.test.compare", (screens == "compare").toString())
+}
+
+// The instrumented tests never run through Gradle's connected* tasks (M2.5b spec §2.4): AGP 9.4.1's test engine (UTP)
+// runs `adb` in a Gradle worker with an empty environment on Windows, so it always talks to the default adb server
+// (5037), which on a developer PC is the one that holds the user's phone, and it fails silently (BUILD SUCCESSFUL, 0
+// tests) on an emulator behind another server. They run with `am instrument` against one emulator and its own adb
+// server (host/internal/emutest, scripts/emulator.sh). Checked when the task graph is built, before any task runs and
+// so before anything is installed (the install tasks that connected tasks depend on would install on every device).
 gradle.taskGraph.whenReady {
-    if (allTasks.any { it.name.startsWith("connected") }) {
-        val serial = System.getenv("ANDROID_SERIAL").orEmpty()
-        check(Regex("emulator-[0-9]+").matches(serial)) {
-            "connected tests run only on one emulator: set ANDROID_SERIAL=emulator-<port> " +
-                "(scripts/emulator.sh start prints it as ADBUDDY_EMULATOR_SERIAL), not \"$serial\""
-        }
+    val connected = allTasks.filter { it.name.startsWith("connected") }.map { it.path }
+    check(connected.isEmpty()) {
+        "connected tests are not run through Gradle (they would reach the adb server of the user's phone): " +
+            "build the APKs (:app:assembleDebug :app:assembleDebugAndroidTest) and run them with " +
+            "`am instrument` on the emulator (android/README.md); refused: $connected"
     }
 }
 
@@ -90,6 +120,11 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    robolectricAndroid(libs.robolectric.android.all)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
 }

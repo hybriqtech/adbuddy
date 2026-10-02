@@ -11,9 +11,9 @@ import (
 // joins the words with spaces; `exec-out` and `exec-in` send their first
 // argument as is and quote the rest; `wait-for-*` runs the rest of the line.
 // Any other argument is one word and is quoted when needed. The result is
-// escaped with Printable.
+// escaped with Visible.
 func DisplayCommand(argv []string) string {
-	return "adb " + Printable(displayArgs(argv))
+	return "adb " + Visible(displayArgs(argv))
 }
 
 func displayArgs(argv []string) string {

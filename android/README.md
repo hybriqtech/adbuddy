@@ -39,6 +39,28 @@ They check that the provider answers only the shell user (`TokenProviderTest`),
 that the app hears changes of `adb_wifi_enabled` (`AdbWifiObserverTest`) and the
 strings in both languages (`LocalesTest`). The `emulator` workflow runs them.
 
+### Screen tests
+
+`:app:testDebugUnitTest` also draws the screens in the JVM, with Robolectric (SDK 34, which runs on Java 17), Compose's
+`ui-test` and Roborazzi: `src/test/kotlin/.../screens` (the first-run steps, Settings, the protected apps and the
+notification access in light, dark, text at 200 % and text at 200 % in Spanish) and `.../flows` (the first-run steps in `MainActivity`, the
+protected apps list, and the chat bubble reaching Settings). Each screen is checked in its semantics (the texts are
+there, whole, on screen and apart) and against a golden image in `src/test/screenshots/`.
+
+- `-Padbuddy.screens=record` records the images. Record on Windows, only the class you changed
+  (`--tests '*SettingsScreensTest'`), and look at every image that changed before you commit it. Recording is
+  deterministic: images that did not change stay the same in git.
+- On Windows the default is `verify`: a pixel changed beyond Roborazzi's colour tolerance (0.7 %) fails, and
+  `build/outputs/roborazzi/*_compare.png` shows where.
+- Elsewhere the default is `compare`: the differences are written there too, but do not fail (the images have not been
+  shown to come out the same on Linux or macOS). CI warns about it in the run's summary and uploads that folder as
+  `screen-differences`.
+- A UI fault the tests see but that is not fixed yet goes in `KNOWN_UI_ISSUES` (`screens/ScreenTestSupport.kt`): it
+  is let through while it lasts and fails once fixed, so it is never recorded as if it were right.
+
+Robolectric's Android jar is a Gradle dependency (`robolectricAndroid` in `app/build.gradle.kts`), so `--offline` works
+once the cache has it; the tests never download anything.
+
 ## Protected apps, notification access and settings
 
 - **Protected apps** (Settings, and the first-run step after the consent): the agent never reads or

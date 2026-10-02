@@ -284,3 +284,49 @@ func TestUILinkSavedFileWithoutListIsNotKnown(t *testing.T) {
 		t.Fatalf("an explicit empty list must count as known; log %q", log.String())
 	}
 }
+
+// V46: a second device.info on the same uiLink, as serve receives it, replaces
+// the list live and rewrites protected.json: with an app removed without
+// emptying the list (the WhatsApp case) and with one added. From a replaced
+// connection nothing changes, in memory or in the file.
+func TestUILinkSecondListReplacesLive(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "data", "protected.json")
+	u := newUILink(file, &bytes.Buffer{})
+	srv := &fakeUIServer{current: true}
+	u.setServer(srv)
+	h := u.area().handlers[bridge.TypeDeviceInfo]
+	send := func(list ...string) {
+		h(uiMessage(t, bridge.TypeDeviceInfo, bridge.DeviceInfo{ProtectedApps: list}))
+	}
+	saved := func() string {
+		t.Helper()
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p protectedFile
+		if err := json.Unmarshal(data, &p); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(p.ProtectedApps, ",")
+	}
+	send("com.example.bank", "com.whatsapp", "com.example.mail")
+	if !u.Protected("com.whatsapp") || saved() != "com.example.bank,com.whatsapp,com.example.mail" {
+		t.Fatalf("first list: %q", saved())
+	}
+	send("com.example.bank", "com.example.mail") // one removed, the list not emptied
+	if u.Protected("com.whatsapp") || !u.Protected("com.example.bank") || !u.Protected("com.example.mail") || saved() != "com.example.bank,com.example.mail" {
+		t.Fatalf("after removing: %q", saved())
+	}
+	send("com.example.bank", "com.example.mail", "com.new.wallet") // one added
+	if !u.Protected("com.new.wallet") || saved() != "com.example.bank,com.example.mail,com.new.wallet" {
+		t.Fatalf("after adding: %q", saved())
+	}
+	srv.mu.Lock()
+	srv.current = false
+	srv.mu.Unlock()
+	send("com.other.only")
+	if u.Protected("com.other.only") || !u.Protected("com.new.wallet") || saved() != "com.example.bank,com.example.mail,com.new.wallet" {
+		t.Fatalf("a replaced connection changed the list: %q", saved())
+	}
+}

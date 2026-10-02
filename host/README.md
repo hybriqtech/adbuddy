@@ -21,7 +21,7 @@ A build from source pins no signing certificate for the phone app, so `adbuddy s
 
 ADBuddy speaks English and Spanish. The language of the host is, in this order: the environment variable `ADBUDDY_LANG`, `language` in `config.toml`, `LC_ALL`, `LC_MESSAGES` or `LANG`, the interface language of Windows, and English. Anything else is English. The phone app follows the language of the phone; the PC and the phone may differ.
 
-What is read by a program or by the agent is **always English**: the output with `--json`, with `ADBUDDY_SOURCE=agent` (the commands the agent uses: `screen`, `tap`, `type`, `foreground`, `screenshot`, `send`, `hook`), the error codes, the journal's `reason`, the shim's "Blocked by ADBuddy" messages and the `text` of the phone protocol's errors. What decides a 🔴 confirmation (the command, its level, the special mark, the two-digit code) is never translated.
+What is read by a program or by the agent is **always English**: the output with `--json`, with `ADBUDDY_SOURCE=agent` (the commands the agent uses: `screen`, `tap`, `type`, `foreground`, `screenshot`, `send`, `hook`), the error codes, the journal's `reason`, the shim's "Blocked by ADBuddy" messages and the `text` of the phone protocol's errors. What decides a 🔴 confirmation (the command, its level, the special mark, the two-digit code) is never translated. The notice a confirmation gets when right-to-left characters in it are shown escaped (`confirm.rtl_escaped`) is text for people: it is in the catalog, in English and Spanish.
 
 Adding a message:
 

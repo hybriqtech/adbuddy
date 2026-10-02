@@ -147,7 +147,7 @@
     <string name="protected_discard_body">La lista no se ha guardado.</string>
     <string name="protected_discard_confirm">Descartar</string>
     <string name="protected_saved_sent">Enviado al PC.</string>
-    <string name="protected_saved_later">Guardado. El PC la recibirá cuando se conecte.</string>
+    <string name="protected_saved_later">Guardado. Hasta que el PC se conecte sigue con la lista anterior: las apps que acabas de proteger aún no lo están en el PC.</string>
     <string name="protected_error">No se pudieron leer tus apps. No se ha cambiado nada; inténtalo de nuevo.</string>
     <string name="access_title">Acceso a las notificaciones</string>
     <string name="access_intro">Permite que el agente lea lo que dicen tus notificaciones, por ejemplo para ver un mensaje que acabas de recibir. De las apps protegidas y de ADBuddy solo ve que hay una notificación, nunca lo que dice. No puede descartar ni pulsar ninguna notificación. Es opcional.</string>
