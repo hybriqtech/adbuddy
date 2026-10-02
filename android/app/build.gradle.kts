@@ -74,7 +74,7 @@ val syncRobolectricJars = tasks.register<Sync>("syncRobolectricJars") {
     into(robolectricJars)
 }
 // Golden images (src/test/screenshots): -Padbuddy.screens=record records them; verify (the default on Windows, where they
-// are recorded) fails on any changed pixel; compare (the default elsewhere) writes the differences to build/outputs/roborazzi
+// are recorded) fails on a change beyond Roborazzi's default tolerance (0.7 % colour per pixel); compare (the default elsewhere) writes the differences to build/outputs/roborazzi
 // and never fails, until the same images are shown to come out on that system too.
 val screens = providers.gradleProperty("adbuddy.screens")
     .getOrElse(if (System.getProperty("os.name").startsWith("Windows")) "verify" else "compare")

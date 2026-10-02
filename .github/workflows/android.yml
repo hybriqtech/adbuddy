@@ -52,7 +52,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -d app/build/outputs/roborazzi ]; then
-            echo "::warning title=Screen differences::golden images differ (compare mode does not fail off Windows): see the screen-differences artifact"
+            echo "::warning title=Screen differences::golden images differ: see the screen-differences artifact"
           fi
       - name: Screen differences
         if: ${{ !cancelled() }}
