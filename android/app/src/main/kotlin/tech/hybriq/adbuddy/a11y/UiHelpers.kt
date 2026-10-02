@@ -37,8 +37,12 @@ object UiHelpers {
      * Sends the protected apps to the host in device.info (spec §4.3). false when the host is not
      * reachable: it gets the list with the next welcome. Quick (no socket wait): safe to call from the UI.
      */
-    fun publishProtectedApps(app: AdbuddyApp): Boolean =
+    fun publishProtectedApps(app: AdbuddyApp): Boolean = synchronized(ProtectedApps.LOCK) {
+        // Read and send under the process lock that propose/confirm take: two publishes (helpers thread and screen)
+        // reach the host in the order of the list they read, never an old list after a newer one. Bridge.send only
+        // queues a frame (no socket wait), so holding the lock does not block the UI on the network.
         app.bridge.send(Protocol.DEVICE_INFO, Protocol.json.encodeToJsonElement(DeviceInfo.serializer(), ProtectedApps.of(app).deviceInfo()))
+    }
 
     fun install(app: AdbuddyApp) {
         val protected = ProtectedApps.of(app)
@@ -73,7 +77,12 @@ object UiHelpers {
         work.execute {
             try {
                 val receivers = ProtectedApps.Heuristic.receivers(ProtectedApps.defaultSms(app))
-                if (protected.propose(ProtectedApps.launcherApps(app), receivers)) sendList()
+                val launcher = runCatching { ProtectedApps.launcherApps(app) }
+                // If the launcher cannot be read, at least what needs no launcher icon is protected (and stays so).
+                val changed = launcher.getOrNull()?.let { protected.propose(it, receivers) }
+                    ?: protected.ensure(receivers intersect ProtectedApps.Heuristic.NO_LAUNCHER_ICON)
+                if (changed) sendList()
+                launcher.exceptionOrNull()?.let { Log.w(TAG, "launcher apps", it) }
             } catch (e: RuntimeException) {
                 Log.w(TAG, "protected apps", e)
             }

@@ -100,6 +100,20 @@ class ProtectedAppsUiTest {
         assertFalse(unchecked.single { it.pkg == "com.hidden.service" }.checked) // still listed, to check it again
     }
 
+    @Test fun playServicesKeepsItsRowAfterBeingUncheckedAndSaved() {
+        // Confirmed without gms: it has no launcher icon, so only the code receivers keep its row alive.
+        val saved = setOf("com.example.mybank")
+        val rows = ProtectedAppsUi.rows(installed, saved, saved, receivers, "")
+        val row = rows.single { it.pkg == gms }
+        assertFalse(row.checked)
+        assertEquals(gms, row.label) // rows without an icon show by package name
+        assertEquals("Google Play services", row.knownName)
+        assertEquals(Reason.CODES, row.reason)
+        val again = ProtectedAppsUi.rows(installed, saved, ProtectedAppsUi.toggle(saved, gms, true), receivers, "")
+        assertTrue(again.single { it.pkg == gms }.checked)
+        assertEquals(null, rows.single { it.pkg == "com.example.mybank" }.knownName)
+    }
+
     @Test fun theSelectionStopsAtTheProtocolLimit() {
         val full = (0 until UiLimits.MAX_PROTECTED_APPS).map { "com.a.app$it" }.toSet()
         assertEquals(full, ProtectedAppsUi.toggle(full, "com.b.extra", true))

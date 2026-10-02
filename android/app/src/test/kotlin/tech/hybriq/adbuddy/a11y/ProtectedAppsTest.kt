@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import tech.hybriq.adbuddy.FakePrefs
 import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.bridge.DeviceInfo
@@ -110,14 +112,66 @@ class ProtectedAppsTest {
         assertEquals(setOf("com.mine.app"), p.list())
     }
 
-    @Test fun proposeAndConfirmAreSafeFromTwoThreads() {
-        val p = ProtectedApps(FakePrefs())
-        val proposer = Thread { repeat(200) { p.propose(installedApps, ProtectedApps.Heuristic.receivers(null)) } }
+    /** A ProtectedApps whose read of "confirmed" stops, to put a confirmation from another instance in that gap. */
+    private class Pausing(prefs: FakePrefs, val read: CountDownLatch, val release: CountDownLatch) : ProtectedApps(prefs) {
+        override val confirmed: Boolean
+            get() {
+                val value = super.confirmed
+                read.countDown()
+                release.await(10, TimeUnit.SECONDS)
+                return value
+            }
+    }
+
+    @Test fun aConfirmationFromAnotherInstanceCannotLandBetweenTheCheckAndTheWriteOfAProposal() {
+        // In production each ProtectedApps.of() is a new instance over the same SharedPreferences (the helpers
+        // thread and the screen): the lock must be the process's, not the instance's.
+        val prefs = FakePrefs()
+        val read = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val proposer = Thread { Pausing(prefs, read, release).propose(installedApps, ProtectedApps.Heuristic.receivers(null)) }
         proposer.start()
-        p.confirm(setOf("com.mine.app"))
-        proposer.join()
-        // However they interleave, a confirmation is never overwritten by a proposal made after it.
+        assertTrue("the proposal read confirmed", read.await(10, TimeUnit.SECONDS))
+        val confirmer = Thread { ProtectedApps(prefs).confirm(setOf("com.mine.app")) }
+        confirmer.start()
+        confirmer.join(500) // with the shared lock it waits for the proposal; without it, it is done by now
+        release.countDown()
+        proposer.join(10_000)
+        confirmer.join(10_000)
+        assertFalse(proposer.isAlive || confirmer.isAlive)
+        val p = ProtectedApps(prefs)
         assertTrue(p.confirmed)
+        assertEquals(setOf("com.mine.app"), p.list())
+    }
+
+    @Test fun theFiveCodeReceiversAreTheContract() {
+        assertEquals(
+            setOf(
+                "com.google.android.apps.messaging",
+                "com.samsung.android.messaging",
+                "com.android.mms",
+                "com.google.android.gm",
+                "com.google.android.gms",
+            ),
+            ProtectedApps.Heuristic.CODE_RECEIVERS,
+        )
+    }
+
+    @Test fun aDefaultSmsAppThatTheHeuristicAlsoFindsDoesNotTakeTwoPlaces() {
+        val n = UiLimits.MAX_PROTECTED_APPS
+        val apps = listOf("com.bank.sms" to "Bank SMS") + (0 until n).map { "com.bank$it.app" to "Bank $it" }
+        val got = ProtectedApps.Heuristic.proposeWithReceivers(apps, setOf("com.bank.sms"))
+        assertEquals(n, got.size)
+    }
+
+    @Test fun ensureAddsWithoutDroppingAndStopsAfterConfirmation() {
+        val p = ProtectedApps(FakePrefs())
+        p.propose(installedApps)
+        assertTrue(p.ensure(ProtectedApps.Heuristic.NO_LAUNCHER_ICON))
+        assertEquals(setOf("com.example.mybank", "com.google.android.gms"), p.list())
+        assertFalse(p.ensure(ProtectedApps.Heuristic.NO_LAUNCHER_ICON))
+        p.confirm(setOf("com.mine.app"))
+        assertFalse(p.ensure(ProtectedApps.Heuristic.NO_LAUNCHER_ICON))
         assertEquals(setOf("com.mine.app"), p.list())
     }
 

@@ -20,21 +20,22 @@ import tech.hybriq.adbuddy.bridge.UiLimits
  * the person has seen the screen. From the confirmation on it never touches
  * the list again.
  */
-class ProtectedApps(private val prefs: SharedPreferences) {
+open class ProtectedApps(private val prefs: SharedPreferences) {
     /** The list, without ADBuddy (the host adds it itself). */
     fun list(): Set<String> = prefs.getStringSet(KEY_LIST, null).orEmpty()
 
     fun isProtected(pkg: String): Boolean = pkg == Packages.ADBUDDY || pkg in list()
 
     /** Whether the user confirmed the list: then proposals no longer change it. */
-    val confirmed: Boolean get() = prefs.getBoolean(KEY_CONFIRMED, false)
+    open val confirmed: Boolean get() = prefs.getBoolean(KEY_CONFIRMED, false)
 
     /**
      * Sets the proposal, unless the user confirmed a list: the heuristic's apps plus receivers, the apps
      * that receive login codes (Heuristic.receivers), when they are installed. Returns whether it changed.
-     * Under the lock, with confirm(): a confirmation that lands meanwhile is never overwritten.
+     * Under the process lock, with confirm(): a confirmation that lands meanwhile, even from another
+     * instance over the same preferences, is never overwritten.
      */
-    fun propose(apps: List<Pair<String, String>>, receivers: Set<String> = emptySet()): Boolean = synchronized(this) {
+    fun propose(apps: List<Pair<String, String>>, receivers: Set<String> = emptySet()): Boolean = synchronized(LOCK) {
         if (confirmed) return@synchronized false
         val proposed = Heuristic.proposeWithReceivers(apps, receivers)
         if (proposed == list() && prefs.contains(KEY_LIST)) return@synchronized false
@@ -43,10 +44,23 @@ class ProtectedApps(private val prefs: SharedPreferences) {
     }
 
     /**
+     * Adds apps to the proposal without dropping any (the proposal when the launcher cannot be read), unless the
+     * user confirmed a list. Returns whether it changed.
+     */
+    fun ensure(extra: Set<String>): Boolean = synchronized(LOCK) {
+        if (confirmed) return@synchronized false
+        val now = list()
+        val next = (now + extra.filter(UiLimits::validPackage)).filter { it != Packages.ADBUDDY }.take(UiLimits.MAX_PROTECTED_APPS).toSet()
+        if (next == now && prefs.contains(KEY_LIST)) return@synchronized false
+        prefs.edit { putStringSet(KEY_LIST, next) }
+        true
+    }
+
+    /**
      * The user's own list (M5c), even if it is the proposal unchanged or empty:
      * confirming is what stops the proposals. ADBuddy is never in it (always protected).
      */
-    fun confirm(list: Set<String>) = synchronized(this) {
+    fun confirm(list: Set<String>) = synchronized(LOCK) {
         val clean = list.filter { it != Packages.ADBUDDY && UiLimits.validPackage(it) }.take(UiLimits.MAX_PROTECTED_APPS).toSet()
         prefs.edit {
             putStringSet(KEY_LIST, clean)
@@ -73,7 +87,7 @@ class ProtectedApps(private val prefs: SharedPreferences) {
         )
 
         /** Receivers that have no icon in the launcher, so "installed" cannot be told from the launcher's list. */
-        private val NO_LAUNCHER_ICON: Set<String> = setOf("com.google.android.gms")
+        val NO_LAUNCHER_ICON: Set<String> = setOf("com.google.android.gms")
 
         /** CODE_RECEIVERS and the phone's default SMS app (null: unknown). */
         fun receivers(defaultSms: String?): Set<String> = CODE_RECEIVERS + listOfNotNull(defaultSms?.takeIf(UiLimits::validPackage))
@@ -84,7 +98,7 @@ class ProtectedApps(private val prefs: SharedPreferences) {
             // The receivers go first: if the heuristic fills the list, it is the heuristic that yields at the limit,
             // never the apps that receive the codes.
             val installed = receivers.filter { it in here || it in NO_LAUNCHER_ICON }.filter(UiLimits::validPackage)
-            return (installed + propose(apps)).filter { it != Packages.ADBUDDY }.take(UiLimits.MAX_PROTECTED_APPS).toSet()
+            return (installed + propose(apps)).filter { it != Packages.ADBUDDY }.distinct().take(UiLimits.MAX_PROTECTED_APPS).toSet()
         }
 
         /** Found anywhere in a package part or a label word ("kutxabank", "mybank"). */
@@ -113,6 +127,13 @@ class ProtectedApps(private val prefs: SharedPreferences) {
     }
 
     companion object {
+        /**
+         * One monitor per process: every ProtectedApps.of() is a new instance over the same SharedPreferences
+         * (the helpers thread, the screen), so the lock cannot be the instance's. Also taken to read and send the
+         * list (UiHelpers.publishProtectedApps), so a stale list never reaches the host after a newer one.
+         */
+        internal val LOCK = Any()
+
         private const val PREFS = "protected_apps"
         private const val KEY_LIST = "list"
         private const val KEY_CONFIRMED = "confirmed"

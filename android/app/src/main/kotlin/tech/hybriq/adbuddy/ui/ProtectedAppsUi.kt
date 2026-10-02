@@ -13,7 +13,10 @@ object ProtectedAppsUi {
     /** Why an app is proposed; it does not depend on whether it is checked now, so rows keep their place. */
     enum class Reason { CODES, GUESS, NONE }
 
-    data class Row(val pkg: String, val label: String, val checked: Boolean, val reason: Reason)
+    /** knownName: a readable name for an app that has no launcher label (label is its package name); the screen may show it beside it. */
+    data class Row(val pkg: String, val label: String, val checked: Boolean, val reason: Reason, val knownName: String? = null)
+
+    private val KNOWN_NAMES = mapOf("com.google.android.gms" to "Google Play services")
 
     fun reason(pkg: String, label: String, receivers: Set<String>): Reason = when {
         pkg in receivers -> Reason.CODES
@@ -40,10 +43,13 @@ object ProtectedAppsUi {
      */
     fun rows(installed: List<Pair<String, String>>, initial: Set<String>, selection: Set<String>, receivers: Set<String>, query: String): List<Row> {
         val known = installed.filter { it.first != Packages.ADBUDDY && UiLimits.validPackage(it.first) }.distinctBy { it.first }
-        val extra = (initial - Packages.ADBUDDY - known.map { it.first }.toSet()).sorted().map { it to it }
+        // The saved apps without a launcher icon, and Play services even when unchecked and saved: otherwise
+        // there would be no row left to protect it again.
+        val extra = (initial + (receivers intersect ProtectedApps.Heuristic.NO_LAUNCHER_ICON) - Packages.ADBUDDY - known.map { it.first }.toSet())
+            .sorted().map { it to it }
         val q = query.trim().lowercase()
         return (known + extra)
-            .map { (pkg, label) -> Row(pkg, label, pkg in selection, reason(pkg, label, receivers)) }
+            .map { (pkg, label) -> Row(pkg, label, pkg in selection, reason(pkg, label, receivers), KNOWN_NAMES[pkg].takeIf { pkg == label }) }
             .filter { q.isEmpty() || it.label.lowercase().contains(q) || it.pkg.lowercase().contains(q) }
             .sortedWith(compareBy<Row>({ it.reason == Reason.NONE }, { it.label.lowercase() }, { it.pkg }))
     }
