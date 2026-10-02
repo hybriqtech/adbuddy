@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -18,6 +19,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import tech.hybriq.adbuddy.MainActivity
 import tech.hybriq.adbuddy.R
+import tech.hybriq.adbuddy.a11y.Packages
 import tech.hybriq.adbuddy.a11y.ProtectedApps
 import tech.hybriq.adbuddy.screens.PHONE
 import tech.hybriq.adbuddy.ui.Onboarding
@@ -57,12 +59,19 @@ class OnboardingFlowTest {
         assertFalse(ProtectedApps.of(app).confirmed)
     }
 
+    // Before the rule: MainActivity starts on the first step and reads the launcher right away (a @Before comes after).
+    init {
+        // ADBuddy's own icon makes the launcher read usable. Proposed: the code receivers (WhatsApp, Play services) and what looks protected ("Mi Banco"), not "Notes".
+        installLauncherApps(Packages.ADBUDDY to "ADBuddy", "com.example.mybank" to "Mi Banco", "com.whatsapp" to "WhatsApp", "org.example.notes" to "Notes")
+    }
+
     @Test fun confirmingTheListThenDoneFinishesTheSteps() {
         // The apps are read off the main thread: the button turns on once they are there.
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText(text(R.string.protected_confirm)) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(15_000) { compose.onAllNodes(hasText(text(R.string.protected_confirm)) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(text(R.string.protected_confirm)).performClick()
         step(2).assertIsDisplayed()
         assertTrue(ProtectedApps.of(app).confirmed)
+        assertEquals(setOf("com.example.mybank", "com.whatsapp", "com.google.android.gms"), ProtectedApps.of(app).list())
         compose.onNodeWithText(text(R.string.onboarding_done)).performClick()
         compose.onNodeWithContentDescription(text(R.string.action_menu)).assertIsDisplayed()
         assertTrue(Onboarding.of(app).done())

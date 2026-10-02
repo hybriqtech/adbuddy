@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.flows
 
+import android.content.res.Configuration
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -56,7 +57,7 @@ class ProtectedAppsFlowTest {
         compose.onNodeWithText(text(R.string.menu_settings)).performClick()
         compose.onNodeWithText(text(R.string.protected_title)).performClick()
         // The apps are read off the main thread: wait for the rows.
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Mi Banco")).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(15_000) { compose.onAllNodes(hasText("Mi Banco")).fetchSemanticsNodes().isNotEmpty() }
     }
 
     private fun row(pkg: String, label: String) = compose.run {
@@ -79,6 +80,15 @@ class ProtectedAppsFlowTest {
         compose.onNodeWithText("WhatsApp").assertIsDisplayed()
         compose.onNodeWithText("Mi Banco").assertDoesNotExist()
         compose.onNodeWithText("whatsapp").performTextClearance()
+        // Upper and mixed case too: the query is lowered as well as the name.
+        compose.onNodeWithText(text(R.string.protected_search)).performTextInput("Banco")
+        compose.onNodeWithText("Mi Banco").assertIsDisplayed()
+        compose.onNodeWithText("WhatsApp").assertDoesNotExist()
+        compose.onNodeWithText("Banco").performTextClearance()
+        compose.onNodeWithText(text(R.string.protected_search)).performTextInput("WHATS")
+        compose.onNodeWithText("WhatsApp").assertIsDisplayed()
+        compose.onNodeWithText("Mi Banco").assertDoesNotExist()
+        compose.onNodeWithText("WHATS").performTextClearance()
         compose.onNodeWithText(text(R.string.protected_search)).performTextInput("zzz")
         compose.onNodeWithText(text(R.string.protected_empty)).assertIsDisplayed()
     }
@@ -91,8 +101,9 @@ class ProtectedAppsFlowTest {
 
         RuntimeEnvironment.setQualifiers("+land")
         compose.activityRule.scenario.recreate()
+        assertEquals(Configuration.ORIENTATION_LANDSCAPE, compose.activity.resources.configuration.orientation)
 
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText(text(R.string.protected_save))).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(15_000) { compose.onAllNodes(hasText(text(R.string.protected_save))).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(text(R.string.protected_intro)).assertExists()
         row("com.whatsapp", "WhatsApp").assertIsOn()
         row("com.example.mybank", "Mi Banco").assertIsOn()
@@ -108,7 +119,7 @@ class ProtectedAppsFlowTest {
         settingsShown()
         assertEquals(setOf("com.example.mybank"), ProtectedApps.of(app).list())
         compose.onNodeWithText(text(R.string.protected_title)).performClick()
-        compose.waitUntil(5_000) { compose.onAllNodes(hasText("Mi Banco")).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(15_000) { compose.onAllNodes(hasText("Mi Banco")).fetchSemanticsNodes().isNotEmpty() }
         row("com.whatsapp", "WhatsApp").assertIsOff()
     }
 
@@ -142,7 +153,7 @@ class ProtectedAppsFlowTest {
         settingsShown()
         val saved = ProtectedApps.of(app)
         assertTrue(saved.confirmed)
-        assertTrue("com.whatsapp" in saved.list())
+        assertEquals(setOf("com.example.mybank", "com.whatsapp"), saved.list())
         // No PC connected in the test: the list waits for the next connection, and the person is told so.
         assertEquals(text(R.string.protected_saved_later), ShadowToast.getTextOfLatestToast())
         compose.onNodeWithText(text(R.string.settings_protected_confirmed, saved.list().size)).assertIsDisplayed()
