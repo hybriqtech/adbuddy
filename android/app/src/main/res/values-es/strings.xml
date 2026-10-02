@@ -128,4 +128,5 @@
     <string name="remote_disable_body">Fuera de casa, apagarlo corta el acceso hasta que vuelvas a tu Wi-Fi.</string>
     <string name="remote_disable_confirm">Desactivar</string>
     <string name="remote_failed">No se pudo cambiar el modo remoto</string>
+    <string name="listener_label">Lector de notificaciones de ADBuddy</string>
 </resources>

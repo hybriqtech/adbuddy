@@ -101,5 +101,18 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service" />
         </service>
+
+        <!-- Reads the notifications that are on the phone, for `adbuddy notifications`
+             (M5 spec §3.5). Only after the user allows it in the system's notification
+             access; read-only (ListenerIsReadOnlyTest). Not exported: the system binds it. -->
+        <service
+            android:name=".listener.AgentNotificationListener"
+            android:exported="false"
+            android:label="@string/listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>
