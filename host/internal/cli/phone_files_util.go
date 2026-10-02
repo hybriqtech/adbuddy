@@ -136,26 +136,50 @@ func createExclusive(dir, stem, ext string) (*os.File, string, error) {
 	return f, name, nil
 }
 
-// moveExclusive makes src the file dir/stem+ext (or its -2, -3… variant) and
-// removes src. A hard link takes the name atomically and never overwrites
-// (os.Rename does, on Unix); where it is not possible the file is copied into
-// a name created with O_EXCL.
-func moveExclusive(src, dir, stem, ext string) (string, error) {
+// createExclusiveIn is createExclusive in the folder of root.
+func createExclusiveIn(root *os.Root, stem, ext string) (*os.File, string, error) {
+	var f *os.File
+	name, err := candidates(stem, ext, func(name string) (err error) {
+		f, err = root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		return err
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	return f, name, nil
+}
+
+var errMoveChanged = errors.New("the file to move was replaced")
+
+// moveExclusive makes src (relative to root) the file stem+ext of root (or
+// its -2, -3… variant) and removes src. A hard link takes the name atomically
+// and never overwrites (os.Rename does, on Unix); where it is not possible
+// the file is copied into a name created with O_EXCL. want is the file that
+// must be moved: a src replaced meanwhile (by another file, or by a link,
+// which the hard link would take as it is) is not moved.
+func moveExclusive(root *os.Root, src, stem, ext string, want fs.FileInfo) (string, error) {
 	name, err := candidates(stem, ext, func(name string) error {
-		return os.Link(src, filepath.Join(dir, name))
+		return root.Link(src, name)
 	})
 	if err == nil {
-		return name, os.Remove(src)
+		if st, err := root.Lstat(name); err != nil || !os.SameFile(want, st) {
+			root.Remove(name)
+			return "", errMoveChanged
+		}
+		return name, root.Remove(src)
 	}
 	if errors.Is(err, fs.ErrExist) {
 		return "", err
 	}
-	in, err := os.Open(src)
+	in, err := root.Open(src)
 	if err != nil {
 		return "", err
 	}
 	defer in.Close()
-	out, name, err := createExclusive(dir, stem, ext)
+	if st, err := in.Stat(); err != nil || !os.SameFile(want, st) {
+		return "", errMoveChanged
+	}
+	out, name, err := createExclusiveIn(root, stem, ext)
 	if err != nil {
 		return "", err
 	}
@@ -164,10 +188,10 @@ func moveExclusive(src, dir, stem, ext string) (string, error) {
 		err = cerr
 	}
 	if err != nil {
-		os.Remove(filepath.Join(dir, name))
+		root.Remove(name)
 		return "", err
 	}
-	return name, os.Remove(src)
+	return name, root.Remove(src)
 }
 
 // decodeImage decodes the whole image: a variable so that a test can see it
