@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"reflect"
@@ -577,6 +578,141 @@ func TestAllowSessionCoversOnlyTheSameCommand(t *testing.T) {
 	defer cancel2()
 	if c.Confirm(ctx2, s) != confirm.Timeout {
 		t.Fatal("a special command was remembered for the session")
+	}
+}
+
+// A4-1: a command whose effect may come from its stdin (adb shell or exec-out
+// without a command, exec-in…) is never allowed for the session, even with a
+// key and not special: the key does not cover what comes through stdin. An
+// app that answers allow_session anyway gets a single allow.
+func TestStdinCommandIsNeverAllowedForTheSession(t *testing.T) {
+	app := &fakeApp{connected: true}
+	c := NewConfirmer(app, fixed(confirm.Deny))
+	app.onPublish = func(r ConfirmRequest) {
+		if r.AllowSession {
+			t.Error("allow_session offered for a command that reads stdin")
+		}
+		reply(c, r.ID, "allow_session")
+	}
+	for _, argv := range []string{"shell", "exec-out"} {
+		r := confirm.Request{ID: "j_" + argv, Key: "shell.interactive\x00/w\x00" + argv, Stdin: true, ExpiresAt: time.Now().Add(time.Minute)}
+		if got := c.Confirm(context.Background(), r); got != confirm.Allow {
+			t.Fatalf("%s: %v, want allow", argv, got)
+		}
+	}
+	app.mu.Lock()
+	app.onPublish = nil
+	app.mu.Unlock()
+	for _, argv := range []string{"shell", "exec-out"} {
+		r := confirm.Request{ID: "j_again_" + argv, Key: "shell.interactive\x00/w\x00" + argv, Stdin: true, ExpiresAt: time.Now().Add(time.Minute)}
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		got := c.Confirm(ctx, r)
+		cancel()
+		if got != confirm.Timeout {
+			t.Fatalf("%s was remembered for the session: %v", argv, got)
+		}
+	}
+}
+
+// M1: the host does not leave its policy on long commands to the app (an
+// old or broken one may offer more): a command the notification cannot show
+// whole (more than MaxSessionCommand UTF-16 units) is never allowed for the
+// session, and an allow_session for it is a single allow.
+func TestALongCommandIsNeverAllowedForTheSession(t *testing.T) {
+	app := &fakeApp{connected: true}
+	c := NewConfirmer(app, fixed(confirm.Deny))
+	app.onPublish = func(r ConfirmRequest) {
+		if r.AllowSession {
+			t.Errorf("%s: allow_session offered for a command of %d characters", r.ID, len(r.RawCommand))
+		}
+		reply(c, r.ID, "allow_session")
+	}
+	for i, raw := range []string{
+		"adb shell rm " + strings.Repeat("a", MaxSessionCommand),
+		"adb " + strings.Repeat("😀", 149), // 153 runes, 302 UTF-16 units
+	} {
+		r := confirm.Request{ID: fmt.Sprintf("j_%d", i), Key: fmt.Sprintf("k%d", i), RawCommand: raw, ExpiresAt: time.Now().Add(time.Minute)}
+		if got := c.Confirm(context.Background(), r); got != confirm.Allow {
+			t.Fatalf("%d: %v, want allow", i, got)
+		}
+	}
+	app.mu.Lock()
+	app.onPublish = nil
+	app.mu.Unlock()
+	for i := range 2 {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		got := c.Confirm(ctx, confirm.Request{ID: fmt.Sprintf("j_again_%d", i), Key: fmt.Sprintf("k%d", i), ExpiresAt: time.Now().Add(time.Minute)})
+		cancel()
+		if got != confirm.Timeout {
+			t.Fatalf("%d: a long command was remembered for the session: %v", i, got)
+		}
+	}
+	// One that fits keeps the offer.
+	app.onPublish = func(r ConfirmRequest) {
+		if !r.AllowSession {
+			t.Error("allow_session not offered for a command that fits")
+		}
+		reply(c, r.ID, "deny")
+	}
+	c.Confirm(context.Background(), confirm.Request{ID: "j_fits", Key: "k", RawCommand: strings.Repeat("a", MaxSessionCommand), ExpiresAt: time.Now().Add(time.Minute)})
+}
+
+// M1/H3: a command longer than the app's dialog shows cannot have been read to
+// its end: an allow for it, from whatever app, is a deny.
+func TestACommandLongerThanTheDialogCannotBeAllowed(t *testing.T) {
+	for _, d := range []string{"allow", "allow_session"} {
+		app := &fakeApp{connected: true}
+		c := NewConfirmer(app, fixed(confirm.Allow))
+		app.onPublish = func(r ConfirmRequest) { reply(c, r.ID, d) }
+		long := confirm.Request{ID: "j_long", Key: "k", RawCommand: strings.Repeat("a", MaxDialogCommand+1), ExpiresAt: time.Now().Add(time.Minute)}
+		if got := c.Confirm(context.Background(), long); got != confirm.Deny {
+			t.Fatalf("%s: %v, want deny", d, got)
+		}
+		fits := confirm.Request{ID: "j_fits", Key: "k", RawCommand: strings.Repeat("a", MaxDialogCommand), ExpiresAt: time.Now().Add(time.Minute)}
+		if got := c.Confirm(context.Background(), fits); got != confirm.Allow {
+			t.Fatalf("%s: %v, want allow", d, got)
+		}
+	}
+}
+
+// syncApp answers in Publish itself, so the answer is waiting before Confirm
+// looks at its channels.
+type syncApp struct {
+	c        *Confirmer
+	decision string
+}
+
+func (a *syncApp) Connected() bool { return true }
+func (a *syncApp) Publish(_ string, payload any) error {
+	if r, ok := payload.(ConfirmRequest); ok {
+		reply(a.c, r.ID, a.decision)
+	}
+	return nil
+}
+
+// A4-5: an answer and the expiry at the same moment: the expiry wins, every
+// time (a select picks at random), and a late allow_session is not kept.
+func TestAnAnswerAfterTheExpiryDoesNotAllow(t *testing.T) {
+	for _, decision := range []string{"allow", "allow_session"} {
+		app := &syncApp{decision: decision}
+		c := NewConfirmer(app, fixed(confirm.Deny))
+		app.c = c
+		for i := range 40 {
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			r := confirm.Request{ID: fmt.Sprintf("j_%s_%d", decision, i), Key: "k", ExpiresAt: time.Now().Add(time.Minute)}
+			got := c.Confirm(ctx, r)
+			cancel()
+			if got != confirm.Timeout {
+				t.Fatalf("%s %d: %v, want timeout", decision, i, got)
+			}
+		}
+		app.decision = "deny"
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		got := c.Confirm(ctx, confirm.Request{ID: "j_after_" + decision, Key: "k", ExpiresAt: time.Now().Add(time.Minute)})
+		cancel()
+		if got != confirm.Deny {
+			t.Fatalf("%s: a late answer was kept for the session: %v", decision, got)
+		}
 	}
 }
 

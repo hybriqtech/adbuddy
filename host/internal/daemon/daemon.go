@@ -491,8 +491,12 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		// the same folder for the rest of the session. A 🔴 that comes from
 		// the state of the phone or the PC (a precheck, a write on the PC)
 		// may be fine now and not next time: no key, so it is always asked.
+		// Nor one whose effect may come from stdin (A4-1): the key does not
+		// cover it, and the next stdin could be anything. This does not
+		// depend on the classification (classify.StdinDecides).
 		key := ""
-		if reason.Empty() {
+		stdin := classify.StdinDecides(args)
+		if reason.Empty() && !stdin {
 			key = e.Rule + "\x00" + req.Cwd + "\x00" + strings.Join(req.Argv, "\x00")
 		}
 		qctx, withdraw := context.WithCancelCause(ctx)
@@ -527,7 +531,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		cctx, cancel := context.WithTimeout(qctx, d.o.ConfirmTimeout)
 		decision := d.o.Confirmer.Confirm(cctx, confirm.Request{
 			ID: e.ID, Title: e.Description, Detail: detail, RawCommand: classify.DisplayCommand(req.Argv),
-			ExpiresAt: asked.Add(d.o.ConfirmTimeout), Special: res.Special, Key: key,
+			ExpiresAt: asked.Add(d.o.ConfirmTimeout), Special: res.Special, Key: key, Stdin: stdin,
 		})
 		cancel()
 		release = d.answered(q, decision == confirm.Allow)
