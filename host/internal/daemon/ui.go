@@ -73,11 +73,12 @@ type helper struct {
 }
 
 var helpers = map[string]helper{
-	bridge.UIOpDump:       {"helper.screen", classify.Green, classify.Text{EN: "Read the screen", ES: "Leer la pantalla"}, false},
-	bridge.UIOpForeground: {"helper.foreground", classify.Green, classify.Text{EN: "Read the app in the foreground", ES: "Leer la app en primer plano"}, false},
-	OpScreenshot:          {"helper.screenshot", classify.Green, classify.Text{EN: "Take a screenshot", ES: "Hacer una captura de pantalla"}, false},
-	bridge.UIOpClick:      {"helper.tap", classify.Yellow, classify.Text{EN: "Tap {target}", ES: "Tocar {target}"}, true},
-	bridge.UIOpSetText:    {"helper.type", classify.Yellow, classify.Text{EN: "Type {target}", ES: "Escribir {target}"}, true},
+	bridge.UIOpDump:          {"helper.screen", classify.Green, classify.Text{EN: "Read the screen", ES: "Leer la pantalla"}, false},
+	bridge.UIOpForeground:    {"helper.foreground", classify.Green, classify.Text{EN: "Read the app in the foreground", ES: "Leer la app en primer plano"}, false},
+	bridge.UIOpNotifications: {"helper.notifications", classify.Green, classify.Text{EN: "Read the notifications", ES: "Leer las notificaciones"}, false},
+	OpScreenshot:             {"helper.screenshot", classify.Green, classify.Text{EN: "Take a screenshot", ES: "Hacer una captura de pantalla"}, false},
+	bridge.UIOpClick:         {"helper.tap", classify.Yellow, classify.Text{EN: "Tap {target}", ES: "Tocar {target}"}, true},
+	bridge.UIOpSetText:       {"helper.type", classify.Yellow, classify.Text{EN: "Type {target}", ES: "Escribir {target}"}, true},
 }
 
 // uiFailure is how a helper ended badly: the exit code, the error code for
@@ -127,7 +128,9 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		return d.blockUI(e, other)
 	}
 	defer release()
-	if req.UIOp != bridge.UIOpForeground {
+	// foreground is what the guard asks; notifications do not read the screen
+	// (the app empties what a protected app says, and the host does it again).
+	if req.UIOp != bridge.UIOpForeground && req.UIOp != bridge.UIOpNotifications {
 		if why := d.guardForeground(ctx, nil); why != "" {
 			if ctx.Err() != nil { // the agent or serve went away meanwhile
 				code := ExitDenied
@@ -198,7 +201,7 @@ func checkUIArgs(op string, raw json.RawMessage) (string, error) {
 	switch op {
 	case bridge.UIOpDump:
 		return "", strict(new(bridge.UIDumpArgs))
-	case bridge.UIOpForeground:
+	case bridge.UIOpForeground, bridge.UIOpNotifications:
 		return "", strict(new(bridge.Empty))
 	case bridge.UIOpClick:
 		var a bridge.UIClickArgs
@@ -384,6 +387,9 @@ func (d *Daemon) runUI(ctx context.Context, op string, raw json.RawMessage, s St
 			fg.Protected = fg.Protected || d.protected(p)
 		}
 		return fg, "the app or adb", nil
+	case bridge.UIOpNotifications:
+		// No adb fallback: dumpsys notification --noredact would print every app's text.
+		return d.notifications(ctx, raw)
 	}
 	res, err := d.callApp(ctx, op, raw)
 	if err == nil {
