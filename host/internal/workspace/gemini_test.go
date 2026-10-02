@@ -32,7 +32,7 @@ func TestGeminiSettingsAreCreated(t *testing.T) {
 	if err != nil || !changed || !created {
 		t.Fatalf("changed=%v created=%v err=%v", changed, created, err)
 	}
-	if n := fileNames(t, p); len(n) != 1 || n[0] != "AGENTS.md" {
+	if n := fileNames(t, p); len(n) != 2 || n[0] != "GEMINI.md" || n[1] != "AGENTS.md" {
 		t.Fatalf("fileName %v", n)
 	}
 }
@@ -45,7 +45,9 @@ func TestGeminiSettingsKeepWhatTheUserHas(t *testing.T) {
 		"string":        {`{"model":"x","context":{"fileName":"GEMINI.md","discoveryMaxDirs":5}}`, []any{"GEMINI.md", "AGENTS.md"}},
 		"list":          {`{"context":{"fileName":["A.md"]}}`, []any{"A.md", "AGENTS.md"}},
 		"already there": {`{"context":{"fileName":["AGENTS.md","B.md"]}}`, []any{"AGENTS.md", "B.md"}},
-		"empty context": {`{"context":{}}`, []any{"AGENTS.md"}},
+		"empty context": {`{"context":{}}`, []any{"GEMINI.md", "AGENTS.md"}},
+		"empty list":    {`{"context":{"fileName":[]}}`, []any{"GEMINI.md", "AGENTS.md"}},
+		"no context":    {`{"model":"x"}`, []any{"GEMINI.md", "AGENTS.md"}},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -102,7 +104,7 @@ func TestInitConfiguresGeminiAndMentionsSkills(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := fileNames(t, filepath.Join(dir, ".gemini", "settings.json")); n[0] != "AGENTS.md" {
+	if n := fileNames(t, filepath.Join(dir, ".gemini", "settings.json")); len(n) != 2 || n[0] != "GEMINI.md" || n[1] != "AGENTS.md" {
 		t.Fatalf("fileName %v", n)
 	}
 	found := false

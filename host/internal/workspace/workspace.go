@@ -381,7 +381,9 @@ func saveSettings(path string, settings map[string]any) error {
 }
 
 // mergeGeminiSettings makes Gemini CLI read AGENTS.md (spec M6b §3.4): it adds
-// "AGENTS.md" to context.fileName and keeps everything else the user has.
+// "AGENTS.md" to context.fileName and keeps everything else the user has. With
+// no fileName of the user's own it writes ["GEMINI.md", "AGENTS.md"]: setting
+// the key replaces Gemini's default, so GEMINI.md has to be listed too.
 func mergeGeminiSettings(path string) (changed, created bool, err error) {
 	settings, created, err := loadSettings(path)
 	if err != nil {
@@ -412,6 +414,11 @@ func mergeGeminiSettings(path string) (changed, created bool, err error) {
 		if s == "AGENTS.md" {
 			return false, false, nil
 		}
+	}
+	if len(names) == 0 {
+		// Gemini replaces its default (GEMINI.md) with what fileName lists:
+		// without a list of the user's own, keep GEMINI.md loading.
+		names = []any{"GEMINI.md"}
 	}
 	ctx["fileName"] = append(names, "AGENTS.md")
 	settings["context"] = ctx
