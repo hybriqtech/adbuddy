@@ -47,9 +47,12 @@ func TestEnsureRealDirsIsAllOrNothing(t *testing.T) {
 }
 
 // planted are the folders of Init where a link is planted in the tests: with
-// it, Init used to create .adbuddy/bin (and the shim) or the journal on the
-// other side.
-var planted = []string{".adbuddy", filepath.Join(".adbuddy", "bin"), "journal", ".claude", ".gemini"}
+// it, Init used to create .adbuddy/bin (and the shim), the journal or a skill
+// on the other side.
+var planted = []string{
+	".adbuddy", filepath.Join(".adbuddy", "bin"), "journal", ".claude", ".gemini", ".agents",
+	filepath.Join(".claude", "skills", SkillNames()[0]), filepath.Join(".agents", "skills", SkillNames()[0]),
+}
 
 // checkRefused runs Init on dir, where rel is a link to outside, and checks
 // that it fails, writes nothing through the link and creates nothing else.
@@ -89,5 +92,35 @@ func TestInitRefusesAJunctionWhereItsFoldersGo(t *testing.T) {
 			t.Cleanup(func() { os.Remove(link) })
 			checkRefused(t, dir, rel, outside)
 		})
+	}
+}
+
+// The environment itself may be a junction (the user's choice): only links
+// inside it are refused.
+func TestInitWorksWhenTheEnvironmentIsAJunction(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("junctions are a Windows thing")
+	}
+	realDir := t.TempDir()
+	env := filepath.Join(t.TempDir(), "env")
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", env, realDir).CombinedOutput(); err != nil {
+		t.Skipf("no junction: %v: %s", err, out)
+	}
+	t.Cleanup(func() { os.Remove(env) })
+	checkInitThroughLink(t, env, realDir)
+}
+
+// checkInitThroughLink runs Init on env, a link to realDir, and checks that it
+// works and its files are in realDir.
+func checkInitThroughLink(t *testing.T, env, realDir string) {
+	t.Helper()
+	if _, err := Init(Options{Dir: env, Exe: fakeExe(t, "v1")}); err != nil {
+		t.Fatal(err)
+	}
+	if read(t, filepath.Join(BinDir(realDir), exe("adb"))) != "v1" {
+		t.Fatal("the shim is not in the environment")
+	}
+	if st, err := os.Lstat(JournalDir(realDir)); err != nil || !st.IsDir() {
+		t.Fatalf("no journal folder: %v %v", st, err)
 	}
 }
