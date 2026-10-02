@@ -383,3 +383,5 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
   - el test de `phone_chat_registry` no comprueba `len(order) == len(m)` (que el orden y el mapa del registro no se desincronicen);
   - `ipc`: `checkListen` se ejecuta dos veces en la ruta de `Listen` (una en `Listen` y otra en `ListenLocked`); es inocuo, y se puede dejar un comentario o unificarlo;
   - `serve` responde `SOCKET_FAILED` si `ipc.Lock` falla por algo distinto de "ocupado" (el mismo código de antes del cambio); candidato a un `LOCK_FAILED` propio, que tocaría el catálogo de errores y `docs/troubleshooting.md`.
+
+- **Post-v1 (aplazado por decisión del supervisor, el usuario afina la experiencia tras la v1):** V44 (con ADBuddy delante solo pasan `input keyevent 3`/`KEYCODE_HOME`: es una guarda de seguridad y abrir HOME desde ADBuddy lo decide el usuario) y V45 (mensaje de espera/reintento cuando la pantalla se marca protegida: la guarda falla cerrada y el bloqueo dura como mucho unos 9 s). Plan ya escrito y verificado en una copia limpia, sin revisión opus ni implementación: rama local `plan/v44-v45`, `docs/superpowers/plans/2026-10-02-adbuddy-v44-v45.md`.
