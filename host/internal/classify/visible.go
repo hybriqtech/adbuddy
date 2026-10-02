@@ -2,6 +2,7 @@ package classify
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -59,4 +60,77 @@ func Visible(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// minRun is the shortest run of blanks that is shown compacted (␠×N).
+const minRun = 4
+
+// blankUnits are the blanks whose runs are compacted, and how one shows.
+var blankUnits = map[rune]string{' ': "␠", '\n': `\n`, '\t': `\t`, '\r': `\r`}
+
+// VisibleCommand is Visible for the raw command a person confirms, applied
+// once (by DisplayCommand). A backslash the agent wrote comes out as two, so
+// it cannot pass for one of Visible's escapes (A4-4); a run of minRun or more
+// spaces, newlines, tabs or carriage returns comes out as ␠×N (or the escape
+// and ×N), so padding cannot push the rest of the command out of what the
+// phone shows (A4-2); and a ␠ the agent wrote comes out escaped. Unlike
+// Visible it is not idempotent (no escaping that tells a written escape from
+// a real one can be), so it is applied once; Visible on its result changes
+// nothing.
+func VisibleCommand(s string) string {
+	var b strings.Builder
+	rs := []rune(s)
+	for i := 0; i < len(rs); {
+		r := rs[i]
+		n := runLen(rs, i)
+		if unit, ok := blankUnits[r]; ok && n >= minRun {
+			b.WriteString(unit + "×" + strconv.Itoa(n))
+			i += n
+			continue
+		}
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '␠':
+			b.WriteString(`\u2420`)
+		default:
+			b.WriteString(Visible(string(r)))
+		}
+		i++
+	}
+	return b.String()
+}
+
+// compactSpaces shortens text already escaped (Printable) for a title: a run
+// of minRun or more spaces comes out as ␠×N, and a ␠ in it escaped.
+func compactSpaces(s string) string {
+	if !strings.Contains(s, "    ") && !strings.ContainsRune(s, '␠') {
+		return s
+	}
+	var b strings.Builder
+	rs := []rune(s)
+	for i := 0; i < len(rs); {
+		n := runLen(rs, i)
+		switch {
+		case rs[i] == ' ' && n >= minRun:
+			b.WriteString("␠×" + strconv.Itoa(n))
+			i += n
+			continue
+		case rs[i] == '␠':
+			b.WriteString(`\u2420`)
+		default:
+			b.WriteRune(rs[i])
+		}
+		i++
+	}
+	return b.String()
+}
+
+// runLen is how many times rs[i] repeats from i.
+func runLen(rs []rune, i int) int {
+	n := 1
+	for i+n < len(rs) && rs[i+n] == rs[i] {
+		n++
+	}
+	return n
 }

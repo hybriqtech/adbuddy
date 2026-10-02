@@ -321,9 +321,12 @@ func values(ws []Word) []string {
 	return out
 }
 
-// display shortens a command for titles.
+// display shortens a command, or one of its words, for titles: escaped,
+// runs of blanks compacted (so padding cannot push the rest out of the
+// title) and cut to 80 runes. The whole command is in the question's raw
+// command.
 func display(ws []string) string {
-	s := Printable(strings.Join(ws, " "))
+	s := compactSpaces(Printable(strings.Join(ws, " ")))
 	if utf8.RuneCountInString(s) > 80 {
 		r := []rune(s)
 		s = string(r[:79]) + "…"
@@ -361,7 +364,7 @@ func baseVars(ws []Word) map[string]string {
 		vars["args"] = display(vals[1:])
 	}
 	for i, v := range vals {
-		vars[strconv.Itoa(i)] = Printable(v)
+		vars[strconv.Itoa(i)] = display([]string{v}) // A4-3: no endless title nor detail line
 	}
 	return vars
 }
@@ -455,7 +458,7 @@ func (c *Classifier) evalWith(rs ruleSet, scope string, ws []Word) Finding {
 			f.Level, f.Reason = res.level, res.reason
 		}
 		for k, v := range res.vars {
-			vars[k] = Printable(v)
+			vars[k] = display([]string{v})
 		}
 		if res.op != nil && f.Level != Red {
 			f.Op = res.op
