@@ -43,7 +43,11 @@ sdk() {
 SDK=$(sdk)
 EXE=""
 BAT=""
-[[ "${OS:-}" == Windows_NT ]] && { EXE=.exe; BAT=.bat; }
+# The runner may have no OS variable (env -i), so uname decides too.
+windows=0
+[[ "${OS:-}" == Windows_NT ]] && windows=1
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; esac
+if [[ "$windows" == 1 ]]; then EXE=.exe; BAT=.bat; fi
 ADB="$SDK/platform-tools/adb$EXE"
 
 print_env() {
@@ -76,7 +80,7 @@ start() {
     # partition, and the oracle pushes some 8000 case files to /data/local/tmp.
     # 2047 MB on Windows: its emulator caps it there and exits on 4096.
     args=(-avd "$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim -no-snapshot)
-    if [[ -z "$EXE" ]]; then args+=(-partition-size 4096); else args+=(-partition-size 2047); fi
+    if [[ "$windows" == 1 ]]; then args+=(-partition-size 2047); else args+=(-partition-size 4096); fi
     args+=(-gpu "${ADBUDDY_EMU_GPU:-swiftshader_indirect}")
     nohup "$SDK/emulator/emulator$EXE" "${args[@]}" >"${TMPDIR:-/tmp}/adbuddy-emulator.log" 2>&1 &
   fi
