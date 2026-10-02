@@ -49,6 +49,9 @@ type termState struct {
 	unsub func() // the Manager subscription
 
 	send sync.Mutex
+
+	// sendFn replaces Server.SendTo in tests.
+	sendFn func(bridge.Message, string, any) error
 }
 
 // termWatch is what one terminal.watch keeps. msg is the request it came on:
@@ -285,7 +288,11 @@ func (l *phoneLink) takeTerm(w *termWatch) {
 // sendTerm sends a stream message to the connection that watches. That
 // connection being gone ends the watch.
 func (l *phoneLink) sendTerm(w *termWatch, typ string, payload any) bool {
-	if err := l.srv.SendTo(w.msg, typ, payload); err != nil {
+	send := l.term.sendFn
+	if send == nil {
+		send = l.srv.SendTo
+	}
+	if err := send(w.msg, typ, payload); err != nil {
 		if errors.Is(err, bridge.ErrNoApp) {
 			l.term.mu.Lock()
 			l.endWatchLocked(w)
@@ -349,7 +356,9 @@ func (l *phoneLink) flushTerm(w *termWatch) {
 		}
 		n := min(len(w.buf), termChunk)
 		if !l.sendTerm(w, bridge.TypeTerminalOutput, bridge.TerminalOutput{Epoch: w.epoch, Offset: w.bufOff, Data: w.buf[:n]}) {
-			w.buf = nil
+			// What was pending is not kept to grow if sending keeps failing:
+			// a snapshot, when it can go, brings the app up to date.
+			w.snapDue, w.buf = true, nil
 			return
 		}
 		w.buf, w.bufOff = w.buf[n:], w.bufOff+int64(n)
