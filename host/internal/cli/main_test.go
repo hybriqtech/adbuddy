@@ -24,6 +24,10 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// A process of the fake agent's tree (agentpeer_test.go).
+	if mode := os.Getenv("ADBUDDY_PEER_MODE"); mode != "" {
+		os.Exit(peerHelper(mode))
+	}
 	// The language of the machine never changes what the tests read: English
 	// (ADBUDDY_LANG beats config.language, LANG and the language of Windows).
 	os.Setenv("ADBUDDY_LANG", "en")

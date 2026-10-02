@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -20,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 )
 
 // Status values. Running is written before a 🟡/🔴 command starts so the
@@ -118,9 +121,8 @@ func (s *Store) Dir() string { return s.dir }
 // BackupDir is where the backups of entry id go.
 func (s *Store) BackupDir(id string) string { return filepath.Join(s.dir, "backups", id) }
 
-func (s *Store) file() string {
-	return filepath.Join(s.dir, s.now().UTC().Format("2006-01")+".jsonl")
-}
+// monthFile is the name of this month's file in the journal folder.
+func (s *Store) monthFile() string { return s.now().UTC().Format("2006-01") + ".jsonl" }
 
 // Writable checks that a record could be appended right now.
 func (s *Store) Writable() error {
@@ -133,11 +135,52 @@ func (s *Store) Writable() error {
 	return f.Close()
 }
 
+// openAppend opens this month's file to append, through the journal folder
+// itself (safeio.OpenRoot): a link or a junction planted in place of the
+// folder after Init, a month file that is not a regular file (a FIFO, a
+// link) or one with a second name (a hard link to a file elsewhere) is an
+// error, never a record written outside the environment. Without the journal
+// nothing runs (Writable).
 func (s *Store) openAppend() (*os.File, error) {
 	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return nil, err
 	}
-	return os.OpenFile(s.file(), os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o600)
+	root, err := safeio.OpenRoot(s.dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return safeio.OpenAppendIn(root, s.monthFile(), 0o600)
+}
+
+// MakeBackupDir creates the backup folder of entry id (BackupDir) through
+// the journal folder itself, and returns its path: a link or a junction in
+// place of journal or of journal/backups is an error, never a folder made
+// elsewhere. What then writes into it (adb pull) goes by path: a link
+// swapped in after this call is not caught.
+func (s *Store) MakeBackupDir(id string) (string, error) {
+	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+		return "", err
+	}
+	root, err := safeio.OpenRoot(s.dir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	rel := filepath.Join("backups", id)
+	if err := root.MkdirAll(rel, 0o700); err != nil {
+		return "", err
+	}
+	for _, d := range []string{"backups", rel} {
+		st, err := root.Lstat(d)
+		if err != nil {
+			return "", err
+		}
+		if st.Mode().Type() != fs.ModeDir {
+			return "", fmt.Errorf("%s: %w", filepath.Join(s.dir, d), safeio.ErrNotRealDir)
+		}
+	}
+	return s.BackupDir(id), nil
 }
 
 // Append writes e as one line and syncs it to disk.
@@ -185,18 +228,29 @@ func (s *Store) Append(e Entry) error {
 
 // Load reads every month file and returns the latest record of each entry,
 // oldest first. Lines that cannot be parsed (a crash mid-write) are skipped
-// and counted.
+// and counted. It reads through the journal folder itself, as openAppend
+// writes: a folder that is a link or a junction, or a month file that is not
+// a regular file with a single name (a FIFO would hang the read), is an
+// error that names it, never lines skipped.
 func (s *Store) Load() (entries []Entry, skipped int, err error) {
-	files, err := filepath.Glob(filepath.Join(s.dir, "*.jsonl"))
+	root, err := safeio.OpenRoot(s.dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, 0, nil // nothing journaled yet
+	}
+	if err != nil {
+		return nil, 0, err
+	}
+	defer root.Close()
+	files, err := fs.Glob(root.FS(), "*.jsonl")
 	if err != nil {
 		return nil, 0, err
 	}
 	sort.Strings(files)
 	byID := map[string]int{}
 	for _, name := range files {
-		f, err := os.Open(name)
+		f, err := safeio.OpenRegularIn(root, name)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("%s: %w", s.dir, err)
 		}
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 64*1024), 16*1024*1024)

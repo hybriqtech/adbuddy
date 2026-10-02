@@ -264,3 +264,25 @@ func TestNoSessionKeyWhenTheStateMadeItRed(t *testing.T) {
 		}
 	}
 }
+
+// V20: ping says whether the person paused the agent from the phone, so the
+// agent's doctor can leave adb alone meanwhile.
+func TestPingSaysWhetherPaused(t *testing.T) {
+	e := newEnv(t)
+	paused := false
+	e.d.o.Paused = func() bool { return paused }
+	for _, want := range []bool{false, true} {
+		paused = want
+		s := &stream{}
+		if exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindPing}, s); exit.Code != 0 || len(s.data) != 1 {
+			t.Fatalf("%+v", exit)
+		}
+		var p ipc.Ping
+		if err := json.Unmarshal(s.data[0], &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Paused != want {
+			t.Fatalf("paused %v, want %v", p.Paused, want)
+		}
+	}
+}

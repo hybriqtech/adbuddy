@@ -30,6 +30,18 @@ type Device interface {
 type Env struct {
 	Cwd       string // the shim's working directory (adb push resolves local paths there)
 	BackupDir string // where this entry's backups go (journal/backups/<id>)
+	// MakeBackupDir, when set, creates BackupDir through the journal folder
+	// (journal.Store.MakeBackupDir) and returns it; without it the folder is
+	// made by path.
+	MakeBackupDir func() (string, error)
+}
+
+// backupDir creates the entry's backup folder and returns it.
+func (e Env) backupDir() (string, error) {
+	if e.MakeBackupDir != nil {
+		return e.MakeBackupDir()
+	}
+	return e.BackupDir, os.MkdirAll(e.BackupDir, 0o700)
 }
 
 // Prepared is the outcome of the prechecks.
@@ -341,12 +353,13 @@ func push(ctx context.Context, dev Device, a map[string]string, env Env, p *Prep
 	case "none":
 		p.Inverse = shellArgv("rm", "-f", target)
 	case "file":
-		if err := os.MkdirAll(env.BackupDir, 0o700); err != nil {
+		dir, err := env.backupDir()
+		if err != nil {
 			return err
 		}
 		// Fixed name: the remote name is chosen on the phone and must never
 		// pick where the backup lands (one backup per journal entry).
-		backup := filepath.Join(env.BackupDir, "original")
+		backup := filepath.Join(dir, "original")
 		if err := dev.Pull(ctx, target, backup); err != nil {
 			return fmt.Errorf("backup of %s failed: %w", target, err)
 		}
