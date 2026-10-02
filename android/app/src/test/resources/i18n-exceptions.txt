@@ -1,3 +1,5 @@
 # Literals of the app code that are not text for a person, or that wait for their fix.
 # One per line:  file (from tech/hybriq/adbuddy/) | the literal | why
 # `file | *` exempts a whole file. NoHardcodedTextTest fails when a line here matches nothing any more.
+ui/ProtectedAppsScreen.kt | Mi Banco | sample data of the previews (the label of an invented app), never shown in the running app
+ui/ProtectedAppsUi.kt | Google Play services | the product name Google gives its own app: it is shown untranslated, as the system's app list does
