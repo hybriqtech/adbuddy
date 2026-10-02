@@ -496,3 +496,7 @@ Específico de la API 34: la validación 3 (servicio en primer plano desde el pr
 Parada 21:58:20 (`scripts/emulator.sh stop` rc 0); a las 21:58:24 solo quedaba el vigilante `emulator -kill <pid> -sleep 20`, y después ningún qemu/emulator en el PC. RAM libre 18.1 GB. AVD `adbuddy-dev34` con `adb_enabled=1`, `adb_wifi_enabled=0` y sin la app.
 
 Estado: T2 pasos 2, 3, 4, 6, 7 hechos (3-7 por `am instrument`, no por Gradle); T3 pasos 5 y 6 hechos. Pendiente de decisión del controlador: el defecto de `connectedDebugAndroidTest` (servidor 5037) y, con él, el README de T2 (paso 8: dice `gradle :app:connectedDebugAndroidTest`) y el job de la CI de la Tarea 5. Nada más pendiente con emulador de T2/T3.
+
+## 2026-10-02 22:55 — reanudación tras el reinicio de ventana
+Ruling: guarda de Gradle niega SIEMPRE `connected*` (commit de merge 5750183, ya integrada con origin/main); instrumentados por `am instrument` desde `emutest.TestInstrumentedSuite` — por qué: UTP llega al servidor 5037 del móvil — si me equivoco: no se prueba el arranque por Gradle (no funciona con servidor propio de todos modos). Brief: task-2c-brief.md.
+Task 2c: complete (ba1730c). Verificado con emulador android-34 (22:5x): TestInstrumentedSuite "OK (15 tests) in [AdbWifiObserverTest LocalesTest TokenProviderTest]"; emulador parado. Pendiente: revisión opus T2/T3/T4. Interrumpido por orden f3: corregir H1-H3/M1 de tern en fix/v1-confirm-hardening primero.
