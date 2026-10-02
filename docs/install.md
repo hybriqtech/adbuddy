@@ -50,7 +50,7 @@ This works today, on any of the three systems. You need [Git](https://git-scm.co
    adbuddy dev
    ```
 
-4. Build the phone app. This needs JDK 17, the Android SDK platform 37 and Gradle 9.8; the repository has no Gradle wrapper yet.
+4. Build the phone app. This needs JDK 17, the Android SDK platform 37 and Gradle 9.8; the repository has no Gradle wrapper yet. Gradle must find the SDK: set `ANDROID_HOME` (as the CI does) or put `sdk.dir=<path to the SDK>` in `android/local.properties`, or it stops with "SDK location not found".
 
    ```sh
    cd ../android
@@ -156,7 +156,7 @@ With the host in your `PATH`, no cable is needed. Put the phone on the same Wi-F
 adbuddy setup
 ```
 
-It goes step by step and skips what is already done, so you can run it again. It refuses to run while `adbuddy serve` is running (`ALREADY_RUNNING`): stop serve first.
+It goes step by step. It skips pairing and the download when they are already done, but it asks for consent again and rewrites the environment, so you can run it again. It refuses to run while `adbuddy serve` is running (`ALREADY_RUNNING`): stop serve first.
 
 1. Downloads Android platform-tools, checked against Google's checksum.
 2. Pairs the phone with a QR code (or with `--code`, a pairing code) and connects.
@@ -207,7 +207,7 @@ On Linux and macOS:
 ```sh
 rm ~/.local/bin/adbuddy
 rm -r ~/.config/adbuddy ~/.local/share/adbuddy
-rm -r ~/ADBuddy/<phone-name>
+rm -r ~/ADBuddy/<phone name>
 ```
 
 On macOS the settings and the data are one folder: `rm -r ~/Library/Application\ Support/ADBuddy`.
@@ -216,7 +216,7 @@ On Windows, in PowerShell:
 
 ```powershell
 Remove-Item -Recurse "$env:APPDATA\ADBuddy", "$env:LOCALAPPDATA\ADBuddy"
-Remove-Item -Recurse "$HOME\ADBuddy\<phone-name>"
+Remove-Item -Recurse "$HOME\ADBuddy\<phone name>"
 Remove-Item -Recurse "$env:LOCALAPPDATA\Programs\adbuddy"
 ```
 
@@ -224,7 +224,7 @@ Then remove that folder from your `PATH` (Settings, search for "environment vari
 
 ## Next
 
-- [Set up your phone](setup/): Developer options, Wireless debugging and pairing, with pictures.
+- [Set up your phone](setup/): Developer options, Wireless debugging and pairing (screenshots coming).
 - [Use ADBuddy](usage.md): start the host, talk to the agent, undo, remote mode.
 - [Safety](safety.md): what ADBuddy protects and what it does not.
 - [Troubleshooting](troubleshooting.md): when something fails.

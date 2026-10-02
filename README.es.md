@@ -45,7 +45,7 @@ Todavía no hay versión pública, así que hoy compilas el host desde el códig
 
    Cuando haya una versión pública, un solo comando `curl … | sh` la instalará en Linux y macOS (en Windows será un archivo descargado): consulta [Instalar ADBuddy](docs/install.md) (en inglés).
 
-2. **Prepara el móvil.** Activa las opciones de desarrollador y la depuración inalámbrica. [Prepara tu móvil](docs/setup/es/index.md) tiene los pasos (la guía en inglés, con capturas, está en [Set up your phone](https://hybriqtech.github.io/adbuddy/setup/)).
+2. **Prepara el móvil.** Activa las opciones de desarrollador y la depuración inalámbrica. [Prepara tu móvil](docs/setup/es/index.md) tiene los pasos (capturas próximamente; la guía en inglés está en [Set up your phone](https://hybriqtech.github.io/adbuddy/setup/)).
 
 3. **Ejecuta setup.** Descarga las platform-tools de Android, empareja el móvil con un código QR, instala la app y prepara el entorno del agente. Hoy no descarga la app: compila el APK como dice [Instalar ADBuddy](docs/install.md#build-from-source) (en inglés) y pásalo.
 
@@ -126,7 +126,7 @@ Son los comandos de `adbuddy --help` (el programa los describe en inglés; aquí
 Las guías están en inglés, salvo la de preparación del móvil.
 
 - [Instalar ADBuddy](docs/install.md) (en inglés): compilar desde el código, actualizar y desinstalar.
-- [Prepara tu móvil](docs/setup/es/index.md): opciones de desarrollador, depuración inalámbrica y emparejamiento. La versión en inglés, con capturas: [Set up your phone](https://hybriqtech.github.io/adbuddy/setup/).
+- [Prepara tu móvil](docs/setup/es/index.md): opciones de desarrollador, depuración inalámbrica y emparejamiento. La versión en inglés (capturas próximamente): [Set up your phone](https://hybriqtech.github.io/adbuddy/setup/).
 - [Usar ADBuddy](docs/usage.md) (en inglés): arrancar el host, hablar con el agente, responder preguntas, deshacer, modo remoto.
 - [Seguridad](docs/safety.md) (en inglés): lo que ADBuddy protege y lo que no garantiza.
 - [Preguntas frecuentes](docs/faq.md) (en inglés): respuestas cortas.

@@ -94,11 +94,11 @@ Tras "Paired", `adbuddy setup` hace el resto por sí solo, en este orden. No tie
 5. **Elige el agente.** Busca Claude Code, Codex, Gemini CLI y OpenCode en tu `PATH`. Si tienes varios, pregunta cuál usar. `--agent <nombre>` y `--yes` se saltan la pregunta. Si no hay ninguno instalado, dice cómo instalar uno. ADBuddy no instala agentes.
 6. **Crea el entorno.** El entorno es la carpeta donde trabaja el agente: `~/ADBuddy/<nombre del móvil>/`. El nombre del móvil es su modelo en minúsculas y con guiones. La carpeta contiene las instrucciones y las skills del agente, con el perfil del móvil, y el shim (un sustituto de `adb` que clasifica cada comando por riesgo y lo apunta en el diario). Setup también guarda tus elecciones. Después imprime una línea que empieza por "Ready:".
 
-Puedes volver a ejecutar setup, con `adbuddy serve` parado. Se reconecta, vuelve a pedir tu consentimiento y reescribe las instrucciones y las skills del agente (`NOTES.md` se queda como está). También apaga el modo remoto. Si setup ya conoce tu móvil, lo encuentra ("Found it: already paired.") y se salta la guía y el código QR.
+Puedes volver a ejecutar setup, con `adbuddy serve` parado. Se reconecta, vuelve a pedir tu consentimiento y reescribe las instrucciones y las skills del agente (`NOTES.md` se queda como está). También apaga el modo remoto. Si el móvil que configuraste antes responde en la red, setup lo encuentra ("Found it: already paired.") y se salta la guía y el código QR.
 
 ## Qué hace ADBuddy con este acceso
 
-El agente trabaja a través del shim de ADBuddy, que clasifica cada comando por riesgo, lo apunta en un diario con su forma de deshacerlo y hace esperar tu confirmación a lo irreversible. El shim protege contra errores e inyecciones de prompts, no contra un agente empeñado en buscar otro adb: para eso, el interruptor real es **Cortar acceso** en la app. Setup nunca pide ni guarda el PIN del móvil. [Seguridad](../../safety.md), en inglés, tiene los detalles.
+El agente trabaja a través del shim de ADBuddy, que clasifica cada comando por riesgo, lo apunta en un diario con su forma de deshacerlo y hace esperar tu confirmación a los comandos que clasifica como rojos (los toques y la escritura no se preguntan). El shim protege contra errores e inyecciones de prompts, no contra un agente empeñado en buscar otro adb: para eso, el interruptor real es **Cortar acceso** en la app. Setup nunca pide ni guarda el PIN del móvil. [Seguridad](../../safety.md), en inglés, tiene los detalles.
 
 ## Siguiente: arranca ADBuddy
 

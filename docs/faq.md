@@ -18,7 +18,7 @@ ADBuddy supports Claude Code, Codex, Gemini CLI and OpenCode, and recommends Cla
 
 ## What does the agent see on my phone?
 
-What adb lets it read: the apps installed, settings, files in shared storage, the phone's logs, what is on the screen (the text of its elements, and screenshots) and, through content providers, what the phone's shell may read, such as contacts and call history (it depends on the phone). Reading is green, so it does not ask you. ADBuddy's screen helpers never carry the text of password fields, and nothing touches or reads the screen while a protected app is in front. What it reads goes into its conversation, and so to its model provider. See [Safety](safety.md#the-three-levels) and [What ADBuddy does not guarantee](safety.md#what-adbuddy-does-not-guarantee).
+What adb lets it read: the apps installed, settings, files in shared storage, the phone's logs, what is on the screen (the text of its elements, and screenshots) and, through content providers, what the phone's shell may read, such as contacts and call history (it depends on the phone). Reading is green, so it does not ask you. ADBuddy's screen helpers never carry the text of password fields, and, with the app, nothing touches or reads the screen while a protected app is in front (without the app, only ADBuddy itself is protected). What it reads goes into its conversation, and so to its model provider. See [Safety](safety.md#the-three-levels) and [What ADBuddy does not guarantee](safety.md#what-adbuddy-does-not-guarantee).
 
 ## Can it delete my photos?
 
@@ -36,9 +36,9 @@ Yes, with a little more work. Tailscale gives the PC and the phone addresses tha
 
 If you lose the PC, tap **Cut access** in the app, or turn off both USB debugging and Wireless debugging (turning off only Wireless debugging does not close port 5555). If remote mode was on, restart the phone. Then use **Revoke USB debugging authorizations**, forget the PC under **Paired devices** and remove it from your Tailscale network. If you lose the phone, ADBuddy adds no other way in: lock it and erase it with your phone's own tools. The journal on the PC lists what the agent ran. See [Pause and cut access](usage.md#pause-and-cut-access) and [Uninstall](install.md#uninstall).
 
-## Why does it never ask for my PIN?
+## Why doesn't it ask for my PIN?
 
-Because it never needs it. ADBuddy's helpers do not type into password fields when the app is connected, the agent's instructions forbid asking for a PIN or a password, and Android asks for its own when it must. To allow a red command from the phone, you unlock the phone yourself. See [Safety](safety.md#protected-apps-and-the-screen).
+It has no need to. ADBuddy's helpers do not type into password fields when the app is connected, the agent's instructions forbid asking for a PIN or a password, and Android asks for its own when it must. To allow a red command from the phone, you unlock the phone yourself. See [Safety](safety.md#protected-apps-and-the-screen).
 
 ## How much does it cost?
 

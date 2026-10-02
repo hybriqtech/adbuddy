@@ -3,7 +3,7 @@
 # Careful: `exclude` is a list of what stays out, not of what goes in. Any new
 # .md file under docs/ is published unless it is added below.
 title: ADBuddy
-description: Let any coding agent manage your Android phone over Wi-Fi adb, safely.
+description: Let any coding agent manage your Android phone over Wi-Fi adb, with every command ranked, journaled and the risky ones confirmed.
 theme: jekyll-theme-minimal  # responsive, with a viewport for phones
 exclude:
   - superpowers

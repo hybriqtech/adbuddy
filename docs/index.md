@@ -5,7 +5,7 @@ layout: default
 
 # ADBuddy
 
-Chat from your phone with a coding agent on your PC, and let it manage your Android phone over Wi-Fi adb, safely.
+Chat from your phone with a coding agent on your PC, and let it manage your Android phone over Wi-Fi adb, with every command ranked, journaled and the risky ones confirmed.
 
 - [Set up your phone](setup/): turn on Wireless debugging and pair the phone.
 - [Prepara tu móvil (español)](setup/es/): la misma guía en español.

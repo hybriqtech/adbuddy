@@ -94,11 +94,11 @@ After "Paired", `adbuddy setup` does the rest by itself, in this order. You do n
 5. **Picks the agent.** It looks for Claude Code, Codex, Gemini CLI and OpenCode in your `PATH`. If you have several, it asks which one to use. `--agent <name>` and `--yes` skip the question. If none is installed, it says how to install one. ADBuddy does not install agents.
 6. **Creates the environment.** The environment is the folder where the agent works: `~/ADBuddy/<phone name>/`. The phone name is the phone's model in lower case with dashes. The folder holds the agent's instructions and skills, with the phone's profile, and the shim (a small stand-in for `adb` that ranks every command by risk and journals it). Setup also saves your choices. Then it prints a line that starts with "Ready:".
 
-You can run setup again, with `adbuddy serve` stopped. It reconnects, asks for your consent again and rewrites the agent's instructions and skills (`NOTES.md` stays). It also turns remote mode off. If setup already knows your phone, it finds it ("Found it: already paired.") and skips the guide and the QR code.
+You can run setup again, with `adbuddy serve` stopped. It reconnects, asks for your consent again and rewrites the agent's instructions and skills (`NOTES.md` stays). It also turns remote mode off. If the phone you set up before answers on the network, setup finds it ("Found it: already paired.") and skips the guide and the QR code.
 
 ## What ADBuddy does with this access
 
-The agent works through ADBuddy's shim, which ranks each command by risk, writes it to a journal with its undo, and makes anything irreversible wait for your confirmation. The shim protects against mistakes and prompt injection, not against an agent set on finding another adb: for that, **Cut access** in the app is the real switch. Setup never asks for or stores your PIN. [Safety](../safety.md) has the details.
+The agent works through ADBuddy's shim, which ranks each command by risk, writes it to a journal with its undo, and makes the commands it ranks red wait for your confirmation (taps and typing are not asked about). The shim protects against mistakes and prompt injection, not against an agent set on finding another adb: for that, **Cut access** in the app is the real switch. Setup never asks for or stores your PIN. [Safety](../safety.md) has the details.
 
 ## Next: start ADBuddy
 

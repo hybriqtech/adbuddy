@@ -45,7 +45,7 @@ There is no public release yet, so today you build the host from source. [Instal
 
    When there is a public release, a single `curl … | sh` command will install it on Linux and macOS (Windows will use a downloaded archive): see [Install ADBuddy](docs/install.md).
 
-2. **Prepare the phone.** Turn on Developer options and Wireless debugging. [Set up your phone](https://hybriqtech.github.io/adbuddy/setup/) has the steps with pictures (in the repository: [docs/setup/index.md](docs/setup/index.md)).
+2. **Prepare the phone.** Turn on Developer options and Wireless debugging. [Set up your phone](https://hybriqtech.github.io/adbuddy/setup/) has the steps (screenshots coming; in the repository: [docs/setup/index.md](docs/setup/index.md)).
 
 3. **Run setup.** It downloads Android platform-tools, pairs the phone with a QR code, installs the app and prepares the agent's environment. Today it does not download the app: build the APK as [Install ADBuddy](docs/install.md#build-from-source) says and pass it.
 

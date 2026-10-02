@@ -8,9 +8,9 @@ lang: en
 
 This page is for the day after [setup](install.md): start the host, talk to your agent, answer its questions, look back at what it did and undo it.
 
-ADBuddy puts a **shim** between the agent and the phone. A shim is a small stand-in program: the agent runs what it thinks is `adb`, and ADBuddy's copy ranks the command by risk, writes it to a **journal** and, when it cannot be undone, waits for your answer. The **environment** is the folder where the agent works (`~/ADBuddy/<phone name>/`).
+ADBuddy puts a **shim** between the agent and the phone. A shim is a small stand-in program: the agent runs what it thinks is `adb`, and ADBuddy's copy ranks the command by risk, writes it to a **journal** and, when it ranks the command red, waits for your answer. The **environment** is the folder where the agent works (`~/ADBuddy/<phone name>/`).
 
-Every command gets one of three levels: green (read-only, runs at once), yellow (reversible, journaled with its undo) and red (irreversible, dangerous or not understood: it waits for you). [Safety](safety.md) explains each one.
+Every command gets one of three levels: green (read-only, runs at once), yellow (reversible or harmless; journaled, with its undo when it has one) and red (irreversible, dangerous or not understood: it waits for you). [Safety](safety.md) explains each one.
 
 ## Start the host
 
@@ -83,11 +83,11 @@ adbuddy new codex
 adbuddy stop
 ```
 
-`adbuddy new` starts a fresh conversation, with another agent if you name one. `adbuddy stop` stops the agent; serve keeps running. The phone has **New conversation** in its menu. The agent cannot run these commands.
+`adbuddy new` starts a fresh conversation, with another agent if you name one. `adbuddy stop` stops the agent; serve keeps running. The phone has **New conversation** in its menu. These commands are refused (`AGENT_SESSION`) when the agent's session runs them; that is a check against mistakes, not a barrier.
 
 ## Answer red questions
 
-When the agent runs something irreversible, ADBuddy holds the command until you answer. The agent waits.
+When the agent runs a command ADBuddy ranks red, it holds the command until you answer. The agent waits.
 
 - **App connected:** the question appears on the phone as a notification with **Allow**, **Deny** and, when the host offers it, **Allow during the session**. The app shows the same question as a dialog when it is open. The phone must be unlocked to allow; Deny always works.
 - **No app connected:** the question appears in the `adbuddy serve` terminal, similar to this (a `Why:` line follows when there is a reason):
@@ -181,7 +181,7 @@ adbuddy screenshot
 - `adbuddy foreground` shows the app in front.
 - `adbuddy screenshot` saves a picture, scaled to half by default, in `screenshots/` of the current folder. `-o` picks the file and `--scale` the size.
 
-Each one is journaled like an adb command. Banking, payments, password and 2FA apps, and ADBuddy itself, are protected: while one is in front, the agent can neither read nor touch the screen. Today ADBuddy guesses that list from app names, and you cannot edit it yet. ADBuddy never types into password fields.
+Each one is journaled like an adb command. With the app, banking, payments, password and 2FA apps, and ADBuddy itself, are protected: while one is in front, the agent can neither read nor touch the screen. Today ADBuddy guesses that list from app names, and you cannot edit it yet. Without the app, only ADBuddy itself is protected. With the app connected, `adbuddy type "<text>"` refuses password fields.
 
 While the agent uses the screen, the phone shows a frame round it and a pill, **Agent using the screen · Pause**. Tap the pill to pause.
 
@@ -197,7 +197,7 @@ It arrives in the chat on the phone. You can ask the agent to do it.
 
 ## Pause and cut access
 
-Two controls on the phone work without the PC.
+Two controls on the phone. **Cut access** works without the PC; **Pause** asks the host, so it needs the app connected.
 
 **Pause** stops the agent from using the phone, and the connection stays up. While paused, ADBuddy refuses every adb command, every screen helper and `adbuddy undo`, and withdraws open questions. The agent is told `paused from the phone`. Pause from the chat's ⋮ menu, from the conversation notification, or from the pill on the screen. Choose **Resume** to continue. Pause is only offered while the phone is connected to the host.
 
@@ -232,7 +232,7 @@ ADBuddy finds the phone by mDNS, which only works on one network. Away from home
 
 ### With mobile data only
 
-Without any Wi-Fi, ADBuddy reaches the phone through adb's port 5555. **You** turn this on, never the agent:
+Without any Wi-Fi, ADBuddy reaches the phone through adb's port 5555. **You** turn this on. A request from the agent's session is refused (`AGENT_SESSION`, a check against mistakes), and turning it on always asks you with a special confirmation:
 
 ```sh
 adbuddy remote on
@@ -280,5 +280,5 @@ They live in `.claude/skills/` and `.agents/skills/` of the environment. A skill
 
 - [Safety](safety.md): the levels, the journal, what is protected and what is not.
 - [Troubleshooting](troubleshooting.md): `adbuddy doctor` and the error codes.
-- [Set up your phone](setup/): Wireless debugging, pairing and Tailscale, with pictures.
+- [Set up your phone](setup/): Wireless debugging, pairing and Tailscale (screenshots coming).
 - [Install ADBuddy](install.md): update and uninstall.

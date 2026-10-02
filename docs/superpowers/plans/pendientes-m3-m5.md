@@ -149,11 +149,9 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - mantener `docs/troubleshooting.md` al día cuando cambien los códigos de error (el test de guarda no los comprueba: ver el paso 3 de "Cutting a release" en `docs/releasing.md`);
   - **código:** `daemon/inverse.go` admite inversos `uninstall <pkg>` y `rm -f <ruta>`: una entrada de diario falsificada y firmada con `ipc.secret` (que el agente puede leer) haría que `adbuddy undo` actúe sin preguntar. Es de la misma clase que "agente decidido" (el shim no protege contra eso), pero queda anotado;
   - **código:** `serve --help`, el último mensaje de `setup` y la antigua `host/README.md` decían "serve, luego run en otra terminal", pero `serve` arranca el agente él mismo (`serve --no-agent` + `run` es la alternativa): corregir `--help` y el mensaje de `setup`;
-  - **código:** `phone.go:148,170` y la app prometen "ejecuta `adbuddy setup` para actualizar la app", pero `setup` solo instala la app si falta o con `--apk`: cambiar el texto o hacer que `setup` actualice;
+  - **código:** la promesa "ejecuta `adbuddy setup` para actualizar la app" está en `host/internal/cli/phone.go:170` y en las cadenas `status_update_app` de `android/app/src/main/res/values/strings.xml` y `values-es/strings.xml`, pero `setup` solo instala la app si falta o con `--apk` (`phone.go:148` dice "install it", cierto si falta la app; hoy, sin release ni certificado fijado, `setup` sin `--apk` no instala la app): cambiar el texto o hacer que `setup` actualice;
   - la guarda de guías exige argumentos completos en `adbuddy type "<text>"` y `adbuddy setup --apk <file>` (convención): documentarlo junto a `docs_test.go`;
   - `checkDocHTMLish` da el número de línea de la prosa y no del fichero;
-  - `docs/faq.md` ~29 ("nothing touches or reads the screen while a protected app is in front") y ~50 (título "never ask for my PIN"): matizar;
-  - `docs/install.md:210,219` usa `<phone-name>` y el resto de las guías `<phone name>`: unificar;
   - Advanced Protection de Android: las guías hablan de ella, pero el código no la comprueba.
 - **Aplazados de las revisiones de M6b:**
   - la guarda de ejemplos deja sin comprobar un bloque ```adb que sigue a una valla de 4 backticks o con info string `adb{.x}` (guardar la longitud de la valla y marcar como error cualquier info string que empiece por `adb` y no sea exactamente `adb`/`adbuddy`);
