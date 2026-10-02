@@ -12,6 +12,11 @@ import tech.hybriq.adbuddy.bridge.UiNotifications
 class NotificationReportTest {
     private val at = Instant.parse("2026-10-01T09:58:00Z").toEpochMilli()
     private val bank = setOf("com.example.bank")
+    private fun assertHiddenKey(key: String) {
+        assertTrue(key, key.startsWith("hidden-"))
+        assertFalse(key, key.contains("482913"))
+    }
+
     private val guarded: (String) -> Boolean = { it in bank }
 
     private fun raw(
@@ -52,14 +57,16 @@ class NotificationReportTest {
     }
 
     @Test fun adbuddyItselfShowsNoContent() {
-        val r = NotificationReport.build(listOf(raw("tech.hybriq.adbuddy", "The agent wants to: reboot", "adb shell reboot")), { false })
+        val r = NotificationReport.build(listOf(raw("tech.hybriq.adbuddy", "The agent wants to: reboot", "adb shell reboot", key = "0|tech.hybriq.adbuddy|7|otp-482913|1")), { false })
+        assertHiddenKey(r.notifications[0].key)
         assertEquals("tech.hybriq.adbuddy", r.notifications[0].`package`)
         assertEquals("", r.notifications[0].title)
         assertEquals("", r.notifications[0].text)
     }
 
     @Test fun aNotificationMarkedSecretShowsNoContent() {
-        val r = NotificationReport.build(listOf(raw("com.other.app", "Code", "482913", secret = true)), { false })
+        val r = NotificationReport.build(listOf(raw("com.other.app", "Code", "482913", key = "0|com.other.app|7|otp-482913|1", secret = true)), { false })
+        assertHiddenKey(r.notifications[0].key)
         assertEquals("com.other.app", r.notifications[0].`package`)
         assertEquals("", r.notifications[0].text)
         assertEquals("", r.notifications[0].title)
@@ -67,8 +74,10 @@ class NotificationReportTest {
 
     @Test fun aPackageThatIsNotOneIsHiddenAndNotShown() {
         for (pkg in listOf("", "bank", "a b.c", "x\u001b[2J.y")) {
-            val r = NotificationReport.build(listOf(raw(pkg, "t", "482913")), { false })
+            val r = NotificationReport.build(listOf(raw(pkg, "t", "482913", key = "0|x|7|otp-482913|1")), { false })
             assertEquals("", r.notifications[0].`package`)
+            assertEquals("", r.notifications[0].title)
+            assertHiddenKey(r.notifications[0].key)
             assertEquals("", r.notifications[0].text)
         }
     }
@@ -85,15 +94,16 @@ class NotificationReportTest {
         val r = NotificationReport.build(
             listOf(
                 raw("com.example.bank", "Bank", "Your code is 482913", key = "0|com.example.bank|7|otp-482913|10140"),
-                raw("tech.hybriq.adbuddy", "Question", "482913"),
-                raw("com.other.app", "x", "482913", secret = true),
-                raw("not a package", "x", "482913"),
+                raw("tech.hybriq.adbuddy", "Question", "482913", key = "0|tech.hybriq.adbuddy|7|otp-482913|1"),
+                raw("com.other.app", "x", "482913", key = "0|com.other.app|7|otp-482913|1", secret = true),
+                raw("not a package", "x", "482913", key = "0|x|7|otp-482913|1"),
             ),
             guarded,
         )
         val json = Protocol.json.encodeToString(UiNotifications.serializer(), r)
         assertFalse(json, json.contains("482913"))
         assertFalse(json, json.contains("otp-"))
+        r.notifications.forEach { assertHiddenKey(it.key) }
     }
 
     @Test fun atMostFiftyTheNewestKept() {
@@ -113,6 +123,9 @@ class NotificationReportTest {
             assertEquals(s.length, UiLimits.MAX_NOTIFICATION_TEXT * 2) // no half pair
         }
         assertEquals("short", NotificationReport.clip("short"))
+        val edge = NotificationReport.clip("a".repeat(UiLimits.MAX_NOTIFICATION_TEXT - 1) + "😀😀")
+        assertEquals("a".repeat(UiLimits.MAX_NOTIFICATION_TEXT - 1) + "😀", edge)
+        assertEquals(UiLimits.MAX_NOTIFICATION_TEXT + 1, edge.length)
     }
 
     @Test fun theAnswerFitsWhatTheHostAccepts() {
@@ -125,6 +138,21 @@ class NotificationReportTest {
         assertTrue(r.truncated)
         assertTrue(r.notifications.isNotEmpty())
         assertEquals("k49", r.notifications[0].key) // the oldest were dropped, not the newest
+    }
+
+    @Test fun toStringLeaksNothing() {
+        val s = raw("com.example.bank", "Bank title", "code 482913", key = "0|com.example.bank|7|otp-482913|1").toString()
+        assertFalse(s, s.contains("Bank title"))
+        assertFalse(s, s.contains("482913"))
+        assertFalse(s, s.contains("otp-"))
+        assertTrue(s, s.contains("com.example.bank"))
+    }
+
+    @Test fun aHugeVisibleKeyCannotEmptyTheAnswer() {
+        val r = NotificationReport.build(listOf(raw("com.a.app", key = "k".repeat(UiLimits.MAX_UI_RESULT + 10))), guarded)
+        assertEquals(1, r.notifications.size)
+        assertTrue(r.notifications[0].key.codePointCount(0, r.notifications[0].key.length) <= UiLimits.MAX_NOTIFICATION_TEXT)
+        assertFalse(r.truncated)
     }
 
     @Test fun nothingIsNothing() {

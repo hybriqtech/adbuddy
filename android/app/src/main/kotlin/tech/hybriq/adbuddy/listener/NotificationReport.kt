@@ -22,7 +22,11 @@ data class RawNotification(
     val ongoing: Boolean,
     /** The app marked it VISIBILITY_SECRET: not even the lock screen shows it. */
     val secret: Boolean,
-)
+) {
+    /** A data class would print key, title and text: nothing may log them. */
+    override fun toString() =
+        "RawNotification(pkg=$pkg, postedAtMs=$postedAtMs, ongoing=$ongoing, secret=$secret, key/title/text=<redacted>)"
+}
 
 /**
  * What `adbuddy notifications` gets (M5 spec §3.5). Pure, so it is unit-tested.
@@ -35,22 +39,24 @@ object NotificationReport {
     /** guarded: ADBuddy or a protected app, asked now (the list can change between calls). */
     fun build(raw: List<RawNotification>, guarded: (String) -> Boolean): UiNotifications {
         val newest = raw.sortedWith(compareByDescending<RawNotification> { it.postedAtMs }.thenBy { it.key })
-        var report = UiNotifications(
-            newest.take(UiLimits.MAX_NOTIFICATIONS).mapIndexed { i, n -> item(n, i, guarded) },
-            truncated = newest.size > UiLimits.MAX_NOTIFICATIONS,
-        )
+        val items = newest.take(UiLimits.MAX_NOTIFICATIONS).mapIndexed { i, n -> item(n, i, guarded) }
         // The whole answer must fit what the host accepts: drop the oldest until it does.
-        while (report.notifications.isNotEmpty() && encodedSize(report) > UiLimits.MAX_UI_RESULT) {
-            report = UiNotifications(report.notifications.dropLast(1), truncated = true)
+        // Each item is measured once (+1 for its comma); the envelope is measured with truncated = true.
+        val envelope = encodedSize(UiNotifications(emptyList(), truncated = true))
+        var total = envelope + items.sumOf { encodedSize(it) + 1 }
+        var keep = items.size
+        while (keep > 0 && total > UiLimits.MAX_UI_RESULT) {
+            keep--
+            total -= encodedSize(items[keep]) + 1
         }
-        return report
+        return UiNotifications(items.take(keep), truncated = newest.size > UiLimits.MAX_NOTIFICATIONS || keep < items.size)
     }
 
     private fun item(n: RawNotification, index: Int, guarded: (String) -> Boolean): UiNotification {
         val validPkg = UiLimits.validPackage(n.pkg)
         val hidden = !validPkg || n.pkg == Packages.ADBUDDY || n.secret || guarded(n.pkg)
         return UiNotification(
-            key = if (hidden) "hidden-$index" else n.key,
+            key = if (hidden) "hidden-$index" else clip(n.key),
             `package` = if (validPkg) n.pkg else "",
             title = if (hidden) "" else clip(n.title),
             text = if (hidden) "" else clip(n.text),
@@ -67,4 +73,7 @@ object NotificationReport {
 
     private fun encodedSize(r: UiNotifications): Int =
         Protocol.json.encodeToString(UiNotifications.serializer(), r).toByteArray(Charsets.UTF_8).size
+
+    private fun encodedSize(n: UiNotification): Int =
+        Protocol.json.encodeToString(UiNotification.serializer(), n).toByteArray(Charsets.UTF_8).size
 }
