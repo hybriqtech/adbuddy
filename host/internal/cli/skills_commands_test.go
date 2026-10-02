@@ -56,6 +56,11 @@ var allowedRecursiveRm = [][]string{
 	{"shell", "rm", "-r", "/sdcard/ADBuddy-papelera"},
 }
 
+// shellSeparators turn what a shell treats as a command boundary or a
+// grouping into a space, so that `x;rm -r y` and `$(rm -r y)` inside one
+// quoted argument still show their rm.
+var shellSeparators = strings.NewReplacer(";", " ", "|", " ", "&", " ", "(", " ", ")", " ", "$", " ", "`", " ", "<", " ", ">", " ", "{", " ", "}", " ", "\"", " ", "'", " ")
+
 // forbiddenRecipe says whether a command does what no recipe does, however
 // well it is annotated (spec §2.3): clear an app's data, delete recursively,
 // wipe, reboot, or install granting every permission.
@@ -67,15 +72,26 @@ func forbiddenRecipe(file string, fields []string) bool {
 	}
 	var toks []string
 	for _, f := range fields {
-		toks = append(toks, strings.Fields(strings.ToLower(f))...)
+		toks = append(toks, strings.Fields(shellSeparators.Replace(strings.ToLower(f)))...)
 	}
 	joined := strings.Join(toks, " ")
 	if wipeRe.MatchString(joined) || strings.Contains(joined, "reboot") ||
-		strings.Contains(joined, "pm clear") || strings.Contains(joined, "package clear") {
+		strings.Contains(joined, "pm clear") || strings.Contains(joined, "package clear") ||
+		strings.Contains(joined, "master_clear") || strings.Contains(joined, "factory_reset") {
 		return true
 	}
 	for i, tk := range toks {
 		switch {
+		case tk == "find" || strings.HasSuffix(tk, "/find"):
+			if slices.Contains(toks[i+1:], "-delete") {
+				return true
+			}
+		case tk == "uninstall" && i > 0 && (toks[i-1] == "pm" || toks[i-1] == "package"):
+			// Only for one user, never for the whole phone.
+			rest := toks[i+1:]
+			if !slices.ContainsFunc(rest, func(o string) bool { return o == "--user" || strings.HasPrefix(o, "--user=") }) {
+				return true
+			}
 		case tk == "rm" || strings.HasSuffix(tk, "/rm"):
 			for _, o := range toks[i+1:] {
 				if o == "--recursive" || (strings.HasPrefix(o, "-") && !strings.HasPrefix(o, "--") && strings.Contains(o, "r")) {
@@ -109,9 +125,11 @@ func skillExamplesIn(fsys fs.FS) ([]skillExample, []string) {
 		}
 		kind := ""
 		other := false // inside a block of another language (sh, text…)
+		fence := 0     // backticks of the fence that opened that block
 		for i, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
 			trim := strings.TrimSpace(line)
 			ticks := len(trim) - len(strings.TrimLeft(trim, "`"))
+			closing := ticks >= 3 && ticks == len(trim) // only backticks: a closing fence
 			switch {
 			case kind == "" && !other && strings.HasPrefix(trim, "~~~"):
 				bad("%s:%d: use ``` fences, never ~~~: the blocks of ```adb are checked", p, i+1)
@@ -121,15 +139,16 @@ func skillExamplesIn(fsys fs.FS) ([]skillExample, []string) {
 				switch {
 				case ticks == 3 && (info == "adb" || info == "adbuddy"):
 					kind = info
-				case word == "adb" || word == "adbuddy":
+				case strings.HasPrefix(word, "adb") || strings.Contains(strings.ToLower(info), "{") && strings.Contains(strings.ToLower(info), "adb"):
+					// adb{.x}, adbuddy,x, {.adb}: a renderer may still call it adb
 					bad("%s:%d: the fence must be exactly ```adb or ```adbuddy (lower case, three backticks, nothing else): %q", p, i+1, trim)
-					other = true
+					other, fence = true, ticks
 				default:
-					other = true
+					other, fence = true, ticks
 				}
-			case other && trim == "```":
+			case other && closing && ticks >= fence:
 				other = false
-			case kind != "" && trim == "```":
+			case kind != "" && closing:
 				kind = ""
 			case kind != "" && trim != "":
 				ex := skillExample{file: p, line: i + 1, kind: kind, text: trim}
@@ -386,6 +405,12 @@ func TestSkillExamplesCatches(t *testing.T) {
 		"adbuddy annotation":     adbuddyBlock("screen   # green"),
 		"adbuddy prefix":         adbuddyBlock("adbuddy screen"),
 		"empty fence unclosed":   "```\nadb shell ls\n",
+		// V33: fences that used to hide an adb block from the guard.
+		"adb after a 4 backtick fence": "````text\nsome output\n````\n```adb\nshell getprop ro.product.model\n```\n",
+		"3 ticks inside a 4 fence":     "````text\n```\n````\n```adb\nshell getprop ro.product.model\n```\n",
+		"attribute info string":        "```adb{.x}\nshell getprop ro.product.model   # green\n```\n",
+		"braces info string":           "``` {.adb}\nshell getprop ro.product.model   # green\n```\n",
+		"adbuddy attribute":            "```adbuddy{.x}\nscreen\n```\n",
 	}
 	for name, md := range bad {
 		t.Run("bad/"+name, func(t *testing.T) {
@@ -409,15 +434,18 @@ func TestSkillExamplesCatches(t *testing.T) {
 		})
 	}
 	good := map[string]string{
-		"getprop":        adbBlock("shell getprop ro.product.model   # green"),
-		"input swipe":    adbBlock("shell input swipe 540 1200 540 400 600   # yellow"),
-		"packages":       adbBlock("shell pm list packages -3   # green"),
-		"settings":       adbBlock("shell settings get global window_animation_scale   # green"),
-		"screenshot -o":  adbuddyBlock("screenshot -oshot.png"),
-		"screen":         adbuddyBlock("screen"),
-		"send":           adbuddyBlock(`send outbox/device-profile.md --caption "Device profile"`),
-		"foreground":     adbuddyBlock("foreground"),
-		"other language": "```text\nsome output\n```\n\nPlain prose about the phone.\n",
+		"getprop":                     adbBlock("shell getprop ro.product.model   # green"),
+		"input swipe":                 adbBlock("shell input swipe 540 1200 540 400 600   # yellow"),
+		"packages":                    adbBlock("shell pm list packages -3   # green"),
+		"settings":                    adbBlock("shell settings get global window_animation_scale   # green"),
+		"screenshot -o":               adbuddyBlock("screenshot -oshot.png"),
+		"screen":                      adbuddyBlock("screen"),
+		"send":                        adbuddyBlock(`send outbox/device-profile.md --caption "Device profile"`),
+		"foreground":                  adbuddyBlock("foreground"),
+		"other language":              "```text\nsome output\n```\n\nPlain prose about the phone.\n",
+		"4 fence with a nested block": "````text\n```adb\nshell pm clear com.example.app\n```\n````\n\n" + adbBlock("shell getprop ro.product.model   # green"),
+		"find without delete":         adbBlock("shell find /sdcard/DCIM -type d   # green"),
+		"uninstall for one user":      adbBlock("shell pm uninstall --user 0 com.example.app   # yellow"),
 	}
 	for name, md := range good {
 		t.Run("good/"+name, func(t *testing.T) {
@@ -465,4 +493,55 @@ func TestRecursiveRmException(t *testing.T) {
 			t.Errorf("the exact command must fail outside %s (%s): %v", own, other, errs)
 		}
 	}
+}
+
+// V33: what no recipe does, however it is hidden in a quoted argument. Every
+// case is annotated red so that the recipe filter is the only reason it fails.
+func TestForbiddenRecipesAreCaught(t *testing.T) {
+	cl, err := classify.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []string{
+		"shell 'echo $(rm -r /sdcard/x)'",
+		"shell 'echo `rm -r /sdcard/x`'",
+		"shell 'ls;rm -r /sdcard/x'",
+		"shell 'ls ; rm -rf /sdcard/x'",
+		"shell 'ls && rm --recursive /sdcard/x'",
+		"shell find /sdcard/x -delete",
+		"shell find /sdcard/x -type f -delete",
+		"shell /system/bin/find /sdcard/x -delete",
+		"shell 'cd /sdcard;find . -delete'",
+		"shell pm uninstall com.example.app",
+		"shell pm uninstall -k com.example.app",
+		"shell cmd package uninstall com.example.app",
+		"shell am broadcast -a android.intent.action.MASTER_CLEAR",
+		"shell am broadcast -a android.intent.action.FACTORY_RESET",
+		"shell am broadcast -a android.intent.action.FACTORY_RESET --es android.intent.extra.REASON x",
+	} {
+		t.Run(cmd, func(t *testing.T) {
+			errs := skillProblems(t, cl, adbBlock(cmd+"   # red"))
+			if len(errs) != 1 || !strings.Contains(errs[0], "a recipe never does this") {
+				t.Errorf("want only the recipe filter to reject it, got %v", errs)
+			}
+		})
+	}
+	for _, cmd := range []string{
+		"shell pm uninstall --user 0 com.example.app",
+		"shell pm uninstall --user=0 com.example.app",
+		"shell find /sdcard/x -type f",
+	} {
+		if forbiddenRecipe("x/SKILL.md", mustSplit(t, cmd)) {
+			t.Errorf("%q is not a forbidden recipe", cmd)
+		}
+	}
+}
+
+func mustSplit(t *testing.T, cmd string) []string {
+	t.Helper()
+	f, err := splitExample(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
 }
