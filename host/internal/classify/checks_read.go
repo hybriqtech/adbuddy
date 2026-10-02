@@ -12,6 +12,8 @@ func init() {
 		"awk":              checkAwk,
 		"sort":             checkSort,
 		"uniq":             checkUniq,
+		"pgrep":            checkPgrep,
+		"ss":               checkSs,
 		"date":             checkDate,
 		"dumpsys":          checkDumpsys,
 		"ip":               checkIP,
@@ -201,23 +203,43 @@ func checkAwk(ws []Word) checkResult {
 	return red(reason("awk without program"))
 }
 
+// toybox sort (confirmed with sort --help in the emulator) has no long
+// options. -k, -t and -o take a value; -S and -T are accepted and take one;
+// -h is not a toybox option, but it is the usual spelling of human sizes and
+// only fails. Anything else is unknown, so 🔴.
+var sortOptions = getoptSpec{flags: "bCcdfgiMnrsuxVzh", values: "ktoST", strict: true}
+
+// sort writes to a file with -o, alone, grouped (-uo), glued (-ofile) or in the
+// next word. -to (separator o) and -k2,2o (key modifier) are not output.
 func checkSort(ws []Word) checkResult {
-	for _, w := range ws[1:] {
-		if w.Value == "-o" || strings.HasPrefix(w.Value, "--output") || (strings.HasPrefix(w.Value, "-o") && !strings.HasPrefix(w.Value, "--")) {
-			return red(reason("sort -o writes a file"))
-		}
+	r := sortOptions.parse(ws[1:])
+	if r.bad != "" {
+		return red(reason("sort option {v} may write a file", "v", r.bad))
+	}
+	if _, o := r.seen['o']; o {
+		return red(reason("sort -o writes a file"))
 	}
 	return ok()
 }
 
+// uniq INPUT OUTPUT writes OUTPUT; -f, -s and -w take a value; after -- every
+// word is a file.
+var uniqOptions = getoptSpec{flags: "cduiz", values: "fsw", strict: true}
+
 func checkUniq(ws []Word) checkResult {
-	n := 0
-	for _, w := range ws[1:] {
-		if !strings.HasPrefix(w.Value, "-") || w.Value == "-" {
-			n++
+	r := uniqOptions.parse(ws[1:])
+	if r.bad != "" {
+		return red(reason("uniq option {v} may write a file", "v", r.bad))
+	}
+	// toybox rejects a value that is not a number ("uniq: not integer: a",
+	// checked in the emulator) before it acts, but a value that is not one is
+	// not trusted either.
+	for _, c := range "fsw" {
+		if v, set := r.seen[byte(c)]; set && !isDigits(v) {
+			return red(reason("uniq option {v} may write a file", "v", "-"+string(c)+v))
 		}
 	}
-	if n > 1 {
+	if len(r.pos) > 1 {
 		return red(reason("uniq with an output file"))
 	}
 	return ok()
@@ -408,14 +430,95 @@ func dumpsysActivity(args []string) bool {
 	return true
 }
 
-func checkIP(ws []Word) checkResult {
-	for _, w := range ws[1:] {
-		switch w.Value {
-		case "add", "del", "delete", "change", "replace", "set", "flush", "append", "prepend", "save", "restore", "exec", "up", "down":
-			return red(reason("ip command that changes the network"))
-		}
+// toybox pgrep (confirmed with pgrep --help in the emulator): -L SIGNAL sends
+// the signal to what it finds ("pgrep -L 9 -x sleep" killed the sleep), so L is
+// 🔴 whatever the way it is written. The other options only select or print.
+// It has no long options.
+var pgrepOptions = getoptSpec{flags: "aclfnovx", values: "dLGgPstUu", strict: true}
+
+func checkPgrep(ws []Word) checkResult {
+	r := pgrepOptions.parse(ws[1:])
+	if r.bad != "" {
+		return red(reason("pgrep option {v} may send a signal", "v", r.bad))
+	}
+	if _, l := r.seen['L']; l {
+		return red(reason("pgrep -L sends a signal to the processes"))
 	}
 	return ok()
+}
+
+// ss (iproute2, confirmed with ss --help in the emulator): -D FILE (--diag)
+// writes a file, -K (--kill) closes sockets, -F FILE reads the filter from a
+// file and -N switches namespace. They are not listed, so they are unknown
+// and 🔴; so is -E, which never ends. -A and -f take a value.
+var ssOptions = getoptSpec{
+	flags:  "hVnrlaoempisbZz460tSudwxH",
+	values: "Af",
+	longFlags: map[string]bool{
+		"--help": true, "--version": true, "--numeric": true, "--resolve": true, "--all": true, "--listening": true,
+		"--options": true, "--extended": true, "--memory": true, "--processes": true, "--info": true, "--summary": true,
+		"--bpf": true, "--context": true, "--contexts": true, "--ipv4": true, "--ipv6": true, "--packet": true,
+		"--tcp": true, "--sctp": true, "--udp": true, "--dccp": true, "--raw": true, "--unix": true, "--no-header": true,
+	},
+	longValues: map[string]bool{"--query": true, "--socket": true, "--family": true},
+	strict:     true,
+}
+
+func checkSs(ws []Word) checkResult {
+	if r := ssOptions.parse(ws[1:]); r.bad != "" {
+		return red(reason("ss option {v} may write a file or close sockets", "v", r.bad))
+	}
+	return ok()
+}
+
+// ip objects that only have a reading side. iproute2 accepts any prefix of an
+// object (ip a, ip l, ip r), so a word is an object if it is one.
+var ipObjects = []string{"address", "link", "route", "rule", "neighbor", "neighbour", "netconf", "maddress", "mroute"}
+
+// ip options that only change how the answer is printed. -b/-batch (read
+// commands from a file or stdin), -force, -n/-netns, -f and the rest are 🔴.
+var ipOptions = []string{
+	"-4", "-6", "-s", "-d", "-o", "-j", "-p", "-br", "-c",
+	"-stats", "-statistics", "-details", "-oneline", "-json", "-pretty", "-brief", "-color",
+}
+
+// ipReadVerbs: the verb is read exactly (an abbreviation such as s can be set,
+// save or show depending on the object). No verb shows.
+var ipReadVerbs = []string{"show", "list", "get"}
+
+// checkIP: ip [read-only options] OBJECT [show|list|get ...]; everything else
+// is 🔴, whether it is an unknown option, an abbreviated or unlisted object or
+// any verb that is not reading.
+func checkIP(ws []Word) checkResult {
+	i := 1
+	for ; i < len(ws) && strings.HasPrefix(ws[i].Value, "-"); i++ {
+		if !contains(ipOptions, ws[i].Value) {
+			return red(reason("ip option {v} is not a known way of reading the network", "v", ws[i].Value))
+		}
+	}
+	if i == len(ws) {
+		return ok()
+	}
+	if !isIPObject(ws[i].Value) {
+		return red(reason("ip {v} is not a known way of reading the network", "v", ws[i].Value))
+	}
+	i++
+	if i == len(ws) || contains(ipReadVerbs, ws[i].Value) {
+		return ok()
+	}
+	return red(reason("ip command that changes the network"))
+}
+
+func isIPObject(w string) bool {
+	if w == "" || strings.HasPrefix(w, "-") {
+		return false
+	}
+	for _, o := range ipObjects {
+		if strings.HasPrefix(o, w) {
+			return true
+		}
+	}
+	return false
 }
 
 func checkIfconfig(ws []Word) checkResult {
