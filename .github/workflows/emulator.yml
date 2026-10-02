@@ -4,14 +4,14 @@ name: emulator
 
 # Tests that need a real Android: the classifier's oracle (what the phone's
 # mksh does with each differential case) and the read-only examples of the
-# skills (they must run on the phone's toybox). Like host.yml: only on pull
-# requests and pushes to main, and only when what it checks changes.
+# skills (they must run on the phone's toybox). Only on pull requests and by
+# hand (workflow_dispatch), and only when what it checks changes. It does not
+# run on pushes to main: merges to main are fast-forwards of a pull request
+# that already passed it, so main's tree is the one it validated.
 on:
   pull_request:
     paths: ["host/internal/classify/**", "host/internal/workspace/skills/**", "host/internal/cli/skills_*_test.go", "scripts/emulator.sh", ".github/workflows/emulator.yml"]
-  push:
-    branches: [main]
-    paths: ["host/internal/classify/**", "host/internal/workspace/skills/**", "host/internal/cli/skills_*_test.go", "scripts/emulator.sh", ".github/workflows/emulator.yml"]
+  workflow_dispatch:
 
 permissions:
   contents: read

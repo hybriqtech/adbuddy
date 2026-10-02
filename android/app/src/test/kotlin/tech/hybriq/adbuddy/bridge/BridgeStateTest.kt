@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import tech.hybriq.adbuddy.ui.RemoteUi
 
 class BridgeStateTest {
     private fun msg(seq: Long, type: String, payload: String) =
@@ -343,5 +344,27 @@ class BridgeStateTest {
         val s = BridgeState(session = "s_1")
         assertNull(s.disconnected().remote)
         assertNull(s.appOutdated().remote)
+    }
+
+    /** The "lost answer" mark is the identity of state.remote (RemoteUi.unknownSince): only a new host state clears it. */
+    @Test fun aNewHostStateOfTheSameContentIsANewObjectSoTheLostAnswerMarkDoesNotSurvive() {
+        val a = BridgeState(session = "s_1").apply(msg(1, Protocol.REMOTE_STATE, active)).remote!!
+        val base = BridgeState(session = "s_1", lastSeq = 1, remote = a)
+        val viaEvent = base.apply(msg(2, Protocol.REMOTE_STATE, active)).remote
+        val viaSnapshot = base.apply(msg(3, Protocol.SNAPSHOT, """{"remote":$active}""")).remote
+        for (n in listOf(viaEvent, viaSnapshot)) {
+            assertEquals(a, n)
+            assertTrue("a new object, not the same instance", n !== a)
+            assertFalse(RemoteUi.unknownSince(true, a, n))
+        }
+    }
+
+    @Test fun disconnectingKeepsTheRemoteIdentitySoTheMarkPersistsUntilANewState() {
+        val a = RemoteState(enabled = true, address = "100.64.0.5:5555", expiresAt = "2026-10-01T10:00:00Z")
+        val s = BridgeState(session = "s_1", connection = BridgeState.Connection.CONNECTED, remote = a)
+        for (after in listOf(s.disconnected(), s.appOutdated())) {
+            assertTrue("same instance", after.remote === a)
+            assertTrue(RemoteUi.unknownSince(true, a, after.remote))
+        }
     }
 }

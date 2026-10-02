@@ -59,10 +59,11 @@ var (
 	filesNow = time.Now
 )
 
-// filesState is what the files keep. Two mutexes, neither held while calling
+// filesState is what the files keep. Three mutexes, none held while calling
 // the Manager or the bridge server (the handlers answer after releasing it):
 // upMu guards the uploads, and every frame of the app takes it too; dlMu
-// guards the downloads and the capture flag.
+// guards the downloads and the capture flag; sendMu gives adbuddy send its
+// turns at outbox/ (send.go, copyToOutbox).
 type filesState struct {
 	upMu    sync.Mutex
 	uploads map[string]*upload // by id, of this connection only
@@ -71,6 +72,8 @@ type filesState struct {
 	downloads map[string]*download
 	dlSlots   chan struct{} // one per download that sends: maxDownloads
 	capturing bool
+
+	sendMu sync.Mutex
 }
 
 // upload is an upload of this connection. A finished one stays (done) so that

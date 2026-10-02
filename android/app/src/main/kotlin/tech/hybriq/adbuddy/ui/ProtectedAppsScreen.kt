@@ -126,7 +126,7 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
         val list = ProtectedAppsUi.result(selection ?: return)
         protectedApps.confirm(list)
         val sent = UiHelpers.publishProtectedApps(app)
-        Toast.makeText(context, if (sent) savedSent else savedLater, Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, if (sent) savedSent else savedLater, if (sent) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
         onDone()
     }
 

@@ -131,4 +131,22 @@ class RemoteUiTest {
         assertTrue(RemoteUi.treatAsRemote(RemoteState(enabled = true, expiresAt = past))) // closing
         assertFalse(RemoteUi.treatAsRemote(RemoteState(enabled = false)))
     }
+
+    @Test fun `DISCONNECTED wins over unknownSince and cannot toggle or draw the switch`() {
+        for (c in listOf(Connection.WAITING, Connection.CONNECTING, Connection.INCOMPATIBLE)) {
+            for (r in listOf(null, RemoteState(enabled = false), RemoteState(enabled = true, expiresAt = future), RemoteState(enabled = true, expiresAt = past))) {
+                val v = view(state(r, c), unknownSince = true)
+                assertEquals("$c $r", Kind.DISCONNECTED, v.kind)
+                assertFalse("$c $r", v.canToggle)
+                assertFalse("$c $r", v.showSwitch)
+            }
+        }
+    }
+
+    @Test fun `waiting with the mark set is DISCONNECTED without a switch`() {
+        val v = view(state(RemoteState(enabled = true, expiresAt = future), Connection.WAITING), unknownSince = true)
+        assertEquals(Kind.DISCONNECTED, v.kind)
+        assertFalse(v.canToggle)
+        assertFalse(v.showSwitch)
+    }
 }
