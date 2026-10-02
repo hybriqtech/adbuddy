@@ -13,6 +13,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
@@ -489,4 +490,161 @@ func TestChatSendIsBusyWhenThePermissionIsLeftToTheTerminal(t *testing.T) {
 		// pending ones are gone, attention was raised by the refused one
 		typed(r, "r_3")
 	})
+}
+
+// V05: a question the host leaves to Claude Code's dialog on the terminal
+// keeps the chat busy past the attention's TTL (it was 120 s and then a
+// chat.send typed Enter on a dialog nobody had seen), until Stop, a prompt or
+// the end of the session. attentionTTL is 0: the TTL is over at once, no sleep.
+func TestChatSendIsBusyWhileTheTerminalHoldsAQuestionPastTheAttention(t *testing.T) {
+	typed := func(t *testing.T, r *agentRig, id string) {
+		t.Helper()
+		sendApp(t, r.c, bridge.TypeChatSend, id, bridge.ChatSend{ID: "c" + id, Text: "hola"})
+		r.readError(t, id, bridge.CodeBusy)
+		if said := r.pty(0).said(); said != "" {
+			t.Fatalf("something was typed into the dialog: %q", said)
+		}
+	}
+	left := func(t *testing.T, r *agentRig, input map[string]any) {
+		t.Helper()
+		p := r.payload("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": input})
+		got := make(chan []byte, 1)
+		go func() { got <- r.l.hookCall(context.Background(), r.ws, "PermissionRequest", p) }()
+		select {
+		case out := <-got:
+			if out != nil {
+				t.Fatalf("decided: %s", out)
+			}
+		case <-time.After(2 * time.Second):
+			r.l.resolveAllPerms("test")
+			<-got
+			t.Fatal("a card was raised: the hook waits for the phone")
+		}
+	}
+	t.Run("card cannot show it", func(t *testing.T) {
+		setTiming(t, &attentionTTL, 0)
+		r := newAgentRig(t)
+		left(t, r, map[string]any{"command": "echo " + string(rune(0x202e)) + "evil", "description": "do it"})
+		typed(t, r, "r_1")
+	})
+	t.Run("out of the sandbox", func(t *testing.T) {
+		setTiming(t, &attentionTTL, 0)
+		r := newAgentRig(t)
+		left(t, r, map[string]any{"command": "ls", "description": "do it", "dangerouslyDisableSandbox": true})
+		typed(t, r, "r_1")
+	})
+	t.Run("in the background", func(t *testing.T) {
+		setTiming(t, &attentionTTL, 0)
+		r := newAgentRig(t)
+		left(t, r, map[string]any{"command": "ls", "description": "do it", "run_in_background": true})
+		typed(t, r, "r_1")
+	})
+	t.Run("rate", func(t *testing.T) {
+		setTiming(t, &attentionTTL, 0)
+		r := newAgentRig(t)
+		setTiming(t, &permGap, time.Hour) // newAgentRig sets it to 0
+		_, out := r.ask(t, "touch a")
+		r.l.resolveAllPerms("test")
+		_ = wait(t, out)
+		r.resolved(t)
+		left(t, r, map[string]any{"command": "touch b", "description": "do it"})
+		typed(t, r, "r_1")
+	})
+	t.Run("the card timed out", func(t *testing.T) {
+		setTiming(t, &attentionTTL, 0)
+		setTiming(t, &permTimeout, 80*time.Millisecond)
+		r := newAgentRig(t)
+		req, out := r.ask(t, "touch x")
+		if pr := r.resolved(t); pr.ID != req.ID || pr.By != "timeout" {
+			t.Fatalf("%+v", pr)
+		}
+		if b := wait(t, out); b != nil {
+			t.Fatalf("decided: %s", b)
+		}
+		typed(t, r, "r_1")
+	})
+	t.Run("no app", func(t *testing.T) {
+		setTiming(t, &attentionTTL, 0)
+		r := newAgentRig(t)
+		r.c.CloseNow()
+		waitUntil(t, "the app gone", func() bool { return !r.l.srv.Connected() })
+		left(t, r, map[string]any{"command": "touch x", "description": "do it"})
+		if r.l.agentBusy() == "" {
+			t.Fatal("not busy with the dialog on the terminal")
+		}
+	})
+}
+
+// V05: what ends the dialog the host left on the terminal frees the chat; the
+// end of a tool does not (it may be another tool's with the same summary).
+func TestTheTerminalsQuestionEndsWithStopPromptOrSession(t *testing.T) {
+	for name, end := range map[string]func(t *testing.T, r *agentRig){
+		"stop":    func(t *testing.T, r *agentRig) { r.hook(t, "Stop", map[string]any{}) },
+		"prompt":  func(t *testing.T, r *agentRig) { r.hook(t, "UserPromptSubmit", map[string]any{"prompt": "x"}) },
+		"session": func(t *testing.T, r *agentRig) { r.hook(t, "SessionEnd", map[string]any{}) },
+		"conversation": func(t *testing.T, r *agentRig) {
+			if err := r.m.Start("claude", false); err != nil { // a new process: a new conversation
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			setTiming(t, &attentionTTL, 0)
+			r := newAgentRig(t)
+			p := r.payload("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": "echo " + string(rune(0x202e)) + "evil"}})
+			if out := r.l.hookCall(context.Background(), r.ws, "PermissionRequest", p); out != nil {
+				t.Fatalf("decided: %s", out)
+			}
+			if r.l.agentBusy() == "" {
+				t.Fatal("not busy")
+			}
+			end(t, r)
+			waitUntil(t, "the chat free", func() bool { return r.l.agentBusy() == "" })
+		})
+	}
+}
+
+// V05: past the attention's TTL, a dialog Busy() reads on the screen still
+// keeps the chat from typing.
+func TestChatSendIsBusyWithADialogOnTheScreenPastTheAttention(t *testing.T) {
+	setTiming(t, &attentionTTL, 0)
+	r := newAgentRig(t)
+	r.hook(t, "Notification", map[string]any{"notification_type": "permission_prompt"})
+	r.pty(0).outW.Write([]byte("Do you want to proceed?"))
+	waitUntil(t, "the question on the screen", func() bool { return r.m.Busy() != "" })
+	sendApp(t, r.c, bridge.TypeChatSend, "r_1", bridge.ChatSend{ID: "c1", Text: "hola"})
+	r.readError(t, "r_1", bridge.CodeBusy)
+	if said := r.pty(0).said(); said != "" {
+		t.Fatalf("something was typed into the dialog: %q", said)
+	}
+}
+
+// V05, round 1: a PermissionRequest the host cannot take (not JSON, too large,
+// not from the environment) still opens Claude Code's dialog on the terminal:
+// the chat is held as when the host leaves it there. Other events are not.
+func TestAPermissionRequestTheHostIgnoresHoldsTheChat(t *testing.T) {
+	setTiming(t, &attentionTTL, 0)
+	r := newAgentRig(t)
+	elsewhere := map[string]any{"hook_event_name": "PermissionRequest", "session_id": sid, "cwd": t.TempDir(), "tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}}
+	far, _ := json.Marshal(elsewhere)
+	for name, raw := range map[string][]byte{
+		"not json":      []byte("not json"),
+		"empty":         []byte("{}"),
+		"too large":     []byte(`{"session_id":"` + sid + `","x":"` + strings.Repeat("a", claudecode.MaxHookInput) + `"}`),
+		"another place": far,
+	} {
+		for _, ev := range []string{"Stop", "Notification"} {
+			r.l.hookCall(context.Background(), r.ws, ev, raw)
+			if why := r.l.agentBusy(); why != "" {
+				t.Fatalf("%s: %s held the chat", name, ev)
+			}
+		}
+		if out := r.l.hookCall(context.Background(), r.ws, "PermissionRequest", raw); out != nil {
+			t.Fatalf("%s: decided: %s", name, out)
+		}
+		if r.l.agentBusy() == "" {
+			t.Errorf("%s: not busy with the dialog on the terminal", name)
+		}
+		r.hook(t, "UserPromptSubmit", map[string]any{"prompt": "x"})
+	}
 }

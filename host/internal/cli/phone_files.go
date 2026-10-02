@@ -33,7 +33,20 @@ const (
 	maxMIME         = 255
 	maxCaptureBytes = 64 << 20
 	partialDir      = ".partial" // inbox/.partial/<id> and <id>.json
+	// maxDownloads send at once per connection; the others asked wait their
+	// turn (the app asks for every image of the chat at once), up to
+	// maxPendingDownloads: one more is busy.
+	maxDownloads        = 4
+	maxPendingDownloads = 64
 )
+
+// inboxHook runs in openInbox once inbox/ is checked (opened false) and once
+// it is open (opened true): a hook for the tests.
+var inboxHook = func(opened bool) {}
+
+// moveHook runs in endUpload just before the written file is filed, with its
+// descriptor, which must still be open: a hook for the tests.
+var moveHook = func(f *os.File) {}
 
 var (
 	// inboxQuota is what inbox/ may weigh, partial uploads included.
@@ -56,6 +69,7 @@ type filesState struct {
 
 	dlMu      sync.Mutex
 	downloads map[string]*download
+	dlSlots   chan struct{} // one per download that sends: maxDownloads
 	capturing bool
 }
 
@@ -242,12 +256,13 @@ func (l *phoneLink) beginUploadLocked(ab bridge.AttachBegin) (*upload, int64, st
 		return nil, a.Size, "", ""
 	}
 
-	inbox, ok := ensureInbox(ws)
-	if !ok {
+	root, err := openInbox(ws)
+	if err != nil {
 		return nil, 0, bridge.CodeFailed, "The inbox folder cannot be used: it is a link or cannot be created."
 	}
-	partials := filepath.Join(inbox, partialDir)
-	l.dropStaleLocked(partials, now)
+	defer root.Close()
+	inbox := filepath.Join(ws, "inbox")
+	l.dropStaleLocked(root, now)
 	if old := fs.uploads[ab.ID]; old != nil {
 		// What it wrote stays in .partial: the resumption below takes it.
 		if old.f != nil {
@@ -268,9 +283,7 @@ func (l *phoneLink) beginUploadLocked(ab bridge.AttachBegin) (*upload, int64, st
 		return nil, 0, bridge.CodeTooLarge, "The inbox is full (2 GiB): free space by deleting files from the inbox folder of the environment."
 	}
 
-	data := filepath.Join(partials, ab.ID)
-	meta := filepath.Join(partials, ab.ID+".json")
-	f, offset, err := openPartial(data, meta, ab)
+	f, offset, err := openPartial(root, ab)
 	if err != nil {
 		return nil, 0, bridge.CodeFailed, "Could not keep the upload."
 	}
@@ -279,15 +292,17 @@ func (l *phoneLink) beginUploadLocked(ab bridge.AttachBegin) (*upload, int64, st
 	return u, offset, "", ""
 }
 
-// openPartial opens inbox/.partial/<id> to write: the one a previous upload
-// with the same hash left (and the offset it reached), or a new one. A
-// .partial that is a link, a folder or too large is never followed: it is
-// removed and the upload starts at 0.
-func openPartial(data, meta string, ab bridge.AttachBegin) (*os.File, int64, error) {
-	st, err := os.Lstat(data)
+// openPartial opens .partial/<id> of the inbox root to write: the one a
+// previous upload with the same hash left (and the offset it reached), or a
+// new one. A .partial that is a link, a folder or too large is never
+// followed: it is removed and the upload starts at 0.
+func openPartial(root *os.Root, ab bridge.AttachBegin) (*os.File, int64, error) {
+	data := filepath.Join(partialDir, ab.ID)
+	meta := data + ".json"
+	st, err := root.Lstat(data)
 	switch {
-	case err == nil && st.Mode().IsRegular() && st.Size() <= ab.Size && metaMatches(meta, ab):
-		f, err := os.OpenFile(data, os.O_RDWR, 0o600)
+	case err == nil && st.Mode().IsRegular() && st.Size() <= ab.Size && metaMatches(root, meta, ab):
+		f, err := root.OpenFile(data, os.O_RDWR, 0o600)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -295,36 +310,36 @@ func openPartial(data, meta string, ab bridge.AttachBegin) (*os.File, int64, err
 			f.Close()
 			return nil, 0, errors.New("the partial file changed")
 		}
-		if err := writeMeta(meta, ab); err != nil {
+		if err := writeMeta(root, meta, ab); err != nil {
 			f.Close()
 			return nil, 0, err
 		}
 		return f, st.Size(), nil
 	case err == nil:
-		if err := os.Remove(data); err != nil {
+		if err := root.Remove(data); err != nil {
 			return nil, 0, err
 		}
 	case !errors.Is(err, os.ErrNotExist):
 		return nil, 0, err
 	}
-	f, err := os.OpenFile(data, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := root.OpenFile(data, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := writeMeta(meta, ab); err != nil {
+	if err := writeMeta(root, meta, ab); err != nil {
 		f.Close()
-		os.Remove(data)
+		root.Remove(data)
 		return nil, 0, err
 	}
 	return f, 0, nil
 }
 
-func metaMatches(meta string, ab bridge.AttachBegin) bool {
-	st, err := os.Lstat(meta)
+func metaMatches(root *os.Root, meta string, ab bridge.AttachBegin) bool {
+	st, err := root.Lstat(meta)
 	if err != nil || !st.Mode().IsRegular() || st.Size() > 4<<10 {
 		return false
 	}
-	raw, err := os.ReadFile(meta)
+	raw, err := root.ReadFile(meta)
 	if err != nil {
 		return false
 	}
@@ -332,14 +347,14 @@ func metaMatches(meta string, ab bridge.AttachBegin) bool {
 	return json.Unmarshal(raw, &pm) == nil && pm.SHA256 == ab.SHA256 && pm.Size == ab.Size
 }
 
-func writeMeta(meta string, ab bridge.AttachBegin) error {
-	if st, err := os.Lstat(meta); err == nil && !st.Mode().IsRegular() {
-		if err := os.Remove(meta); err != nil {
+func writeMeta(root *os.Root, meta string, ab bridge.AttachBegin) error {
+	if st, err := root.Lstat(meta); err == nil && !st.Mode().IsRegular() {
+		if err := root.Remove(meta); err != nil {
 			return err
 		}
 	}
 	raw, _ := json.Marshal(partialMeta{SHA256: ab.SHA256, Size: ab.Size})
-	return os.WriteFile(meta, raw, 0o600)
+	return root.WriteFile(meta, raw, 0o600)
 }
 
 // inboxUsedLocked is what inbox/ weighs for the quota: the files in it, the
@@ -376,25 +391,50 @@ func inboxUsedLocked(inbox, skip string, uploads map[string]*upload) int64 {
 	return total
 }
 
-// dropStaleLocked deletes the uploads that did not advance for uploadStale,
-// those in memory and those left on disk by an earlier connection.
-// ensureInbox creates inbox/ and inbox/.partial of the environment and checks
-// that both are real folders: they are the agent's to replace, and a link
-// (a symlink, a junction) would send what is kept, listed and deleted there
-// wherever it points. MkdirAll is not used: it goes through links.
-func ensureInbox(ws string) (string, bool) {
-	inbox := filepath.Join(ws, "inbox")
-	for _, d := range []string{inbox, filepath.Join(inbox, partialDir)} {
-		if _, err := os.Lstat(d); errors.Is(err, os.ErrNotExist) {
-			if err := os.Mkdir(d, 0o700); err != nil {
-				return "", false
-			}
-		}
-		if !plainDir(d) {
-			return "", false
-		}
+var errInboxLink = errors.New("inbox/ or inbox/.partial is not a plain folder")
+
+// openInbox creates inbox/ and inbox/.partial of the environment when they
+// are missing, checks that both are real folders and opens inbox/ as an
+// os.Root, through which all that the files write, move and delete there
+// goes. They are the agent's to replace at any moment, and a link (a
+// symlink, a junction) would send it wherever it points: the check alone
+// leaves a window until the use. Through the root nothing leaves it: a link
+// put in place of inbox/ after the check is not followed out of the
+// environment (os.Root refuses one that escapes, and on Windows any
+// junction), and once open the root is the folder itself, not its name.
+// MkdirAll is not used: it goes through links.
+func openInbox(ws string) (*os.Root, error) {
+	env, err := os.OpenRoot(ws)
+	if err != nil {
+		return nil, err
 	}
-	return inbox, true
+	defer env.Close()
+	if err := mkdirPlain(env, "inbox"); err != nil {
+		return nil, err
+	}
+	inboxHook(false)
+	root, err := env.OpenRoot("inbox")
+	if err != nil {
+		return nil, err
+	}
+	if err := mkdirPlain(root, partialDir); err != nil {
+		root.Close()
+		return nil, err
+	}
+	inboxHook(true)
+	return root, nil
+}
+
+// mkdirPlain creates the folder name of root if it is missing and checks that
+// it is a real folder.
+func mkdirPlain(root *os.Root, name string) error {
+	if err := root.Mkdir(name, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	if fi, err := root.Lstat(name); err != nil || !fi.IsDir() || fi.Mode()&(os.ModeSymlink|os.ModeIrregular) != 0 {
+		return errInboxLink
+	}
+	return nil
 }
 
 // inboxPlain reports whether inbox/ and inbox/.partial are real folders.
@@ -402,18 +442,38 @@ func inboxPlain(inbox string) bool {
 	return plainDir(inbox) && plainDir(filepath.Join(inbox, partialDir))
 }
 
-func (l *phoneLink) dropStaleLocked(partials string, now time.Time) {
+// removePartial deletes .partial/<id> and its .json through openInbox: never
+// through a link put in place of inbox/ (then nothing is deleted, and the
+// stale cleanup takes them later).
+func removePartial(ws, id string) {
+	root, err := openInbox(ws)
+	if err != nil {
+		return
+	}
+	defer root.Close()
+	root.Remove(filepath.Join(partialDir, id))
+	root.Remove(filepath.Join(partialDir, id+".json"))
+}
+
+// dropStaleLocked deletes the uploads that did not advance for uploadStale,
+// those in memory and those left on disk by an earlier connection.
+func (l *phoneLink) dropStaleLocked(root *os.Root, now time.Time) {
 	for id, u := range l.files.uploads {
 		if u.done == nil && now.Sub(u.last) > uploadStale {
 			if u.f != nil {
 				u.f.Close()
 			}
-			os.Remove(filepath.Join(partials, id))
-			os.Remove(filepath.Join(partials, id+".json"))
+			root.Remove(filepath.Join(partialDir, id))
+			root.Remove(filepath.Join(partialDir, id+".json"))
 			delete(l.files.uploads, id)
 		}
 	}
-	entries, err := os.ReadDir(partials)
+	dir, err := root.Open(partialDir)
+	if err != nil {
+		return
+	}
+	entries, err := dir.ReadDir(-1)
+	dir.Close()
 	if err != nil {
 		return
 	}
@@ -426,7 +486,7 @@ func (l *phoneLink) dropStaleLocked(partials string, now time.Time) {
 			continue
 		}
 		if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > uploadStale {
-			os.Remove(filepath.Join(partials, e.Name()))
+			root.Remove(filepath.Join(partialDir, e.Name()))
 		}
 	}
 }
@@ -450,9 +510,7 @@ func (l *phoneLink) onUploadFrame(fid bridge.FrameID, offset int64, data []byte)
 		u.f.Close()
 		u.f = nil
 		if ws, _ := l.workspaceAndADB(); ws != "" {
-			partials := filepath.Join(ws, "inbox", partialDir)
-			os.Remove(filepath.Join(partials, id))
-			os.Remove(filepath.Join(partials, id+".json"))
+			removePartial(ws, id)
 		}
 		return
 	}
@@ -483,13 +541,13 @@ func (l *phoneLink) onAttachEnd(m bridge.Message) {
 	}
 	att, final, code, text := l.endUpload(ae.ID)
 	if code == "" && final != "" {
-		inbox := l.inboxDir()
-		if !inboxPlain(inbox) {
-			l.fail(m, bridge.CodeFailed, "The inbox folder cannot be used: it is a link.")
-			return
+		// The file is already filed: it is registered even if inbox/ became a
+		// link meanwhile, only without a thumbnail (read by path, it would come
+		// from wherever the link points).
+		if inbox := l.inboxDir(); inboxPlain(inbox) {
+			// Outside the mutex: decoding a large image takes seconds.
+			att.Thumb = thumbnailOf(filepath.Join(inbox, final))
 		}
-		// Outside the mutex: decoding a large image takes seconds.
-		att.Thumb = thumbnailOf(filepath.Join(inbox, final))
 		l.finishUpload(att, final)
 	}
 	if code != "" {
@@ -511,7 +569,8 @@ func (l *phoneLink) inboxDir() string {
 // endUpload checks a finished upload and moves it to its final name in
 // inbox/. It returns the attachment (without thumb) and the final name; for a
 // retry of a finished one the attachment is the existing one and the name "".
-// The move (a copy where hard links are not possible) runs without upMu.
+// The move (a copy where hard links are not possible) runs without upMu and
+// through openInbox: never out of inbox/, whatever takes its name meanwhile.
 func (l *phoneLink) endUpload(id string) (bridge.Attachment, string, string, string) {
 	ws, _ := l.workspaceAndADB()
 	fs := &l.files
@@ -525,20 +584,17 @@ func (l *phoneLink) endUpload(id string) (bridge.Attachment, string, string, str
 		fs.upMu.Unlock()
 		return *u.done, "", "", ""
 	}
-	inbox := filepath.Join(ws, "inbox")
-	partials := filepath.Join(inbox, partialDir)
 	fail := func(code, text string) (bridge.Attachment, string, string, string) {
 		if u.f != nil {
 			u.f.Close()
 		}
-		os.Remove(filepath.Join(partials, id))
-		os.Remove(filepath.Join(partials, id+".json"))
+		removePartial(ws, id)
 		delete(fs.uploads, id)
 		fs.upMu.Unlock()
 		return bridge.Attachment{}, "", code, text
 	}
 	switch {
-	case !inboxPlain(inbox):
+	case !inboxPlain(filepath.Join(ws, "inbox")):
 		return fail(bridge.CodeFailed, "The inbox folder cannot be used: it is a link.")
 	case u.bad:
 		return fail(bridge.CodeInvalid, "The upload carried more data than it declared.")
@@ -547,25 +603,52 @@ func (l *phoneLink) endUpload(id string) (bridge.Attachment, string, string, str
 	case !u.ready || u.written != u.size || hex.EncodeToString(u.h.Sum(nil)) != u.sha:
 		return fail(bridge.CodeChecksum, "The file did not arrive intact: send it again.")
 	}
-	if err := u.f.Close(); err != nil {
+	// The file that was written: only this one is filed, not another put in
+	// place of .partial/<id> meanwhile.
+	written, err := u.f.Stat()
+	if err != nil {
 		return fail(bridge.CodeFailed, "Could not save the file.")
 	}
+	// The descriptor stays open until the file is filed: while it is open the
+	// inode cannot be freed and reused by a file put in place of .partial/<id>,
+	// which would fool the SameFile check of moveExclusive (Linux reuses it at
+	// once).
+	wf := u.f
 	u.f = nil
 	// Out of the map while it moves: nothing else touches it (the reader of
 	// this connection is the one here).
 	delete(fs.uploads, id)
 	fs.upMu.Unlock()
+	closed := false
+	defer func() {
+		if !closed {
+			wf.Close()
+		}
+	}()
 
+	root, err := openInbox(ws)
+	if err != nil {
+		// Its .partial stays: removing it would go wherever inbox/ points now.
+		return bridge.Attachment{}, "", bridge.CodeFailed, "The inbox folder cannot be used: it is a link or cannot be created."
+	}
+	defer root.Close()
 	name := safeName(u.name)
 	ext := filepath.Ext(name)
 	if ext == name {
 		ext = ""
 	}
 	stem := filesNow().Format("20060102-150405") + "-" + strings.TrimSuffix(name, ext)
-	final, err := moveExclusive(filepath.Join(partials, id), inbox, stem, ext)
-	os.Remove(filepath.Join(partials, id+".json"))
+	partial := filepath.Join(partialDir, id)
+	moveHook(wf)
+	final, err := moveExclusive(root, partial, stem, ext, written)
+	root.Remove(partial + ".json")
 	if err != nil {
-		os.Remove(filepath.Join(partials, id))
+		root.Remove(partial)
+		return bridge.Attachment{}, "", bridge.CodeFailed, "Could not save the file."
+	}
+	closed = true
+	if err := wf.Close(); err != nil {
+		root.Remove(final)
 		return bridge.Attachment{}, "", bridge.CodeFailed, "Could not save the file."
 	}
 	mime := u.mime
@@ -621,13 +704,23 @@ func (l *phoneLink) onFileGet(m bridge.Message) {
 		l.fail(m, bridge.CodeFailed, "The file is no longer on the PC.")
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	d := &download{cancel: cancel, done: make(chan struct{})}
 	l.files.dlMu.Lock()
 	old := l.files.downloads[fg.ID]
+	if old == nil && len(l.files.downloads) >= maxPendingDownloads {
+		l.files.dlMu.Unlock()
+		f.Close()
+		l.fail(m, bridge.CodeBusy, "Too many downloads at once: wait for one to finish.")
+		return
+	}
 	if l.files.downloads == nil {
 		l.files.downloads = map[string]*download{}
 	}
+	if l.files.dlSlots == nil {
+		l.files.dlSlots = make(chan struct{}, maxDownloads)
+	}
+	slots := l.files.dlSlots
+	ctx, cancel := context.WithCancel(context.Background())
+	d := &download{cancel: cancel, done: make(chan struct{})}
 	l.files.downloads[fg.ID] = d
 	l.files.dlMu.Unlock()
 	if old != nil {
@@ -636,7 +729,7 @@ func (l *phoneLink) onFileGet(m bridge.Message) {
 		old.cancel()
 		<-old.done
 	}
-	go l.runDownload(ctx, m, a, fid, fg.Offset, f, d)
+	go l.runDownload(ctx, m, a, fid, fg.Offset, f, d, slots)
 }
 
 // openStored opens the regular file of an attachment, whose path is relative
@@ -672,7 +765,7 @@ func openStored(ws, rel string) (*os.File, error) {
 	return f, nil
 }
 
-func (l *phoneLink) runDownload(ctx context.Context, m bridge.Message, a storedAttachment, fid bridge.FrameID, offset int64, f *os.File, d *download) {
+func (l *phoneLink) runDownload(ctx context.Context, m bridge.Message, a storedAttachment, fid bridge.FrameID, offset int64, f *os.File, d *download, slots chan struct{}) {
 	defer func() {
 		f.Close()
 		d.cancel()
@@ -683,6 +776,13 @@ func (l *phoneLink) runDownload(ctx context.Context, m bridge.Message, a storedA
 		l.files.dlMu.Unlock()
 		close(d.done)
 	}()
+	// It waits its turn to send (see maxDownloads), until cancelled.
+	select {
+	case slots <- struct{}{}:
+		defer func() { <-slots }()
+	case <-ctx.Done():
+		return
+	}
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		l.fail(m, bridge.CodeFailed, "Could not read the file.")
 		return
@@ -796,17 +896,19 @@ func (l *phoneLink) capture() (bridge.Attachment, string) {
 		return bridge.Attachment{}, "The phone did not return a valid image."
 	}
 
-	inbox, ok := ensureInbox(ws)
-	if !ok {
+	root, err := openInbox(ws)
+	if err != nil {
 		return bridge.Attachment{}, "The inbox folder cannot be used: it is a link or cannot be created."
 	}
+	defer root.Close()
+	inbox := filepath.Join(ws, "inbox")
 	l.files.upMu.Lock()
 	full := inboxUsedLocked(inbox, "", l.files.uploads)+int64(len(img)) > inboxQuota
 	l.files.upMu.Unlock()
 	if full {
 		return bridge.Attachment{}, "The inbox is full (2 GiB): free space by deleting files from the inbox folder of the environment."
 	}
-	f, final, err := createExclusive(inbox, filesNow().Format("20060102-150405")+"-captura", ".png")
+	f, final, err := createExclusiveIn(root, filesNow().Format("20060102-150405")+"-captura", ".png")
 	if err != nil {
 		return bridge.Attachment{}, "Could not save the screenshot."
 	}
@@ -815,18 +917,21 @@ func (l *phoneLink) capture() (bridge.Attachment, string) {
 		err = cerr
 	}
 	if err != nil {
-		os.Remove(filepath.Join(inbox, final))
+		root.Remove(final)
 		return bridge.Attachment{}, "Could not save the screenshot."
 	}
 	var idb [16]byte
 	if _, err := rand.Read(idb[:]); err != nil {
-		os.Remove(filepath.Join(inbox, final))
+		root.Remove(final)
 		return bridge.Attachment{}, "Could not make an id."
 	}
 	sum := sha256.Sum256(img)
 	att := bridge.Attachment{
 		ID: bridge.FrameID(idb).String(), Name: "captura.png", MIME: "image/png", Size: int64(len(img)),
-		SHA256: hex.EncodeToString(sum[:]), Thumb: thumbnailOf(filepath.Join(inbox, final)),
+		SHA256: hex.EncodeToString(sum[:]),
+	}
+	if inboxPlain(inbox) { // as for an upload: no thumbnail read through a link
+		att.Thumb = thumbnailOf(filepath.Join(inbox, final))
 	}
 	l.chat.attachments.put(att, "inbox/"+final)
 	return att, ""

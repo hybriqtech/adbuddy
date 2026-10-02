@@ -194,7 +194,7 @@ Tailscale es opcional y se recomienda en la documentación y en la app.
    "inverse":{"argv":["shell","pm","enable","com.facebook.katana"]},
    "backups":[],"undoneBy":null}
   ```
-- **`adbuddy undo [last|<id>|session]`** ejecuta los inversos en orden inverso. No vuelve a pedir confirmación y deja entradas `source: undo`. Si un cambio no tiene inverso, lo dice y lo salta.
+- **`adbuddy undo [last|<id>|session]`** ejecuta los inversos en orden inverso. No vuelve a pedir confirmación por los inversos 🟡, pero los inversos 🔴 (por ejemplo `uninstall` o `rm -f`) sí la piden, por la misma puerta y con el mismo clasificador que cualquier orden del agente: el diario vive en la carpeta del agente y puede forjarse. Si se deniega, caduca o nadie puede confirmar, esa entrada se salta. El tipo de inverso debe corresponder al cambio registrado. Deja entradas `source: undo`. Si un cambio no tiene inverso, lo dice y lo salta.
 - **`adbuddy journal [--session] [--json]`** permite consultar el diario, tanto al agente como a ti.
 - **Si el diario no se puede escribir,** se bloquean todos los comandos 🟡 y 🔴: sin registro no hay cambios.
 - **Cada entrada se envía a la app** (evento `journal.entry`) para el panel de actividad.

@@ -86,6 +86,11 @@ func newUILink(file string, log io.Writer) *uiLink {
 		tell(log, "uilink.the_saved_list_of_protected", file, classify.Printable(err.Error()))
 		return u
 	}
+	// {} or null carry no list (an empty one is "protectedApps": []): not known,
+	// so Protected says there is none.
+	if p.ProtectedApps == nil {
+		return u
+	}
 	u.setProtected(p.ProtectedApps)
 	return u
 }
@@ -130,6 +135,10 @@ func (u *uiLink) Call(ctx context.Context, op string, args json.RawMessage) (jso
 	if srv == nil {
 		return nil, daemon.ErrNoApp
 	}
+	// Already stopped: nothing goes out, so nothing can happen unseen.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	err := srv.Send(bridge.TypeUIRequest, bridge.UIRequest{ID: id, Op: op, Args: args, ExpiresAt: u.now().Add(uiWait)})
 	if errors.Is(err, bridge.ErrNoApp) {
 		return nil, daemon.ErrNoApp
@@ -139,9 +148,17 @@ func (u *uiLink) Call(ctx context.Context, op string, args json.RawMessage) (jso
 	}
 	t := time.NewTimer(uiWait)
 	defer t.Stop()
+	// Known race, left as is: when an answer and the end of ctx are both ready,
+	// select picks one at random, so a done request may report ctx.Err() with
+	// the app's answer unread (V12 note).
 	select {
 	case r := <-w.ch:
 		if r.OK {
+			// A broken answer, not an empty result: every op answers with one.
+			// A UIError, so adb does not repeat what may have been done.
+			if len(r.Result) == 0 || string(r.Result) == "null" {
+				return nil, &daemon.UIError{Code: bridge.CodeFailed, Text: "the app answered without a result"}
+			}
 			return r.Result, nil
 		}
 		if r.Error == nil {

@@ -199,6 +199,62 @@ func CardSafe(tool string, raw json.RawMessage) bool {
 			return false
 		}
 	}
+	if tool == "Bash" && !bashRestOff(in) {
+		return false
+	}
+	switch tool {
+	case "Edit", "MultiEdit", "Write", "NotebookEdit":
+		if configPath(str(in, "file_path")) || configPath(str(in, "notebook_path")) {
+			return false
+		}
+	}
+	return true
+}
+
+// configPath reports whether a file tool would write what configures the agent
+// or git: a component .claude or .git, or a .mcp.json (V04, round 1). The card
+// shows the path, not the content, and such a write could add rules, hooks or
+// servers that skip every later question. It looks at every component as
+// written, in any case and with either slash, so it holds before and after
+// cleaning the path (cleaning only drops components) and when one of them is a
+// link. Windows also reaches a name with trailing dots or spaces, a stream
+// (name:…) or its 8.3 short name (CLAUDE~1, GIT~1, MCP~1.JSO).
+func configPath(p string) bool {
+	for _, c := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		c = strings.ToLower(c)
+		if i := strings.IndexByte(c, ':'); i >= 0 {
+			c = c[:i]
+		}
+		c = strings.TrimRight(c, ". ")
+		switch c {
+		case ".claude", ".git", ".mcp.json":
+			return true
+		}
+		for _, short := range []string{"claude~", "git~", "mcp~"} {
+			if rest, ok := strings.CutPrefix(c, short); ok && rest != "" && rest[0] >= '0' && rest[0] <= '9' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// bashShown are the fields of a Bash input its card accounts for: the command
+// is the detail, the description the title, and the timeout does not change
+// what runs.
+var bashShown = map[string]bool{"command": true, "description": true, "timeout": true}
+
+// bashRestOff reports whether every other field of a Bash input is off (absent,
+// null or false). One that is on may change how the command runs where the
+// card does not say (dangerouslyDisableSandbox runs it out of the sandbox,
+// run_in_background leaves it running after the answer), and so may one this
+// host does not know: a "yes" would approve the whole input (V04).
+func bashRestOff(in map[string]any) bool {
+	for k, v := range in {
+		if !bashShown[k] && v != nil && v != false {
+			return false
+		}
+	}
 	return true
 }
 

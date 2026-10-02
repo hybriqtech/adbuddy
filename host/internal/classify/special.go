@@ -156,12 +156,38 @@ func specialReason(scope string, ws []Word, level Level) Text {
 		if len(v) > 1 && (v[1] == "wifi" || v[1] == "connectivity") && level != Green {
 			return reason("may cut the Wi-Fi connection")
 		}
+		if len(v) > 2 && v[1] == "netpolicy" && (ws[2].Dynamic || !contains([]string{"get", "list", "help"}, v[2])) {
+			// Its commands take UIDs (ADBuddy's is not known here) or mark
+			// networks as metered.
+			return reason("network policy on a UID or a network could cut ADBuddy's or the phone's connection")
+		}
 	case "screenrecord":
 		return reason("records what is on screen")
 	case "dumpsys":
 		if revealsNotifications(v) {
 			return reason("prints the text of every app's notifications, codes included")
 		}
+	case "bugreport", "bugreportz", "dumpstate":
+		// The same report as adb bugreport, built on the phone.
+		return reason("the bug report includes what is on screen and the notifications")
+	case "appops":
+		if sub, at := subAt(ws); sub == "set" {
+			if t, ok := firstTarget(ws, at+1); ok && !ws[t].Dynamic && !packageName(ws[t].Value) {
+				// AppOpsService takes a UID (or root, shell…) instead of a
+				// package; ADBuddy's is not known here.
+				return reason("appops set on a UID, which could be ADBuddy's")
+			}
+		}
+	case "kill":
+		if killsBeyondAPID(v) {
+			return reason("kill on every process, a process group or a job could stop adbd or ADBuddy")
+		}
+	case "pkill", "killall":
+		// Always, whatever the arguments: a pattern (whose dialect differs
+		// from Go's), -f on the command line, selectors such as -U 2000 or
+		// -P 1 and options in any order reach adbd in too many ways to
+		// analyse, and adbd runs with the shell's UID.
+		return reason("may kill adbd, which cuts the connection")
 	case "reboot", "stop", "start":
 		return reason("may restart the phone or adbd")
 	case "setprop":
@@ -176,10 +202,21 @@ func specialReason(scope string, ws []Word, level Level) Text {
 	if level != Green && touchesCriticalApp(name, ws, v) {
 		return reason("affects an app the phone needs to stay connected or to start")
 	}
-	if level != Green && resetsEveryApp(name, v) {
+	// dumpsys options may come before deviceidle (dumpsys -t 5 deviceidle …):
+	// judge it from the word deviceidle on.
+	dv := v
+	if name == "dumpsys" {
+		for i, w := range v[1:] {
+			if w == "deviceidle" {
+				dv = append([]string{"dumpsys"}, v[i+1:]...)
+				break
+			}
+		}
+	}
+	if level != Green && resetsEveryApp(name, dv) {
 		return reason("resets the permissions, battery exemptions or app ops of every app, ADBuddy's included")
 	}
-	if level != Green && (name == "pm" || name == "appops" || name == "am" || (name == "dumpsys" && len(v) > 1 && v[1] == "deviceidle")) && hasDynamic(ws[1:]) {
+	if level != Green && (name == "pm" || name == "appops" || name == "am" || (name == "dumpsys" && len(dv) > 1 && dv[1] == "deviceidle")) && hasDynamic(ws[1:]) {
 		return reason("arguments only known on the phone could name ADBuddy or a critical app")
 	}
 	return Text{}
@@ -214,6 +251,21 @@ func amSpecial(ws []Word) Text {
 	if amMemory[sub] {
 		return reason("reads or changes an app's memory")
 	}
+	switch sub {
+	case "bug-report":
+		return reason("the bug report includes what is on screen and the notifications")
+	case "kill-all":
+		return reason("kills every app in the background, ADBuddy's included")
+	case "restart":
+		return reason("restarts the phone's system, which cuts the connection")
+	case "stop-user", "switch-user":
+		return reason("stops or switches the phone's user, which can stop ADBuddy")
+	case "crash":
+		// am crash takes a package or a PID; ADBuddy's PID is not known here.
+		if t, ok := firstTarget(ws, at+1); ok && !ws[t].Dynamic && !packageName(ws[t].Value) {
+			return reason("am crash on a process ID, which could be ADBuddy's")
+		}
+	}
 	for _, w := range ws[1:] {
 		if amStartMemoryOption(w.Value) {
 			return reason("reads or changes the memory of the app it opens")
@@ -225,6 +277,62 @@ func amSpecial(ws []Word) Text {
 		return reason("am instrument without -w keeps running after it returns")
 	}
 	return Text{}
+}
+
+// firstTarget is the index of the first word from ws[from] on that is not an
+// option or the value of --user.
+func firstTarget(ws []Word, from int) (int, bool) {
+	for i := from; i < len(ws); i++ {
+		switch v := ws[i].Value; {
+		case ws[i].Dynamic:
+			return i, true
+		case v == "--user":
+			i++
+		case strings.HasPrefix(v, "-"):
+		default:
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// killsBeyondAPID reports whether kill signals something other than literal
+// PIDs: -1 (every process the shell's UID may signal), 0 or -PGID (a process
+// group) or %job. mksh's kill takes -SIGNAL (a digit or a capital after the
+// dash), or -s SIGNAL and -l, then "--". On a production phone adbd runs with
+// the shell's UID (2000), so kill -9 <adbd's PID> does cut the connection; a
+// literal PID stays a plain 🔴 only because testdata/habitual.jsonl fixes it
+// so (kill -9 1234). Accepted risk: a user rule can lower it.
+func killsBeyondAPID(v []string) bool {
+	args := v[1:]
+	if len(args) > 0 && len(args[0]) > 1 && args[0][0] == '-' && (args[0][1] >= '0' && args[0][1] <= '9' || args[0][1] >= 'A' && args[0][1] <= 'Z') {
+		args = args[1:]
+	} else {
+		for len(args) > 0 && strings.HasPrefix(args[0], "-") && args[0] != "--" {
+			switch a := args[0]; {
+			case a == "-l":
+				return false // lists signals
+			case a == "-s":
+				if len(args) < 2 {
+					return false
+				}
+				args = args[2:]
+			case strings.HasPrefix(a, "-s"):
+				args = args[1:]
+			default:
+				return true // an option kill does not have: fail closed
+			}
+		}
+	}
+	if len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	for _, t := range args {
+		if !isDigits(t) || strings.Trim(t, "0") == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // instrumentValues are the am instrument options that take values. A few

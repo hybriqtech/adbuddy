@@ -139,6 +139,52 @@ func TestFind(t *testing.T) {
 	}
 }
 
+// A clickable ancestor without area gives no touch point: an error, never a
+// tap at (0,0) (V10).
+func TestFindEmptyClickableBounds(t *testing.T) {
+	for _, bounds := range []string{`bounds="[0,0][0,0]"`, `bounds="[10,10][10,50]"`, ``, `bounds="garbage"`} {
+		x := `<hierarchy><node package="p" class="a.B" bounds="[0,0][100,100]">` +
+			`<node clickable="true" package="p" class="a.R" ` + bounds + `>` +
+			`<node text="Go" package="p" class="a.T" bounds="[5,5][50,50]"/></node></node></hierarchy>`
+		for _, q := range [][2]string{{"", "Go"}} {
+			got, err := Find([]byte(x), q[0], q[1], nil)
+			if !errors.Is(err, ErrNoTouchPoint) || got != ([4]int{}) {
+				t.Errorf("%s: Find = %v, %v; want ErrNoTouchPoint", bounds, got, err)
+			}
+		}
+	}
+	// With area the same layout still finds the row (nothing else changed).
+	x := `<hierarchy><node package="p" class="a.B" bounds="[0,0][100,100]"><node clickable="true" package="p" class="a.R" bounds="[0,10][100,60]">` +
+		`<node text="Go" package="p" class="a.T" bounds="[5,5][50,50]"/></node></node></hierarchy>`
+	if got, err := Find([]byte(x), "", "Go", nil); err != nil || got != [4]int{0, 10, 100, 60} {
+		t.Fatalf("Find = %v, %v", got, err)
+	}
+}
+
+// A protected match still says protected even when another match has no area.
+func TestFindProtectedBeatsNoTouchPoint(t *testing.T) {
+	x := `<hierarchy><node package="p" class="a.B" bounds="[0,0][100,100]">` +
+		`<node clickable="true" package="p" class="a.R" bounds="[0,0][0,0]"><node text="Go" package="p" class="a.T" bounds="[5,5][50,50]"/></node>` +
+		`<node text="Go" package="bank" class="a.T" bounds="[5,5][50,50]"/></node></hierarchy>`
+	_, err := Find([]byte(x), "", "Go", func(p string) bool { return p == "bank" })
+	if !errors.Is(err, ErrProtected) {
+		t.Fatalf("Find = %v", err)
+	}
+}
+
+// Cut at MaxDepth with no match: not "not found" (V10).
+func TestFindTooDeep(t *testing.T) {
+	deep := strings.Repeat(`<node package="p" class="a.T" bounds="[0,0][10,10]">`, MaxDepth+2) +
+		`<node text="Go" package="p" class="a.T" bounds="[0,0][10,10]"/>` + strings.Repeat(`</node>`, MaxDepth+2)
+	if _, err := Find([]byte(`<hierarchy>`+deep+`</hierarchy>`), "", "Go", nil); !errors.Is(err, ErrTooDeep) {
+		t.Fatalf("deep: %v", err)
+	}
+	// A shallow layout without the text is still not found.
+	if _, err := Find([]byte(`<hierarchy><node package="p" bounds="[0,0][10,10]"/></hierarchy>`), "", "Go", nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("shallow: %v", err)
+	}
+}
+
 func TestResumed(t *testing.T) {
 	cases := []struct {
 		name, out string

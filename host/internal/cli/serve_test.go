@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net"
 	"os"
@@ -375,11 +378,31 @@ func TestServeWiresRemoteActive(t *testing.T) {
 	if !f() {
 		t.Fatal("remote mode on but RemoteActive says off")
 	}
-	src, err := os.ReadFile("serve.go")
+	// Looked up in the syntax tree, not as text: formatting or neighbouring
+	// fields can change without breaking it.
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "serve.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(src), "RemoteActive: remoteActive(ctl)") {
+	wired := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		kv, ok := n.(*ast.KeyValueExpr)
+		if !ok {
+			return true
+		}
+		if k, ok := kv.Key.(*ast.Ident); ok && k.Name == "RemoteActive" {
+			if c, ok := kv.Value.(*ast.CallExpr); ok {
+				if fn, ok := c.Fun.(*ast.Ident); ok && fn.Name == "remoteActive" && len(c.Args) == 1 {
+					if a, ok := c.Args[0].(*ast.Ident); ok && a.Name == "ctl" {
+						wired = true
+					}
+				}
+			}
+		}
+		return true
+	})
+	if !wired {
 		t.Fatal("serve.go does not give daemon.Options the remote mode's state")
 	}
 }

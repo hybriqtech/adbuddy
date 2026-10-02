@@ -21,6 +21,7 @@
 "daemon.inverse_failed" = "no se pudo calcular cómo deshacer %[1]s: %[2]s"
 "daemon.journal_failed" = "falló la escritura en el diario para %[1]s: %[2]s"
 "undo.prefix" = "Deshacer: "
+"undo.confirm.detail" = "Para deshacer un cambio del diario hace falta un comando que pide confirmación."
 # remote: la pregunta de `adbuddy remote on` (cli/remotecmd.go)
 "remote.confirm.title" = "Abrir el puerto de red 5555 de adb durante 12 horas"
 "remote.confirm.detail" = "adb escuchará en el puerto 5555 de cualquier red hasta que lo cierres con `adbuddy remote off` o pasen 12 horas."
@@ -212,8 +213,9 @@ dirección de conexión con --connect (o escríbela cuando te la pida)."""
 "help.undo.short" = "Deshace cambios del diario ejecutando sus inversos"
 "help.undo.long" = """
 Deshace el último cambio (por defecto), una entrada del diario, o todos los cambios de una sesión,
-los más recientes primero. Los inversos se ejecutan sin volver a preguntar; los cambios sin inverso
-se indican y se saltan. Necesita `adbuddy serve` en marcha."""
+los más recientes primero. Un inverso 🔴 (como uninstall o rm -f) pide confirmación como
+cualquier comando 🔴; los demás se ejecutan sin volver a preguntar. Los cambios sin inverso,
+o cuyo inverso no se confirma, se indican y se saltan. Necesita `adbuddy serve` en marcha."""
 
 # undo.go: flag
 "help.undo.flag.session" = "sesión para `undo session` (por defecto: la actual)"
@@ -406,6 +408,7 @@ Códigos de salida:
 "err.undo.fix.undo_failed" = "Comprueba el móvil y el diario; los inversos que fallaron se pueden reintentar con `adbuddy undo <id>`."
 "err.undo.fix.waiting_for_answer" = "Un comando 🔴 espera confirmación (en la app de ADBuddy o en la terminal de serve); reintenta cuando se responda."
 "err.undo.fix.paused" = "Reanuda desde la app de ADBuddy y vuelve a ejecutar adbuddy undo para el resto."
+"err.undo.fix.undo_denied" = "Vuelve a ejecutar adbuddy undo y permite la pregunta 🔴 (en la app de ADBuddy o en la terminal de serve), o revierte el cambio a mano."
 "err.run.agent_not_found" = "%[1]s no está instalado o no está en el PATH"
 "err.run.agent_not_found.fix" = "%[2]s"
 

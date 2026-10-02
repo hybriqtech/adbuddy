@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
@@ -186,8 +187,9 @@ func SelectUndo(entries []journal.Entry, target, session, identity string) (plan
 	return nil, nil, &UndoError{"NOT_FOUND", "no journal entry " + target}
 }
 
-// undo runs inverses in reverse order without asking again (spec §4.4). It
-// holds the changes lock, so two undos (or an undo and a change) never race.
+// undo runs inverses in reverse order without asking again (spec §4.4), except
+// the 🔴 ones: those ask like any 🔴 command. It holds the changes lock, so
+// two undos (or an undo and a change) never race.
 func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if d.o.Paused() {
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
@@ -206,7 +208,8 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if other != "" {
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: other}
 	}
-	defer release()
+	// release is replaced while a 🔴 inverse is asked (see below).
+	defer func() { release() }()
 	entries, _, err := d.o.Journal.Load()
 	if err != nil {
 		return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNREADABLE", Error: err.Error()}
@@ -235,6 +238,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	plan, skipped, err := SelectUndo(entries, req.Target, session, d.identity())
 	res := newUndoResult()
 	var reappeared []string // moves not undone because their source exists again
+	denied := 0             // 🔴 inverses the user did not confirm
 	res.Skipped = append(res.Skipped, skipped...)
 	if err != nil {
 		ue := err.(*UndoError)
@@ -256,6 +260,78 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			fmt.Fprintf(s.Stderr(), "✗ %s: %s\n", classify.Printable(e.Description), classify.Printable(item.Error))
 			continue
 		}
+		// The journal is the agent's to forge (it can read the signing secret):
+		// the inverse must undo the change the record claims, and goes through
+		// the same classifier and confirmation as any command of the agent.
+		kind := ""
+		oargs := e.Argv
+		_, oargs = classify.SplitGlobal(oargs)
+		if len(oargs) > 0 {
+			if r := d.o.Classifier.Classify(oargs); r.Op != nil {
+				kind = r.Op.Kind
+			}
+		}
+		if !inverseFitsKind(kind, e.Inverse.Argv) {
+			item.Error = "refused: the inverse does not undo the change recorded (" + kind + ")"
+			res.Failed = append(res.Failed, item)
+			fmt.Fprintf(s.Stderr(), "✗ %s: %s\n", classify.Printable(e.Description), classify.Printable(item.Error))
+			continue
+		}
+		level, rule := "yellow", "undo" // what the journal says: 🔴 only when the user was asked
+		if ires := d.o.Classifier.Classify(e.Inverse.Argv); ires.Level == classify.Red {
+			level, rule = ires.Level.String(), "undo-confirmed"
+			// Not asked while this undo is itself in flight: the question
+			// waits for the changes in flight, this one included.
+			release()
+			release = func() {}
+			// What the person reads comes from the classifier, never from the
+			// journal: the agent can forge its records.
+			detail := d.lang().T("undo.confirm.detail") + "\n" + classify.Printable(ires.Detail(d.o.Lang))
+			decision, askErr := d.AskUser(ctx, confirm.Request{
+				ID: journal.NewID("j_", d.o.Now().UTC()), Title: ires.Description(d.o.Lang), Detail: detail,
+				RawCommand: classify.DisplayCommand(e.Inverse.Argv), Special: ires.Special,
+			}, 0)
+			if errors.Is(askErr, ErrAskPaused) {
+				_ = s.Data(res)
+				return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
+			}
+			if errors.Is(askErr, ErrAskBusy) { // never asked: not a denial
+				_ = s.Data(res)
+				return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: askErr.Error()}
+			}
+			if ctx.Err() != nil {
+				break // the client left, or serve stopped, while asking
+			}
+			// Back in flight, whatever the answer, while the loop goes on.
+			r, other := d.admit(undoPrefix(d.o.Lang)+req.Target, true)
+			if other != "" {
+				_ = s.Data(res)
+				return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: other}
+			}
+			release = r
+			why := ""
+			switch {
+			case askErr != nil:
+				why = "denied: " + askErr.Error()
+			case decision == confirm.Nobody:
+				why = "denied: nobody could confirm"
+			case decision == confirm.Timeout:
+				why = "denied: confirmation expired"
+			case decision != confirm.Allow:
+				why = "denied by user"
+			}
+			if why != "" {
+				item.Error = why
+				res.Skipped = append(res.Skipped, item)
+				denied++
+				continue
+			}
+			// Paused while it was asked (an Allow may come after the pause).
+			if d.o.Paused() {
+				_ = s.Data(res)
+				return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
+			}
+		}
 		if src, ok := moveBackTarget(e.Inverse.Argv); ok {
 			// Something may have been created where the file was: moving it
 			// back would overwrite it, or move it inside a new folder.
@@ -276,7 +352,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		now := d.o.Now().UTC()
 		u := journal.Entry{
 			ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUndo,
-			Argv: e.Inverse.Argv, Level: "yellow", Rule: "undo", Description: undoPrefix(d.o.Lang) + e.Description, Undoes: e.ID,
+			Argv: e.Inverse.Argv, Level: level, Rule: rule, Description: undoPrefix(d.o.Lang) + e.Description, Undoes: e.ID,
 		}
 		item.UndoID = u.ID
 		// The mark goes first, outside the agent's reach: if the host dies
@@ -347,6 +423,9 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 	if ctx.Err() != nil {
 		return ipc.Exit{Code: 1, ErrorCode: "UNDO_FAILED", Error: "cancelled"}
+	}
+	if len(res.Undone) == 0 && denied > 0 {
+		return ipc.Exit{Code: ExitDenied, ErrorCode: "UNDO_DENIED", Error: fmt.Sprintf("%d inverse(s) needed your confirmation and did not get it", denied)}
 	}
 	if len(res.Undone) == 0 && len(reappeared) > 0 {
 		return ipc.Exit{Code: 1, ErrorCode: "UNCERTAIN_STATE", Error: strings.Join(reappeared, "; ")}

@@ -38,12 +38,14 @@ type permResult struct {
 // (spec M4 §5.1).
 func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInput) []byte {
 	if l.srv == nil || !l.srv.Connected() {
-		return nil // the person is at the PC
+		l.holdTerminal() // the person is at the PC; the dialog is still there if the app comes
+		return nil
 	}
 	if !claudecode.CardSafe(in.ToolName, in.ToolInput) {
 		// The card could not show what a "yes" would approve: the terminal
 		// asks, and its dialog must not get the chat's text (spec §6.3).
 		l.raiseAttention()
+		l.holdTerminal()
 		return nil
 	}
 	rule, always := claudecode.AlwaysRule(in.ToolName, in.ToolInput)
@@ -62,6 +64,7 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	a.mu.Lock()
 	if len(a.perms) >= maxPerms || now.Sub(a.lastPerm) < permGap {
 		a.attention = now.Add(attentionTTL) // Claude Code's dialog is on the terminal
+		a.held = true
 		a.mu.Unlock()
 		return nil
 	}
@@ -100,6 +103,9 @@ func (l *phoneLink) resolvePerm(id string, d claudecode.Decision, by string) boo
 		return false
 	}
 	delete(a.perms, id)
+	if by == "timeout" {
+		a.held = true // nobody answered: Claude Code's dialog stays on the terminal (V05)
+	}
 	for i, o := range a.order {
 		if o == id {
 			a.order = append(a.order[:i:i], a.order[i+1:]...)

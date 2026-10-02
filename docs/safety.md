@@ -47,7 +47,7 @@ adbuddy undo session
 adbuddy undo <id>
 ```
 
-[Use ADBuddy](usage.md#look-back-and-undo) shows each form. `adbuddy undo` undoes the most recent change that has an inverse. Undo runs the recorded inverse without asking again, and it does not run while the agent is paused.
+[Use ADBuddy](usage.md#look-back-and-undo) shows each form. `adbuddy undo` undoes the most recent change that has an inverse. Undo runs a 🟡 inverse without asking again; a 🔴 inverse (such as `uninstall` after an install, or `rm -f` of a file the agent created) asks you like any 🔴 command, and if you do not allow it that change is skipped. Undo does not run while the agent is paused.
 
 **What has an undo.** ADBuddy records an inverse for the changes it understands: a setting changed, an app disabled or uninstalled for the user (a system app), an app operation mode set with `appops`, a battery exemption, a folder created, a file moved or created, a file pushed (a file it replaces is saved first and put back) and a new app installed.
 

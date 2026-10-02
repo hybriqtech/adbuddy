@@ -234,33 +234,178 @@ func checkDate(ws []Word) checkResult {
 	return ok()
 }
 
-// dumpsys is 🟢 unless it passes a command that changes state. Options that
-// start with --reset or --clear (procstats --clear, batterystats --reset-all,
-// usagestats --clear…) wipe the service's data.
+// dumpsys is 🟢 only in a form known to read (v1 V06): many services take
+// commands among their arguments (battery set, jobscheduler run, thermalservice
+// override-status, batterystats --reset…), so the arguments go through an
+// allowlist. dumpsys's own options, a service alone and, for a few services,
+// the arguments listed below are reading; anything else is 🔴.
 //
 // --noredact / --reveal (in any position, with or without a service)
 // prints the text of every app's notifications: 🔴.
 func checkDumpsys(ws []Word) checkResult {
-	if revealsNotifications(values(ws)) {
+	v := values(ws)
+	if revealsNotifications(v) {
 		return red(reason("dumpsys notification text of every app"))
 	}
-	if len(ws) < 3 {
-		return ok() // dumpsys alone, or only a service
-	}
-	for _, w := range ws[2:] {
-		switch v := w.Value; {
-		case strings.HasPrefix(v, "--reset"), strings.HasPrefix(v, "--clear"):
+	svc, args, bad := dumpsysSplit(v)
+	switch {
+	case bad != "":
+		if strings.HasPrefix(bad, "--reset") || strings.HasPrefix(bad, "--clear") {
 			return red(reason("dumpsys option that clears data"))
-		default:
-			switch v {
-			case "set", "reset", "unplug", "enable", "disable", "clear", "put", "delete", "remove", "add",
-				"force", "force-idle", "force-inactive", "unforce", "step", "whitelist", "tempwhitelist",
-				"sys-whitelist", "except-idle-whitelist", "suspend", "kill", "stop", "start":
-				return red(reason("dumpsys command that changes state"))
+		}
+		return red(reason("unknown dumpsys option {v}", "v", bad))
+	case svc == "":
+		return ok() // every service, without arguments
+	case dumpsysVerbs[svc]:
+		return red(reason("dumpsys command that changes state"))
+	case svc == "deviceidle":
+		// The deviceidle rule reads it when it comes right after dumpsys.
+		return red(reason("dumpsys options before deviceidle"))
+	case len(args) == 0:
+		return ok()
+	}
+	if reads := dumpsysReads[svc]; reads != nil && reads(args) {
+		return ok()
+	}
+	return red(reason("dumpsys {value} with arguments that are not a known way of reading it", "value", svc))
+}
+
+// dumpsysFlags are dumpsys's own options without a value; dumpsysValued take
+// one. dumpsys reads them with getopt_long("+t:T:l"), so they end at the first
+// word that is not an option: the service. A long option abbreviated, which
+// getopt_long would also accept, is not in the list and is 🔴.
+var (
+	dumpsysFlags = map[string]bool{
+		"-l": true, "--help": true, "--proto": true, "--skip": true, "--clients": true,
+		"--dump": true, "--pid": true, "--thread": true, "--stability": true,
+	}
+	dumpsysValued = map[string]bool{"-t": true, "-T": true, "--priority": true}
+)
+
+// dumpsysSplit separates dumpsys's own options from the service and its
+// arguments. bad is the first option dumpsys does not have. With --skip the
+// words after the options are services to leave out: no service is dumped
+// with arguments.
+func dumpsysSplit(v []string) (svc string, args []string, bad string) {
+	skip := false
+	for i := 1; i < len(v); i++ {
+		a := v[i]
+		switch {
+		case a == "--":
+			if skip || i+1 >= len(v) {
+				return "", nil, ""
 			}
+			return v[i+1], v[i+2:], ""
+		case !strings.HasPrefix(a, "-") || a == "-":
+			if skip {
+				return "", nil, ""
+			}
+			return a, v[i+1:], ""
+		case dumpsysValued[a]:
+			i++
+		case (strings.HasPrefix(a, "-t") || strings.HasPrefix(a, "-T")) && isDigits(a[2:]),
+			strings.HasPrefix(a, "--priority="):
+		case dumpsysFlags[a]:
+			skip = skip || a == "--skip"
+		default:
+			return "", nil, a
 		}
 	}
-	return ok()
+	return "", nil, ""
+}
+
+// dumpsysVerbs are words that name a command, not a service.
+var dumpsysVerbs = map[string]bool{
+	"set": true, "reset": true, "unplug": true, "enable": true, "disable": true, "clear": true,
+	"put": true, "delete": true, "remove": true, "add": true, "force": true, "force-idle": true,
+	"force-inactive": true, "unforce": true, "step": true, "whitelist": true, "tempwhitelist": true,
+	"sys-whitelist": true, "except-idle-whitelist": true, "suspend": true, "kill": true, "stop": true,
+	"start": true,
+}
+
+// dumpsysReads lists, for the services whose arguments are commonly used to
+// read, the arguments known to read. Any other service is 🟢 only alone.
+// --checkin is left out of procstats, batterystats and activity: there it
+// consumes state (procstats renames its saved files, batterystats deletes its
+// checkin file, activity clears the broadcast statistics); -c only prints.
+var dumpsysReads = map[string]func(args []string) bool{
+	"activity": dumpsysActivity,
+	"package": wordsOrNames("packages", "p", "permissions", "perm", "permission", "features", "f",
+		"libraries", "l", "preferred", "pref", "preferred-xml", "providers", "prov", "messages", "m",
+		"verifiers", "v", "version", "installs", "shared-users", "s", "queries", "q",
+		"domain-preferred-apps", "d", "keysets", "k", "frozen", "volumes", "dexopt", "compiler-stats",
+		"changes", "service-permissions", "known-packages", "-f", "-a", "-h", "--checkin", "--all-components"),
+	"meminfo": wordsOrNames("-a", "-d", "-c", "-s", "-S", "-h", "--oom", "--local", "--package",
+		"--checkin", "--proto", "--unreachable"),
+	"gfxinfo":      wordsOrNames("framestats"),
+	"procstats":    wordsOrNames("--hours", "--last", "--current", "--details", "--full-details", "--active", "-a", "-c", "-h"),
+	"batterystats": wordsOrNames("--charged", "-c", "--history", "--daily", "--proto", "-h"),
+	"window": wordsOrNames("windows", "w", "displays", "d", "tokens", "t", "policy", "p", "animator", "a",
+		"sessions", "s", "lastanr", "l", "input", "visible", "visible-apps", "containers", "-a", "-h"),
+}
+
+// wordsOrNames accepts arguments that are all in words or are names: a
+// package, a process, a component or a number (a PID, a UID, hours…).
+func wordsOrNames(words ...string) func([]string) bool {
+	return func(args []string) bool {
+		for _, a := range args {
+			if !contains(words, a) && !dumpsysName(a) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// dumpsysName is a package or process name (com.x, com.x:remote), a component
+// (com.x/.Main) or a number.
+func dumpsysName(s string) bool {
+	if isDigits(s) {
+		return true
+	}
+	name, class, isComponent := strings.Cut(s, "/")
+	if strings.HasPrefix(name, "-") || !strings.Contains(name, ".") || !nameChars(name, ":") {
+		return false
+	}
+	return !isComponent || (class != "" && nameChars(class, "$"))
+}
+
+func nameChars(s, extra string) bool {
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || strings.ContainsRune(extra, r)) {
+			return false
+		}
+	}
+	return true
+}
+
+// activitySections are the parts of dumpsys activity that only print.
+var activitySections = []string{
+	"activities", "a", "recents", "r", "broadcasts", "b", "broadcast-stats", "intents", "i",
+	"permissions", "perm", "processes", "p", "oom", "o", "lmk", "lru", "services", "s", "providers",
+	"prov", "top", "starter", "containers", "lastanr", "lastanr-traces", "associations", "as",
+	"exit-info", "users", "settings", "binder-proxies",
+	"-a", "-c", "-v", "-f", "-h", "--proto",
+}
+
+// dumpsysActivity: sections and names; `service NAME` and `provider NAME`
+// hand the rest of the line to that service's or provider's own dump, so
+// nothing may follow the name.
+func dumpsysActivity(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "service" || a == "provider":
+			return i == len(args)-2 && dumpsysName(args[i+1])
+		case a == "-p":
+			if i+1 >= len(args) || !dumpsysName(args[i+1]) {
+				return false
+			}
+			i++
+		case !contains(activitySections, a) && !dumpsysName(a):
+			return false
+		}
+	}
+	return true
 }
 
 func checkIP(ws []Word) checkResult {

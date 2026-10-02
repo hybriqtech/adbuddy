@@ -1,0 +1,103 @@
+# v1 · cierre de diferidos de código (ola 1) Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Cerrar, antes de la v1, los asuntos de código aplazados por las revisiones de M1-M6d que no necesitan móvil, claves ni emulador. **Primero** los que dejan ejecutar algo sin la confirmación que le corresponde (regla del proyecto: un hueco así no se aparca) y los de más impacto de seguridad; después el resto sin solape con M6c (tern: cadenas e i18n) ni M5c (nautilus: notificaciones y pantallas de la app).
+
+**Architecture:** Once tareas independientes, cada una con su test que falla primero, su commit y su revisión. Parte del triage `.superpowers/sdd/2026-10-02-adbuddy-v1-diferidos/triage.md` (local; cada tarea cita los ids V01-V43 de sus filas, con fichero, línea y origen), con cada asunto comprobado contra el código de `origin/main` al hacerlo.
+
+**Tech Stack:** Go 1.27 (host), Kotlin (solo T11, tests JVM), shell (T6).
+
+## Global Constraints
+
+- **Cada asunto se reproduce antes de arreglarse** en el `origin/main` actual (83b7019 al escribir esto; el `main` local de algunos worktrees está desfasado): se comprueba que sigue vigente y se escribe un test que falla sin el arreglo; si ya no existe, se dice en el informe y no se inventa trabajo.
+- **Nada que necesite móvil, emulador, claves o red** (salvo `gh api` de solo lectura en T6/V30). Los tests usan el adb falso. En este PC Windows no corre `go test -race` (solo la CI): leer los globales de test antes de lanzar goroutines.
+- **Textos de cara al usuario (choque con M6c).** m6c añade un catálogo i18n y `cli/textlint_test.go` (un contador de literales de texto que solo puede bajar: `NewError`, `ConfigError`, `TransientError`, `UsageError`, `Fprint*`, `say`/`warn`, `Short`, `Long`, `Detail`, `Guidance`). Regla: en `internal/cli`, los errores nuevos con `fmt.Errorf` y ningún literal nuevo de esos tipos; reutilizar mensajes que ya existen. Si un asunto de seguridad necesita un texto o motivo nuevo (T1, T2, T3), se escribe en texto plano con el patrón actual y **se lista en el informe con su clave sugerida** para que tern lo añada a su catálogo al rebasar. No tocar `strings.xml` ni `android/**/ui/**`, notificaciones, `ProtectedApps.kt`, `UiExecutor.kt`, `UiHelpers.kt` (M5c).
+- **Seguridad:** un arreglo no puede abrir un hueco que deje ejecutar 🔴 sin confirmación, escribir fuera del entorno, aceptar una ruta fuera de `projects/`, abrir el socket IPC a otros usuarios o saltarse el shim; ante la duda, falla cerrado y se dice en el informe.
+- **Proceso del proyecto (`CLAUDE.md`):** cada tarea compila y pasa sus tests sola; commits con identidad local `hybriqtech` y el trailer exacto `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; nunca `--no-verify`; `git add` con rutas concretas; nunca modelos Haiku; sin IPs privadas en lo que se sube (usar `192.0.2.x`/`100.64.0.x` o construirlas con una concatenación en los tests); ficheros de `host/` en LF; no tocar `docs/superpowers/plans/pendientes-m3-m5.md` dentro de las tareas (m5c cambia sus líneas 106-150: se reconcilia al final).
+- Comandos desde `host/`: `go test ./... -count=1 -timeout 10m`, `gofmt -l .` (vacío), `go vet ./...`.
+
+## Reparto de revisiones
+
+**Opus** (seguridad: canal, token, journal, permisos, contención de escritura): T1, T2, T3, T4 (V24), T5, T9 (V28). **Sonnet** (`adbuddy-reviewer`): T4 (V25), T6, T7, T10. (T8 y T11 quitadas: las toma nautilus.) Revisión final de la rama: opus. La revisión opus del plan ya se hizo y sus hallazgos están aplicados. Las tareas van en serie, un subagente a la vez.
+
+## Fuera de la ola 1
+
+- **A los pendientes, para después de M6c/M5c o decisión del usuario:** V07 (`ADBUDDY_SOURCE` y la sesión), V08 (lector del bridge sin tope: falla seguro, el 🔴 caduca y se deniega), V09, V19, V20, V22 (contención/envío/doctor: m6c cambia `pcwrite.go` y `send.go`), V11, V31, V34, V35, V36, V38, V18, V40, la parte de V39 en `cli/phone.go` (`unsupported` y el tope de avisos, que ya existe: `maxNotices = 16`; m6c reescribe esas líneas) y V43 (el selector de medios está en `ui/ChatRoot.kt`, de M5c).
+- **V27** (lista de variables de entorno permitidas para el agente): cambio de comportamiento con riesgo de romper agentes reales; decisión de producto.
+
+---
+
+### Task 1: `undo` no ejecuta a ciegas inversos de un diario que el agente puede forjar (V01)
+
+**V01.** `undo` ejecuta sin preguntar inversos (`uninstall <pkg>`, `rm -f <ruta>`) de entradas de diario forjadas: la firma usa `ipc.secret` (`cli/serve.go:215`), que el agente puede leer, y el diario vive en su carpeta; `validInverse` admite esos inversos y `undo` los corre (`daemon/undo.go:252,296`, `daemon/inverse.go`). Ficheros: `daemon/inverse.go`, `daemon/undo.go`, `journal`.
+
+Decisión de diseño (tomada aquí; spec v1 §4.4): **el inverso de una entrada del diario pasa por el mismo clasificador y la misma puerta de confirmación que cualquier orden del agente.** Antes de ejecutarlo, `undo` clasifica el inverso con el `Classifier`; si sale 🔴 (por ejemplo `uninstall <pkg>` o `rm -f <ruta>`), espera la confirmación del usuario por el camino de confirmaciones del daemon, igual que una orden 🔴; si la deniega o caduca, esa entrada se salta como "denied" y se cuenta en el resultado. Además se comprueba que el tipo de inverso corresponde al `op.Kind` registrado (una entrada firmada con un `Op` de `settings` no puede traer un inverso `uninstall`).
+
+Test que falla sin el arreglo: una entrada de diario con firma válida hecha con el secreto (como la forjaría un agente que lee `ipc.secret`) y un inverso 🔴 NO se ejecuta sin confirmación; denegada, no corre; confirmada, corre; los inversos 🟡 de siempre siguen corriendo sin preguntar. Falla cerrado si no hay quien confirme (como `Denied: nobody could confirm`). Textos nuevos en texto plano y listados en el informe para el catálogo de tern.
+
+### Task 2: Clasificador: lo que da un cambio de estado en 🟢 o sin ser especial (V06 V02 V03)
+
+**V06** (el hueco): `dumpsys` es 🟢 con argumentos libres y lista de DENEGACIÓN corta (`classify/checks_read.go:243-264`, `rules/shell-read.yaml:80`): subcomandos que cambian estado pasan sin confirmación ni diario (`jobscheduler run`, `alarm set-time`, `thermalservice override-*`…) y `ws[1]` no se mira (`dumpsys --reset`, `dumpsys set`: `len(ws)<3` devuelve ok). **V02:** `bugreportz` y `dumpstate` son 🔴 normal, no especial (solo `name == "bugreport"` lo es: `special.go:101`): una regla "Sí, siempre" los baja y dan pantalla y notificaciones. **V03:** neutralizar ADBuddy por UID o PID (`appops set <uid>`, `kill <pid>`, `am kill-all`, `cmd netpolicy`) es 🔴 normal; `touchesCriticalApp` y `resetsEveryApp` (`special.go:288-345`) solo miran nombres de paquete.
+
+Remedio: V06 pasa a una lista blanca de formas de lectura (`dumpsys <servicio> [args de lectura]`, `dumpsys -l`, `dumpsys meminfo`, `dumpsys battery`, `dumpsys package`, etc.) sin romper `classify/testdata/habitual.jsonl` (el contrato de lo que no puede subir); la primera palabra tras `dumpsys` se mira siempre; lo que no está en la lista blanca sube a 🔴 con su motivo. V02: `bugreportz` y `dumpstate` pasan a especiales como `bugreport`. V03: se vuelve especial cuando el uid o el pid corresponden a ADBuddy o no se pueden resolver (decidir mirando `special.go:288-345`). Cada caso nuevo va al corpus (`testdata/*.jsonl`, `corpus_test.go`) con su nivel; **no hay que regrabar el oráculo** (no cambia el evaluador de shell): si algo lo exigiera, parar y decirlo. Motivos nuevos en texto plano, listados en el informe para el catálogo de tern.
+
+### Task 3: Tarjetas de permiso y atención de Claude Code (V04 V05)
+
+**V04:** la tarjeta de permiso no enseña `dangerouslyDisableSandbox` ni `run_in_background` de Bash, y Edit/Write enseñan ruta, no contenido (`claudecode/rule.go:103-130`, `CardSafe` `:185`); un "Sí" aprueba la entrada entera. **V05:** la atención caduca a 120 s (`cli/phone_agent.go:35`, `phone_perm.go:64,74`) incluso con un permiso dejado a la terminal por tarjeta no apta; después solo frena `Manager.Busy()`, que reconoce 5 textos en inglés (`session/session.go:450-456`): un `chat.send` teclea Enter sobre un diálogo no visto.
+
+Remedio: `CardSafe` es falso (la pregunta va a la terminal) si esos campos vienen activos y la tarjeta no puede enseñarlos; la atención no caduca mientras haya un permiso pendiente en la terminal (hasta `Stop` o prompt) o `Busy()` reconoce el diálogo; lo mínimo que impida que un `chat.send` teclee Enter sobre un diálogo no visto (falla cerrado: ante la duda, no teclear). Tests que fallan sin el arreglo (carga útil con la bandera activa ⇒ no apta para tarjeta; permiso pendiente tras 120 s ⇒ `chat.send` no teclea). Cambios pequeños en `phone_agent.go` y `session.go`: m6c toca algunas líneas de esos ficheros (cuidar los conflictos); textos nuevos, si hacen falta, en texto plano y listados en el informe.
+
+### Task 4: Transcript de Claude Code y PTY en Windows (V24 V25)
+
+**V24 (opus).** `ValidTranscript` (`claudecode/paths.go:63-70`) con Go >= 1.23: `EvalSymlinks` no resuelve junctions de Windows; en la rama "no existe" se acepta `projects\J\later.jsonl` fuera de `projects/`; además TOCTOU: `tail.go:58-73` reabre por ruta y `Lstat` solo mira el último componente. Comparar el descriptor abierto con el `Lstat` NO detecta que un directorio intermedio pase a ser una junction (ambos la siguen). La réplica de la revisión del plan: `EvalSymlinks(J)` no resuelve una junction, `ValidTranscript(projects\J\later.jsonl)` se acepta en la rama "no existe", y en la rama "existe" se rechaza solo por accidente. **Remedio probado: `os.OpenRoot(<projects>)` y `root.Open(rel)` en cada `Poll`** (rechaza una junction con "path escapes from parent", también si apunta dentro de `projects`, y abre bien los ficheros normales), lo que cierra la validación y el TOCTOU a la vez. **Restricción obligatoria, con test:** solo se rechazan los componentes **estrictamente por debajo** de `projects/`; un `.claude` o un `projects` que sea junction o enlace (usuarios que movieron la carpeta a otro disco) sigue funcionando. Tests: junction real con `mklink /J` bajo `projects/` rechazada en las ramas "existe" y "no existe", ficheros normales aceptados, `projects` enlazado aceptado (se saltan si no se puede crear la junction). Para no chocar con m6c, no cambiar la llamada de `cli/phone_agent.go:283` (m6c inserta `tl.Parser().SetLang(...)` justo después): tocar `tail.go` por dentro.
+
+**V25 (Sonnet).** PTY en Windows: hijos con consola propia (y el agente, si `serve` muere sin `defer`) sobreviven (`pty/pty_windows.go:130,241-247`). Job object de `golang.org/x/sys/windows` (ya en `go.mod`: `CREATE_SUSPENDED`, `ResumeThread`, `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, `TerminateJobObject`, `JobObjectBasicProcessIdList`): proceso suspendido, asignarlo al job, reanudar; `SecurityAttributes` nil (no heredable) y sin `BREAKAWAY_OK`; `Kill()` usa `TerminateJobObject` también en la rama "ya terminó" (`pty_windows.go:240-242`, donde hoy sobreviven los nietos con consola propia); si falla `AssignProcessToJobObject`, seguir sin job con un aviso (los huérfanos no son un hueco: el shim falla cerrado sin host) y con test de esa decisión; test `//go:build windows` con `JobObjectBasicProcessIdList` de que cerrar el job mata al hijo y a los nietos; sin cambios en Linux y macOS. Apunte: un servidor adb que arranque algo del árbol del agente quedaría dentro del job y moriría con el agente.
+
+### Task 5: Workspace: contención de escritura y lecturas colgables (V14 V26 V15 V32)
+
+**V14 (más amplio que el triage).** `loadSettings` lee `.claude/settings.json` y `.gemini/settings.json` con `os.ReadFile` (`workspace/workspace.go:315`): un FIFO o `/dev/zero` plantado por el agente cuelga `Init`. El patrón "`Lstat` y luego lectura por ruta" está en cuatro sitios: `loadSettings`, `writeFile` (comparación `workspace.go:144-145`), `hasUserMarker` (`skills.go:110-120`) y `fileHash(dst)` en `copyIfDifferent` (`workspace.go:405`: una FIFO en `.adbuddy/bin/adb` deja colgado el arranque de `serve` y `run`, no solo `env init`). **Un único helper** que abre el fichero (con `O_NONBLOCK` en Unix mediante build tag), hace `f.Stat()`, exige fichero regular, comprueba `SameFile` con el `Lstat` previo y lee con `LimitReader` (1 MiB), usado en los cuatro; test en Unix con `syscall.Mkfifo` (`//go:build unix`).
+
+**V26 (más amplio que el triage; comprobado que se escribe fuera del entorno).** `ensureRealDirs` no es todo-o-nada (`workspace/skills.go:87-106`) y `Init` hace `MkdirAll` de `BinDir` (`.adbuddy/bin`), `JournalDir` y `.claude` (`workspace.go:63`) sin mirar enlaces: con `env\.adbuddy` como junction a `outside`, `Init` termina sin error y deja `outside\bin\adb.exe`; `serve.go:87` y `run.go:77` llaman a `Init` en cada arranque. La pasada previa de `ensureRealDirs` (todo o nada) debe listar TODAS las carpetas explícitamente: `.adbuddy`, `.adbuddy/bin`, `journal`, `.claude`, `.claude/skills/<skill>`, `.agents/skills/<skill>`, `.gemini`, y sustituir ese `MkdirAll`; test con junction en Windows y enlace simbólico en Unix sobre `.adbuddy` y `journal`; `os.Root` para el TOCTOU solo si es un cambio pequeño y claro, si no, documentar el residuo.
+
+**V15 (endurecimiento; es la puerta del token, pero no un hueco: `Release` es una constante y `Same` ya compara `DevAPK`, ruta y stat).** `phoneapp/trust.go:206-232,236-250`: vaciar la caché (`vr.ok.Store(nil)`) tras un fallo definitivo de `Verify`, con test.
+
+**V32.** `mergeGeminiSettings` sin `context.fileName` escribe `["AGENTS.md"]` (`workspace.go:372-391`) y Gemini deja de cargar `GEMINI.md`: escribir `["GEMINI.md","AGENTS.md"]`. **Cambia tests existentes** (`workspace/gemini_test.go` ~35 y ~105 esperan `["AGENTS.md"]`) y la spec M6b §3.4 (`docs/superpowers/specs/2026-10-01-adbuddy-m6b-skills-design.md`, ~línea 77): actualizarlos.
+
+### Task 6: Instalación y CI (V16 V17 V30)
+
+**V16.** `--apk` acepta cualquier ruta: un FIFO sin escritor bloquea `os.Open` (`cli/appsetup.go:77`): exigir fichero regular tras `os.Stat` (un enlace a un APK es legítimo), con error claro y sin abrir nunca una FIFO; el test multiplataforma usa un directorio, el de la FIFO `//go:build unix`; el error con `fmt.Errorf` (regla de textlint). **V17.** `scripts/install.sh:34-36`: `wget --https-only` no garantiza que una redirección no baje a http y BusyBox wget no lo soporta: exigir `curl` (con `--proto "=https"` también las redirecciones); actualizar `docs/install.md` (~línea 80) y la spec M6a (`docs/superpowers/specs/2026-10-01-adbuddy-m6a-releases-design.md`, ~línea 295); `scripts/install_test.sh` sigue pasando; el workflow `release-check` pasará `shellcheck` al tocar `scripts/install*.sh`: sintaxis POSIX cuidada. **V30.** Fijar por SHA las acciones de `.github/workflows/*.yml` que usan etiqueta (`checkout`, `setup-go`, `setup-java`, `gradle/actions/setup-gradle@v4`, etc.), como ya hacen `release*.yml`: `GH_CONFIG_DIR="$HOME/.config/gh-hybriqtech" gh api repos/<owner>/<repo>/git/ref/tags/<tag>` (si el objeto es una etiqueta anotada, desreferenciar con `git/tags/<sha>`), escribir `uses: owner/repo@<sha> # <tag>` sin cambiar la versión, y comprobar que el YAML sigue siendo válido (`android.yml` solapa unas 4 líneas con m6c: trivial). La CI valida el resultado; si un SHA no se puede obtener, dejar esa acción como está y decirlo.
+
+### Task 7: Guarda de pantalla del host (V10 V12 V13)
+
+**V10** (`uidump/uidump.go:226-232,245`): `uidump.Find` toma los bounds del ancestro clicable sin comprobar que no estén vacíos: tap en (0,0); bounds vacíos ⇒ no hay punto de toque (error, nunca (0,0)); y qué hacer cuando `Find` corta en `MaxDepth` sin señal (decidirlo o aplazarlo diciéndolo). **V12** (`cli/uilink.go:133,142-148`): `uiLink.Call` no mira `ctx` antes de `Send` (un click con ctx cancelado sale y el diario dice "stopped") y `OK:true` sin `result` da `(nil,nil)`: comprobar `ctx` antes de `Send` y tratar `OK:true` sin `result` como un **error** (no un resultado vacío); apuntar la carrera del `select` entre `w.ch` y `ctx.Done()`. **V13** (`cli/uilink.go:78-89`): `protected.json` con `{}` o `null` cuenta como lista conocida y se pierde el aviso de "sin lista": `return u`, para que avise `Protected()` con el mensaje que ya existe (ningún `Fprintf` nuevo), y un test que fije que `"protectedApps": []` (lista vacía explícita) SÍ sigue contando como lista conocida.
+
+### Task 8: IPC robusto (V29) — QUITADA: la toma nautilus (orden del supervisor, 2026-10-02)
+
+Ya no es de este plan. No tocar `ipc/`.
+
+### Task 9: Chat y ficheros del host (V23 V28 V41)
+
+(V28 con revisor opus.) **V23** (`cli/phone_chat.go:225-237`): un `chat.send` reintentado tras `session.new` o fuera de los 100 del historial se vuelve a inyectar (solo hay `inflight` e historial): conjunto acotado de ids ya inyectados; **decidir qué se responde a la app** para un id ya inyectado que ya no está en el historial: un error con un código que ya exista (sin cambiar el protocolo) o el mínimo guardado con tope de memoria; al reconstruirlo, no meterlo en la conversación nueva (ahí no se tecleó). **V28** (`cli/phone_files.go:454-455,534-535,541-565`): hoy `endUpload` → `moveExclusive` puede mover un fichero que viene del móvil fuera del entorno si `inbox` pasa a ser un enlace tras `inboxPlain`, y el `fail` borra a través del enlace: `plainDir` en el `Remove` de `.partial/<id>`, cerrar la ventana `inboxPlain`→`moveExclusive` (la revisión recomienda `os.Root` también aquí), test de `endUpload` que ejerza la comprobación, y tope de descargas simultáneas. **V41** (`cli/phone_chat.go:105-130`, `phone_term.go`): guardar el tamaño por mensaje para no serializar demasiado (el lock es el del servidor del bridge, `phone.go:399`, `server.go:427/629`; `chatSnapshot` suelta `chat.mu` antes de `Marshal`: si el asunto no está vigente tal como se describe, decirlo); `flushTerm` descarta lo acumulado si `sendTerm` falla con error distinto de `ErrNoApp`: usar `w.snapDue = true` (como `phone_term.go:346-347`) en lugar de conservar un búfer que crecería sin límite si el envío sigue fallando.
+
+### Task 10: Tests y flakes del host (V37 V33 V39)
+
+**V37:** estabilizar con esperas por condición (no `Sleep`) los tests citados en el triage (`TestRemoteOnClientGoneWhileAsking` en `remotecmd_test.go:657`, `Sleep(300ms)` en `TestWatchRemoteResetsAfterASuccess`, esperas de 5 s) sin quitar cobertura; **no refactorizar `serve.go`** para `TestServeWiresRemoteActive` (m6c cambia 55 líneas): comprobar el literal con `go/ast` o dejarlo. **V33:** la guarda de ejemplos de las skills (`cli/skills_commands_test.go`) detecta un bloque ```adb tras una valla de 4 backticks o con info string `adb{.x}` y las recetas prohibidas que le faltan (`rm -r` dentro de `$(…)` o tras `;`, `find -delete`, `pm uninstall` sin `--user`, `MASTER_CLEAR`, `FACTORY_RESET`), con casos negativos. **V39 (solo `bridge`; lo de `cli/phone.go` va a pendientes):** tests de tramas de ids no aceptados, de `OnAttach` después de `OnConnect`, de `Publish` desde `OnAttach` y de `filled()` por `PublishSnapshot`.
+
+### Task 11: Tests JVM de la app (V21 V42 V43) — QUITADA: la toma nautilus (orden del supervisor, 2026-10-02)
+
+Ya no es de este plan. No tocar `android/`. También pasan a nautilus V11 y V38 (`daemon/guard.go`).
+
+---
+
+## Pasos de cada tarea (se repiten; no se copian en cada una)
+
+- [ ] **Reproducir** (ver Global Constraints) y escribir el test que falla sin el arreglo (RED con comando y salida).
+- [ ] **Arreglar** con el cambio mínimo; sin refactors fuera del asunto.
+- [ ] **Comprobar:** los tests del paquete y `go test ./... -count=1 -timeout 10m`, `gofmt -l .` (vacío), `go vet ./...`.
+- [ ] **Informe:** una fila por asunto (arreglado / ya no vigente / aplazado con motivo), con el test que lo guarda y los comandos y salidas; **lista de textos nuevos para el catálogo de tern** (T1-T3).
+- [ ] **Commit** (uno por asunto o uno por tarea si son pequeños; asunto y causa raíz en el cuerpo), con la identidad hybriqtech y el trailer exacto.
+
+## Validaciones manuales pendientes
+
+Nada de esto se prueba sin móvil ni sin permiso explícito del usuario: V43 (herramientas atascadas en `running`, pila de sinks de `TerminalFeed`: lógica sin UI aplazada) y cualquier comportamiento de V05 con Claude Code real (un permiso pendiente con el diálogo en la terminal).

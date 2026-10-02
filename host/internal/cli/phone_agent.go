@@ -62,6 +62,7 @@ type adapter struct {
 	fallbacks   map[string]bool // normalized texts emitted as the Stop fallback
 	sent        []sentText
 	attention   time.Time // a dialog may be on the terminal's screen until then
+	held        bool      // a question was left to Claude Code's dialog on the terminal: until Stop, a prompt or the end (V05)
 	perms       map[string]*pendingPerm
 	order       []string
 	lastPerm    time.Time
@@ -106,7 +107,7 @@ func (l *phoneLink) adapterConversation(conv string, stopped bool) {
 	cancel := a.cancel
 	a.cancel, a.tail = nil, nil
 	a.active, a.degraded, a.hookState = false, false, ""
-	a.lastText, a.fallbacks, a.attention, a.droppedSeen = "", nil, time.Time{}, 0
+	a.lastText, a.fallbacks, a.attention, a.droppedSeen, a.held = "", nil, time.Time{}, 0, false
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -115,7 +116,9 @@ func (l *phoneLink) adapterConversation(conv string, stopped bool) {
 }
 
 // agentBusy says why a chat.send must wait: a question of the agent is
-// pending, or a dialog may be on the terminal's screen (spec M4 §6.2). It does
+// pending, or a dialog may be on the terminal's screen (spec M4 §6.2): for the
+// attention's TTL, or until Stop or a prompt when the host left a question to
+// the terminal (held, V05); Manager.Busy() reads the screen too. It does
 // not depend on the adapter being active: a PermissionRequest raises its card
 // even when the SessionStart could not be followed, and the text typed then
 // would land on Claude Code's dialog.
@@ -123,7 +126,7 @@ func (l *phoneLink) agentBusy() string {
 	a := &l.adapter
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if len(a.perms) > 0 || time.Now().Before(a.attention) {
+	if len(a.perms) > 0 || a.held || time.Now().Before(a.attention) {
 		return busyPending
 	}
 	return ""
@@ -165,6 +168,7 @@ func (l *phoneLink) handleHook(ctx context.Context, ws string, req ipc.Request, 
 	}
 	raw, err := io.ReadAll(io.LimitReader(c.Stdin(), claudecode.MaxHookInput+1))
 	if err != nil {
+		l.ignoredHook(req.Argv[0])
 		return ipc.Exit{}
 	}
 	if out := l.hookCall(ctx, ws, req.Argv[0], raw); len(out) > 0 {
@@ -179,10 +183,12 @@ func (l *phoneLink) hookCall(ctx context.Context, ws, event string, raw []byte) 
 	in, err := claudecode.ParseHook(event, raw)
 	if err != nil {
 		fmt.Fprintln(l.log, l.lang.T("phone_agent.claude_code_hook_ignored", err))
+		l.ignoredHook(event)
 		return nil
 	}
 	if !sameTree(ws, in.Cwd) {
 		fmt.Fprintln(l.log, l.lang.T("phone_agent.claude_code_hook_ignored_it"))
+		l.ignoredHook(event)
 		return nil
 	}
 	switch in.Event {
@@ -210,6 +216,16 @@ func (l *phoneLink) hookCall(ctx context.Context, ws, event string, raw []byte) 
 	return nil
 }
 
+// ignoredHook holds the chat for a PermissionRequest the host does not take:
+// Claude Code opens its dialog on the terminal all the same (V05, round 1).
+// It can only keep the chat from typing, which is the safe way to fail.
+func (l *phoneLink) ignoredHook(event string) {
+	if event == claudecode.EventPermissionRequest {
+		l.raiseAttention()
+		l.holdTerminal()
+	}
+}
+
 // sameTree reports whether cwd is the environment or lies under it.
 func sameTree(ws, cwd string) bool {
 	if ws == "" || cwd == "" || !filepath.IsAbs(cwd) {
@@ -234,7 +250,7 @@ func (l *phoneLink) setHookState(state string, clear bool) {
 	changed := a.hookState != state
 	a.hookState = state
 	if clear {
-		a.attention = time.Time{}
+		a.attention, a.held = time.Time{}, false
 	}
 	a.mu.Unlock()
 	if changed {
@@ -246,6 +262,15 @@ func (l *phoneLink) raiseAttention() {
 	a := &l.adapter
 	a.mu.Lock()
 	a.attention = time.Now().Add(attentionTTL)
+	a.mu.Unlock()
+}
+
+// holdTerminal marks a question left to Claude Code's dialog on the terminal:
+// nobody may have seen it, and it does not expire with the attention (V05).
+func (l *phoneLink) holdTerminal() {
+	a := &l.adapter
+	a.mu.Lock()
+	a.held = true
 	a.mu.Unlock()
 }
 
@@ -305,7 +330,7 @@ func (l *phoneLink) onSessionEnd() {
 	a.mu.Lock()
 	cancel := a.cancel
 	a.cancel, a.tail = nil, nil
-	a.active, a.hookState, a.attention = false, "", time.Time{}
+	a.active, a.hookState, a.attention, a.held = false, "", time.Time{}, false
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()

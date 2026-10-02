@@ -1,6 +1,7 @@
 Undo the last change (default), one journal entry, or every change of a session,
-newest first. Inverses run without asking again; changes without an inverse
-are reported and skipped. Needs `adbuddy serve` running.
+newest first. A 🔴 inverse (such as uninstall or rm -f) asks for confirmation like
+any 🔴 command; the others run without asking again. Changes without an inverse,
+or whose inverse is not confirmed, are reported and skipped. Needs `adbuddy serve` running.
 
 Usage:
   adbuddy undo [last|session|<id>] [flags]

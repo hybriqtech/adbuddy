@@ -107,5 +107,9 @@ cp "$rel"/adbuddy_9.9.9_linux_amd64.tar.gz "$odd/"
 refused "no exact line" Linux x86_64 "$(url "$odd")" "$work/bin-odd"
 says "no exact line" "no adbuddy archive for linux_amd64"
 
+# It needs curl (BusyBox wget cannot promise HTTPS-only redirects) and pins HTTPS on every hop.
+if grep -v "^#" "$here/install.sh" | grep -q wget; then echo "FAIL install.sh still uses wget"; fail=1; fi
+grep -q -- '--proto "=https" --proto-redir "=https"' "$here/install.sh" || { echo "FAIL install.sh does not pin HTTPS on redirections"; fail=1; }
+
 [ "$fail" -eq 0 ] && echo "install: all tests pass"
 exit "$fail"

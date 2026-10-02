@@ -821,9 +821,23 @@ func TestWatchRemoteResetsAfterASuccess(t *testing.T) {
 	if err := g.store.SetUntil(time.Time{}); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(300 * time.Millisecond)
-	expire()
-	waitUntil(t, "a second warning", func() bool { return warnings() == 2 })
+	// No fixed pause: the watcher cannot say when it saw the clean state, so
+	// the expiry is switched off and on until a second warning shows up. That
+	// warning only exists if a success reset the "already warned" flag in
+	// between; without the reset the later failures stay silent.
+	clean := false
+	waitUntil(t, "a second warning", func() bool {
+		if warnings() == 2 {
+			return true
+		}
+		if clean {
+			expire()
+		} else if err := g.store.SetUntil(time.Time{}); err != nil {
+			t.Fatal(err)
+		}
+		clean = !clean
+		return false
+	})
 }
 
 func TestRemoteBackoffCapIsAboutTwoMinutes(t *testing.T) {

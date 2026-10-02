@@ -389,3 +389,43 @@ func countCalls(f *fakeADB, key string) int {
 	}
 	return n
 }
+
+// A definitive failure of Verify drops the last good answer: Same must not
+// keep admitting an app that Verify has just rejected. A transient failure
+// (adb) keeps it: Same still checks the stat itself.
+func TestDefiniteFailureForgetsTheLastGoodAnswer(t *testing.T) {
+	rel := apktest.SHA256(ours)
+	f := &fakeADB{}
+	installed(f, testPath, signedBy(ours), 1)
+	vr := NewVerifier(fixed(Trust{Release: rel}), 0)
+	if _, err := vr.Verify(context.Background(), f); err != nil {
+		t.Fatal(err)
+	}
+	// Transient: the APK cannot be read this time.
+	key := "shell " + shq.Join("base64", testPath)
+	other1 := signedBy(other)
+	installed(f, testPath, other1, 1)
+	delete(f.answers, key)
+	if _, err := vr.Verify(context.Background(), f); !errors.Is(err, ErrNoTrustedApp) || errors.Is(err, ErrSigner) {
+		t.Fatalf("transient: %v", err)
+	}
+	// The good answer survived: the good app, back in place, is still the same.
+	installed(f, testPath, signedBy(ours), 1)
+	if err := vr.Same(context.Background(), f); err != nil {
+		t.Fatalf("Same after a transient failure: %v", err)
+	}
+	installed(f, testPath, other1, 1)
+	delete(f.answers, key)
+	// Definitive: it is signed by someone else.
+	installed(f, testPath, other1, 1)
+	if _, err := vr.Verify(context.Background(), f); !errors.Is(err, ErrSigner) {
+		t.Fatalf("definitive: %v", err)
+	}
+	// The stat of the rejected app is the one now installed: without the
+	// fix, Same only compares path and stat with the old good answer and
+	// would fail anyway, so put the old good stat back in place.
+	installed(f, testPath, signedBy(ours), 1)
+	if err := vr.Same(context.Background(), f); !errors.Is(err, ErrNoTrustedApp) {
+		t.Fatalf("Same after a definitive failure: %v", err)
+	}
+}

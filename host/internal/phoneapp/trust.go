@@ -243,6 +243,9 @@ func (vr *Verifier) Verify(ctx context.Context, a ADB) (Verified, error) {
 	v, err := vr.check(ctx, a, trust, path, sk, n)
 	if err == nil || errors.Is(err, ErrSigner) || errors.Is(err, ErrAppTooOld) || errors.Is(err, ErrUnpinned) {
 		vr.key, vr.v, vr.err = key, v, err // definite: remembered for this app and trust
+		if err != nil {
+			vr.ok.Store(nil) // a rejected app leaves no good answer for Same
+		}
 	}
 	if err == nil {
 		vr.ok.Store(&v)

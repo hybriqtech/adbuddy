@@ -60,10 +60,14 @@ func Init(o Options) (Result, error) {
 	if o.Dir == "" || o.Exe == "" {
 		return res, errors.New("workspace: Dir and Exe are required")
 	}
-	for _, d := range []string{o.Dir, BinDir(o.Dir), JournalDir(o.Dir), filepath.Join(o.Dir, ".claude")} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
-			return res, err
-		}
+	// The environment itself may be reached through a link of the user's;
+	// nothing under it may be one (ensureRealDirs), checked before anything is
+	// created or written.
+	if err := os.MkdirAll(o.Dir, 0o700); err != nil {
+		return res, err
+	}
+	if err := ensureRealDirs(o.Dir, initDirs()...); err != nil {
+		return res, err
 	}
 	profile := o.Profile
 	if profile == "" {
@@ -94,9 +98,6 @@ func Init(o Options) (Result, error) {
 	if err := installSkills(o.Dir, o.Force, &res); err != nil {
 		return res, err
 	}
-	if err := ensureRealDirs(o.Dir, ".gemini"); err != nil {
-		return res, err
-	}
 	changed, created, err := mergeClaudeSettings(filepath.Join(o.Dir, ".claude", "settings.json"), filepath.Join(BinDir(o.Dir), exe("adbuddy")))
 	if err != nil {
 		return res, err
@@ -116,6 +117,25 @@ func Init(o Options) (Result, error) {
 		res.note(filepath.Join(".adbuddy", "bin", name), changed, created)
 	}
 	return res, nil
+}
+
+// initDirs lists every folder Init writes in, relative to the environment:
+// the shim's, the journal's, the agents' settings and every skill folder.
+func initDirs() []string {
+	dirs := []string{".adbuddy", filepath.Join(".adbuddy", "bin"), "journal", ".claude", ".gemini"}
+	err := fs.WalkDir(Skills(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() || p == "." {
+			return err
+		}
+		for _, root := range skillRoots {
+			dirs = append(dirs, filepath.Join(root, filepath.FromSlash(p)))
+		}
+		return nil
+	})
+	if err != nil {
+		panic(err) // the skills are embedded: this cannot happen
+	}
+	return dirs
 }
 
 func (r *Result) note(name string, changed, created bool) {
@@ -139,10 +159,10 @@ func writeFile(path string, data []byte, overwrite bool) (changed, created bool,
 	if !overwrite {
 		return false, false, nil
 	}
-	// Read the old content only if it is a regular file of the same size: a
-	// FIFO, or a link to /dev/zero, must be replaced, never read.
-	if st, err := os.Lstat(path); err == nil && st.Mode().IsRegular() && st.Size() == int64(len(data)) {
-		if old, err := os.ReadFile(path); err == nil && bytes.Equal(old, data) {
+	// Compare only with a regular file (readRegular): a FIFO, or a link to
+	// /dev/zero, must be replaced, never read.
+	if st, err := os.Lstat(path); err == nil && st.Size() == int64(len(data)) {
+		if old, err := readRegular(path); err == nil && bytes.Equal(old, data) {
 			return false, false, nil
 		}
 	}
@@ -309,13 +329,18 @@ func mergeClaudeSettings(path, hookExe string) (changed, created bool, err error
 
 // loadSettings reads a JSON settings file that must hold an object. A missing
 // file is an empty object and created is true. Anything else that is not a
-// JSON object is an error that tells the user to fix or delete the file.
+// JSON object, also a FIFO, a link or a file larger than 1 MiB (readRegular),
+// is an error that tells the user to fix or delete the file.
 func loadSettings(path string) (settings map[string]any, created bool, err error) {
 	settings = map[string]any{}
-	data, err := os.ReadFile(path)
+	data, err := readRegular(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		created = true
+	case errors.Is(err, errNotRegular):
+		return nil, false, fmt.Errorf("%s is not a regular file; fix it or delete it", path)
+	case errors.Is(err, errTooLarge):
+		return nil, false, fmt.Errorf("%s is larger than 1 MiB; fix it or delete it", path)
 	case err != nil:
 		return nil, false, err
 	default:
@@ -356,7 +381,9 @@ func saveSettings(path string, settings map[string]any) error {
 }
 
 // mergeGeminiSettings makes Gemini CLI read AGENTS.md (spec M6b §3.4): it adds
-// "AGENTS.md" to context.fileName and keeps everything else the user has.
+// "AGENTS.md" to context.fileName and keeps everything else the user has. With
+// no fileName of the user's own it writes ["GEMINI.md", "AGENTS.md"]: setting
+// the key replaces Gemini's default, so GEMINI.md has to be listed too.
 func mergeGeminiSettings(path string) (changed, created bool, err error) {
 	settings, created, err := loadSettings(path)
 	if err != nil {
@@ -379,6 +406,7 @@ func mergeGeminiSettings(path string) (changed, created bool, err error) {
 	default:
 		return false, false, fmt.Errorf("%s: \"context.fileName\" is not a string or a list", path)
 	}
+	var kept []any // empty names count as none
 	for _, n := range names {
 		s, ok := n.(string)
 		if !ok {
@@ -387,6 +415,15 @@ func mergeGeminiSettings(path string) (changed, created bool, err error) {
 		if s == "AGENTS.md" {
 			return false, false, nil
 		}
+		if s != "" {
+			kept = append(kept, n)
+		}
+	}
+	names = kept
+	if len(names) == 0 {
+		// Gemini replaces its default (GEMINI.md) with what fileName lists:
+		// without a list of the user's own, keep GEMINI.md loading.
+		names = []any{"GEMINI.md"}
 	}
 	ctx["fileName"] = append(names, "AGENTS.md")
 	settings["context"] = ctx
@@ -397,21 +434,30 @@ func mergeGeminiSettings(path string) (changed, created bool, err error) {
 }
 
 // copyIfDifferent copies src to dst unless dst already has the same content.
+// dst is only read if it is a regular file (openRegular) and only up to the
+// size of src: a FIFO, or a link to /dev/zero, planted there is replaced.
 func copyIfDifferent(src, dst string) (changed, created bool, err error) {
-	want, err := fileHash(src)
-	if err != nil {
-		return false, false, err
-	}
-	have, err := fileHash(dst)
-	if err == nil && have == want {
-		return false, false, nil
-	}
-	created = errors.Is(err, fs.ErrNotExist)
 	in, err := os.Open(src)
 	if err != nil {
 		return false, false, err
 	}
 	defer in.Close()
+	st, err := in.Stat()
+	if err != nil {
+		return false, false, err
+	}
+	want, err := hashOf(in)
+	if err != nil {
+		return false, false, err
+	}
+	same, err := sameContent(dst, st.Size(), want)
+	if same {
+		return false, false, nil
+	}
+	created = errors.Is(err, fs.ErrNotExist)
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		return false, false, err
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(dst), ".shim-*")
 	if err != nil {
 		return false, false, err
@@ -434,14 +480,24 @@ func copyIfDifferent(src, dst string) (changed, created bool, err error) {
 	return true, created, nil
 }
 
-func fileHash(path string) ([32]byte, error) {
-	f, err := os.Open(path)
+// sameContent reports whether path is a regular file (openRegular) of size
+// bytes whose hash is want. The error says why not, when it is not readable.
+func sameContent(path string, size int64, want [32]byte) (bool, error) {
+	f, st, err := openRegular(path)
 	if err != nil {
-		return [32]byte{}, err
+		return false, err
 	}
 	defer f.Close()
+	if st.Size() != size {
+		return false, nil
+	}
+	have, err := hashOf(io.LimitReader(f, size))
+	return err == nil && have == want, err
+}
+
+func hashOf(r io.Reader) ([32]byte, error) {
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, r); err != nil {
 		return [32]byte{}, err
 	}
 	var sum [32]byte

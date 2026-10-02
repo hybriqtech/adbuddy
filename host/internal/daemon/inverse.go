@@ -141,3 +141,51 @@ func shellInverse(w []string) bool {
 	}
 	return false
 }
+
+// inverseFitsKind reports whether argv is the kind of inverse precheck builds
+// for a change of op kind (classify.Op.Kind). A record signed with a key the
+// agent can read may carry any inverse validInverse admits: it must at least
+// undo the change the record claims, so a `settings put` cannot bring an
+// `uninstall` or an `rm -f` along. An unknown kind fits nothing.
+func inverseFitsKind(kind string, argv []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	switch argv[0] {
+	case "uninstall":
+		return kind == "adb-install"
+	case "push":
+		return kind == "adb-push" // restores the backup of an overwritten file
+	case "shell":
+	default:
+		return false
+	}
+	w := make([]string, 0, len(argv)-1)
+	for _, tok := range argv[1:] {
+		x, ok := unquote(tok)
+		if !ok {
+			return false
+		}
+		w = append(w, x)
+	}
+	n := len(w)
+	switch {
+	case n >= 1 && w[0] == "settings":
+		return kind == "settings-put"
+	case n >= 2 && w[0] == "pm" && w[1] == "enable":
+		return kind == "pm-disable"
+	case n >= 3 && w[0] == "cmd" && w[1] == "package" && w[2] == "install-existing":
+		return kind == "pm-uninstall-user"
+	case n >= 2 && w[0] == "appops" && w[1] == "set":
+		return kind == "appops-set"
+	case n >= 2 && w[0] == "dumpsys" && w[1] == "deviceidle":
+		return kind == "deviceidle"
+	case n >= 1 && w[0] == "mv":
+		return kind == "mv"
+	case n >= 1 && w[0] == "rmdir":
+		return kind == "mkdir"
+	case n >= 2 && w[0] == "rm" && w[1] == "-f":
+		return kind == "new-file" || kind == "adb-push"
+	}
+	return false
+}

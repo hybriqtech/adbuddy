@@ -212,3 +212,152 @@
 {"sh":"appops reset com.no.existe","level":"red","special":true}
 {"sh":"cmd appops reset --user 0 com.x","level":"red","special":true}
 {"sh":"appops reset ''","level":"red","special":true}
+# dumpsys reads through an allowlist of reading forms (v1 V06): its own options, a service alone, and per service the arguments known to read; the rest is red
+{"sh":"dumpsys -l","level":"green"}
+{"sh":"dumpsys -t 10 activity top","level":"green"}
+{"sh":"dumpsys -T 500 battery","level":"green"}
+{"sh":"dumpsys --proto battery","level":"green"}
+{"sh":"dumpsys --priority CRITICAL","level":"green"}
+{"sh":"dumpsys --skip meminfo","level":"green"}
+{"sh":"dumpsys window","level":"green"}
+{"sh":"dumpsys window windows | grep mCurrentFocus","level":"green"}
+{"sh":"dumpsys window displays","level":"green"}
+{"sh":"dumpsys activity top","level":"green"}
+{"sh":"dumpsys activity recents","level":"green"}
+{"sh":"dumpsys activity processes","level":"green"}
+{"sh":"dumpsys activity services com.x","level":"green"}
+{"sh":"dumpsys activity broadcasts","level":"green"}
+{"sh":"dumpsys activity service com.android.systemui/.SystemUIService","level":"green"}
+{"sh":"dumpsys meminfo com.x","level":"green"}
+{"sh":"dumpsys meminfo -a com.x","level":"green"}
+{"sh":"dumpsys meminfo 1234","level":"green"}
+{"sh":"dumpsys gfxinfo com.x","level":"green"}
+{"sh":"dumpsys gfxinfo com.x framestats","level":"green"}
+{"sh":"dumpsys batterystats --charged com.x","level":"green"}
+{"sh":"dumpsys batterystats --checkin","level":"red"}
+{"sh":"dumpsys procstats --hours 3","level":"green"}
+{"sh":"dumpsys package packages","level":"green"}
+{"sh":"dumpsys package -f com.x","level":"green"}
+{"sh":"dumpsys package tech.hybriq.adbuddy","level":"green"}
+{"sh":"dumpsys power","level":"green"}
+{"sh":"dumpsys wifi","level":"green"}
+{"sh":"dumpsys cpuinfo","level":"green"}
+{"sh":"dumpsys alarm","level":"green"}
+{"sh":"dumpsys jobscheduler","level":"green"}
+{"sh":"dumpsys netpolicy","level":"green"}
+{"sh":"dumpsys usagestats","level":"green"}
+{"sh":"dumpsys jobscheduler run com.x 1","level":"red"}
+{"sh":"dumpsys jobscheduler run -f com.x 1","level":"red"}
+{"sh":"dumpsys alarm set-time 0","level":"red"}
+{"sh":"dumpsys thermalservice override-status 3","level":"red"}
+{"sh":"dumpsys thermalservice reset","level":"red"}
+{"sh":"dumpsys --reset","level":"red"}
+{"sh":"dumpsys --clear","level":"red"}
+{"sh":"dumpsys --bogus battery","level":"red"}
+{"sh":"dumpsys set","level":"red"}
+{"sh":"dumpsys reset","level":"red"}
+{"sh":"dumpsys battery unplug","level":"red"}
+{"sh":"dumpsys battery set level 5","level":"red"}
+{"sh":"dumpsys netpolicy --unsnooze","level":"red"}
+{"sh":"dumpsys activity track-associations","level":"red"}
+{"sh":"dumpsys activity service com.x/.S extra","level":"red"}
+{"sh":"dumpsys gfxinfo com.x reset","level":"red"}
+{"sh":"dumpsys batterystats --enable full-history","level":"red"}
+{"sh":"dumpsys batterystats --write","level":"red"}
+{"sh":"dumpsys procstats --commit","level":"red"}
+{"sh":"dumpsys usagestats flush","level":"red"}
+{"sh":"dumpsys -t 5 deviceidle whitelist +com.x","level":"red"}
+{"sh":"dumpsys -t 5 deviceidle whitelist -tech.hybriq.adbuddy","level":"red","special":true}
+{"sh":"dumpsys -t 5 deviceidle whitelist reset","level":"red","special":true}
+{"sh":"dumpsys -- deviceidle whitelist reset","level":"red","special":true}
+{"sh":"dumpsys -t 5 deviceidle whitelist -$(pm list packages | grep hyb | cut -c9-)","level":"red","special":true}
+# Bug reports in any of their forms include what is on screen and the notifications (v1 V02)
+{"sh":"bugreport","level":"red","special":true}
+{"sh":"bugreportz","level":"red","special":true}
+{"sh":"bugreportz -p","level":"red","special":true}
+{"sh":"bugreportz -s","level":"red","special":true}
+{"sh":"dumpstate","level":"red","special":true}
+{"sh":"dumpstate -z -o /data/local/tmp/br","level":"red","special":true}
+{"sh":"am bug-report","level":"red","special":true}
+{"sh":"cmd activity bug-report --progress","level":"red","special":true}
+# A UID or a PID the classifier cannot tell apart from ADBuddy's (v1 V03). kill on a literal PID stays a plain red only because kill -9 1234 above fixes it so: adbd runs with the shell's UID and could be the target (accepted risk)
+{"sh":"appops set 10234 RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
+{"sh":"cmd appops set 10234 RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
+{"sh":"appops set --user 0 10234 RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
+{"sh":"appops set shell RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
+{"sh":"appops set --uid com.x RUN_IN_BACKGROUND ignore","level":"red"}
+{"sh":"appops set --uid 10234 RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
+{"sh":"appops set --user 10 com.x.y OP ignore","level":"yellow"}
+{"sh":"kill 1234","level":"red"}
+{"sh":"kill -s KILL 1234","level":"red"}
+{"sh":"kill -l","level":"red"}
+{"sh":"kill -9 -1","level":"red","special":true}
+{"sh":"kill -- -1","level":"red","special":true}
+{"sh":"kill -s KILL -1","level":"red","special":true}
+{"sh":"kill 0","level":"red","special":true}
+{"sh":"kill -9 -1234","level":"red","special":true}
+{"sh":"kill %1","level":"red","special":true}
+{"sh":"am kill-all","level":"red","special":true}
+{"sh":"cmd activity kill-all","level":"red","special":true}
+{"sh":"am crash 1234","level":"red","special":true}
+{"sh":"am crash --user 0 1234","level":"red","special":true}
+{"sh":"am crash com.x","level":"red"}
+{"sh":"cmd netpolicy add restrict-background-blacklist 10234","level":"red","special":true}
+{"sh":"cmd netpolicy add app-idle-whitelist 10234","level":"red","special":true}
+{"sh":"cmd netpolicy set restrict-background true","level":"red","special":true}
+{"sh":"cmd netpolicy set metered-network wifi true","level":"red","special":true}
+{"sh":"cmd -w netpolicy remove restrict-background-whitelist 10234","level":"red","special":true}
+{"sh":"cmd netpolicy list wifi-networks","level":"red"}
+{"sh":"cmd netpolicy get restrict-background","level":"red"}
+# --checkin consumes state in AOSP (procstats renames its saved files, batterystats deletes its checkin file, activity clears the broadcast statistics): red (v1 T2, round 1). -c and meminfo/package --checkin only print
+{"sh":"dumpsys procstats --checkin","level":"red"}
+{"sh":"dumpsys activity --checkin","level":"red"}
+{"sh":"dumpsys activity broadcast-stats --checkin","level":"red"}
+{"sh":"dumpsys batterystats -c","level":"green"}
+{"sh":"dumpsys procstats -c","level":"green"}
+{"sh":"dumpsys meminfo --checkin","level":"green"}
+{"sh":"dumpsys package --checkin","level":"green"}
+# Restarting the system, stopping or switching the user, or killing adbd cut the connection or stop ADBuddy (v1 T2, round 1)
+{"sh":"am restart","level":"red","special":true}
+{"sh":"cmd activity restart","level":"red","special":true}
+{"sh":"am stop-user 10","level":"red","special":true}
+{"sh":"am stop-user -w -f 0","level":"red","special":true}
+{"sh":"am switch-user 10","level":"red","special":true}
+{"sh":"pkill adbd","level":"red","special":true}
+{"sh":"pkill -9 adb","level":"red","special":true}
+{"sh":"pkill -f /apex/com.android.adbd","level":"red","special":true}
+{"sh":"pkill -x 'ad.d'","level":"red","special":true}
+{"sh":"pkill -v com.x","level":"red","special":true}
+{"sh":"pkill -u shell","level":"red","special":true}
+{"sh":"pkill $P","level":"red","special":true}
+{"sh":"pkill '('","level":"red","special":true}
+{"sh":"/system/bin/pkill adbd","level":"red","special":true}
+{"sh":"toybox pkill adbd","level":"red","special":true}
+{"sh":"su -c 'pkill adbd'","level":"red","special":true}
+{"sh":"killall adbd","level":"red","special":true}
+{"sh":"killall -9 adbd","level":"red","special":true}
+{"sh":"killall -s KILL /apex/com.android.adbd/bin/adbd","level":"red","special":true}
+{"sh":"busybox killall adbd","level":"red","special":true}
+{"sh":"killall $P","level":"red","special":true}
+{"sh":"pkill com.x","level":"red","special":true}
+{"sh":"pkill -9 -f com.x","level":"red","special":true}
+{"sh":"killall com.x","level":"red","special":true}
+{"sh":"killall -9 com.x","level":"red","special":true}
+{"sh":"killall -l","level":"red","special":true}
+# Every pkill and killall is special, whatever its arguments (v1 T2, round 2): their patterns, selectors and option order reach adbd in too many ways to analyse
+{"sh":"pkill -U 2000","level":"red","special":true}
+{"sh":"pkill -U shell","level":"red","special":true}
+{"sh":"pkill -P 1","level":"red","special":true}
+{"sh":"pkill -G 2000","level":"red","special":true}
+{"sh":"pkill 'a\\dbd'","level":"red","special":true}
+{"sh":"pkill 'ad\\bd'","level":"red","special":true}
+{"sh":"pkill 'adb[\\d]'","level":"red","special":true}
+{"sh":"pkill /apex/com.android.adbd -f","level":"red","special":true}
+{"sh":"pkill -f seclabel","level":"red","special":true}
+{"sh":"pkill -f root_seclabel","level":"red","special":true}
+{"sh":"pkill -f /sbin/adbd","level":"red","special":true}
+{"sh":"busybox pkill -f seclabel","level":"red","special":true}
+{"sh":"timeout 5 pkill com.x","level":"red","special":true}
+{"sh":"echo com.x | xargs pkill","level":"red","special":true}
+{"sh":"killall adbd -9","level":"red","special":true}
+{"sh":"/system/bin/killall com.x","level":"red","special":true}

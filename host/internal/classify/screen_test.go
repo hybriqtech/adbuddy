@@ -100,3 +100,24 @@ func TestNotificationRevealCannotBeLoweredByAUserRule(t *testing.T) {
 		t.Errorf("titles %+v", r.Primary.Title)
 	}
 }
+
+// v1 V02: bugreportz, dumpstate and the shell's bugreport build the same
+// report as adb bugreport (dumpsys activity, notification…): a "yes,
+// always" rule must not lower them.
+func TestBugReportsCannotBeLoweredByAUserRule(t *testing.T) {
+	c := mustNew(t, `rules:
+  - {id: u.bugz, cmd: bugreportz, level: green, anyArgs: true}
+  - {id: u.bug, cmd: bugreport, level: green, anyArgs: true}
+  - {id: u.dumpstate, cmd: dumpstate, level: green, anyArgs: true}
+  - {id: u.am, cmd: am, sub: [bug-report], level: green, anyArgs: true}
+`)
+	check(t, c, []tc{
+		{sh("bugreportz"), Red, "", "", true},
+		{sh("bugreportz -p"), Red, "", "", true},
+		{sh("bugreport"), Red, "", "", true},
+		{sh("dumpstate -z -o /data/local/tmp/br"), Red, "", "", true},
+		{sh("am bug-report --progress"), Red, "", "", true},
+		{sh("cmd activity bug-report"), Red, "", "", true},
+		{sh("sh -c bugreportz"), Red, "", "", true},
+	})
+}

@@ -177,6 +177,12 @@ func element(n node, b [4]int) bridge.UIElement {
 var (
 	ErrNotFound  = errors.New("no element matches")
 	ErrProtected = errors.New("the element belongs to ADBuddy")
+	// ErrNoTouchPoint: the element found, or the clickable one it stands for,
+	// has no area: there is no point to tap (never (0,0)).
+	ErrNoTouchPoint = errors.New("the element has no area to tap")
+	// ErrTooDeep: nothing matches in what Find read, but the layout is deeper
+	// than MaxDepth: what is below was never looked at.
+	ErrTooDeep = errors.New("the screen layout is too deep to search all of it")
 )
 
 // AmbiguousError lists the bounds of the elements that match, at most 5.
@@ -215,9 +221,11 @@ func Find(out []byte, id, text string, hidden func(string) bool) ([4]int, error)
 		app    bool // inside ADBuddy or a hidden app
 	}
 	var exact, byText, folded []found
+	tooDeep := false
 	var walk func(n node, clickable *node, depth int)
 	walk = func(n node, clickable *node, depth int) {
 		if depth > MaxDepth {
+			tooDeep = true
 			return
 		}
 		if n.click() {
@@ -252,20 +260,33 @@ func Find(out []byte, id, text string, hidden func(string) bool) ([4]int, error)
 		}
 		var targets [][4]int
 		seen := map[[4]int]bool{}
+		noPoint := false
 		for _, f := range set {
 			if f.app {
 				return [4]int{}, ErrProtected
 			}
 			b := f.target.bounds()
+			if empty(b) {
+				// No area, no touch point; a protected match later in the
+				// set still says ErrProtected first.
+				noPoint = true
+				continue
+			}
 			if !seen[b] {
 				seen[b] = true
 				targets = append(targets, b)
 			}
 		}
+		if noPoint {
+			return [4]int{}, ErrNoTouchPoint
+		}
 		if len(targets) == 1 {
 			return targets[0], nil
 		}
 		return [4]int{}, &AmbiguousError{N: len(targets), Bounds: targets[:min(5, len(targets))]}
+	}
+	if tooDeep {
+		return [4]int{}, ErrTooDeep
 	}
 	return [4]int{}, ErrNotFound
 }

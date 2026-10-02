@@ -292,7 +292,7 @@ Para Linux y macOS: `curl -fsSL https://github.com/hybriqtech/adbuddy/releases/l
 
 - POSIX `sh`, con `set -eu`, todo dentro de `main` y llamado en la última línea: si la descarga se corta, no se ejecuta nada.
 - Sistema y arquitectura: `Linux` con `x86_64`/`amd64` o `aarch64`/`arm64`, y `Darwin` (siempre `darwin_all`). Cualquier otra combinación falla con un mensaje claro, y Windows apunta al `.zip`.
-- Descargas con `curl --proto '=https' --tlsv1.2 -fsSL` o `wget --https-only`. `ADBUDDY_DOWNLOAD_URL`, que es solo para tests, admite otros esquemas, y en ese caso se avisa de que el origen no es la release oficial.
+- Descargas con `curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSL`; el script exige `curl` y no usa `wget` (`wget --https-only` no garantiza que una redirección no baje a http y BusyBox wget no lo admite). `ADBUDDY_DOWNLOAD_URL`, que es solo para tests, admite otros esquemas, y en ese caso se avisa de que el origen no es la release oficial.
 - `ADBUDDY_VERSION` ha de casar con la expresión regular de las etiquetas (§3) o valer `latest`.
 - Descarga `checksums.txt` y busca la línea cuyo **segundo campo sea exactamente** `adbuddy_<v>_<target>.tar.gz` (`awk '$2 == f'`). Tiene que haber una y solo una. Descarga el archivo, compara el SHA-256 (`sha256sum` o `shasum -a 256`) y falla si no cuadra.
 - Trabaja en un `mktemp -d` que borra un `trap`, extrae solo `adbuddy` e instala en `${ADBUDDY_INSTALL_DIR:-$HOME/.local/bin}` con `mv` atómico, sin `sudo`. Avisa si esa carpeta no está en el `PATH`.

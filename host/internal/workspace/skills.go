@@ -5,7 +5,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -81,26 +80,53 @@ func installSkills(dir string, force bool, res *Result) error {
 	})
 }
 
-// ensureRealDirs creates each folder of rel (relative to base), and fails if
-// one already exists as a link or as something that is not a folder: a link
-// planted there would make Init write somewhere else.
-func ensureRealDirs(base, rel string) error {
-	cur := base
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		cur = filepath.Join(cur, part)
-		st, err := os.Lstat(cur)
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			if err := os.Mkdir(cur, 0o700); err != nil {
+// ensureRealDirs makes every folder of each rel (relative to base) a real
+// folder, all or nothing: it checks them all first and, if one exists as a
+// link or as something that is not a folder, fails without creating any (a
+// link planted there would make Init write somewhere else); then it creates
+// the missing ones.
+func ensureRealDirs(base string, rels ...string) error {
+	var missing []string
+	seen := map[string]bool{}
+	for _, rel := range rels {
+		cur := base
+		for _, part := range strings.Split(rel, string(filepath.Separator)) {
+			cur = filepath.Join(cur, part)
+			if seen[cur] {
+				continue
+			}
+			seen[cur] = true
+			if err := checkRealDir(cur); errors.Is(err, fs.ErrNotExist) {
+				missing = append(missing, cur)
+			} else if err != nil {
 				return err
 			}
-		case err != nil:
-			return err
-		case st.Mode()&fs.ModeSymlink != 0 || (st.Mode()&fs.ModeIrregular != 0 && !st.IsDir()): // a link, or a Windows junction (a folder with a reparse point that is not a link stays ModeDir)
-			return fmt.Errorf("%s is a link; delete it or move it away so ADBuddy can install its skills there", cur)
-		case !st.IsDir():
-			return fmt.Errorf("%s is not a folder; delete it or move it away so ADBuddy can install its skills there", cur)
 		}
+	}
+	// A folder comes after its parent in missing.
+	for _, d := range missing {
+		if err := os.Mkdir(d, 0o700); errors.Is(err, fs.ErrExist) {
+			if err := checkRealDir(d); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkRealDir returns nil if dir is a folder, not a link to one, and an
+// error that wraps fs.ErrNotExist if it does not exist.
+func checkRealDir(dir string) error {
+	st, err := os.Lstat(dir)
+	switch {
+	case err != nil:
+		return err
+	case st.Mode()&fs.ModeSymlink != 0 || (st.Mode()&fs.ModeIrregular != 0 && !st.IsDir()): // a link, or a Windows junction (a folder with a reparse point that is not a link stays ModeDir)
+		return fmt.Errorf("%s is a link; delete it or move it away so ADBuddy can create its files there", dir)
+	case !st.IsDir():
+		return fmt.Errorf("%s is not a folder; delete it or move it away so ADBuddy can create its files there", dir)
 	}
 	return nil
 }
@@ -108,15 +134,9 @@ func ensureRealDirs(base, rel string) error {
 // hasUserMarker reports whether the regular file at path contains UserMarker
 // in its first MiB. Anything else (missing, a link, a pipe) is false.
 func hasUserMarker(path string) bool {
-	st, err := os.Lstat(path)
-	if err != nil || !st.Mode().IsRegular() {
+	b, err := readRegular(path)
+	if err != nil && !errors.Is(err, errTooLarge) {
 		return false
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	b, _ := io.ReadAll(io.LimitReader(f, 1<<20))
 	return bytes.Contains(b, []byte(UserMarker))
 }
