@@ -1,7 +1,6 @@
 package classify
 
 import (
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -184,9 +183,11 @@ func specialReason(scope string, ws []Word, level Level) Text {
 			return reason("kill on every process, a process group or a job could stop adbd or ADBuddy")
 		}
 	case "pkill", "killall":
-		if killsAdbd(name, ws) {
-			return reason("may kill adbd, which cuts the connection")
-		}
+		// Always, whatever the arguments: a pattern (whose dialect differs
+		// from Go's), -f on the command line, selectors such as -U 2000 or
+		// -P 1 and options in any order reach adbd in too many ways to
+		// analyse, and adbd runs with the shell's UID.
+		return reason("may kill adbd, which cuts the connection")
 	case "reboot", "stop", "start":
 		return reason("may restart the phone or adbd")
 	case "setprop":
@@ -329,57 +330,6 @@ func killsBeyondAPID(v []string) bool {
 	for _, t := range args {
 		if !isDigits(t) || strings.Trim(t, "0") == "" {
 			return true
-		}
-	}
-	return false
-}
-
-// adbdNames are what pkill matches its pattern against for adbd: the process
-// name and, with -f, the command line.
-var adbdNames = []string{"adbd", "/apex/com.android.adbd/bin/adbd", "/system/bin/adbd"}
-
-// killsAdbd reports whether pkill or killall (toybox) may reach adbd. pkill
-// matches a regular expression against the name (adb, ad.d…) or, with -f, the
-// command line; killall compares whole names. Options that pick processes by
-// something else (-u, -U, -g, -G, -P, -s, -t) or invert the match (-v) may
-// take adbd in too, and a word only known on the phone may be adbd: all of
-// them fail closed.
-func killsAdbd(name string, ws []Word) bool {
-	flags := "fnox" // pkill
-	if name == "killall" {
-		flags = "iqvwe"
-	}
-	full := false
-	for i := 1; i < len(ws); i++ {
-		w := ws[i]
-		v := w.Value
-		switch {
-		case w.Dynamic:
-			return true
-		case v == "-l" && name == "killall":
-			return false // lists signals
-		case v == "-l" || (v == "-s" && name == "killall"):
-			i++ // -l SIGNAL (pkill), -s SIGNAL (killall)
-		case len(v) > 1 && v[0] == '-' && (v[1] >= '0' && v[1] <= '9' || v[1] >= 'A' && v[1] <= 'Z'):
-			// -SIGNAL
-		case len(v) > 1 && v[0] == '-' && strings.Trim(v[1:], flags) == "":
-			full = full || (name == "pkill" && strings.Contains(v, "f"))
-		case strings.HasPrefix(v, "-"):
-			return true
-		case name == "killall":
-			if v == "adbd" || strings.HasSuffix(v, "/adbd") {
-				return true
-			}
-		default:
-			re, err := regexp.Compile(v)
-			if err != nil {
-				return true
-			}
-			for _, n := range adbdNames {
-				if (n == "adbd" || full) && re.MatchString(n) {
-					return true
-				}
-			}
 		}
 	}
 	return false

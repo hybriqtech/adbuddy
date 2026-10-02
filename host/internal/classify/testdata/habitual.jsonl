@@ -339,8 +339,25 @@
 {"sh":"killall -s KILL /apex/com.android.adbd/bin/adbd","level":"red","special":true}
 {"sh":"busybox killall adbd","level":"red","special":true}
 {"sh":"killall $P","level":"red","special":true}
-{"sh":"pkill com.x","level":"red"}
-{"sh":"pkill -9 -f com.x","level":"red"}
-{"sh":"killall com.x","level":"red"}
-{"sh":"killall -9 com.x","level":"red"}
-{"sh":"killall -l","level":"red"}
+{"sh":"pkill com.x","level":"red","special":true}
+{"sh":"pkill -9 -f com.x","level":"red","special":true}
+{"sh":"killall com.x","level":"red","special":true}
+{"sh":"killall -9 com.x","level":"red","special":true}
+{"sh":"killall -l","level":"red","special":true}
+# Every pkill and killall is special, whatever its arguments (v1 T2, round 2): their patterns, selectors and option order reach adbd in too many ways to analyse
+{"sh":"pkill -U 2000","level":"red","special":true}
+{"sh":"pkill -U shell","level":"red","special":true}
+{"sh":"pkill -P 1","level":"red","special":true}
+{"sh":"pkill -G 2000","level":"red","special":true}
+{"sh":"pkill 'a\\dbd'","level":"red","special":true}
+{"sh":"pkill 'ad\\bd'","level":"red","special":true}
+{"sh":"pkill 'adb[\\d]'","level":"red","special":true}
+{"sh":"pkill /apex/com.android.adbd -f","level":"red","special":true}
+{"sh":"pkill -f seclabel","level":"red","special":true}
+{"sh":"pkill -f root_seclabel","level":"red","special":true}
+{"sh":"pkill -f /sbin/adbd","level":"red","special":true}
+{"sh":"busybox pkill -f seclabel","level":"red","special":true}
+{"sh":"timeout 5 pkill com.x","level":"red","special":true}
+{"sh":"echo com.x | xargs pkill","level":"red","special":true}
+{"sh":"killall adbd -9","level":"red","special":true}
+{"sh":"/system/bin/killall com.x","level":"red","special":true}

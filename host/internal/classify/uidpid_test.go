@@ -43,9 +43,10 @@ func TestUIDAndPIDTargetsReadOptions(t *testing.T) {
 	})
 }
 
-// Round 1: restarting the system, stopping or switching the user and killing
-// adbd by name cut the connection or stop ADBuddy: a user rule cannot lower
-// them.
+// Restarting the system, stopping or switching the user and any pkill or
+// killall (round 2: their patterns, selectors and option order reach adbd in
+// too many ways to analyse) cut the connection or stop ADBuddy: a user rule
+// cannot lower them.
 func TestConnectionKillersCannotBeLoweredByAUserRule(t *testing.T) {
 	c := mustNew(t, `rules:
   - {id: u.am, cmd: am, level: green, anyArgs: true}
@@ -60,7 +61,27 @@ func TestConnectionKillersCannotBeLoweredByAUserRule(t *testing.T) {
 		{sh("pkill -f /apex/com.android.adbd"), Red, "", "", true},
 		{sh("killall adbd"), Red, "", "", true},
 		{sh("su 0 killall adbd"), Red, "", "", true},
-		{sh("pkill com.x"), Green, "u.pkill", "", false},
+		{sh("pkill com.x"), Red, "", "", true},
+		{sh("pkill -U 2000"), Red, "", "", true},
+		{sh("pkill -U shell"), Red, "", "", true},
+		{sh("pkill -P 1"), Red, "", "", true},
+		{sh("pkill -G 2000"), Red, "", "", true},
+		{sh(`pkill 'a\dbd'`), Red, "", "", true},
+		{sh(`pkill 'ad\bd'`), Red, "", "", true},
+		{sh(`pkill 'adb[\d]'`), Red, "", "", true},
+		{sh("pkill /apex/com.android.adbd -f"), Red, "", "", true},
+		{sh("pkill -f seclabel"), Red, "", "", true},
+		{sh("pkill -f root_seclabel"), Red, "", "", true},
+		{sh("pkill -f /sbin/adbd"), Red, "", "", true},
+		{sh("busybox pkill -f seclabel"), Red, "", "", true},
+		{sh("toybox pkill com.x"), Red, "", "", true},
+		{sh("/system/bin/pkill com.x"), Red, "", "", true},
+		{sh("su -c 'pkill com.x'"), Red, "", "", true},
+		{sh("timeout 5 pkill com.x"), Red, "", "", true},
+		{sh("echo com.x | xargs pkill"), Red, "", "", true},
+		{sh("killall adbd -9"), Red, "", "", true},
+		{sh("killall com.x"), Red, "", "", true},
+		{sh("killall -l"), Red, "", "", true},
 	})
 }
 
