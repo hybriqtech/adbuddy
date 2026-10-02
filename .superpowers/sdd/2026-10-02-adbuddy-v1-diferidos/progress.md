@@ -30,3 +30,10 @@ Plan reescrito con los hallazgos de la revisión opus del plan y las órdenes de
 - T1 ronda 0: commit 74ed01b; revision opus (a6bf78baa3d46459b): 2 Important (titulo forjable §4.5, undo fuera de inFlight tras preguntar) + minors. Ronda 1 enviada al implementador. Aplazados: M4 registro denegacion, M6 comparar Op.Args, M9 Detail ingles. Para tern: Long de cli/undo.go y undoFixes sin UNDO_DENIED.
 - Pendiente tras T1: quitar T8 (IPC V29) y T11 (JVM V21/V42/V43) del plan (nautilus los toma), y V11/V38 (guard.go); rebasar sobre main 2fcf8e2.
 - Task 1: complete (74ed01b + 002b19c; re-revision sonnet sin hallazgos importantes). Para tern: textos nuevos en task-1-report.md; Long de cli/undo.go y undoFixes UNDO_DENIED.
+- Rebase sobre main 2fcf8e2 hecho (T8/T11 quitadas, V11/V38 a nautilus). T2 despachada (implementador opus a7d9c165d5a6c26e5, BASE 6ce00cf).
+- T2 ronda 0: 58f489c; revision opus: 1 Important (--checkin consume estado) + am restart/pkill adbd (ampliacion V03). Ronda 1 enviada. Validacion manual pendiente: repasar lista de lectura de dumpsys (activity/window/procstats) en el emulador.
+- T2 ronda 1: 3e52c0b; re-revision opus: 4 bypasses en analisis de patron pkill/killall. Ruling: todo pkill/killall 🔴 especial sin analizar args — el analisis es fragil y el contrato no lo exige — cuesta algo de friccion si alguien usa pkill de una app (sigue siendo confirmable). Ronda 2 enviada.
+- Task 2: complete (58f489c, 3e52c0b, ffdd4ff). Textos nuevos para tern en task-2-report.md (classify.special.amRestart, amUser, etc.). Propuesta futura: am unlock-user / pm remove-user 🔴 normal.
+- T3 despachada (implementador opus ac9a016bfeb2cff63, BASE ffdd4ff).
+- T3 ronda 0: 717e83d (V04), ca34d84 (V05); revision opus ✅✅ con 2 Important. Ruling: arreglar ambos en T3 (hook no procesado => held; Edit/Write a .claude/.git/.mcp.json => terminal) — cuesta que esas ediciones se aprueben siempre en terminal. Aplazados: bajar held al ver Request interrupted; elicitation_dialog; TOCTOU preexistente phone_chat.go:265. Ronda 1 enviada.
+- Task 3: complete (717e83d, ca34d84, ade4c86, e814735; re-revision sin hallazgos). Sin textos nuevos para tern en T3.
