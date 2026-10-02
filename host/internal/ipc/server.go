@@ -95,6 +95,7 @@ type Conn struct {
 	resize chan [2]int
 	mu     sync.Mutex
 	nc     net.Conn
+	peer   Peer // the process at the other end (peer.go)
 }
 
 // Resizes delivers the sizes a terminal sends with FrameResize (KindAttach).
@@ -250,6 +251,9 @@ func (s *Server) Close() error {
 
 func (s *Server) handle(nc net.Conn) {
 	defer nc.Close()
+	// Who connected, before anything is read (V07, peer.go).
+	peer := capturePeer(nc)
+	defer peer.release()
 	_ = nc.SetReadDeadline(time.Now().Add(5 * time.Second))
 	typ, payload, err := ReadFrame(nc)
 	if err != nil || typ != FrameRequest {
@@ -259,7 +263,7 @@ func (s *Server) handle(nc net.Conn) {
 	if json.Unmarshal(payload, &req) != nil {
 		return
 	}
-	c := &Conn{nc: nc, resize: make(chan [2]int, 4)}
+	c := &Conn{nc: nc, resize: make(chan [2]int, 4), peer: peer}
 	if subtle.ConstantTimeCompare([]byte(req.Secret), []byte(s.secret)) != 1 {
 		writeExit(c, Exit{Code: 1, Error: "unauthorized"})
 		finish(nc, nil)
