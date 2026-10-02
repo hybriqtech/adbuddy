@@ -95,6 +95,7 @@ type Conn struct {
 	resize chan [2]int
 	mu     sync.Mutex
 	nc     net.Conn
+	peer   Peer // the process at the other end (peer.go)
 }
 
 // Resizes delivers the sizes a terminal sends with FrameResize (KindAttach).
@@ -284,6 +285,18 @@ func (s *Server) Close() error {
 
 func (s *Server) handle(nc net.Conn) {
 	defer nc.Close()
+	// Who connected, before anything is read (V07, peer.go).
+	peer := capturePeer(nc)
+	// release acts on the Peer it is called on, so it must be the copy the
+	// Conn keeps once there is one, and only that one (the handle is closed once).
+	var c *Conn
+	defer func() {
+		if c != nil {
+			c.peer.release()
+		} else {
+			peer.release()
+		}
+	}()
 	release := sync.OnceFunc(func() { <-s.preauth }) // the slot Serve took for it
 	defer release()
 	_ = nc.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -295,7 +308,7 @@ func (s *Server) handle(nc net.Conn) {
 	if json.Unmarshal(payload, &req) != nil {
 		return
 	}
-	c := &Conn{nc: nc, resize: make(chan [2]int, 4)}
+	c = &Conn{nc: nc, resize: make(chan [2]int, 4), peer: peer}
 	if subtle.ConstantTimeCompare([]byte(req.Secret), []byte(s.secret)) != 1 {
 		// Refused: it keeps its slot (the deferred release) while finish
 		// waits up to 2 s for the client to close, so refusals stay bounded.

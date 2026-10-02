@@ -59,6 +59,7 @@ func newJob() windows.Handle {
 }
 
 type winPTY struct {
+	jmu    sync.Mutex     // job: Kill closes it while Contains may read it
 	job    windows.Handle // 0 if there is none
 	hpc    windows.Handle // the pseudo console
 	proc   windows.Handle
@@ -318,9 +319,12 @@ func (p *winPTY) Kill() error {
 		_ = p.in.Close()
 		_ = p.out.Close() // a blocked Read gets io.EOF
 		closeAll(p.thread, p.proc)
+		p.jmu.Lock()
 		if p.job != 0 {
 			_ = windows.CloseHandle(p.job)
+			p.job = 0
 		}
+		p.jmu.Unlock()
 	})
 	return nil
 }

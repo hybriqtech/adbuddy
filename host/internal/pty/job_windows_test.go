@@ -161,6 +161,10 @@ func TestWithoutJobItWarnsAndGoesOn(t *testing.T) {
 			if p.(*winPTY).job != 0 {
 				t.Fatal("a job despite the failure")
 			}
+			// V07: without a job the agent's tree is not known.
+			if _, err := p.(*winPTY).Contains(p.Pid()); !errors.Is(err, errors.ErrUnsupported) {
+				t.Fatalf("Contains without a job: %v, want ErrUnsupported", err)
+			}
 			if len(warned) != 1 || !strings.Contains(warned[0], "injected") {
 				t.Fatalf("warnings = %q; want one with the cause", warned)
 			}
