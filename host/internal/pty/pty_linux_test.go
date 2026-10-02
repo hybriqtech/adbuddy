@@ -128,9 +128,12 @@ func TestKillFreesAWriteBlockedOnADeafChild(t *testing.T) {
 // The master stays non-blocking under the poller: Close frees a blocked
 // Write only then. Resize used to call Fd(), which blocks it again.
 func TestMasterStaysNonblocking(t *testing.T) {
+	if testing.Short() {
+		t.Skip("starts a real child")
+	}
 	p := startDeaf(t)
 	if getfl(t, p)&unix.O_NONBLOCK == 0 {
-		t.Skip("pollableMaster fell back to the blocking master")
+		t.Fatal("the master is not nonblocking: pollableMaster did not apply or fell back")
 	}
 	if err := p.Resize(100, 30); err != nil {
 		t.Fatal(err)
