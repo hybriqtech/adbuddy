@@ -164,6 +164,13 @@ func (l *phoneLink) toolStarted(id, key string) {
 	a := &l.adapter
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// The same tool use again (a re-read of the transcript): it is already
+	// tied to a card, and kept for no other.
+	for _, p := range a.perms {
+		if p != nil && p.toolID == id {
+			return
+		}
+	}
 	for _, oid := range a.order {
 		if p := a.perms[oid]; p != nil && p.toolID == "" && p.key == key {
 			p.toolID = id

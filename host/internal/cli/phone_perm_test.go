@@ -713,6 +713,50 @@ func TestPermissionOfTwoIdenticalToolsEndsOneByOneInOrder(t *testing.T) {
 	wait(t, outB)
 }
 
+// The same tool use seen again as running (a re-read) while it is tied to a
+// card is not kept for the next card with its key: that card is left with no
+// tie, and the tool's end takes away only the first.
+func TestPermissionTiedToolUseSeenAgainIsNotKeptForAnotherCard(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	r.append(t, atool("u1", "msg_1", "toolu_a", "Bash", bashIn("touch x")))
+	reqA, outA := r.ask(t, "touch x")
+	a := &r.l.adapter
+	var key string
+	waitUntil(t, "the card is tied to the tool use", func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		for _, p := range a.perms {
+			if p.toolID == "toolu_a" {
+				key = p.key
+			}
+		}
+		return key != ""
+	})
+	r.l.toolStarted("toolu_a", key)
+	a.mu.Lock()
+	n := len(a.unbound)
+	a.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d tool uses kept, want none: the id is tied already", n)
+	}
+	reqB, outB := r.ask(t, "touch x")
+	a.mu.Lock()
+	tied := a.perms[reqB.ID].toolID
+	a.mu.Unlock()
+	if tied != "" {
+		t.Fatalf("the second card was tied to %q", tied)
+	}
+	r.append(t, aresult("u2", "toolu_a", false))
+	if pr := r.resolved(t); pr.ID != reqA.ID {
+		t.Fatalf("%+v", pr)
+	}
+	wait(t, outA)
+	r.stillPending(t, reqB.ID)
+	r.l.resolveAllPerms("agent")
+	wait(t, outB)
+}
+
 func TestPermissionCardBeforeTheToolUseIsTiedToo(t *testing.T) {
 	r := newAgentRig(t)
 	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
