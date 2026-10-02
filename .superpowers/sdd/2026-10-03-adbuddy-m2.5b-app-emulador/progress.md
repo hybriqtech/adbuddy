@@ -500,3 +500,5 @@ Estado: T2 pasos 2, 3, 4, 6, 7 hechos (3-7 por `am instrument`, no por Gradle); 
 ## 2026-10-02 22:55 — reanudación tras el reinicio de ventana
 Ruling: guarda de Gradle niega SIEMPRE `connected*` (commit de merge 5750183, ya integrada con origin/main); instrumentados por `am instrument` desde `emutest.TestInstrumentedSuite` — por qué: UTP llega al servidor 5037 del móvil — si me equivoco: no se prueba el arranque por Gradle (no funciona con servidor propio de todos modos). Brief: task-2c-brief.md.
 Task 2c: complete (ba1730c). Verificado con emulador android-34 (22:5x): TestInstrumentedSuite "OK (15 tests) in [AdbWifiObserverTest LocalesTest TokenProviderTest]"; emulador parado. Pendiente: revisión opus T2/T3/T4. Interrumpido por orden f3: corregir H1-H3/M1 de tern en fix/v1-confirm-hardening primero.
+Task 4: complete (c4f4b9d), verificada con emulador android-34 (A4/A5 RED/A6 GREEN).
+Task 4: complete (c4f4b9d), verificada con emulador android-34 (A4/A5 RED/A6 GREEN).
