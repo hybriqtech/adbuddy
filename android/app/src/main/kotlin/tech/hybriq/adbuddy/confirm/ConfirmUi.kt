@@ -78,12 +78,15 @@ object ConfirmUi {
      * What the question says, in order: the host's rule (detail and the ⚠
      * warning) first, then the agent's command, cut to maxCommand characters,
      * and last the footer (expiry or state). The agent's text never pushes
-     * the rule's out of sight.
+     * the rule's out of sight. With [ltr] the detail and the command start with a left-to-right mark (for plain
+     * text that cannot set a direction, the notification): the app adds it when it shows them, so a command that
+     * starts with a right-to-left letter is not laid out right to left. The labels are never marked.
      */
-    fun lines(r: ConfirmRequest, special: String, footer: String, maxCommand: Int = MAX_COMMAND): List<String> = buildList {
-        if (r.detail.isNotEmpty()) add(r.detail)
+    fun lines(r: ConfirmRequest, special: String, footer: String, maxCommand: Int = MAX_COMMAND, ltr: Boolean = false): List<String> = buildList {
+        val mark = if (ltr) LRM else ""
+        if (r.detail.isNotEmpty()) add(mark + r.detail)
         if (r.special) add("⚠ $special")
-        add(if (r.rawCommand.length <= maxCommand) r.rawCommand else r.rawCommand.take(maxCommand - 1) + "…")
+        add(mark + (if (r.rawCommand.length <= maxCommand) r.rawCommand else r.rawCommand.take(maxCommand - 1) + "…"))
         add(footer)
     }
 
@@ -132,4 +135,6 @@ object ConfirmUi {
     }
 
     const val MAX_COMMAND = 300
+
+    private const val LRM = "‎"
 }
