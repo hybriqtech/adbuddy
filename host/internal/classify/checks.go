@@ -99,41 +99,118 @@ var (
 	logcatLongValues  = map[string]bool{"--buffer": true, "--format": true, "--max-count": true, "--pid": true, "--regex": true, "--uid": true}
 )
 
-// logcat is 🟢 only with read-only options: clearing, resizing, pruning,
-// rotating or writing files is 🔴.
-func checkLogcat(ws []Word) checkResult {
-	for i := 1; i < len(ws); i++ {
+// getoptSpec describes the options of a command that parses its arguments
+// with getopt, so that a check reads them the way the command does.
+//
+//   - A word -xyz is a cluster read letter by letter. A letter in values takes
+//     the rest of the cluster as its value, or the next word if the cluster ends
+//     there. A letter in flags takes none. Any other letter is unknown.
+//   - Long options are matched exactly (no abbreviations): longFlags take no
+//     value, longValues take one (--name=value or the next word).
+//   - A lone - and a word that does not start with - are positionals. Options
+//     are read after a positional too.
+//   - strict: -- ends the options (the rest are positionals), a value taken
+//     from the next word that starts with - or is missing is not trusted
+//     (-t -- -o f: -- is the value of -t, and -o is then an option), and the
+//     command is not asked to guess. Otherwise -- is an unknown long option.
+type getoptSpec struct {
+	flags, values         string
+	longFlags, longValues map[string]bool
+	strict                bool
+}
+
+// getoptResult is what a getoptSpec found: the letters that were seen (with the
+// value they took, "" if none), the positional words and the first word it
+// could not read with certainty (bad, "" if none).
+type getoptResult struct {
+	seen map[byte]string
+	long map[string]bool
+	pos  []string
+	bad  string
+}
+
+func (s getoptSpec) parse(ws []Word) getoptResult {
+	r := getoptResult{seen: map[byte]string{}, long: map[string]bool{}}
+	fail := func(v string) getoptResult { r.bad = v; return r }
+	for i := 0; i < len(ws); i++ {
 		v := ws[i].Value
+		// next returns the value taken from the next word.
+		next := func() (string, bool) {
+			if !s.strict {
+				i++
+				if i < len(ws) {
+					return ws[i].Value, true
+				}
+				return "", true
+			}
+			if i+1 >= len(ws) || strings.HasPrefix(ws[i+1].Value, "-") {
+				return "", false
+			}
+			i++
+			return ws[i].Value, true
+		}
 		switch {
-		case !strings.HasPrefix(v, "-"):
-			continue // a filter spec such as ActivityManager:I or *:S
+		case s.strict && v == "--":
+			for _, w := range ws[i+1:] {
+				r.pos = append(r.pos, w.Value)
+			}
+			return r
+		case v == "-" || !strings.HasPrefix(v, "-"):
+			r.pos = append(r.pos, v)
 		case strings.HasPrefix(v, "--"):
 			name, _, hasValue := strings.Cut(v, "=")
 			switch {
-			case logcatLongFlags[name] && !hasValue:
-			case logcatLongValues[name]:
+			case s.longFlags[name] && !hasValue:
+			case s.longValues[name]:
 				if !hasValue {
-					i++
+					if _, ok := next(); !ok {
+						return fail(v)
+					}
 				}
 			default:
-				return red(reason("logcat option {v} may change the logs or write files", "v", v))
+				return fail(v)
 			}
+			r.long[name] = true
 		default:
-			// A cluster of short options, e.g. -d, -dv time, -vtime.
 			for j := 1; j < len(v); j++ {
 				c := v[j]
-				if strings.IndexByte(logcatShortFlags, c) >= 0 {
-					continue
-				}
-				if strings.IndexByte(logcatShortValues, c) >= 0 {
-					if j == len(v)-1 {
-						i++ // the value is the next word
+				switch {
+				case strings.IndexByte(s.flags, c) >= 0:
+					r.seen[c] = ""
+				case strings.IndexByte(s.values, c) >= 0:
+					val := v[j+1:]
+					if val == "" {
+						var ok bool
+						if val, ok = next(); !ok {
+							return fail(v)
+						}
 					}
-					break
+					r.seen[c] = val
+					j = len(v) // the value took the rest of the cluster
+				default:
+					return fail(v)
 				}
-				return red(reason("logcat option {v} may change the logs or write files", "v", v))
 			}
 		}
+	}
+	return r
+}
+
+// logcat options that only read. logcat uses getopt_long, which also accepts
+// unambiguous abbreviations of long options (--cl = --clear), so only these
+// exact spellings are 🟢; any other option is 🔴.
+var logcatOptions = getoptSpec{
+	flags:      "dsLgSDB", // no value
+	values:     "vbtTem",  // take a value
+	longFlags:  map[string]bool{"--dividers": true, "--last": true, "--statistics": true, "--binary": true},
+	longValues: map[string]bool{"--buffer": true, "--format": true, "--max-count": true, "--pid": true, "--regex": true, "--uid": true},
+}
+
+// logcat is 🟢 only with read-only options: clearing, resizing, pruning,
+// rotating or writing files is 🔴.
+func checkLogcat(ws []Word) checkResult {
+	if r := logcatOptions.parse(ws[1:]); r.bad != "" {
+		return red(reason("logcat option {v} may change the logs or write files", "v", r.bad))
 	}
 	return ok()
 }

@@ -201,23 +201,35 @@ func checkAwk(ws []Word) checkResult {
 	return red(reason("awk without program"))
 }
 
+// toybox sort (confirmed with sort --help in the emulator) has no long
+// options. -k, -t and -o take a value; -S and -T are accepted and take one;
+// -h is not a toybox option, but it is the usual spelling of human sizes and
+// only fails. Anything else is unknown, so 🔴.
+var sortOptions = getoptSpec{flags: "bCcdfgiMnrsuxVzh", values: "ktoST", strict: true}
+
+// sort writes to a file with -o, alone, grouped (-uo), glued (-ofile) or in the
+// next word. -to (separator o) and -k2,2o (key modifier) are not output.
 func checkSort(ws []Word) checkResult {
-	for _, w := range ws[1:] {
-		if w.Value == "-o" || strings.HasPrefix(w.Value, "--output") || (strings.HasPrefix(w.Value, "-o") && !strings.HasPrefix(w.Value, "--")) {
-			return red(reason("sort -o writes a file"))
-		}
+	r := sortOptions.parse(ws[1:])
+	if r.bad != "" {
+		return red(reason("sort option {v} may write a file", "v", r.bad))
+	}
+	if _, o := r.seen['o']; o {
+		return red(reason("sort -o writes a file"))
 	}
 	return ok()
 }
 
+// uniq INPUT OUTPUT writes OUTPUT; -f, -s and -w take a value; after -- every
+// word is a file.
+var uniqOptions = getoptSpec{flags: "cduiz", values: "fsw", strict: true}
+
 func checkUniq(ws []Word) checkResult {
-	n := 0
-	for _, w := range ws[1:] {
-		if !strings.HasPrefix(w.Value, "-") || w.Value == "-" {
-			n++
-		}
+	r := uniqOptions.parse(ws[1:])
+	if r.bad != "" {
+		return red(reason("uniq option {v} may write a file", "v", r.bad))
 	}
-	if n > 1 {
+	if len(r.pos) > 1 {
 		return red(reason("uniq with an output file"))
 	}
 	return ok()

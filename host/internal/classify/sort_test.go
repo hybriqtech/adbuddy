@@ -26,7 +26,7 @@ func TestSortOutputOptionIsRed(t *testing.T) {
 	for _, args := range []string{
 		"-uo f /dev/null", "-mo f x", "-ro/sdcard/x x", "-o f x", "-ofile x", "--output=f x", "--out f x",
 		"-u -o f x", "-nro f x", "x -uo f", "x -o f x", "-t -- -o f x", "-k -- -o f x", "- -uo f",
-		"+1 -uo f", "-uo", "-t -o f x", "--output f x", "--o f x", "--reverse x", "-ro",
+		"+1 -uo f", "-uo", "-t -o f x", "--output f x", "--o f x", "-k", "-t", "-S -o f", "-q x", "--reverse x", "-ro",
 	} {
 		classifyBoth(t, c, "sort", strings.Fields(args), Red)
 	}
@@ -44,7 +44,7 @@ func TestSortOutputOptionIsRed(t *testing.T) {
 func TestSortReadingFormsStayGreen(t *testing.T) {
 	c := mustNew(t, "")
 	for _, args := range []string{
-		"", "-h", "-rh", "-u", "-n -r", "-t, -k2 x", "-to x", "-k2,2o x", "-- -o", "-nr x", "-u x y",
+		"", "-h", "-rh", "-u", "-n -r", "-t, -k2 x", "-to x", "-k2,2o x", "-- -o", "-nr x", "-u x y", "-S 1 x", "-T /tmp x", "-k2,2 -t, x",
 	} {
 		classifyBoth(t, c, "sort", strings.Fields(args), Green)
 	}
