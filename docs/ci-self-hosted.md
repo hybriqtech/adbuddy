@@ -18,7 +18,7 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 | --- | --- | --- | --- |
 | `CI_HOST_MATRIX` | `host.yml` | the three hosted cells (`ubuntu-latest`, `windows-latest`, `macos-latest`) | A JSON array of cells `{"name": ..., "runner": ...}`. A Linux cell needs `gcc` (for `go test -race`); a Windows cell needs Git for Windows. Leave a cell out of the array to drop it. |
 | `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min). |
-| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, hardware acceleration (the AVD `adbuddy-ci-api37` is created by `scripts/emulator.sh` when it is missing); a Linux runner needs `/dev/kvm` (see section 6). |
+| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, hardware acceleration (the AVDs `adbuddy-ci-api37` for the oracle and `adbuddy-ci-api34` for the app's tests are created by `scripts/emulator.sh` when missing), and JDK 17 for the app's tests (Gradle 9.8 is downloaded by `setup-gradle`); a Linux runner needs `/dev/kvm` (see section 6). |
 | `CI_RUNNER_RELEASE` | `release-check.yml` (`scripts` and `goreleaser`) | `"ubuntu-latest"` | Linux with `shellcheck`. |
 | `CI_RUNNER_SIGN` | `release-check.yml` (`sign`) | `"ubuntu-latest"` | Linux with an Android SDK: `apksigner` and `zipalign` are Linux scripts here. |
 

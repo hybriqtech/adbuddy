@@ -502,3 +502,18 @@ Ruling: guarda de Gradle niega SIEMPRE `connected*` (commit de merge 5750183, ya
 Task 2c: complete (ba1730c). Verificado con emulador android-34 (22:5x): TestInstrumentedSuite "OK (15 tests) in [AdbWifiObserverTest LocalesTest TokenProviderTest]"; emulador parado. Pendiente: revisión opus T2/T3/T4. Interrumpido por orden f3: corregir H1-H3/M1 de tern en fix/v1-confirm-hardening primero.
 Task 4: complete (c4f4b9d), verificada con emulador android-34 (A4/A5 RED/A6 GREEN).
 Task 4: complete (c4f4b9d), verificada con emulador android-34 (A4/A5 RED/A6 GREEN).
+
+## Cierre (Tarea 6, documentación)
+
+Una línea por tarea (veredictos de revisión: los que anote el controlador; no los he visto):
+- T1 spike: android-37.0 no sirve (surfaceflinger en bucle con 3 GPUs); android-34 sirve; variante "A en local", tcpipOnEmulator=true con prueba débil (0cc5f0d, 02504ea).
+- T2 (guarda de Gradle y observador): 0e00a8a, fbb4351, a5055c1, ba1730c (instrumentados por `am instrument`, TestInstrumentedSuite).
+- T3 (emutest, validaciones 1, 2, 3): 6e711dc, ed28946.
+- T4 (Cortar acceso y Reactivar, solo con ADBUDDY_EMULATOR_CUT=1): c4f4b9d.
+- T5 (CI: oráculo en android-37, emutest en android-34): e29c5d4.
+- T6 (documentación): este commit; el plan de M2 queda con 10 textos "Automatizada en M2.5b" o "Sigue manual".
+
+Validaciones manuales pendientes de este plan, tal como quedaron:
+1. La primera ejecución del job `emulator` con los tests de la app en el runner Windows: duración total y que los pasos nuevos pasan como en el ensayo local.
+2. El job `emulator` en un runner Linux: `setup-gradle`, la guarda de `ANDROID_SERIAL` y `emutest` no se han ejecutado en Linux.
+3. Las de M2 que siguen manuales: 4, 5, 7, 8, 9; la 2, 3 y 10 en Android 17 (y la 2 en Android 11-13); la 6 con la depuración inalámbrica real y el puerto tcpip en el Pixel. Lista completa en `pendientes-m3-m5.md`, "Validaciones que solo se pueden hacer en el Pixel".
