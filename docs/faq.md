@@ -18,7 +18,7 @@ ADBuddy supports Claude Code, Codex, Gemini CLI and OpenCode, and recommends Cla
 
 ## What does the agent see on my phone?
 
-What adb lets it read: the apps installed, settings, files in shared storage, the phone's logs, what is on the screen (the text of its elements, and screenshots) and, through content providers, what the phone's shell may read, such as contacts and call history (it depends on the phone). Reading is green, so it does not ask you. ADBuddy's screen helpers never carry the text of password fields, and, with the app, nothing touches or reads the screen while a protected app is in front (without the app, only ADBuddy itself is protected). What it reads goes into its conversation, and so to its model provider. See [Safety](safety.md#the-three-levels) and [What ADBuddy does not guarantee](safety.md#what-adbuddy-does-not-guarantee).
+What adb lets it read: the apps installed, settings, files in shared storage, the phone's logs, what is on the screen (the text of its elements, and screenshots) and, through content providers, what the phone's shell may read, such as contacts and call history (it depends on the phone). Reading is green, so it does not ask you. ADBuddy's screen helpers never carry the text of password fields, and, with the app, nothing touches or reads the screen while a protected app is in front (until the app has sent a list, only ADBuddy itself is protected; after that the PC keeps the last list it got). What it reads goes into its conversation, and so to its model provider. See [Safety](safety.md#the-three-levels) and [What ADBuddy does not guarantee](safety.md#what-adbuddy-does-not-guarantee).
 
 ## Can it delete my photos?
 

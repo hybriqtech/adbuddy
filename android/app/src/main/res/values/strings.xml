@@ -149,7 +149,7 @@
     <string name="protected_discard_body">The list was not saved.</string>
     <string name="protected_discard_confirm">Discard</string>
     <string name="protected_saved_sent">Sent to the PC.</string>
-    <string name="protected_saved_later">Saved. Until the PC connects it keeps the previous list: apps you just protected are not protected there yet.</string>
+    <string name="protected_saved_later">Saved. Until the PC connects it keeps the previous list: apps you just protected are not protected on the PC yet.</string>
     <string name="protected_error">Could not read your apps. Nothing was changed; try again.</string>
     <string name="access_title">Notification access</string>
     <string name="access_intro">Lets the agent read what your notifications say, for example to see a message you just received. From protected apps and from ADBuddy it only sees that a notification exists, never what it says. It cannot dismiss or tap any notification. It is optional.</string>
