@@ -115,3 +115,14 @@ Los comandos que no son de `adbuddy` (`curl`, `sh`, `certutil`, `winget`…) no 
 - **Donaciones sin cuentas:** decisión de §5 (marcadores, sin enlaces inventados).
 - **Traducciones:** solo README y la guía de preparación; el resto de guías, en inglés (se apunta a pendientes).
 - **Solape con otras sesiones:** M6c (strings) y M5c (pantallas) no se tocan; si una guía necesita nombrar una pantalla de la app, describe solo lo que ya está en main.
+
+## 8. Correcciones tras la revisión opus del plan (2026-10-02)
+
+La revisión del plan (réplica de la guarda y lectura del código) cambió lo siguiente respecto a lo escrito arriba; **mandan estas líneas**:
+
+- **Hoy no hay release pública ni certificado fijado:** `docs/install.md` incluye "Build from source" (cierto hoy) y presenta el script `curl … | sh` y la descarga de la app por `adbuddy setup` como "cuando haya release"; el README dice "no public release yet" sin número de versión (§3.1, §3.2).
+- **El código manda, no la spec v1:** lo que la spec v1 describe y el código no hace no se documenta (p. ej. la lista editable de apps protegidas llega con M5c; "Mantener la depuración activa" no existe; el desbloqueo para confirmar es solo de Android 12+).
+- **`host/README.md`** (documento para desarrolladores, desfasado) se reduce a una nota de desarrollo que enlaza a las guías (§1).
+- **Donaciones:** toda la sección "Support the project" del README va dentro de un comentario HTML hasta que existan las cuentas (§5).
+- **Guarda (§6):** acepta `<…>` y `[…]` como marcadores, `--help`/`-h`/`help`, comillas, comentarios ` #`, `adbuddy.exe`, bloques `console` solo con prompt; construye un árbol de comandos por comando; un enlace desde un `.md` de `docs/` no puede salir de `docs/` ni caer en un fichero excluido; los enlaces a páginas sueltas llevan `.md`; `releasing.md` pasa a `exclude`; los esqueletos de las guías los crea T1.
+- **Revisión:** opus revisa también el README (resumen de seguridad y comparación con ARTEMIS) y la revisión final cubre todas las afirmaciones de seguridad de todas las guías.
