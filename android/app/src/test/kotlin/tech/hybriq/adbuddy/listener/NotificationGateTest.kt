@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.listener
 
+import android.content.SharedPreferences
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -74,12 +75,81 @@ class NotificationGateTest {
         assertFalse(consent.confirmed())
     }
 
-    // Accepted risk (ruling 15): this looks for `.confirm()` and `::confirm`, so `with(consent) { confirm() }`
-    // gets round it. The Opus review reads the screen by hand; the test catches the plain mistakes.
+    @Test fun aMarkRevokedWhileTheListenerIsReadDiscardsTheRead() {
+        // The user revokes (the listener unbinds and clears the mark) between the checks and the end of the read.
+        var mark = true
+        val result = NotificationGate.read({ mark }, { Listed.YES }, { mark = false }) { mark = false; listOf(one) }
+        assertEquals(NotificationRead.NotConfirmed, result)
+        // The mark kept all along: the read stands.
+        assertEquals(NotificationRead.Ok(listOf(one)), NotificationGate.read({ true }, { Listed.YES }, {}) { listOf(one) })
+    }
+
+    /** Preferences whose first commit() fails (returns false, writes nothing), as a real write can. */
+    private class FlakyPrefs(private val inner: FakePrefs, var failures: Int) : SharedPreferences by inner {
+        override fun edit(): SharedPreferences.Editor {
+            val real = inner.edit()
+            return object : SharedPreferences.Editor by real {
+                override fun commit(): Boolean = if (failures-- > 0) false else real.commit()
+                override fun apply() {} // asynchronous: nothing is written by the time the caller moves on
+            }
+        }
+    }
+
+    @Test fun revokeIsSynchronousAndRetriesOnceWhenTheWriteFails() {
+        val inner = FakePrefs()
+        NotificationConsent(inner).confirm()
+        val once = FlakyPrefs(inner, failures = 1)
+        NotificationConsent(once).revoke()
+        assertFalse("the retry cleared it", NotificationConsent(inner).confirmed())
+    }
+
+    // --- The watch over who sets the mark -------------------------------------------------------------------
+    // Accepted risk (ruling 15): a source scan cannot catch every spelling, so the Opus review reads the screen by hand;
+    // it catches the plain ones and the real way round (writing the preference itself).
+
+    private val confirmDecl = Regex("\\bfun\\s+confirm\\s*\\(")
+    private val confirmCall = Regex("\\bconfirm\\s*\\(\\s*\\)|::confirm\\b")
+    private val mayConfirm = setOf("NotificationAccessScreen.kt", "NotificationConsent.kt")
+
+    /** A call to confirm() or a reference to it in [src], comments and strings left out, its declaration too. */
+    private fun callsConfirm(src: String) = confirmCall.containsMatchIn(CodeScan.code(src).replace(confirmDecl, "fun x("))
+
+    /** The files, by name, that set the mark when they should not: calling confirm(), or writing the preference itself. */
+    private fun offenders(files: Map<String, String>): Set<String> = files.filter { (name, text) ->
+        val writesDirectly = name != "NotificationConsent.kt" && (
+            text.contains("\"notification_consent\"") ||
+                // ProtectedApps keeps its own, unrelated "confirmed" key.
+                (name != "ProtectedApps.kt" && text.contains("\"confirmed\"") && Regex("\\bedit\\b").containsMatchIn(text))
+            )
+        (name !in mayConfirm && callsConfirm(text)) || writesDirectly
+    }.keys
+
     @Test fun nothingButTheButtonSetsTheMark() {
-        // The gate and the status never confirm: confirm() is called from the confirm button only.
-        val calls = java.io.File("src/main/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }
-            .filter { Regex("\\.confirm\\(\\)|::confirm\\b").containsMatchIn(it.readText()) }.map { it.name }.toSet()
-        assertTrue(calls.toString(), setOf("NotificationAccessScreen.kt", "NotificationConsent.kt").containsAll(calls))
+        val root = java.io.File("src/main/kotlin")
+        assertTrue("no sources found, the scan would pass empty", root.isDirectory)
+        val files = root.walkTopDown().filter { it.isFile && it.extension == "kt" }.associate { it.name to it.readText() }
+        assertTrue("the scan found no sources", files.containsKey("NotificationConsent.kt"))
+        assertEquals(emptySet<String>(), offenders(files))
+    }
+
+    @Test fun theMarkScannerSeesTheWaysToSetItAndNotTheLegitimateOnes() {
+        val bad = listOf(
+            "consent .confirm ()",
+            "with(consent) { confirm() }",
+            "val f = consent::confirm",
+            "NotificationConsent.of(ctx).confirm()",
+            "val p = ctx.getSharedPreferences(\"notification_consent\", 0)",
+            "prefs.edit { putBoolean(\"confirmed\", true) }",
+        )
+        for (b in bad) assertEquals(b, setOf("Other.kt"), offenders(mapOf("Other.kt" to b)))
+        // The brief's own: the declaration, the screen's button, and a comment or string that only says the word.
+        val fine = mapOf(
+            "NotificationConsent.kt" to "fun confirm() { prefs.edit { putBoolean(\"confirmed\", true) } }\nprivate const val PREFS = \"notification_consent\"",
+            "NotificationAccessScreen.kt" to "Button(onClick = { consent.confirm() }) {}",
+            "ProtectedApps.kt" to "fun confirm(list: Set<String>) {}\nprefs.edit { putBoolean(\"confirmed\", true) }",
+            "Doc.kt" to "// the button calls consent.confirm()\nval s = \"consent.confirm()\"",
+            "Other.kt" to "val c = consent.confirmed()\nprotectedApps.confirm(list)",
+        )
+        assertEquals(emptySet<String>(), offenders(fine))
     }
 }

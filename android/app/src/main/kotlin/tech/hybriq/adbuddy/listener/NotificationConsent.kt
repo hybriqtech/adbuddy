@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.listener
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
@@ -20,8 +21,13 @@ class NotificationConsent(private val prefs: SharedPreferences) {
         prefs.edit { putBoolean(KEY, true) }
     }
 
+    /**
+     * Synchronous: the mark is gone, in the file, when this returns (the listener calls it as the system unbinds it,
+     * and the process may be killed right after). If the write fails, it tries once more.
+     */
+    @SuppressLint("ApplySharedPref")
     fun revoke() {
-        prefs.edit { putBoolean(KEY, false) }
+        if (!prefs.edit().putBoolean(KEY, false).commit()) prefs.edit().putBoolean(KEY, false).commit()
     }
 
     companion object {

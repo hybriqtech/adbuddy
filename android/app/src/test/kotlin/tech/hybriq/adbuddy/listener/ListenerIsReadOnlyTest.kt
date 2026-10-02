@@ -27,82 +27,7 @@ class ListenerIsReadOnlyTest {
      */
     private fun code(f: File): String = code(f.readText())
 
-    private fun code(t: String): String {
-        val out = StringBuilder()
-        var i = 0
-        while (i < t.length) {
-            val c = t[i]
-            when {
-                t.startsWith("//", i) -> while (i < t.length && t[i] != '\n') i++
-                t.startsWith("/*", i) -> {
-                    val end = t.indexOf("*/", i + 2)
-                    i = if (end < 0) t.length else end + 2
-                }
-                t.startsWith("\"\"\"", i) -> {
-                    i = skipString(t, i + 3, raw = true, out)
-                    out.append("\"\"")
-                }
-                c == '"' -> {
-                    i = skipString(t, i + 1, raw = false, out)
-                    out.append("\"\"")
-                }
-                c == '\'' -> { // a char literal, such as '"'
-                    i = skipChar(t, i + 1)
-                    out.append("''")
-                }
-                else -> {
-                    out.append(c)
-                    i++
-                }
-            }
-        }
-        return out.toString()
-    }
-
-    /** The index just past a string whose content starts at [from]; the code of its templates goes to [out]. */
-    private fun skipString(t: String, from: Int, raw: Boolean, out: StringBuilder): Int {
-        var i = from
-        while (i < t.length) {
-            when {
-                raw && t.startsWith("\"\"\"", i) -> return i + 3
-                !raw && t[i] == '"' -> return i + 1
-                !raw && t[i] == '\\' -> i += 2
-                t.startsWith("\${", i) -> {
-                    val end = templateEnd(t, i + 2)
-                    out.append(' ').append(code(t.substring(i + 2, minOf(end, t.length)))).append(' ')
-                    i = end + 1
-                }
-                else -> i++
-            }
-        }
-        return t.length
-    }
-
-    private fun skipChar(t: String, from: Int): Int {
-        var i = from
-        while (i < t.length && t[i] != '\'') i += if (t[i] == '\\') 2 else 1
-        return i + 1
-    }
-
-    /** The index of the } that closes a template whose code starts at [from]; unbalanced, the rest of the file is code. */
-    private fun templateEnd(t: String, from: Int): Int {
-        var depth = 1
-        var i = from
-        while (i < t.length) {
-            when {
-                t.startsWith("\"\"\"", i) -> i = skipString(t, i + 3, raw = true, StringBuilder())
-                t[i] == '"' -> i = skipString(t, i + 1, raw = false, StringBuilder())
-                t[i] == '\'' -> i = skipChar(t, i + 1)
-                t[i] == '{' -> { depth++; i++ }
-                t[i] == '}' -> {
-                    if (--depth == 0) return i
-                    i++
-                }
-                else -> i++
-            }
-        }
-        return t.length
-    }
+    private fun code(t: String): String = CodeScan.code(t)
 
     private fun kotlinFiles(d: File) = d.walkTopDown().filter { it.isFile && (it.extension == "kt" || it.extension == "java") }.toList()
 
@@ -272,13 +197,30 @@ class ListenerIsReadOnlyTest {
         error("$name is not closed")
     }
 
+
+    /** The clearing must be the FIRST statement of the body: not inside an `if`, nor behind a `return`. */
+    private val clearsFirst = Regex("^\\{\\s*NotificationGate\\.onUnbound\\s*\\{[^}]*NotificationConsent\\.of\\(this\\)\\.revoke\\(\\)[^}]*}")
+    private fun clearsTheMarkFirst(body: String) = clearsFirst.containsMatchIn(body)
+
     @Test fun theListenerClearsTheUsersMarkWhenTheSystemUnbindsIt() {
         // Revoking the access unbinds the service: the mark goes at once, even if nobody is looking (the gate and the
         // screen only see the revoke when asked, and the agent could turn the switch back on before that).
         val src = code(File(dir, "AgentNotificationListener.kt"))
-        val call = Regex("NotificationGate\\.onUnbound\\s*\\{[^}]*NotificationConsent\\.of\\(this\\)\\.revoke\\(\\)[^}]*}")
         for (name in listOf("onListenerDisconnected", "onDestroy")) {
-            assertTrue("$name does not clear the mark", call.containsMatchIn(body(src, name)))
+            assertTrue("$name does not clear the mark first", clearsTheMarkFirst(body(src, name)))
         }
+    }
+
+    @Test fun theClearingMustBeTheFirstStatementOfTheBody() {
+        val fine = "{ // comment\n NotificationGate.onUnbound { NotificationConsent.of(this).revoke() }\n if (x) {} }"
+        assertTrue(clearsTheMarkFirst(code(fine)))
+        val bad = listOf(
+            "{ if (current === this) { NotificationGate.onUnbound { NotificationConsent.of(this).revoke() } } }",
+            "{ if (x) return\n NotificationGate.onUnbound { NotificationConsent.of(this).revoke() } }",
+            "{ return; NotificationGate.onUnbound { NotificationConsent.of(this).revoke() } }",
+            "{ current = null\n NotificationGate.onUnbound { NotificationConsent.of(this).revoke() } }",
+            "{ NotificationGate.onUnbound { } }",
+        )
+        for (b in bad) assertFalse(b, clearsTheMarkFirst(code(b)))
     }
 }
