@@ -614,6 +614,67 @@ func TestStdinCommandIsNeverAllowedForTheSession(t *testing.T) {
 	}
 }
 
+// M1: the host does not leave its policy on long commands to the app (an
+// old or broken one may offer more): a command the notification cannot show
+// whole (more than MaxSessionCommand UTF-16 units) is never allowed for the
+// session, and an allow_session for it is a single allow.
+func TestALongCommandIsNeverAllowedForTheSession(t *testing.T) {
+	app := &fakeApp{connected: true}
+	c := NewConfirmer(app, fixed(confirm.Deny))
+	app.onPublish = func(r ConfirmRequest) {
+		if r.AllowSession {
+			t.Errorf("%s: allow_session offered for a command of %d characters", r.ID, len(r.RawCommand))
+		}
+		reply(c, r.ID, "allow_session")
+	}
+	for i, raw := range []string{
+		"adb shell rm " + strings.Repeat("a", MaxSessionCommand),
+		"adb " + strings.Repeat("😀", 149), // 153 runes, 302 UTF-16 units
+	} {
+		r := confirm.Request{ID: fmt.Sprintf("j_%d", i), Key: fmt.Sprintf("k%d", i), RawCommand: raw, ExpiresAt: time.Now().Add(time.Minute)}
+		if got := c.Confirm(context.Background(), r); got != confirm.Allow {
+			t.Fatalf("%d: %v, want allow", i, got)
+		}
+	}
+	app.mu.Lock()
+	app.onPublish = nil
+	app.mu.Unlock()
+	for i := range 2 {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		got := c.Confirm(ctx, confirm.Request{ID: fmt.Sprintf("j_again_%d", i), Key: fmt.Sprintf("k%d", i), ExpiresAt: time.Now().Add(time.Minute)})
+		cancel()
+		if got != confirm.Timeout {
+			t.Fatalf("%d: a long command was remembered for the session: %v", i, got)
+		}
+	}
+	// One that fits keeps the offer.
+	app.onPublish = func(r ConfirmRequest) {
+		if !r.AllowSession {
+			t.Error("allow_session not offered for a command that fits")
+		}
+		reply(c, r.ID, "deny")
+	}
+	c.Confirm(context.Background(), confirm.Request{ID: "j_fits", Key: "k", RawCommand: strings.Repeat("a", MaxSessionCommand), ExpiresAt: time.Now().Add(time.Minute)})
+}
+
+// M1/H3: a command longer than the app's dialog shows cannot have been read to
+// its end: an allow for it, from whatever app, is a deny.
+func TestACommandLongerThanTheDialogCannotBeAllowed(t *testing.T) {
+	for _, d := range []string{"allow", "allow_session"} {
+		app := &fakeApp{connected: true}
+		c := NewConfirmer(app, fixed(confirm.Allow))
+		app.onPublish = func(r ConfirmRequest) { reply(c, r.ID, d) }
+		long := confirm.Request{ID: "j_long", Key: "k", RawCommand: strings.Repeat("a", MaxDialogCommand+1), ExpiresAt: time.Now().Add(time.Minute)}
+		if got := c.Confirm(context.Background(), long); got != confirm.Deny {
+			t.Fatalf("%s: %v, want deny", d, got)
+		}
+		fits := confirm.Request{ID: "j_fits", Key: "k", RawCommand: strings.Repeat("a", MaxDialogCommand), ExpiresAt: time.Now().Add(time.Minute)}
+		if got := c.Confirm(context.Background(), fits); got != confirm.Allow {
+			t.Fatalf("%s: %v, want allow", d, got)
+		}
+	}
+}
+
 // syncApp answers in Publish itself, so the answer is waiting before Confirm
 // looks at its channels.
 type syncApp struct {

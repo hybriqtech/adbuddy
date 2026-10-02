@@ -58,12 +58,14 @@ object ConfirmUi {
     }
 
     /**
-     * The buttons of the notification: those of the dialog, but only Deny for a special question (its ⚠ must
-     * be read, A4-3) or a command the notification cuts (the rest must be read, A4-2). The person opens the
-     * dialog to allow them.
+     * The buttons of the notification: those of the dialog, but never Allow during the session (M2: collapsed,
+     * the notification shows only the title and a line), and only Deny for a special question (its ⚠ must be
+     * read, A4-3) or a command the notification cuts (the rest must be read, A4-2). The person opens the dialog
+     * for the rest.
      */
     fun notificationDecisions(r: ConfirmRequest, status: Status): List<String> =
-        decisions(r, status).let { all -> if (r.special || cut(r)) all.filter { it == Decision.DENY } else all }
+        decisions(r, status).filter { it != Decision.ALLOW_SESSION }
+            .let { all -> if (r.special || cut(r)) all.filter { it == Decision.DENY } else all }
 
     /** Why a notification does not allow what the question asks: the command is [TOO_LONG], [CUT] or [SPECIAL]. */
     enum class Why { TOO_LONG, CUT, SPECIAL }

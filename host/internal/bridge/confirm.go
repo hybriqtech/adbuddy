@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"unicode/utf16"
 
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
@@ -48,6 +49,7 @@ type pendingReq struct {
 	key     string
 	gone    chan struct{} // closed by AppGone; replaced when the question stays on the phone
 	granted bool          // the answer added key to the session (under c.mu)
+	unread  bool          // longer than the app's dialog shows: an allow is a deny (MaxDialogCommand)
 }
 
 // NewConfirmer returns a Confirmer that asks on app, or fallback.
@@ -62,10 +64,19 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 	if r.ID == "" {
 		return confirm.Deny
 	}
+	// What the app shows is what Shown makes visible; the Fallback (the
+	// terminal) gets the original and does the same.
+	note := c.RTLNote
+	if note == "" {
+		note = i18n.EN.T("confirm.rtl_escaped")
+	}
+	shown := r.Shown(note)
+	units := len(utf16.Encode([]rune(shown.RawCommand)))
 	// "Allow during the session" covers only the same rule with the same
-	// arguments, and never a command that may cut the connection or one
-	// whose effect may come from stdin, which the key does not cover (A4-1).
-	allowSession := r.Key != "" && !r.Special && !r.Stdin
+	// arguments, and never a command that may cut the connection, one whose
+	// effect may come from stdin, which the key does not cover (A4-1), or one
+	// the notification does not show whole (M1: whatever the app offers).
+	allowSession := r.Key != "" && !r.Special && !r.Stdin && units <= MaxSessionCommand
 	c.mu.Lock()
 	if allowSession && c.session[r.Key] {
 		c.mu.Unlock()
@@ -75,16 +86,10 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 	if !c.App.Connected() {
 		return c.Fallback.Confirm(ctx, r)
 	}
-	// What the app shows is what Shown makes visible; the Fallback (the
-	// terminal) gets the original and does the same.
-	note := c.RTLNote
-	if note == "" {
-		note = i18n.EN.T("confirm.rtl_escaped")
-	}
-	shown := r.Shown(note)
 	req := ConfirmRequest{ID: r.ID, Level: "red", Title: shown.Title, Detail: shown.Detail, RawCommand: shown.RawCommand,
 		ExpiresAt: r.ExpiresAt.UTC(), Special: r.Special, AllowSession: allowSession}
-	p := &pendingReq{req: req, reply: make(chan confirm.Decision, 1), key: r.Key, gone: make(chan struct{})}
+	p := &pendingReq{req: req, reply: make(chan confirm.Decision, 1), key: r.Key, gone: make(chan struct{}),
+		unread: units > MaxDialogCommand}
 	c.mu.Lock()
 	if _, dup := c.pending[r.ID]; dup {
 		c.mu.Unlock()
@@ -192,12 +197,24 @@ func (c *Confirmer) notify(title string, moved bool) {
 	}
 }
 
+// MaxSessionCommand is the longest raw command, in UTF-16 units (what the app
+// measures), that the notification shows whole; a longer one is never
+// allowed for the session (A4-2, M1). The app's ConfirmUi.MAX_COMMAND.
+const MaxSessionCommand = 300
+
+// MaxDialogCommand is the longest raw command, in UTF-16 units, that the
+// app's dialog shows; a longer one cannot have been read to its end, so it is
+// never allowed (H3, M1). The app's ConfirmUi.DIALOG_MAX_COMMAND.
+const MaxDialogCommand = 20_000
+
 // StaleReplyText tells the app its answer came too late.
 const StaleReplyText = "That question was already answered or moved to the PC terminal."
 
 // Reply handles a confirm.reply from the app. A reply for an id that is not
 // waiting (answered, withdrawn or moved to the terminal) does nothing but
-// tell the app so.
+// tell the app so. The host's policy holds whatever the app offered (M1): an
+// allow_session the question did not offer is a single allow, and an allow
+// of a command longer than the dialog shows is a deny.
 func (c *Confirmer) Reply(raw json.RawMessage) {
 	var rep ConfirmReply
 	if json.Unmarshal(raw, &rep) != nil {
@@ -217,10 +234,11 @@ func (c *Confirmer) Reply(raw json.RawMessage) {
 	}
 	defer c.mu.Unlock()
 	d := confirm.Deny
-	switch rep.Decision {
-	case "allow":
+	switch {
+	case p.unread:
+	case rep.Decision == "allow":
 		d = confirm.Allow
-	case "allow_session":
+	case rep.Decision == "allow_session":
 		d = confirm.Allow
 		if p.req.AllowSession && !c.session[p.key] {
 			c.session[p.key] = true

@@ -16,9 +16,10 @@ import tech.hybriq.adbuddy.ui.Formats
 
 /**
  * Shows each pending 🔴 question as a high-priority notification (spec §4.5)
- * with Allow, Deny and, when the host offers it, Allow during the session; a
- * special question or a command the notification cuts gets only Deny and Open
- * (ConfirmUi.notificationDecisions): it is allowed from the dialog.
+ * with Allow and Deny, and Open when the dialog offers more (Allow during the
+ * session is offered only there, M2); a special question or a command the
+ * notification cuts gets only Deny and Open (ConfirmUi.notificationDecisions):
+ * it is allowed from the dialog.
  * Allowing needs the phone unlocked (setAuthenticationRequired, Android 12+,
  * and ConfirmReceiver checks it again). The notification stays on this phone
  * (setLocalOnly: not on watches nor mirrors). Questions answered elsewhere or

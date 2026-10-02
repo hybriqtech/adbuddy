@@ -87,9 +87,19 @@ class ConfirmUiTest {
 
     @Test fun theReceiverSendsAnOpenQuestion() {
         val s = state(q("j_1", allowSession = true))
-        for (d in listOf(Decision.DENY, Decision.ALLOW, Decision.ALLOW_SESSION)) {
+        for (d in listOf(Decision.DENY, Decision.ALLOW)) {
             assertTrue(d, ConfirmUi.canSend(s, "j_1", d, now, locked = false, notification = true))
         }
+    }
+
+    // M2: allow during the session only from the dialog, never from the notification (collapsed, it shows only
+    // the title and a line).
+    @Test fun allowDuringTheSessionOnlyFromTheDialog() {
+        val r = q("j_1", allowSession = true)
+        assertEquals(listOf(Decision.DENY, Decision.ALLOW), ConfirmUi.notificationDecisions(r, ConfirmUi.Status.OPEN))
+        val s = state(r)
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, notification = true))
+        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, notification = false))
     }
 
     @Test fun aLockedPhoneCanDenyButNotAllow() {
@@ -252,7 +262,7 @@ class ConfirmUiTest {
             assertEquals(r.id, listOf(Decision.DENY), ConfirmUi.notificationDecisions(r, ConfirmUi.Status.OPEN))
         }
         assertEquals(
-            listOf(Decision.DENY, Decision.ALLOW, Decision.ALLOW_SESSION),
+            listOf(Decision.DENY, Decision.ALLOW),
             ConfirmUi.notificationDecisions(q("j_3", allowSession = true), ConfirmUi.Status.OPEN),
         )
         assertTrue(ConfirmUi.notificationDecisions(special, ConfirmUi.Status.EXPIRED).isEmpty())
