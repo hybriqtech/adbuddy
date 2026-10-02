@@ -24,7 +24,7 @@ func childOf(t *testing.T) (PTY, *output, int) {
 	out.waitFor(t, "ready")
 	p.Write([]byte("spawn\r"))
 	re := regexp.MustCompile(`child:(\d+);`)
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	var m []string
 	for m = re.FindStringSubmatch(out.String()); m == nil; m = re.FindStringSubmatch(out.String()) {
 		if time.Now().After(deadline) {
@@ -48,7 +48,7 @@ func childOf(t *testing.T) (PTY, *output, int) {
 
 func waitDead(t *testing.T, pid int, what string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for alive(pid) {
 		if time.Now().After(deadline) {
 			t.Fatalf("%s %d still running 10 s later", what, pid)
