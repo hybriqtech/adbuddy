@@ -20,7 +20,7 @@ jobs:
   mksh:
     name: oracle against the emulator's mksh
     # Fork pull requests never reach a self-hosted runner.
-    if: ${{ vars.CI_RUNNER_EMULATOR != '"none"' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ vars.CI_RUNNER_EMULATOR != '"none"' && (vars.CI_RUNNER_EMULATOR == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ${{ fromJSON(vars.CI_RUNNER_EMULATOR || '"ubuntu-latest"') }}
     timeout-minutes: 90
     defaults:

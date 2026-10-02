@@ -15,8 +15,8 @@ permissions:
 jobs:
   test:
     name: go test (${{ matrix.name }})
-    # Fork pull requests never reach a self-hosted runner.
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    # With CI_HOST_MATRIX set, fork pull requests never reach a self-hosted runner.
+    if: ${{ vars.CI_HOST_MATRIX == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     timeout-minutes: 30
     strategy:
       fail-fast: false

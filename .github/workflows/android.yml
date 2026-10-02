@@ -17,7 +17,7 @@ permissions:
 jobs:
   unit:
     # Fork pull requests never reach a self-hosted runner.
-    if: ${{ vars.CI_RUNNER_ANDROID != '"none"' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ vars.CI_RUNNER_ANDROID != '"none"' && (vars.CI_RUNNER_ANDROID == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ANDROID || '"ubuntu-latest"') }}
     timeout-minutes: 45
     defaults:
