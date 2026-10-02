@@ -627,7 +627,7 @@ func TestDocsGuardCatches(t *testing.T) {
 	if got := checkDocCommands("f.md", sh("adbuddy bogus")); len(got) == 0 {
 		t.Error("checkDocCommands missed an unknown subcommand")
 	}
-	if got := checkDocPrivacy("f.md", "10.0.0." + "5"); len(got) == 0 {
+	if got := checkDocPrivacy("f.md", "10.0.0."+"5"); len(got) == 0 {
 		t.Error("checkDocPrivacy missed an address")
 	}
 }
