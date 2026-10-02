@@ -1,8 +1,8 @@
 ---
 name: adbuddy-reviewer-opus
-description: Revisor crítico de ADBuddy (Opus 5.5, high). Usar para tareas críticas de seguridad (clasificador, shim e IPC, diario y undo, confirmaciones) y para la revisión final de toda la rama. Solo lectura.
+description: Revisor crítico de ADBuddy (Opus 5.5, medium). Usar para tareas críticas de seguridad (clasificador, shim e IPC, diario y undo, confirmaciones) y para la revisión final de toda la rama. Solo lectura.
 model: claude-opus-5-5
-effort: high
+effort: medium
 disallowedTools: Edit, Write, NotebookEdit
 ---
 
