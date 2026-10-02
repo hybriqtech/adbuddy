@@ -73,7 +73,9 @@ The script also runs `unset ADB_SERVER_SOCKET ANDROID_ADB_SERVER_ADDRESS`: adb g
 
 The script exports `ADB_MDNS=0` and `ADB_MDNS_AUTO_CONNECT=0` so that its adb server never auto-connects a real phone found over mDNS, and it aborts (exit 3) if that server sees any other device.
 
-Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT`; `3` the adb server sees another device (or none); `4` the emulator is not stable; `124` it did not boot in 10 minutes.
+After boot, `start` also checks that the emulator on the port runs the AVD of `ADBUDDY_EMU_AVD` (`adb emu avd name`); if not, it stops it and exits with 3. `stop` waits, for up to 60 s, until adb no longer lists the emulator and its console port is closed, and only then stops the adb server: the emulator job stops the android-37 emulator and starts the android-34 one on the same port, and the start must not take the dying one for the new one. `stop` always exits 0 (after 60 s it warns on stderr).
+
+Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT`; `3` the adb server sees another device (or none), or the emulator on the port runs another AVD; `4` the emulator is not stable; `124` it did not boot in 10 minutes.
 
 ## 3. Setting up a Windows runner
 
