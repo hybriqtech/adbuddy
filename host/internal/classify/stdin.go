@@ -2,6 +2,7 @@ package classify
 
 import (
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -14,14 +15,16 @@ import (
 // evaluator: it only looks at the words, and errs on the side of yes. A yes
 // only costs asking again. argv is without adb's global options (SplitGlobal).
 //
-// Yes for: adb shell or exec-out without a command (an interactive shell) or
-// with options ADBuddy does not know; adb exec-in (it pipes stdin into the
-// command); a line on the phone that names a shell, su, eval, source or `.`
-// (code from stdin), xargs, read or a command substitution (arguments from
-// stdin), or a program that copies its stdin (cat, dd, tee), stdin itself
-// (-, /dev/stdin, /proc/self/fd/0, the terminal) or an install or content
-// write that may read it; any other adb command with -, /dev/stdin… as an
-// operand.
+// It is an allowlist (H1): no only for an adb command ADBuddy knows does not
+// read stdin (inertAdb) with no stdin operand (-, /dev/stdin…), and for a
+// line on the phone whose every program is known not to read stdin
+// (nonReaders) or to read it only as data it filters to its output
+// (dataReaders), none of which writes it to a file. Yes for anything else:
+// adb shell or exec-out without a command or with options ADBuddy does not
+// know, adb exec-in, a program on the line that is not in those lists (awk,
+// sed, a shell, a wrapper, one ADBuddy does not know…), and, wherever on the
+// line, a shell, su, eval, source, `.`, xargs, read, dd, tee, a command
+// substitution, stdin itself or an install or content write that may read it.
 func StdinDecides(argv []string) bool {
 	for len(argv) > 0 && strings.HasPrefix(argv[0], "wait-for-") {
 		argv = argv[1:]
@@ -51,6 +54,9 @@ func StdinDecides(argv []string) bool {
 		line := strings.Join(args, " ")
 		return strings.TrimSpace(line) == "" || lineReadsStdin(line)
 	}
+	if !inertAdb[argv[0]] {
+		return true
+	}
 	for _, a := range argv[1:] {
 		if stdinPath(a) {
 			return true
@@ -59,22 +65,89 @@ func StdinDecides(argv []string) bool {
 	return false
 }
 
+// inertAdb are the adb commands that do not hand their stdin to anything on
+// the phone: they read files on the PC, or nothing (an operand that is stdin
+// itself is looked at apart). pair is not here: it may read the pairing code
+// from stdin.
+var inertAdb = map[string]bool{
+	"devices": true, "version": true, "help": true, "get-state": true, "get-serialno": true, "get-devpath": true,
+	"start-server": true, "kill-server": true, "features": true, "host-features": true, "mdns": true, "jdwp": true,
+	"pull": true, "bugreport": true, "logcat": true, "reverse": true, "forward": true,
+	"install": true, "install-multiple": true, "install-multi-package": true, "uninstall": true, "push": true,
+	"sync": true, "sideload": true, "restore": true, "backup": true, "connect": true, "disconnect": true, "reconnect": true,
+	"remount": true, "usb": true, "tcpip": true, "reboot": true, "root": true, "unroot": true,
+	"disable-verity": true, "enable-verity": true,
+}
+
 // stdinReaders are programs that, named anywhere on the line, may take code,
-// arguments or contents from stdin.
+// arguments or contents from stdin: a first look that does not need to know
+// where commands start.
 var stdinReaders = map[string]bool{
 	// code
 	"sh": true, "mksh": true, "bash": true, "ash": true, "dash": true, "zsh": true, "ksh": true,
 	"su": true, "eval": true, "source": true, ".": true,
 	// arguments and variables
 	"xargs": true, "read": true,
-	// contents: the programs that copy stdin as is. A filter (sed, awk…)
-	// that writes its stdin to a file is like adb push of a local file that
-	// changed since it was allowed: the same command on other contents.
-	"cat": true, "dd": true, "tee": true,
+	// contents: programs that copy stdin to a file
+	"dd": true, "tee": true,
 }
 
-// lineReadsStdin looks for stdinReaders and stdin itself in a shell line,
-// with quotes and backslashes removed (s'h' is sh on the phone).
+// nonReaders are the programs on the phone known not to read stdin, or to
+// read from it only the answer to a question about the operands they were
+// given (rm -i, cp -i, mv -i), which the key covers. The system's services
+// (settings, am, pm, wm, input, appops, svc, sm, dumpsys, service) get their
+// arguments, not stdin; cmd is not here: it hands stdin to any service, and
+// some read it. pm and content stay here for their other subcommands: their
+// install and write are looked at in lineReadsStdin.
+var nonReaders = map[string]bool{
+	// files
+	"rm": true, "rmdir": true, "mv": true, "cp": true, "ln": true, "mkdir": true, "touch": true,
+	"chmod": true, "chown": true, "chgrp": true, "ls": true, "stat": true, "du": true, "df": true,
+	"realpath": true, "readlink": true, "basename": true, "dirname": true, "pwd": true, "cd": true,
+	// output and tests
+	"echo": true, "printf": true, "true": true, "false": true, ":": true, "test": true, "[": true,
+	"sleep": true, "date": true, "id": true, "whoami": true, "uname": true, "uptime": true, "nproc": true,
+	"getprop": true, "getenforce": true, "exit": true, "return": true,
+	// the system
+	"reboot": true, "setprop": true, "kill": true, "killall": true, "pkill": true, "pidof": true, "pgrep": true,
+	"ps": true, "sync": true, "svc": true, "sm": true, "settings": true, "input": true, "wm": true, "am": true,
+	"pm": true, "appops": true, "dumpsys": true, "service": true, "content": true, "logcat": true,
+	"screencap": true, "screenrecord": true,
+}
+
+// dataReaders are the filters that may read stdin, but only as data they
+// write to their output: what they do does not depend on it. Each one,
+// unless it writes that data to a file (sort -o, or an output redirection on
+// the line; see lineReadsStdin): cat copies it, head and tail cut it, wc
+// counts it, sort orders it, cut and tr transform it, and grep (also egrep
+// and fgrep) selects lines of it (its patterns come from the arguments, or
+// from -f with a file; -f - is stdin itself).
+var dataReaders = map[string]bool{
+	"cat": true, "head": true, "tail": true, "wc": true, "sort": true, "cut": true, "tr": true,
+	"grep": true, "egrep": true, "fgrep": true,
+}
+
+// keywords keep the next word in the position of a command; the closing ones
+// run nothing. for, case, select, function, [[ and (( are not here: what
+// follows them is not a command, and ADBuddy does not follow them.
+var keywords = map[string]bool{
+	"if": true, "then": true, "else": true, "elif": true, "do": true, "while": true, "until": true, "!": true, "time": true,
+}
+
+var closers = map[string]bool{"fi": true, "done": true}
+
+// systemDirs are where the phone's own programs are; a program named by a
+// path elsewhere may be anything.
+var systemDirs = []string{"/system/bin/", "/system/xbin/", "/vendor/bin/"}
+
+// assignment is one of a variable of the agent's own, in lower case: one of
+// the shell's (PATH, IFS, LD_PRELOAD, ENV…) may change what the next program
+// is or does, so it is not followed and the command counts as not inert.
+var assignment = regexp.MustCompile(`^[a-z_][a-z0-9_]*=`)
+
+// lineReadsStdin looks at a shell line with quotes and backslashes removed
+// (s'h' is sh on the phone): stdinReaders and stdin itself anywhere, then
+// every command on it (inertLine).
 func lineReadsStdin(line string) bool {
 	if strings.Contains(line, "$(") || strings.Contains(line, "`") || strings.Contains(line, "<(") {
 		return true // a substitution may read stdin: $(cat), $(head -1)…
@@ -106,7 +179,121 @@ func lineReadsStdin(line string) bool {
 			write = true // content write copies stdin to the URI
 		}
 	}
-	return install && sizeFromStdin || content && write
+	if install && sizeFromStdin || content && write {
+		return true
+	}
+	return !inertLine(plain)
+}
+
+// inertLine reports whether every command on a shell line is a nonReader or
+// a dataReader, and no dataReader's input may end up in a file: then nothing
+// on it depends on stdin. Anything it does not follow counts as not inert.
+func inertLine(line string) bool {
+	commandPos := true // the next word names a command
+	redirect := false  // the next word is the target of a redirection
+	out, dup := false, false
+	filters, writes := false, false
+	var name string
+	var args []string
+	inert := true
+	end := func() {
+		if name != "" && !inertCommand(name, args) {
+			inert = false
+		}
+		if dataReaders[programName(name)] {
+			filters = true
+		}
+		name, args, commandPos = "", nil, true
+	}
+	for _, t := range shellTokens(line) {
+		switch {
+		case t == "<" || t == ">":
+			if !redirect {
+				out, dup = t == ">", false
+			}
+			redirect = true
+		case redirect && (t == "&" || t == "|"):
+			dup = dup || t == "&" // >&2, <&0: a file descriptor, not a file
+		case len(t) == 1 && strings.ContainsAny(t, ";|&(){}\n"):
+			redirect = false
+			end()
+		case redirect:
+			redirect = false
+			if out && !dup && t != "/dev/null" {
+				writes = true
+			}
+		case commandPos && (assignment.MatchString(t) || keywords[t]):
+		case commandPos:
+			name, commandPos = t, false
+		default:
+			args = append(args, t)
+		}
+	}
+	if redirect {
+		return false
+	}
+	end()
+	return inert && !(filters && writes)
+}
+
+// inertCommand reports whether the command name with args is known not to
+// depend on stdin.
+func inertCommand(name string, args []string) bool {
+	if closers[name] {
+		return true
+	}
+	p := programName(name)
+	switch {
+	case p == "":
+		return false
+	case p == "sort":
+		for _, a := range args {
+			if strings.HasPrefix(a, "-o") || strings.HasPrefix(a, "--output") {
+				return false // writes what it read to a file
+			}
+		}
+	}
+	return nonReaders[p] || dataReaders[p]
+}
+
+// programName is the program a command word names: itself, or the last part
+// of a path in the system's directories; "" for any other path.
+func programName(w string) string {
+	if !strings.Contains(w, "/") {
+		return w
+	}
+	for _, d := range systemDirs {
+		if strings.HasPrefix(w, d) && !strings.Contains(w[len(d):], "/") {
+			return w[len(d):]
+		}
+	}
+	return ""
+}
+
+// shellTokens splits a line (quotes already removed) into words and the
+// one-character operators ; | & ( ) { } < > and newline.
+func shellTokens(line string) []string {
+	var toks []string
+	var w strings.Builder
+	flush := func() {
+		if w.Len() > 0 {
+			toks = append(toks, w.String())
+			w.Reset()
+		}
+	}
+	for _, r := range line {
+		switch {
+		case r == ' ' || r == '\t' || r == '\r':
+			flush()
+		case strings.ContainsRune(";|&(){}<>\n", r):
+			flush()
+			toks = append(toks, string(r))
+		default:
+			w.WriteRune(r)
+		}
+	}
+	flush()
+	return toks
 }
 
 // stdinPath is a file operand that is stdin itself (or the terminal adb shell

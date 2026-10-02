@@ -106,3 +106,50 @@ func TestStdinDecides(t *testing.T) {
 		}
 	}
 }
+
+// H1: StdinDecides is an allowlist. A program on the phone keeps the key only
+// if it is known not to read stdin, or to read it only as data it filters to
+// its output; anything else may be an interpreter of what comes through stdin
+// (awk's system(), getline and print | cmd; sed's e command…), whatever its
+// name.
+func TestStdinDecidesIsAnAllowlist(t *testing.T) {
+	yes := [][]string{
+		// awk and sed run what comes through stdin.
+		sh(`awk '{system($0)}'`), sh(`awk '{while ((getline c) > 0) system(c)}'`), sh(`awk '{print | $0}'`),
+		sh("awk 1"), sh("sed e"), sh("sed -n p"), sh(`ls | awk '{system($0)}'`), sh("rm -rf /sdcard/x; awk 1"),
+		sh("rm -rf /sdcard/x && sed e"), sh("FOO=1 awk 1"), sh("if true; then awk 1; fi"), sh("! awk 1"), sh("(awk 1)"),
+		sh("{ awk 1; }"), sh("while true; do awk 1; done"), sh("rm x\nawk 1"), sh("rm x & awk 1"),
+		// Programs ADBuddy does not know, wrappers that run another program,
+		// a program that is not the system's, a program known only at run time.
+		sh("frob"), sh("env rm -rf /sdcard/x"), sh("nice rm -rf /sdcard/x"), sh("find /sdcard -delete"),
+		sh("/data/local/tmp/rm -rf /sdcard/x"), sh("./rm x"), sh("$X"), sh("${X} rm"), sh("cmd package list packages"),
+		sh("for f in a b; do rm $f; done"), sh("f() { rm x; }; f"),
+		// A filter that reads stdin writes it to a file: other contents next time.
+		sh("head -c 10 > /sdcard/x"), sh("grep x > /sdcard/y"), sh("sort -o /sdcard/x"), sh("tr a b >> /sdcard/x"),
+		sh("rm -rf /sdcard/x; cat > /sdcard/y"),
+		// adb commands ADBuddy does not know.
+		{"frob"}, {"emu", "kill"}, {"pair", "1.2.3.4:5"},
+	}
+	no := [][]string{
+		// Filters that only read stdin as data and write to their output.
+		sh("rm -rf /sdcard/DCIM | wc -l"), sh("ls /sdcard | head -5"), sh("logcat -d | grep x | tail -3"),
+		sh("pm list packages | sort | cut -d: -f2"), sh("dumpsys battery | tr a-z A-Z"), sh("cat /proc/cpuinfo | grep x"),
+		sh("cat"), sh("rm -rf /sdcard/x | cat"),
+		// Redirections that are not a file written from stdin.
+		sh("rm x 2>/dev/null"), sh("ls >&2"), sh("rm x 2>&1 | head"), sh("ls > /sdcard/list.txt"),
+		// Assignments, keywords and the system's paths.
+		sh("foo=1 rm x"), sh("if true; then rm x; fi"), sh("/system/bin/rm -rf /sdcard/x"), sh("rm x && reboot || svc wifi disable"),
+		sh("settings put global x 1; am force-stop com.x; input keyevent 3"),
+		{"push", "a.txt", "/sdcard/a.txt"}, {"sync"}, {"root"}, {"tcpip", "5555"},
+	}
+	for _, argv := range yes {
+		if !StdinDecides(argv) {
+			t.Errorf("%q: StdinDecides false, want true", argv)
+		}
+	}
+	for _, argv := range no {
+		if StdinDecides(argv) {
+			t.Errorf("%q: StdinDecides true, want false", argv)
+		}
+	}
+}
