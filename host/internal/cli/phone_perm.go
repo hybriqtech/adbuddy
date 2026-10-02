@@ -48,12 +48,13 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	}
 	rule, always := claudecode.AlwaysRule(in.ToolName, in.ToolInput)
 	now := time.Now()
+	timeout := permTimeout // read once: tests restore it when they end
 	req := bridge.PermissionRequest{
 		ID:          newID("p_"),
 		Tool:        in.ToolName,
 		Summary:     claudecode.ToolSummary(in.ToolName, in.ToolInput),
 		Detail:      claudecode.ToolDetail(in.ToolName, in.ToolInput),
-		ExpiresAt:   now.Add(permTimeout).UTC(),
+		ExpiresAt:   now.Add(timeout).UTC(),
 		AllowAlways: always,
 	}
 	p := &pendingPerm{req: req, rule: rule, tool: in.ToolName, summary: req.Summary, done: make(chan permResult, 1)}
@@ -74,7 +75,7 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	a.mu.Unlock()
 	l.publishEvent(bridge.TypePermRequest, req)
 
-	timer := time.NewTimer(permTimeout)
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case r := <-p.done:

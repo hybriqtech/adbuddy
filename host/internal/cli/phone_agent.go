@@ -295,7 +295,7 @@ func (l *phoneLink) onSessionStart(in claudecode.HookInput) {
 	// agentPoll is read here, before the goroutine, for the same reason as
 	// tunnelCheck in startPhoneLink: a test that sets it must not race with a
 	// goroutine that has not run yet when the test ends.
-	go l.tailLoop(ctx, tl, time.Now(), agentPoll)
+	go l.tailLoop(ctx, tl, time.Now(), agentPoll, startGrace)
 }
 
 func (l *phoneLink) onSessionEnd() {
@@ -312,7 +312,7 @@ func (l *phoneLink) onSessionEnd() {
 	l.publishState()
 }
 
-func (l *phoneLink) tailLoop(ctx context.Context, tl *claudecode.Tailer, started time.Time, poll time.Duration) {
+func (l *phoneLink) tailLoop(ctx context.Context, tl *claudecode.Tailer, started time.Time, poll, grace time.Duration) {
 	t := time.NewTicker(poll)
 	defer t.Stop()
 	for {
@@ -321,7 +321,7 @@ func (l *phoneLink) tailLoop(ctx context.Context, tl *claudecode.Tailer, started
 			return
 		case <-t.C:
 		}
-		if !l.pollTranscript(ctx, tl, started) {
+		if !l.pollTranscript(ctx, tl, started, grace) {
 			return
 		}
 	}
@@ -329,7 +329,7 @@ func (l *phoneLink) tailLoop(ctx context.Context, tl *claudecode.Tailer, started
 
 // pollTranscript reads what the transcript gained and shows it. false when
 // the chat degraded and the reading is over.
-func (l *phoneLink) pollTranscript(ctx context.Context, tl *claudecode.Tailer, started time.Time) bool {
+func (l *phoneLink) pollTranscript(ctx context.Context, tl *claudecode.Tailer, started time.Time, grace time.Duration) bool {
 	a := &l.adapter
 	a.pollMu.Lock()
 	defer a.pollMu.Unlock()
@@ -342,7 +342,7 @@ func (l *phoneLink) pollTranscript(ctx context.Context, tl *claudecode.Tailer, s
 	case err != nil:
 		l.degrade("the transcript cannot be read")
 		return false
-	case !tl.Started() && time.Since(started) > startGrace:
+	case !tl.Started() && time.Since(started) > grace:
 		l.degrade("the transcript did not appear")
 		return false
 	case p.BadRun() >= badLines:
