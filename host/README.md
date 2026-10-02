@@ -80,6 +80,17 @@ go test -timeout 20m -count=1 -run TestSkillsReadOnlyOnEmulator ./internal/cli
 
 It fails if the phone says a program or an option does not exist, and it refuses any serial that is not `emulator-*`. The `emulator` workflow runs it too.
 
+### The app on the emulator
+
+`internal/emutest` reaches the app over adb, as the host reaches a phone: the provider answers the shell user, the handshake on stdin reaches it, and `BridgeService` goes to the foreground after it (validations 1, 2 and 3 of the M2 plan). It installs the debug APKs, so build them first; with the emulator's variables loaded (`scripts/emulator.sh start`):
+
+```sh
+(cd android && gradle :app:assembleDebug :app:assembleDebugAndroidTest)
+cd host && go test -timeout 15m -count=1 ./internal/emutest
+```
+
+Without `ADBUDDY_EMULATOR_SERIAL` the tests skip; they refuse a serial that is not `emulator-*` and an `ANDROID_ADB_SERVER_PORT` that is unset or adb's default 5037. They uninstall what they installed. The `emulator` workflow runs them after the app's instrumented tests.
+
 ### Claude Code with a real agent
 
 This test runs the real Claude Code. It spends a few cents and never touches the phone or your `~/.claude` settings:
