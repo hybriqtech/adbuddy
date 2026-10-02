@@ -45,7 +45,7 @@
     <string name="confirm_expired">Caducada: ya no se puede responder.</string>
 
     <string name="consent_title">Configurar ADBuddy con %1$s</string>
-    <string name="consent_intro">El PC "%1$s" pide terminar de configurar ADBuddy. Si aceptas, va a:</string>
+    <string name="consent_intro">El PC \"%1$s\" pide terminar de configurar ADBuddy. Si aceptas, va a:</string>
     <string name="consent_grant">Dar a ADBuddy el permiso para cambiar ajustes seguros, que usa para cortar y reactivar desde el móvil el acceso del PC por adb.</string>
     <string name="consent_battery">Quitar a ADBuddy de la optimización de batería, para que el canal con el PC siga abierto.</string>
     <string name="consent_a11y">Activar el servicio de accesibilidad de ADBuddy, sin quitar ninguno de los que ya uses.</string>

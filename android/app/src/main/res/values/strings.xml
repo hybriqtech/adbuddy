@@ -46,7 +46,7 @@
     <string name="confirm_expired">Expired: it can no longer be answered.</string>
 
     <string name="consent_title">Set up ADBuddy with %1$s</string>
-    <string name="consent_intro">The PC "%1$s" asks to finish setting up ADBuddy. If you accept, it will:</string>
+    <string name="consent_intro">The PC \"%1$s\" asks to finish setting up ADBuddy. If you accept, it will:</string>
     <string name="consent_grant">Give ADBuddy the permission to change secure settings, used to cut and restore the PC\'s adb access from the phone.</string>
     <string name="consent_battery">Exempt ADBuddy from battery optimisation, so the channel with the PC stays open.</string>
     <string name="consent_a11y">Turn on ADBuddy\'s accessibility service, keeping any other one you use.</string>

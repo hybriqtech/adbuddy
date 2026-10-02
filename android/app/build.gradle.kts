@@ -35,6 +35,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // The i18n controls of the platform, as a second net behind StringsParityTest and NoHardcodedTextTest.
+    // `error +=` raises them to errors and leaves every other check as it was (checkOnly would switch the rest off).
+    lint {
+        error += listOf("MissingTranslation", "ExtraTranslation", "StringFormatCount", "StringFormatMatches", "StringFormatInvalid")
+    }
 }
 
 // The protocol's shared fixtures (protocol/fixtures/, protocol spec §12): FixturesTest reads them.
@@ -42,6 +48,11 @@ val protocolFixtures = rootProject.file("../protocol/fixtures")
 tasks.withType<Test>().configureEach {
     inputs.dir(protocolFixtures).withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("adbuddy.protocolFixtures", protocolFixtures.absolutePath)
+    // M6c: the i18n controls (src/test/kotlin/tech/hybriq/adbuddy/i18n) read the app's own resources and sources.
+    inputs.dir("src/main/res").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("src/main/kotlin").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("adbuddy.resDir", file("src/main/res").absolutePath)
+    systemProperty("adbuddy.kotlinDir", file("src/main/kotlin").absolutePath)
 }
 
 dependencies {
