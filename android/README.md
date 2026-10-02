@@ -27,9 +27,9 @@ adbuddy setup --apk app/build/outputs/apk/debug/app-debug.apk
 
 Instrumented tests run only on an emulator, never on your own phone, through
 `am instrument` on the emulator's own adb server (`TestInstrumentedSuite` in
-`host/internal/emutest`). From the repository root:
+`host/internal/emutest`).
 
-Use the android-34 image (install it with `sdkmanager "system-images;android-34;google_apis;x86_64"`): android-37 does not work for this, its surfaceflinger loops. `stop` needs the same `ADBUDDY_EMU_*` variables as `start`.
+Use the android-34 image (install it with `sdkmanager "system-images;android-34;google_apis;x86_64"`): android-37 does not work for this, its surfaceflinger loops. `stop` needs the same `ADBUDDY_EMU_*` variables as `start`. From the repository root:
 
 ```sh
 (cd android && gradle :app:assembleDebug :app:assembleDebugAndroidTest)
@@ -46,7 +46,7 @@ guard in `app/build.gradle.kts` refuses every `connected*` task.
 
 They check that the provider answers only the shell user (`TokenProviderTest`),
 that the app hears changes of `adb_wifi_enabled` (`AdbWifiObserverTest`) and the
-strings in both languages (`LocalesTest`). The `emulator` workflow runs them.
+strings in both languages (`LocalesTest`). The `emulator` workflow is meant to run them (first run pending).
 
 ### Screen tests
 
