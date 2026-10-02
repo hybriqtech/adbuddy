@@ -25,8 +25,19 @@ gradle :app:assembleDebug         # app/build/outputs/apk/debug/app-debug.apk
 adbuddy setup --apk app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Instrumented tests (`gradle :app:connectedDebugAndroidTest`) need an emulator:
-never run them on your own phone.
+Instrumented tests (`gradle :app:connectedDebugAndroidTest`) run only on an
+emulator, never on your own phone: Gradle refuses to start them unless
+`ANDROID_SERIAL` names an emulator (`emulator-<port>`). From the repository root:
+
+```sh
+eval "$(scripts/emulator.sh start)"   # the emulator, with an adb server of its own
+cd android && ANDROID_SERIAL="$ADBUDDY_EMULATOR_SERIAL" gradle :app:connectedDebugAndroidTest
+../scripts/emulator.sh stop
+```
+
+They check that the provider answers only the shell user (`TokenProviderTest`),
+that the app hears changes of `adb_wifi_enabled` (`AdbWifiObserverTest`) and the
+strings in both languages (`LocalesTest`). The `emulator` workflow runs them.
 
 ## Protected apps, notification access and settings
 

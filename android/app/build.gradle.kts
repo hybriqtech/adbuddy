@@ -60,6 +60,21 @@ tasks.withType<Test>().configureEach {
     systemProperty("adbuddy.kotlinDir", file("src/main/kotlin").absolutePath)
 }
 
+// The instrumented tests run only on an emulator, never on the user's phone (M2.5 spec §2.4): ANDROID_SERIAL
+// must name exactly one emulator (AGP splits it on commas, so "emulator-5554,<phone>" is refused too). Checked
+// when a connected task starts, before it installs anything.
+tasks.configureEach {
+    if (name.startsWith("connected")) {
+        doFirst {
+            val serial = System.getenv("ANDROID_SERIAL").orEmpty()
+            check(Regex("emulator-[0-9]+").matches(serial)) {
+                "connected tests run only on one emulator: set ANDROID_SERIAL=emulator-<port> " +
+                    "(scripts/emulator.sh start prints it as ADBUDDY_EMULATOR_SERIAL), not \"$serial\""
+            }
+        }
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
