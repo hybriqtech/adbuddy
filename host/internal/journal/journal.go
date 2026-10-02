@@ -153,6 +153,36 @@ func (s *Store) openAppend() (*os.File, error) {
 	return safeio.OpenAppendIn(root, s.monthFile(), 0o600)
 }
 
+// MakeBackupDir creates the backup folder of entry id (BackupDir) through
+// the journal folder itself, and returns its path: a link or a junction in
+// place of journal or of journal/backups is an error, never a folder made
+// elsewhere. What then writes into it (adb pull) goes by path: a link
+// swapped in after this call is not caught.
+func (s *Store) MakeBackupDir(id string) (string, error) {
+	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+		return "", err
+	}
+	root, err := safeio.OpenRoot(s.dir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	rel := filepath.Join("backups", id)
+	if err := root.MkdirAll(rel, 0o700); err != nil {
+		return "", err
+	}
+	for _, d := range []string{"backups", rel} {
+		st, err := root.Lstat(d)
+		if err != nil {
+			return "", err
+		}
+		if st.Mode().Type() != fs.ModeDir {
+			return "", fmt.Errorf("%s: %w", filepath.Join(s.dir, d), safeio.ErrNotRealDir)
+		}
+	}
+	return s.BackupDir(id), nil
+}
+
 // Append writes e as one line and syncs it to disk.
 func (s *Store) Append(e Entry) error {
 	if e.ID == "" {

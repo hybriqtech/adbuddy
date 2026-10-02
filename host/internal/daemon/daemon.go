@@ -471,7 +471,8 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if d.o.Paused() { // paused while waiting for the lock
 			return d.block(e, s, PausedMessage)
 		}
-		prep = precheck.Prepare(ctx, d.o.ADB, res.Op, level, precheck.Env{Cwd: req.Cwd, BackupDir: d.o.Journal.BackupDir(e.ID)})
+		prep = precheck.Prepare(ctx, d.o.ADB, res.Op, level, precheck.Env{Cwd: req.Cwd, BackupDir: d.o.Journal.BackupDir(e.ID),
+			MakeBackupDir: func() (string, error) { return d.o.Journal.MakeBackupDir(e.ID) }})
 		level = prep.Level
 		reason = classify.Join(reason, prep.Reason)
 		e.Level = level.String()
