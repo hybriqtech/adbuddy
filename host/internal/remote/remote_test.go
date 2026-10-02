@@ -452,3 +452,105 @@ func TestEnableWithoutPhoneWhileClosingKeepsTheOldUntil(t *testing.T) {
 		t.Fatalf("Expire: changed %v err %v (%q)", changed, err, e.events)
 	}
 }
+
+// V38: with no expiry saved the host believes the port closed, and `adb usb`
+// would restart adbd (and drop the phone's connection) for nothing. The port
+// is still looked at: one that reads 5555, or cannot be read, is closed.
+func TestDisableWithoutTheModeLooksAtThePortFirst(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		port      string
+		portFails bool
+		want      string
+	}{
+		{"closed", "", false, "adb " + getprop},
+		{"another port", "37123", false, "adb " + getprop},
+		{"open", "5555", false, "adb " + getprop + "|adb usb|save zero"},
+		{"unreadable", "", true, "adb " + getprop + "|adb usb|save zero"},
+	} {
+		e := newEnv()
+		e.port, e.portFails = c.port, c.portFails
+		s, err := e.controller().Disable(context.Background())
+		if err != nil || s != (State{}) {
+			t.Fatalf("%s: state %+v err %v", c.name, s, err)
+		}
+		if got := strings.Join(e.events, "|"); got != c.want {
+			t.Fatalf("%s: events %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// V38: `adb usb` closed the port but the expiry could not be cleared: the
+// next attempts only try to clear it, without restarting adbd each time.
+// A new expiry (Enable) closes with `adb usb` again.
+func TestExpireAfterAFailedSaveDoesNotRunUsbAgain(t *testing.T) {
+	e := newEnv()
+	e.until = t0.Add(time.Hour)
+	e.now = t0.Add(2 * time.Hour)
+	e.saveFail = true
+	c := e.controller()
+	if s, changed, err := c.Expire(context.Background()); err == nil || changed || !s.Enabled || !s.Closing {
+		t.Fatalf("first: %+v %v %v", s, changed, err)
+	}
+	if s, changed, err := c.Expire(context.Background()); err == nil || changed || !s.Enabled || !s.Closing {
+		t.Fatalf("second: %+v %v %v", s, changed, err)
+	}
+	if got := strings.Join(e.events, "|"); got != "adb usb" {
+		t.Fatalf("events %q: adb usb ran again", got)
+	}
+	e.saveFail = false
+	if s, changed, err := c.Expire(context.Background()); err != nil || !changed || s != (State{}) {
+		t.Fatalf("third: %+v %v %v", s, changed, err)
+	}
+	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
+		t.Fatalf("events %q", got)
+	}
+	// A failed save again, then a new expiry: its port is closed with adb usb.
+	e.until, e.saveFail, e.events = t0.Add(time.Hour), true, nil
+	if _, _, err := c.Expire(context.Background()); err == nil {
+		t.Fatal("the save did not fail")
+	}
+	e.saveFail = false
+	if _, err := c.Enable(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.now = e.now.Add(13 * time.Hour)
+	if _, changed, err := c.Expire(context.Background()); err != nil || !changed {
+		t.Fatalf("after Enable: %v %v", changed, err)
+	}
+	if got := strings.Join(e.events, "|"); got != "adb usb|save 12h0m0s|adb tcpip 5555|adb usb|save zero" {
+		t.Fatalf("events %q", got)
+	}
+}
+
+// V38 (plan review): Enable forgets the expiry whose port was closed before
+// it runs `adb tcpip`. If tcpip then fails as "no phone", the old expiry is
+// put back, but the order may have reached adbd: the next Expire must close
+// with `adb usb` again, not only clear the expiry (a false "off" with the
+// port open).
+func TestEnableForgetsTheExpiryItsPortWasClosedFor(t *testing.T) {
+	e := newEnv()
+	old := t0.Add(time.Hour)
+	e.until = old
+	e.now = t0.Add(2 * time.Hour)
+	e.saveFail = true
+	c := e.controller()
+	if _, _, err := c.Expire(context.Background()); err == nil {
+		t.Fatal("the save did not fail")
+	}
+	e.saveFail = false
+	e.tcpipFail, e.tcpipErr = true, "error: no devices/emulators found"
+	if _, err := c.Enable(context.Background()); err == nil || !NoPhone(err) {
+		t.Fatalf("Enable: %v", err)
+	}
+	if !e.until.Equal(old) {
+		t.Fatalf("until %v: the old expiry was not put back", e.until)
+	}
+	e.events = nil
+	if _, changed, err := c.Expire(context.Background()); err != nil || !changed {
+		t.Fatalf("Expire: changed %v err %v", changed, err)
+	}
+	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
+		t.Fatalf("events %q: the port was not closed again", got)
+	}
+}

@@ -599,8 +599,9 @@ func TestRemoteOnAllowedAfterALaterOffDenies(t *testing.T) {
 	if exit.Code != 126 || exit.ErrorCode != "REMOTE_DENIED" || !strings.Contains(exit.Error, "turned off while asking; run it again") {
 		t.Fatalf("%+v", exit)
 	}
-	waitUntil(t, "the off to run", func() bool { return h.g.phone.count("usb") == 1 })
-	if h.g.phone.count("tcpip 5555") != 0 {
+	// The mode was off: the off only looks at the port (closed), without `adb usb`.
+	waitUntil(t, "the off to run", func() bool { return h.g.phone.count("shell getprop service.adb.tcp.port") == 1 })
+	if h.g.phone.count("tcpip 5555") != 0 || h.g.phone.count("usb") != 0 {
 		t.Fatalf("calls %v", h.g.phone.called())
 	}
 }

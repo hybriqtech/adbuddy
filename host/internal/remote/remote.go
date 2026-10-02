@@ -74,6 +74,10 @@ type Controller struct {
 	adb ADB
 	st  Store
 	now func() time.Time
+	// closedFor is the expiry whose port `adb usb` closed while clearing it
+	// failed (under mu): the next attempt only clears it, without restarting
+	// adbd again. Any other expiry (Enable saved a new one) runs `adb usb`.
+	closedFor time.Time
 }
 
 func New(a ADB, s Store, now func() time.Time) *Controller {
@@ -142,6 +146,10 @@ func (c *Controller) Enable(ctx context.Context) (State, error) {
 	if err := c.st.SetUntil(c.now().Add(Lifetime)); err != nil {
 		return c.State(), err
 	}
+	// The port may open now: whatever expiry ends up saved (prev comes back
+	// on "no phone", and the order may still have reached adbd), the next
+	// disable closes it with `adb usb`.
+	c.closedFor = time.Time{}
 	if _, err := c.adbCmd(ctx, "tcpip", Port); err != nil {
 		// No phone connected (or offline): the order never reached adbd, so
 		// nothing changed on the phone and the previous expiry is put back:
@@ -165,20 +173,36 @@ func (c *Controller) Enable(ctx context.Context) (State, error) {
 }
 
 // Disable closes the port (`adb usb`) and only then clears the expiry: if
-// adb fails the mode stays on (and says so) and is tried again.
+// adb fails the mode stays on (and says so) and is tried again. With no
+// expiry saved (off as far as the host knows) it first reads the port:
+// `adb usb` would restart adbd, and drop the phone's connection, for nothing.
+// A port that reads 5555, or cannot be read, is closed all the same.
 func (c *Controller) Disable(ctx context.Context) (State, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.st.Until().IsZero() {
+		if port, err := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); err == nil && port != Port {
+			return State{}, nil
+		}
+	}
 	return c.disable(ctx)
 }
 
+// disable runs `adb usb` and clears the expiry. When clearing failed after
+// `adb usb` closed the port, the next call for the same expiry only clears it
+// (closedFor): each `adb usb` restarts adbd and the phone's connection.
 func (c *Controller) disable(ctx context.Context) (State, error) {
-	if _, err := c.adbCmd(ctx, "usb"); err != nil {
-		return c.State(), err
+	until := c.st.Until()
+	if c.closedFor.IsZero() || !until.Equal(c.closedFor) {
+		if _, err := c.adbCmd(ctx, "usb"); err != nil {
+			return c.State(), err
+		}
 	}
 	if err := c.st.SetUntil(time.Time{}); err != nil {
+		c.closedFor = until
 		return c.State(), err
 	}
+	c.closedFor = time.Time{}
 	return State{}, nil
 }
 
