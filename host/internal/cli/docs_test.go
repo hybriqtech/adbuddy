@@ -480,6 +480,7 @@ func docProblems(root, file, text string) []string {
 	bad = append(bad, checkDocCommands(file, text)...)
 	bad = append(bad, checkDocPrivacy(file, text)...)
 	bad = append(bad, checkDocFences(file, text)...)
+	bad = append(bad, checkDocHTMLish(file, text)...)
 	return bad
 }
 
@@ -538,6 +539,10 @@ func TestDocsGuardCatches(t *testing.T) {
 		{"unknown flag in a block", "docs/page.md", sh("adbuddy setup --nope"), true},
 		{"extra arguments in a block", "docs/page.md", block("console", "$ adbuddy screen extra extra"), true},
 		{"unknown flag inline", "docs/page.md", inline("adbuddy setup --nope"), true},
+		{"bare placeholder in prose", "docs/page.md", "Phone: <model>, Android.\n", true},
+		{"placeholder in backticks", "docs/page.md", "Phone: `<model>`.\n", false},
+		{"html comment", "docs/page.md", "<!-- <x> -->\ntext\n", false},
+		{"placeholder in a text block", "docs/page.md", block("text", "Phone: <x>"), false},
 		{"private IPv4", "docs/page.md", "Phone at 10.0.0." + "5.", true},
 		{"user path", "docs/page.md", `Look in C:\Users\x.`, true},
 		{"emulator serial", "docs/page.md", "Device emulator-5554.", true},
@@ -651,4 +656,32 @@ func TestDocsPublishedExcludes(t *testing.T) {
 	if !docExcluded([]string{"private"}, "private/a.md") || docExcluded([]string{"private"}, "privacy.md") {
 		t.Error("docExcluded: a folder entry must cover its content and only it")
 	}
+}
+
+var (
+	docHTMLishRe  = regexp.MustCompile(`<[A-Za-z][^>\n]*>`)
+	docHTMLCommRe = regexp.MustCompile(`(?s)<!--.*?-->`)
+	docAutolinkRe = regexp.MustCompile(`^<(https?://|mailto:)[^>\s]*>$`)
+)
+
+// checkDocHTMLish returns a message for every "<word…>" in the prose (outside
+// inline code, fenced blocks and HTML comments): kramdown reads it as an HTML
+// tag and drops it, so "Phone: <model>" would be published as "Phone: ".
+func checkDocHTMLish(file, text string) []string {
+	var bad []string
+	_, prose, _ := splitDoc(text)
+	// Blank the comments but keep the line count.
+	prose = docHTMLCommRe.ReplaceAllStringFunc(prose, func(s string) string {
+		return strings.Repeat("\n", strings.Count(s, "\n"))
+	})
+	for i, line := range strings.Split(prose, "\n") {
+		line = docInlineRe.ReplaceAllString(line, "")
+		for _, m := range docHTMLishRe.FindAllString(line, -1) {
+			if docAutolinkRe.MatchString(m) {
+				continue
+			}
+			bad = append(bad, file+":"+strconv.Itoa(i+1)+": "+m+" looks like an HTML tag and is dropped: wrap placeholders in backticks")
+		}
+	}
+	return bad
 }
