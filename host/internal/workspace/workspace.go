@@ -60,10 +60,14 @@ func Init(o Options) (Result, error) {
 	if o.Dir == "" || o.Exe == "" {
 		return res, errors.New("workspace: Dir and Exe are required")
 	}
-	for _, d := range []string{o.Dir, BinDir(o.Dir), JournalDir(o.Dir), filepath.Join(o.Dir, ".claude")} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
-			return res, err
-		}
+	// The environment itself may be reached through a link of the user's;
+	// nothing under it may be one (ensureRealDirs), checked before anything is
+	// created or written.
+	if err := os.MkdirAll(o.Dir, 0o700); err != nil {
+		return res, err
+	}
+	if err := ensureRealDirs(o.Dir, initDirs()...); err != nil {
+		return res, err
 	}
 	profile := o.Profile
 	if profile == "" {
@@ -94,9 +98,6 @@ func Init(o Options) (Result, error) {
 	if err := installSkills(o.Dir, o.Force, &res); err != nil {
 		return res, err
 	}
-	if err := ensureRealDirs(o.Dir, ".gemini"); err != nil {
-		return res, err
-	}
 	changed, created, err := mergeClaudeSettings(filepath.Join(o.Dir, ".claude", "settings.json"), filepath.Join(BinDir(o.Dir), exe("adbuddy")))
 	if err != nil {
 		return res, err
@@ -116,6 +117,25 @@ func Init(o Options) (Result, error) {
 		res.note(filepath.Join(".adbuddy", "bin", name), changed, created)
 	}
 	return res, nil
+}
+
+// initDirs lists every folder Init writes in, relative to the environment:
+// the shim's, the journal's, the agents' settings and every skill folder.
+func initDirs() []string {
+	dirs := []string{".adbuddy", filepath.Join(".adbuddy", "bin"), "journal", ".claude", ".gemini"}
+	err := fs.WalkDir(Skills(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() || p == "." {
+			return err
+		}
+		for _, root := range skillRoots {
+			dirs = append(dirs, filepath.Join(root, filepath.FromSlash(p)))
+		}
+		return nil
+	})
+	if err != nil {
+		panic(err) // the skills are embedded: this cannot happen
+	}
+	return dirs
 }
 
 func (r *Result) note(name string, changed, created bool) {
