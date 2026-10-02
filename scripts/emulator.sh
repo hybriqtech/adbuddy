@@ -6,6 +6,12 @@
 # overridden with ADBUDDY_EMU_AVD, ADBUDDY_EMU_PORT and ADBUDDY_EMU_ADB_PORT
 # (the CI job does, to coexist with an emulator started by hand). The emulator's
 # GPU mode can be set with ADBUDDY_EMU_GPU (swiftshader_indirect by default).
+#
+# Exit codes:
+#   1    the SDK or its packages are missing
+#   2    incorrect usage
+#   3    the emulator's adb server sees another device (or none: it fails closed)
+#   124  the emulator did not boot in 10 minutes
 set -euo pipefail
 
 # The adb server of the tests must never auto-connect a real phone: a phone
@@ -51,8 +57,11 @@ print_env() {
 }
 
 start() {
-  # An old server of our port may have been started with mDNS on.
-  "$ADB" kill-server >/dev/null 2>&1 || true
+  # An old server of our port may have been started with mDNS on; one without
+  # it is left alone (it may be serving other work).
+  if ! "$ADB" mdns check 2>/dev/null | tr -d '\r' | grep -q 'discovery disabled'; then
+    "$ADB" kill-server >/dev/null 2>&1 || true
+  fi
   if [[ ! -x "$SDK/emulator/emulator$EXE" || ! -d "$SDK/system-images/android-37.0/google_apis/x86_64" ]]; then
     echo "missing SDK packages; install them with:" >&2
     echo "  sdkmanager emulator '$IMAGE'" >&2
@@ -61,7 +70,8 @@ start() {
   if ! "$SDK/emulator/emulator$EXE" -list-avds | tr -d '\r' | grep -qx "$AVD"; then
     echo no | "$SDK/cmdline-tools/latest/bin/avdmanager$BAT" create avd -n "$AVD" -k "$IMAGE" -d pixel_6 >&2
   fi
-  if [[ "$("$ADB" -s "$SERIAL" get-state 2>/dev/null | tr -d '\r')" != device ]]; then
+  # Launch it only if it does not show up in 5 s (the server may have just restarted).
+  if ! timeout 5 "$ADB" -s "$SERIAL" wait-for-device >/dev/null 2>&1 </dev/null; then
     # -partition-size: the AVD avdmanager makes on a CI runner has a small data
     # partition, and the oracle pushes some 8000 case files to /data/local/tmp.
     # 2047 MB on Windows: its emulator caps it there and exits on 4096.
@@ -76,16 +86,17 @@ start() {
     exit 124
   fi
   # Safety net: this adb server must see the emulator and nothing else.
-  local line other=""
+  local line devices other="" seen=""
+  devices=$("$ADB" devices | tr -d '\r') || other="(adb devices failed)"
   while IFS= read -r line; do
     [[ -z "$line" || "$line" == "List of devices"* || "$line" == "*"* ]] && continue
     line=${line%%[[:space:]]*}
-    [[ "$line" != "$SERIAL" ]] && other="$line"
-  done < <("$ADB" devices | tr -d '\r')
-  if [[ -n "$other" ]]; then
+    if [[ "$line" == "$SERIAL" ]]; then seen=1; else other="${line:-?}"; fi
+  done <<<"$devices"
+  if [[ -n "$other" || -z "$seen" ]]; then
     "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
     "$ADB" kill-server >/dev/null 2>&1 || true
-    echo "the emulator's adb server sees $other, which is not the emulator: refusing to continue" >&2
+    echo "the emulator's adb server must see $SERIAL and nothing else, but it sees: ${other:-no $SERIAL} (a phone over USB, or an adb connect?): refusing to continue" >&2
     exit 3
   fi
   print_env
