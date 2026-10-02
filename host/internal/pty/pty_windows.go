@@ -66,6 +66,7 @@ type winPTY struct {
 	thread windows.Handle
 	pid    int
 	in     *os.File // what is typed
+	inH    windows.Handle
 	out    *os.File // the console's output
 
 	last atomic.Int64 // when output was last read (UnixNano)
@@ -139,6 +140,7 @@ func Start(o Options) (PTY, error) {
 		thread: pi.Thread,
 		pid:    int(pi.ProcessId),
 		in:     os.NewFile(uintptr(cmdIn), "conpty-in"),
+		inH:    cmdIn,
 		out:    os.NewFile(uintptr(cmdOut), "conpty-out"),
 		done:   make(chan struct{}),
 	}
@@ -315,8 +317,11 @@ func (p *winPTY) Kill() error {
 			_ = windows.TerminateProcess(p.proc, 1)
 		}
 		<-p.done // watch is done with the process handle
+		// A Write stuck in the input (the session's writer, V08) must not
+		// hold Kill: cancel it, then close without waiting for it long.
+		_ = windows.CancelIoEx(p.inH, nil)
+		closeNoWait(p.in, inCloseWait)
 		p.closeConsole()
-		_ = p.in.Close()
 		_ = p.out.Close() // a blocked Read gets io.EOF
 		closeAll(p.thread, p.proc)
 		p.jmu.Lock()
@@ -327,6 +332,31 @@ func (p *winPTY) Kill() error {
 		p.jmu.Unlock()
 	})
 	return nil
+}
+
+// inCloseWait is how long Kill waits for the input to close.
+var inCloseWait = 2 * time.Second
+
+// closeNoWait closes f, waiting d at most, and reports whether it closed in
+// time. Close waits for a Write in progress, and a Write into a console that
+// does not take its input may never end. os.NewFile sees that the input is a
+// pipe (Go 1.27), and Close then cancels such a Write (CancelIoEx), as Kill
+// does just before; should neither end it, Kill goes on and the handle
+// closes when the Write ends (a goroutine and a handle left until then).
+func closeNoWait(f *os.File, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		_ = f.Close()
+		close(done)
+	}()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
+	}
 }
 
 // taskkill is System32's, not the first one on PATH.

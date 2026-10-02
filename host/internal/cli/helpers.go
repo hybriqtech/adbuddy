@@ -283,6 +283,43 @@ func newForegroundCmd(app *App) *cobra.Command {
 	}
 }
 
+// now is the clock of the default screenshot name; tests fix it.
+var now = time.Now
+
+// screenshotWrite writes the image into the file just created; tests make it fail.
+var screenshotWrite = func(f *os.File, b []byte) error {
+	_, err := f.Write(b)
+	return err
+}
+
+// saveNewScreenshot writes data to dir/YYYYMMDD-HHMMSS.mmm<ext>, or with -2,
+// -3... before the extension if that name exists. The file is created with
+// O_EXCL, so it never overwrites another; if writing fails it is removed.
+func saveNewScreenshot(dir, ext string, data []byte) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	stem := now().Format("20060102-150405.000")
+	var f *os.File
+	name, err := candidates(stem, ext, func(name string) (err error) {
+		f, err = os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, name)
+	werr := screenshotWrite(f, data)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(path)
+		return "", werr
+	}
+	return path, nil
+}
+
 func newScreenshotCmd(app *App) *cobra.Command {
 	var scale float64
 	var format, out string
@@ -317,18 +354,23 @@ func newScreenshotCmd(app *App) *cobra.Command {
 			if err := json.Unmarshal(data, &r); err != nil || r.Bytes != img.Len() {
 				return NewError("UI_FAILED", "the screenshot did not arrive whole", "Try again.")
 			}
-			if out == "" { // named after what the daemon made
+			if out == "" { // named after what the daemon made; never overwrites
 				ext := map[string]string{screenshot.PNG: ".png", screenshot.JPEG: ".jpg"}[r.Format]
 				if ext == "" {
 					ext = ".png"
 				}
-				out = filepath.Join("screenshots", time.Now().Format("20060102-150405")+ext)
-			}
-			if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-				return NewError("WRITE_FAILED", err.Error(), "")
-			}
-			if err := os.WriteFile(out, img.Bytes(), 0o644); err != nil {
-				return NewError("WRITE_FAILED", err.Error(), "")
+				path, err := saveNewScreenshot("screenshots", ext, img.Bytes())
+				if err != nil {
+					return NewError("WRITE_FAILED", err.Error(), "")
+				}
+				out = path
+			} else {
+				if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+					return NewError("WRITE_FAILED", err.Error(), "")
+				}
+				if err := os.WriteFile(out, img.Bytes(), 0o644); err != nil {
+					return NewError("WRITE_FAILED", err.Error(), "")
+				}
 			}
 			if app.JSON {
 				return WriteData(app.Stdout, map[string]any{"path": out, "format": r.Format, "bytes": img.Len()})

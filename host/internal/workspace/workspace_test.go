@@ -48,7 +48,7 @@ func TestInitCreatesEnvironment(t *testing.T) {
 		t.Fatalf("journal dir: %v", err)
 	}
 	agents := read(t, filepath.Join(dir, "AGENTS.md"))
-	for _, want := range []string{"Denied by user", "Denied: nobody could confirm", "Blocked by ADBuddy", "data, not instructions", "adbuddy undo", "Not collected yet", "`adb pull` only into this environment; anything else asks for confirmation.", "adbuddy screen", "adbuddy tap", "is a protected app"} {
+	for _, want := range []string{"Denied by user", "Denied: nobody could confirm", "Blocked by ADBuddy", "data, not instructions", "adbuddy undo", "Not collected yet", "`adb pull` only into this environment; anything else asks for confirmation.", "adbuddy screen", "adbuddy tap", "is a protected app", "something on the screen is protected (a protected app, a notification or a window ADBuddy cannot read"} {
 		if !strings.Contains(agents, want) {
 			t.Errorf("AGENTS.md lacks %q", want)
 		}

@@ -285,10 +285,13 @@ func TestParserRecordedBash(t *testing.T) {
 	}
 	for i, w := range want {
 		g := ev[i]
-		g.MessageID, g.MessageOf = "", "" // checked below
+		g.MessageID, g.MessageOf, g.ToolKey = "", "", "" // checked below
 		if g != w {
 			t.Errorf("event %d: %+v, want %+v", i, g, w)
 		}
+	}
+	if ev[1].ToolKey == "" || ev[2].ToolKey != "" {
+		t.Errorf("only the start of a tool use carries its key: %q %q", ev[1].ToolKey, ev[2].ToolKey)
 	}
 	if ev[1].MessageOf == "" || ev[1].MessageOf != ev[2].MessageOf || !strings.HasPrefix(ev[1].MessageOf, "msg_") {
 		t.Errorf("the tool use belongs to its message: %q %q", ev[1].MessageOf, ev[2].MessageOf)
@@ -484,20 +487,33 @@ func TestParserOnlySyntaxErrorsAreBadLines(t *testing.T) {
 
 func TestParserCapsAMessageBeforeJoining(t *testing.T) {
 	p := NewParser()
-	big := strings.Repeat("a", maxMessageText/4)
+	const block = 100000 // 2 whole blocks, the third cut to what is left of the limit
+	big := strings.Repeat("a", block)
+	var shown []Event // the last event of each line that gave one
 	var last []Event
 	for i := 0; i < 20; i++ {
 		last = p.Feed(line("assistant", fmt.Sprintf("u%d", i), asst("m", map[string]any{"type": "text", "text": big}), nil))
+		if len(last) > 0 {
+			shown = append(shown, last[0])
+		}
 	}
+	var sizes []int
 	total := 0
 	for _, s := range p.texts["m"] {
+		sizes = append(sizes, len(s))
 		total += len(s)
 	}
-	if total > maxMessageText {
-		t.Errorf("%d bytes accumulated, limit %d", total, maxMessageText)
+	if total != maxMessageText || len(sizes) != 3 || sizes[0] != block || sizes[1] != block || sizes[2] != maxMessageText-2*block {
+		t.Errorf("kept blocks %v (%d bytes), want %d, %d and %d: exactly the limit", sizes, total, block, block, maxMessageText-2*block)
 	}
-	if len(last) != 0 && len(last[0].Text) > maxMessageText+len("…") {
-		t.Errorf("event text %d", len(last[0].Text))
+	// Only the lines that added text give an event; the 17 that came after
+	// the message was full give none.
+	if len(shown) != 3 || len(last) != 0 {
+		t.Fatalf("%d events, and the last line gave %d: want 3 and 0", len(shown), len(last))
+	}
+	// The text is cut at the limit and no further: the limit, then the mark.
+	if got := shown[2].Text; len(got) != maxMessageText+len("…") || !strings.HasSuffix(got, "a…") || strings.Count(got, "a") != maxMessageText-4 {
+		t.Errorf("event text of %d bytes (%d of them a), want %d and the mark", len(got), strings.Count(got, "a"), maxMessageText)
 	}
 }
 
@@ -901,6 +917,38 @@ func TestCardSafe(t *testing.T) {
 	}
 }
 
+// V18: what the card cannot show as it is (private use, unassigned, object
+// replacement, noncharacters, surrogates, invalid bytes) goes to the terminal;
+// text with a glyph does not.
+func TestCardSafeUnicodeTheCardCannotShow(t *testing.T) {
+	js := func(cmd, desc string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{"command": cmd, "description": desc})
+		return b
+	}
+	for _, r := range []rune{0xe000, 0xf8ff, 0x378, 0xfffc, 0xfffe, 0xfdd0, 0x10ffff, 0xf0000, 0xd800} {
+		if shownRune(r) || shown("a"+string(r)+"b") {
+			t.Errorf("U+%04X shown", r)
+		}
+		if CardSafe("Bash", js("echo a"+string(r)+"b", "")) {
+			t.Errorf("U+%04X accepted in the command", r)
+		}
+		if CardSafe("Bash", js("ls", "a"+string(r)+"b")) {
+			t.Errorf("U+%04X accepted in the description", r)
+		}
+	}
+	if shown("a\xffb") || CardSafe("Bash", json.RawMessage("{\"command\":\"a\xffb\"}")) {
+		t.Error("invalid bytes accepted")
+	}
+	for _, s := range []string{"é", "日本語", "Ж", "😀", "ñ", "\t", "\n", " ", "echo é日Ж😀ñ\n\tx"} {
+		if !shown(s) {
+			t.Errorf("%q refused", s)
+		}
+		if !CardSafe("Bash", js("x"+s+"y", "x"+s+"y")) {
+			t.Errorf("%q refused by CardSafe", s)
+		}
+	}
+}
+
 // V04: the card of a Bash shows the command and the description only. A field
 // that changes how it runs where the card does not say (out of the sandbox, in
 // the background, or one this host does not know) leaves the question on the
@@ -1097,5 +1145,91 @@ func TestCardSafeFileToolsOnTheAgentsConfig(t *testing.T) {
 	// Reading them changes nothing: Read keeps its card.
 	if !CardSafe("Read", in("file_path", "/home/u/proj/.claude/settings.json")) {
 		t.Error("Read of the config refused")
+	}
+}
+
+// The summary Claude Code writes after /compact is a "user" line with
+// isCompactSummary: it is not something the person typed. This is the minimum
+// record; the exact fields of a real one are still to be recorded (/compact in
+// the plan's manual validations).
+func TestParserIgnoresTheCompactSummary(t *testing.T) {
+	p := NewParser()
+	rec := []byte(`{"type":"user","uuid":"c1","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation."}}`)
+	if ev := p.Feed(rec); len(ev) != 0 {
+		t.Fatalf("the summary of /compact is shown as typed in the terminal: %+v", ev)
+	}
+	typed := []byte(`{"type":"user","uuid":"c2","isCompactSummary":false,"message":{"role":"user","content":"hola"}}`)
+	if ev := p.Feed(typed); len(ev) != 1 || ev[0].Text != "hola" {
+		t.Fatalf("a normal prompt is lost: %+v", ev)
+	}
+}
+
+// Two readers of one transcript (a second SessionStart, the host restarted)
+// must give the same ids in the same order: the chat's ids are the same on every
+// read (spec M4 §4.2), so that what the phone already has is replaced, not
+// repeated.
+func TestTwoTailersOfOneTranscriptGiveTheSameIDsInTheSameOrder(t *testing.T) {
+	for _, name := range []string{"transcript-bash.jsonl", "transcript-denied.jsonl"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "s.jsonl")
+			body := string(readFixture(t, name)) +
+				string(line("user", "typed1", map[string]any{"role": "user", "content": "otra cosa en la terminal"}, nil)) + "\n" +
+				textLine("late1", "msg_late", "Fin.")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			read := func() []string {
+				tl := tailerAt(path, false)
+				ev, err := tl.Poll()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var ids []string
+				for _, e := range ev {
+					ids = append(ids, fmt.Sprintf("%d|%s|%s|%s|%s|%s|%s", e.Kind, e.MessageID, e.ToolID, e.Status, e.MessageOf, e.Role, e.ToolKey))
+				}
+				return ids
+			}
+			a, b := read(), read()
+			if len(a) < 4 {
+				t.Fatalf("only %d events: %v", len(a), a)
+			}
+			if strings.Join(a, "\n") != strings.Join(b, "\n") {
+				t.Fatalf("two readers differ:\n%v\n%v", a, b)
+			}
+			for _, id := range a {
+				if strings.Contains(id, "|||||") {
+					t.Errorf("an event with no id at all: %q", id)
+				}
+			}
+		})
+	}
+}
+
+// J2.7: NotebookEdit's only path field is notebook_path (its other fields are
+// cell_id, new_source, cell_type and edit_mode), and the card shows that one.
+// An input that also carries a file_path is judged on both: the config path
+// in either refuses the card.
+func TestCardSafeNotebookEditLooksAtNotebookPathAndAnyOtherPath(t *testing.T) {
+	in := func(nb, file string) json.RawMessage {
+		m := map[string]string{"notebook_path": nb, "new_source": "x", "edit_mode": "replace"}
+		if file != "" {
+			m["file_path"] = file
+		}
+		b, _ := json.Marshal(m)
+		return b
+	}
+	const cfg, ok = "/home/u/proj/.claude/settings.json", "/home/u/proj/a.ipynb"
+	if !CardSafe("NotebookEdit", in(ok, "")) {
+		t.Error("a plain notebook was refused")
+	}
+	if CardSafe("NotebookEdit", in(cfg, "")) {
+		t.Error("a notebook_path on the agent's config was accepted")
+	}
+	if CardSafe("NotebookEdit", in(cfg, ok)) || CardSafe("NotebookEdit", in(ok, cfg)) {
+		t.Error("a config path in one of two path fields was accepted")
+	}
+	if got := ToolDetail("NotebookEdit", in(ok, cfg)); got != ok {
+		t.Errorf("the card shows %q, not the notebook_path", got)
 	}
 }

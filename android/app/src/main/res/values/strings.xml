@@ -24,7 +24,7 @@
     <string name="status_connecting">Connecting to the PC…</string>
     <string name="status_waiting">Waiting for the PC (run adbuddy serve)</string>
     <string name="status_paused">Paused: the agent cannot use the phone</string>
-    <string name="status_update_app">This app is too old for the ADBuddy on your PC: run adbuddy setup on the PC to update it</string>
+    <string name="status_update_app">This app is too old for the ADBuddy on your PC: install a newer build with adbuddy setup --apk &lt;file&gt; on the PC (plain setup does not replace an installed app)</string>
     <string name="status_update_host">The ADBuddy on your PC is too old for this app: update it on the PC</string>
     <string name="status_cut">ADB access is cut</string>
 

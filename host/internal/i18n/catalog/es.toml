@@ -37,6 +37,7 @@
 "notice.unsupported" = "Esta versión de ADBuddy en el PC todavía no gestiona %[1]s."
 "notice.chat_off" = "La vista del chat está desactivada (%[1]s); las respuestas siguen llegando al final de cada turno y la terminal lo muestra todo."
 "notice.stale_reply" = "Esa pregunta ya se respondió o pasó a la terminal del PC."
+"notice.typing_dropped" = "El agente no está leyendo lo que escribes: algunas teclas no se enviaron. Vuelve a intentarlo en un momento."
 
 # attach.go: cobra
 "help.attach.short" = "Conecta esta terminal a la sesión del agente en adbuddy serve (Ctrl+] para desconectar)"
@@ -159,8 +160,9 @@ abierto. No disponible para el agente."""
 "help.run.short" = "Arranca un agente de código en el entorno de ADBuddy"
 "help.run.long" = """
 Arranca el agente (claude, codex, gemini, opencode…) en el entorno de ADBuddy,
-con el adb de ADBuddy el primero en su PATH y el móvil seleccionado. `adbuddy serve` debe
-estar en marcha en otra terminal. El código de salida es el del agente."""
+con el adb de ADBuddy el primero en su PATH y el móvil seleccionado. Necesita
+`adbuddy serve` en marcha en otra terminal; arráncalo con `--no-agent` si
+quieres arrancar el agente tú. El código de salida es el del agente."""
 
 # run.go: flag
 "help.run.flag.workspace" = "entorno del agente; debe ser el que vigila `adbuddy serve` (por defecto: ese)"
@@ -179,7 +181,8 @@ pie de texto opcional. El fichero debe estar dentro del entorno y pesar como muc
 "help.serve.long" = """
 Ejecuta ADBuddy en esta terminal, en el PC. Clasifica cada comando adb que ejecuta el
 agente, lo apunta en el diario, lo enseña aquí y te pregunta antes de cualquier cosa irreversible.
-Déjalo abierto y arranca el agente en otra terminal con `adbuddy run`."""
+También arranca el agente; con `--no-agent` solo ejecuta ADBuddy y el agente lo arrancas tú
+en otra terminal con `adbuddy run`."""
 
 # serve.go: flag
 "help.serve.flag.adb" = "ruta del adb real (por defecto: adb_path de config.toml, y si no, el adb que instala adbuddy setup)"
@@ -330,7 +333,7 @@ Códigos de salida:
 "err.run.daemon_unreachable.fix" = "Reinicia `adbuddy serve`."
 "err.run.workspace_mismatch" = "`adbuddy serve` está vigilando %[1]s, no %[2]s"
 "err.run.workspace_mismatch.fix" = "Ejecuta `adbuddy run` sin --workspace para usar %[1]s, o detén serve y arráncalo con `adbuddy serve --workspace %[2]s`."
-"err.run.workspace_failed.fix" = "Cierra los otros agentes que estén en marcha en %[2]s y vuelve a intentarlo."
+"err.run.workspace_failed.fix" = "Comprueba que %[2]s se puede escribir y que ningún otro programa (por ejemplo otro agente que use el adb de ADBuddy) tiene abiertos sus ficheros, y vuelve a intentarlo."
 
 # serve.go: error
 "err.serve.agent_session" = "`adbuddy serve` no se puede arrancar desde la sesión del agente"
@@ -429,7 +432,7 @@ Códigos de salida:
 "appsetup.could_not_trust_the_development" = "⚠ No se pudo confiar en la compilación de desarrollo (%[1]v): setup sigue sin la app."
 "appsetup.trusting_this_development_build_of" = "⚠ Se confía en esta compilación de desarrollo de la app (SHA-256 %[1]s de %[2]s): adbuddy serve entregará el token de la app del móvil exactamente a este APK. Borra %[3]s para dejar de confiar."
 "appsetup.the_app_does_not_appear" = "⚠ La app no aparece como instalada en el móvil. Setup sigue sin ella. Vuelve a ejecutar `adbuddy setup` para reintentarlo."
-"appsetup.the_adbuddy_app_on_the_2" = "⚠ La app de ADBuddy del móvil es demasiado antigua para este PC: vuelve a ejecutar `adbuddy setup` para actualizarla. Las confirmaciones 🔴 se harán en la terminal."
+"appsetup.the_adbuddy_app_on_the_2" = "⚠ La app de ADBuddy del móvil es demasiado antigua para este PC: instala una compilación más reciente con `adbuddy setup --apk <fichero>` (`adbuddy setup` a secas no reemplaza una app instalada). Las confirmaciones 🔴 se harán en la terminal."
 "appsetup.this_build_of_adbuddy_trusts" = "Esta compilación de adbuddy todavía no confía en ningún certificado de firma de la app, así que se la salta: pasa --apk <fichero> para instalar y confiar en una compilación de desarrollo. Las confirmaciones 🔴 se harán en la terminal."
 "appsetup.the_adbuddy_app_on_the_3" = "⚠ La app de ADBuddy del móvil no está firmada por hybriqtech (¿una compilación de desarrollo?), así que ADBuddy no confiará en ella. Desinstálala en el móvil y vuelve a ejecutar `adbuddy setup`, o pasa --apk <ese APK> para confiar en una compilación de desarrollo. Las confirmaciones 🔴 se harán en la terminal."
 "appsetup.could_not_check_the_adbuddy_2" = "⚠ No se pudo comprobar la app de ADBuddy del móvil (%[1]v), así que ADBuddy no confiará en ella. Vuelve a ejecutar `adbuddy setup` para reintentarlo. Las confirmaciones 🔴 se harán en la terminal."
@@ -476,7 +479,7 @@ Códigos de salida:
 "setup.remote_mode_was_on_closing" = "El modo remoto estaba activado: cerrándolo."
 "setup.remote_mode_was_on_for" = "El modo remoto estaba activado para el móvil que habías configurado antes: su puerto 5555 de adb puede seguir abierto hasta que ese móvil se reinicie. Desactiva el modo remoto desde su app o reinícialo."
 "setup.ready_android_environment_agent" = "Listo: %[1]s (Android %[2]s), entorno %[3]s, agente %[4]s, %[5]s."
-"setup.next_run_adbuddy_serve_and" = "Siguiente: ejecuta `adbuddy serve` y déjalo abierto, y luego `adbuddy run` en otra terminal."
+"setup.next_run_adbuddy_serve_and" = "Siguiente: ejecuta `adbuddy serve` y déjalo abierto: arranca el agente. Para ejecutar el agente en otra terminal, usa `adbuddy serve --no-agent` y luego `adbuddy run`."
 "setup.waiting_for_the_phone_up" = "Esperando al móvil (hasta %[1]s)…"
 "setup.note_is_not_in_path" = "Nota: %[1]s todavía no está en el PATH. %[2]s"
 "setup.no_coding_agent_found_in" = "No se encontró ningún agente de código en el PATH. %[1]s"
@@ -635,7 +638,7 @@ En el móvil: Depuración inalámbrica → Vincular dispositivo con código QR, 
 # attach.go, journal.go, phone*.go, remotecmd.go, root.go, run.go, serve*.go, uilink.go, undo.go, version.go: print
 "attach.detached_adbuddy_attach_connects_again" = "\r\nDesconectado. `adbuddy attach` vuelve a conectar."
 "attach.adbuddy_serve_closed_the_connection" = "\r\nadbuddy serve cerró la conexión."
-"envcmd.environment_ready_next_adbuddy_serve" = "Entorno listo. Siguiente: `adbuddy serve`, y luego `adbuddy run` en otra terminal."
+"envcmd.environment_ready_next_adbuddy_serve" = "Entorno listo. Siguiente: `adbuddy serve`: arranca el agente. Para ejecutar el agente en otra terminal, usa `adbuddy serve --no-agent` y luego `adbuddy run`."
 "journal.the_journal_signatures_could_not" = "⚠ no se pudieron verificar las firmas del diario (no hay ipc.secret)"
 "journal.the_journal_is_empty" = "El diario está vacío."
 "journal.damaged_journal_lines_were_skipped.one" = "⚠ Se saltó %[1]d línea dañada del diario."
@@ -644,7 +647,7 @@ En el móvil: Depuración inalámbrica → Vincular dispositivo con código QR, 
 "phone.confirmations_happen_here_without_the" = "⚠ %[1]s. Las confirmaciones 🔴 se hacen aquí, sin la app del móvil."
 "phone.could_not_check_whether_the" = "⚠ No se pudo comprobar si la app de ADBuddy está en el móvil (%[1]s). La app del móvil queda desactivada el resto de esta sesión: las confirmaciones 🔴 se hacen aquí; reinicia `adbuddy serve` para usarla."
 "phone.the_adbuddy_app_is_not" = "La app de ADBuddy no está en el móvil: las confirmaciones 🔴 se hacen aquí. Ejecuta `adbuddy setup` para instalarla."
-"phone.the_adbuddy_app_on_the" = "⚠ La app de ADBuddy del móvil (%[1]s) es demasiado antigua para este PC: ejecuta `adbuddy setup` para actualizarla."
+"phone.the_adbuddy_app_on_the" = "⚠ La app de ADBuddy del móvil (%[1]s) es demasiado antigua para este PC: instala una compilación más reciente con `adbuddy setup --apk <fichero>` (`adbuddy setup` a secas no reemplaza una app instalada)."
 "phone.an_app_with_the_token" = "⚠ Se conectó una app con el token, pero no es la app que ADBuddy comprobó (%[1]s): rechazada, se vuelve a comprobar la app."
 "phone.the_phone_app_is_connected" = "📱 La app del móvil está conectada: las confirmaciones 🔴 van al móvil."
 "phone.the_phone_app_disconnected_confirmations" = "📱 La app del móvil se desconectó: las confirmaciones 🔴 se hacen aquí."

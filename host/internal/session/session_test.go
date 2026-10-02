@@ -27,19 +27,53 @@ type fakePTY struct {
 	deaf    bool
 	hangups int
 	kills   int
+	// hold, when set, keeps each Write waiting for a value from it (or its
+	// close) or for a Kill, which fails the Write: a terminal whose agent
+	// does not read. writing gets a signal each time a Write starts waiting.
+	hold     chan struct{}
+	writing  chan struct{}
+	killed   chan struct{}
+	killOnce sync.Once
+	writes   int // Writes that got through
 }
 
 func newFake() *fakePTY {
 	r, w := io.Pipe()
-	return &fakePTY{out: r, outW: w, done: make(chan struct{})}
+	return &fakePTY{out: r, outW: w, done: make(chan struct{}), killed: make(chan struct{})}
 }
 
 func (f *fakePTY) Read(b []byte) (int, error) { return f.out.Read(b) }
 func (f *fakePTY) Write(b []byte) (int, error) {
 	f.mu.Lock()
+	hold, writing := f.hold, f.writing
+	f.mu.Unlock()
+	if hold != nil {
+		select {
+		case writing <- struct{}{}:
+		default:
+		}
+		select {
+		case <-hold:
+		case <-f.killed:
+			return 0, io.ErrClosedPipe
+		}
+	}
+	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.typed.Write(b)
+	f.writes++
 	return len(b), nil
+}
+
+// holdWrites makes the Writes from now on wait (fakePTY.hold): release lets
+// one through, and open all of them.
+func (f *fakePTY) holdWrites() (writing <-chan struct{}, release func(), open func()) {
+	hold, w := make(chan struct{}), make(chan struct{}, 1)
+	f.mu.Lock()
+	f.hold, f.writing = hold, w
+	f.mu.Unlock()
+	var once sync.Once
+	return w, func() { hold <- struct{}{} }, func() { once.Do(func() { close(hold) }) }
 }
 func (f *fakePTY) Resize(c, r int) error {
 	f.mu.Lock()
@@ -70,6 +104,7 @@ func (f *fakePTY) Kill() error {
 	f.mu.Lock()
 	f.kills++
 	f.mu.Unlock()
+	f.killOnce.Do(func() { close(f.killed) })
 	f.exit(137)
 	f.outW.Close()
 	return nil
@@ -182,7 +217,7 @@ func TestStates(t *testing.T) {
 	}
 	r.fake(0).exit(0)
 	r.waitState(t, StateStopped)
-	if err := r.m.Input([]byte("x")); !errors.Is(err, ErrNoAgent) {
+	if err := r.m.NewTyper().Input([]byte("x")); !errors.Is(err, ErrNoAgent) {
 		t.Fatalf("Input without agent: %v", err)
 	}
 	if r.m.Screen() != nil {
@@ -217,18 +252,24 @@ func TestResumeFallsBackToANewConversation(t *testing.T) {
 	if args := r.starts[1].Args; len(args) != 0 {
 		t.Fatalf("second start args %v", args)
 	}
-	if r.m.Info().State != StateIdle {
-		t.Fatalf("state %q", r.m.Info().State)
+	// The start is recorded before the manager marks itself idle: wait for it.
+	idleBy := time.Now().Add(3 * time.Second)
+	for r.m.Info().State != StateIdle {
+		if time.Now().After(idleBy) {
+			t.Fatalf("state %q", r.m.Info().State)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
 // Paste sends one message: bracketed paste when the agent turned it on, one
 // line when not; control characters never get through.
 func TestPaste(t *testing.T) {
+	defer func(g time.Duration) { pasteGap = g }(pasteGap)
 	pasteGap = time.Millisecond
 	r := newRig(t)
 	r.m.Start("claude", false)
-	if err := r.m.Paste("one\ntwo"); err != nil {
+	if err := r.m.Paste("one\ntwo", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := r.fake(0).said(); got != "one two\r" {
@@ -236,7 +277,7 @@ func TestPaste(t *testing.T) {
 	}
 	r.fake(0).outW.Write([]byte("\x1b[?2004h"))
 	r.waitState(t, StateWorking)
-	r.m.Paste("a\x1b[201~\x03b\r\nc ñ")
+	r.m.Paste("a\x1b[201~\x03b\r\nc ñ", nil)
 	if got := r.fake(0).said(); !strings.HasSuffix(got, "\x1b[200~a[201~b\nc ñ\x1b[201~\r") {
 		t.Fatalf("with bracketed paste: %q", got)
 	}
@@ -327,17 +368,15 @@ func TestPasteIsNotInterleaved(t *testing.T) {
 	r := newRig(t)
 	r.m.Start("codex", false)
 	done := make(chan error, 1)
-	go func() { done <- r.m.Paste("hello") }()
+	go func() { done <- r.m.Paste("hello", nil) }()
 	waitFor(t, func() bool { return r.fake(0).said() != "" })
-	if err := r.m.Input([]byte("X")); err != nil {
+	if err := r.m.NewTyper().Input([]byte("X")); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if got := r.fake(0).said(); got != "hello\rX" {
-		t.Fatalf("typed %q, want %q", got, "hello\rX")
-	}
+	waitFor(t, func() bool { return r.fake(0).said() == "hello\rX" })
 }
 
 func waitFor(t *testing.T, cond func() bool) {

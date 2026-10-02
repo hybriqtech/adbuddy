@@ -28,6 +28,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDirection
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -98,7 +99,7 @@ fun PermissionCard(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             // Whose question it is outweighs what it says: the label is bold and larger, the agent's own words are marked as such.
             Text(stringResource(R.string.perm_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary)
-            Text(stringResource(R.string.perm_summary, p.summary.ifEmpty { p.tool }), style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.perm_summary, p.summary.ifEmpty { p.tool }), style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr))
             // The scroll state starts "can scroll forward" until the text is measured: the buttons stay off until it is known there is no more to read.
             val scroll = key(p.id, p.detail) { rememberScrollState() }
             val hasDetail = p.detail.isNotEmpty() && p.detail != p.summary
@@ -109,7 +110,7 @@ fun PermissionCard(
                     Text(
                         p.detail,
                         Modifier.heightIn(max = DETAIL_MAX_HEIGHT).verticalScroll(scroll).padding(8.dp),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr),
                         fontFamily = FontFamily.Monospace,
                         softWrap = true,
                     )

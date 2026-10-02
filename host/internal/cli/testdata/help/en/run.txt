@@ -1,6 +1,7 @@
 Start the agent (claude, codex, gemini, opencode…) in the ADBuddy environment,
-with ADBuddy's adb first in its PATH and the phone selected. `adbuddy serve` must
-be running in another terminal. The exit code is the agent's.
+with ADBuddy's adb first in its PATH and the phone selected. It needs
+`adbuddy serve` running in another terminal; start that one with `--no-agent` if
+you want to start the agent yourself. The exit code is the agent's.
 
 Usage:
   adbuddy run [agent] [-- agent arguments] [flags]

@@ -449,6 +449,9 @@ func TestAgentInterrupt(t *testing.T) {
 	r.start(t, "claude")
 	sendApp(t, r.c, bridge.TypeInterrupt, "", bridge.Empty{})
 	r.processed(t, "r_2")
+	// The session's writer types it a moment later (V08).
+	waitUntil(t, "the ESC", func() bool { return r.pty(0).said() != "" })
+	time.Sleep(20 * time.Millisecond)
 	if got := r.pty(0).said(); got != "\x1b" {
 		t.Fatalf("the agent got %q, want one ESC", got)
 	}
