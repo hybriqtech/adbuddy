@@ -13,32 +13,32 @@
 
 **Specs:** `docs/superpowers/specs/2026-10-01-adbuddy-m5-ayudas-remoto-design.md` (§3.5, §4.3, §9, §10, §13) · `2026-09-29-adbuddy-v1-design.md` (§4.6, pantallas de §6, onboarding y Ajustes) · `2026-10-01-adbuddy-protocolo-m3-m5-design.md` (§8, §9) · `docs/superpowers/plans/pendientes-m3-m5.md` (M5, "Revisión del plan de M5a, para M5c" y menores aplazados de M5b) · handoff `.superpowers/sdd/2026-10-01-adbuddy-m5b-modo-remoto/handoff-m5c.md`.
 
-**Verificación del plan (réplica acumulada):** todo el código de este plan sale de una copia de trabajo de `main` (f9f4422) y se ha vuelto a aplicar **desde cero, tarea a tarea, con un script** que lee los bloques `Crear`/`Editar` de este documento y ejecuta cada bloque de verificación comprobando si debía fallar o pasar (resultado en "Autorrevisión del plan"). Los ficheros nuevos son byte a byte los del plan, y los cambios a ficheros que ya existen son pares "reemplazar / por" que se aplican con la herramienta Edit (cada texto "reemplazar" es único en su fichero).
+**Verificación del plan (réplica acumulada):** todo el código de este plan sale de una copia de trabajo de `main` (0a22518, con M5b y M4 integradas) y se ha vuelto a aplicar **desde cero, tarea a tarea, con un script** que lee los bloques `Crear`/`Editar` de este documento y ejecuta cada bloque de verificación comprobando si debía fallar o pasar, ya sobre el árbol con M4 dentro (resultado real en "Autorrevisión del plan", "Réplica acumulada tarea a tarea"). Los ficheros nuevos son byte a byte los del plan, y los cambios a ficheros que ya existen son pares "reemplazar / por" que se aplican con la herramienta Edit (cada texto "reemplazar" es único en su fichero).
 
 ## Global Constraints
 
-- Rama `m5c`, sobre `main` f9f4422 (M5b integrada). Commits con identidad local hybriqtech y trailer **exacto** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (también en fixups; los implementadores a veces ponen otro: `git log -N --format=%B`). Nunca `--no-verify`, nunca `--force`, sin `git stash`. Sin push, PR ni cambios en `protocol/` sin el ok de adbuddy-e5; a `main` integra e5. `git grep` de seriales e IPs antes de subir. **Sin IPs RFC 1918** (para ejemplos: `100.64.0.5`, `198.51.100.x`, `192.0.2.x`).
+- Rama `m5c`, sobre `main` 0a22518 (M5b y M4 integradas). Commits con identidad local hybriqtech y trailer **exacto** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (también en fixups; los implementadores a veces ponen otro: `git log -N --format=%B`). Nunca `--no-verify`, nunca `--force`, sin `git stash`. Sin push, PR ni cambios en `protocol/` sin el ok de adbuddy-e5; a `main` integra e5. `git grep` de seriales e IPs antes de subir. **Sin IPs RFC 1918** (para ejemplos: `100.64.0.5`, `198.51.100.x`, `192.0.2.x`).
 - **El móvil del usuario no se toca**: los tests usan el adb falso, apps falsas y la JVM; lo que necesita un móvil va a "Validaciones manuales pendientes" y solo se hace con su permiso explícito.
 - **Ninguna pregunta al usuario se salta la puerta del daemon** (`d.ask`/`AskUser`): mientras hay una abierta se bloquean los comandos del agente. M5c no añade preguntas nuevas; `notifications` pasa por esa puerta como cualquier ayuda.
 - **Falla cerrado ante lo que no se entiende:** un paquete que no es un nombre de paquete, una notificación que no se puede leer o una marcada secreta salen sin contenido; sin listener no hay notificaciones (error `unavailable`), nunca un respaldo por adb.
 - **Ningún código 2FA de una app protegida sale del móvil**: ni por `notifications`, ni por logs (ningún `Log.*` ni fichero con el texto de una notificación), ni por la UI de Actividad ni por el diario (el diario guarda la orden, nunca el resultado). El vaciado ocurre dos veces: en la app (`NotificationReport`) y en el host (`cleanNotifications`, con su copia de `protected.json`).
 - **El listener solo lee**: no descarta, pospone ni pulsa notificaciones, no abre sus intents ni registra su texto, y `AgentNotificationListener.current` es privado (fuera del paquete solo hay `read()` y `connected`); `ListenerIsReadOnlyTest` recorre toda la app y lo vigila. Con el acceso desconocido, la app no dice "permitido" ni "no permitido" (estado de tres valores, ruling de M5b).
-- **`notifications` solo lee con la confirmación del usuario**: una marca (`NotificationConsent`) que solo el botón de la pantalla de acceso de ADBuddy pone, nunca algo automático al observar que el sistema dice "permitido"; sin ella, `unavailable` con "confírmalo en la app ADBuddy"; revocar el acceso en el sistema la invalida.
+- **`notifications` solo lee con la confirmación del usuario**: una marca (`NotificationConsent`) que solo el botón de la pantalla de acceso de ADBuddy pone, nunca algo automático al observar que el sistema dice "permitido"; sin ella, `unavailable` con "confírmalo en la app ADBuddy"; revocar el acceso en el sistema la invalida **sin esperar a que nadie mire**: el propio listener la borra al desconectarse y al destruirse (`NotificationGate.onUnbound`, con test de función y de fuente), y también la borran la puerta y la pantalla. La marca solo la pone el botón de la pantalla de acceso (Tarea 12) y solo la quitan el listener, la puerta y esa pantalla.
 - **Las apps que reciben los códigos (Mensajes, Gmail, la app de SMS, Play services) están protegidas desde el primer arranque**, por la propuesta (`ProtectedApps.propose`), antes de que nadie confirme la lista: lo que llega al host por `device.info` las incluye.
 - Todo manejador de una petición con `rid` responde por todos sus caminos; los reductores no lanzan excepción con ningún payload; `UiRequest` sigue estricto (un campo desconocido o mal formado se contesta `invalid` con el `id` rescatado); ninguna excepción escapa del executor de ayudantes (mata la app).
 - **Cada tarea compila y pasa sus tests por sí sola**; nada usa clases de tareas posteriores.
 - `host/internal/classify/testdata/habitual.jsonl` **intacto** y la lista blanca del clasificador no se ensancha: M5c no toca `classify/` (`adbuddy notifications` no es una orden de adb).
 - **UI nueva, sobre la base de diseño de M3** (`ui/theme`): colores solo de `MaterialTheme.colorScheme`, tipografía y componentes Material 3 como las pantallas existentes, `Scaffold` con insets (borde a borde), un estado desconocido nunca pintado como otro, y tres vistas previas por pantalla (`@AdbuddyPreviews`: claro, oscuro, letra al 200 %). Cada cadena nueva va en `res/values/strings.xml` (inglés) **y** `res/values-es/strings.xml`.
 - **Kotlin:** `export JAVA_HOME="/c/Users/Jose/AppData/Local/Android/jdk-17.0.20.1+1"; export PATH="$JAVA_HOME/bin:/c/Users/Jose/AppData/Local/Gradle/gradle-9.8.0/bin:$PATH"` y `cd android && gradle :app:testDebugUnitTest` (no hay wrapper; `--offline` si no hay red; `:app:assembleDebug` y `:app:lintDebug` también). **Go:** `cd host && go build ./... && go vet ./... && gofmt -l . && go test -count=1 -timeout 5m <paquete>`; la suite completa solo en el último paso de cada tarea de host. Este PC no corre `-race`: que lo corra la CI.
-- Los `.md` del árbol de trabajo pueden estar en CRLF: las ediciones de documentos usan anclas de **una sola línea**.
+- `docs/superpowers/plans/pendientes-m3-m5.md` está en CRLF en este árbol de trabajo (`core.autocrlf=true` y sin atributo `eol` para ese fichero; la spec, `android/README.md` y todo `android/` están en LF): sus ediciones usan anclas de **una sola línea**.
 - Pasar a los revisores límites de tiempo (`go test -timeout 5m`, tope de minutos): una revisión se colgó más de una hora en M2.
 
 ## Rulings de este plan (van al ledger tal cual)
 
 1. **Ruling: el protocolo no cambia.** — La operación `notifications`, sus tipos, límites (`MaxNotifications` 50, `MaxNotificationText` 1024, `MaxUIResult` 512 KiB) y fixtures ya están en `main` y en los dos lados; `truncated` ya existe. — Si me equivoco: una tarea más con ok de e5; ninguna tarea de este plan toca `protocol/`.
 2. **Ruling: el código de la app vive en un paquete nuevo `listener/`, no en `a11y/` ni en `notify/`.** — La spec dejaba elegir; `notify/` ya son las notificaciones propias de ADBuddy (conversación, "Listo"), y mezclar "las que emite" con "las que lee" invita a confundirlas. — Si me equivoco: mover cuatro ficheros y el manifiesto.
-3. **Ruling: el listener solo lee, nada fuera de su paquete lo alcanza, y un test de fuente lo vigila.** — El agente no debe poder descartar, posponer ni accionar una notificación, ni leer la de una app protegida, y nada en la JVM puede ejecutar el servicio. `AgentNotificationListener.current` es `private`: fuera solo `read()` y `connected`. `ListenerIsReadOnlyTest` recorre **todo** `src/main/kotlin` buscando `cancelNotification`, `cancelAllNotifications`, `snoozeNotification` y `activeNotifications` fuera del listener (el `ConfirmNotifier`, que es el `NotificationManager` de la propia app, es la excepción nombrada), y dentro de `listener/` prohíbe además reflexión (`getMethod`, `getDeclaredMethod`, `.invoke(`, `Class.forName`), `.send(`, `bubbleMetadata`, `publicVersion`, `android.util.Log`, `System.out`/`System.err`, `sendBroadcast`, la palabra `actions`, almacenamiento (salvo la marca de confirmación) y que el listener sobreescriba algo más que su ciclo de vida. — Si me equivoco: un falso positivo del test se afina; un falso negativo lo atrapa la revisión Opus.
-4. **Ruling: el contenido sale vacío en dos capas, y la clave también.** — App (`NotificationReport`): ADBuddy, las protegidas (la lista se consulta en cada llamada), las marcadas secretas y los paquetes que no son nombre de paquete salen con `key`, `title` y `text` vacíos (la `key` lleva el tag de la app, que puede llevar texto: se sustituye por `hidden-<n>`). Una notificación cuenta como secreta si lo es por `VISIBILITY_SECRET`, si es de otro usuario o del perfil de trabajo (`sbn.user != Process.myUserHandle()`, falla cerrado), si el usuario o el canal la ocultan de la pantalla de bloqueo (`Ranking.lockscreenVisibilityOverride`, desde Android 12, y `channel.lockscreenVisibility`), si no se puede leer o si su `Ranking` falla; `Ranking.hasSensitiveContent` (Android 15) no es API pública en el SDK 37 y no se usa (validación 30). Host (`cleanNotifications`): lo mismo con su copia de `protected.json`, recorte a 50 y 1024, y paquete inválido a vacío. Una lista desfasada o una app que no sea la verdadera no saca un código. La `key` de las no protegidas se deja entera (acotada por `MaxUIResult`). — Si me equivoco: el agente ve menos de lo debido (se afloja una capa) o más (hueco 🔴: no se aparca).
+3. **Ruling: el listener solo lee, nada fuera de su paquete lo alcanza, y un test de fuente lo vigila.** — El agente no debe poder descartar, posponer ni accionar una notificación, ni leer la de una app protegida, y nada en la JVM puede ejecutar el servicio. `AgentNotificationListener.current` es `private`: fuera solo `read()` y `connected`. `ListenerIsReadOnlyTest` recorre **todo** `src/main/kotlin` buscando `cancelNotification`, `cancelAllNotifications`, `snoozeNotification` y `activeNotifications` fuera del listener (el `ConfirmNotifier`, que es el `NotificationManager` de la propia app, es la excepción nombrada), y dentro de `listener/` prohíbe además reflexión (`getMethod`, `getDeclaredMethod`, `.invoke(`, `Class.forName`), `.send(`, `bubbleMetadata`, `publicVersion`, `android.util.Log`, `System.out`/`System.err`, `sendBroadcast`, la palabra `actions`, almacenamiento (salvo la marca de confirmación) y que el listener sobreescriba algo más que su ciclo de vida. `AgentNotificationListener.read`/`::read` solo aparece en `UiHelpers.kt` (cableado de la puerta) y dentro de `listener/` (otro test de fuente), y el escáner trata como código lo de dentro de `${…}`, no como cadena. — Si me equivoco: un falso positivo del test se afina; un falso negativo lo atrapa la revisión Opus.
+4. **Ruling: el contenido sale vacío en dos capas, y la clave también.** — App (`NotificationReport`): ADBuddy, las protegidas (la lista se consulta en cada llamada), las marcadas secretas y los paquetes que no son nombre de paquete salen con `key`, `title` y `text` vacíos (la `key` lleva el tag de la app, que puede llevar texto: se sustituye por `hidden-<n>`). Una notificación cuenta como secreta si lo es por `VISIBILITY_SECRET`, si es de otro usuario o del perfil de trabajo (`sbn.user != Process.myUserHandle()`, falla cerrado), si el usuario o el canal la ocultan de la pantalla de bloqueo (`Ranking.lockscreenVisibilityOverride`, desde Android 12, y `channel.lockscreenVisibility`), si no se puede leer, o si su `Ranking` no se puede obtener, no trae su clave o falla (`Sensitivity.of`, pura y con test: lo desconocido es secreto, nunca visible); `Ranking.hasSensitiveContent` (Android 15) no es API pública en el SDK 37 y no se usa (validación 30). Host (`cleanNotifications`): lo mismo con su copia de `protected.json`, recorte a 50 y 1024, y paquete inválido a vacío. Una lista desfasada o una app que no sea la verdadera no saca un código. La `key` de las no protegidas se deja entera (acotada por `MaxUIResult`). — Si me equivoco: el agente ve menos de lo debido (se afloja una capa) o más (hueco 🔴: no se aparca).
 5. **Ruling: `notifications` no pasa por la guarda de primer plano, sí por pausa, pregunta 🔴 y diario; no tiene respaldo por adb ni reintento.** — No lee la pantalla: depende del listener, no del primer plano, y exigir la guarda bloquearía leerlas con el banco delante sin ganar nada. Un tiempo agotado es `UI_TIMEOUT` sin el aviso "pudo ocurrir" (es una lectura). `dumpsys notification --noredact` daría todo el texto. — Si me equivoco: añadir la guarda es quitar una condición en `daemon/ui.go`.
 6. **Ruling: `NotificationWindow` (la ventana de 8 s de los heads-up, M5b) no se toca; el listener no la abre.** — Duplicar esa lógica sin decidirlo (handoff, ruling 7) arriesga dos fuentes que se contradicen. El listener sí conoce el paquete de la notificación y la accesibilidad no: mejorar la ventana con él (excluir las de ADBuddy por paquete, seguir el "tiempo para actuar") es v1.1, tras la validación 17 de M5b. — Si me equivoco: una ventana más larga o más corta se ajusta con el listener sin tocar este plan.
 7. **Ruling: el acceso a notificaciones es de tres valores, y permitido exige sistema y conexión.** — La fuente es `NotificationManager.isNotificationListenerAccessGranted(componente)` con `enabled_notification_listeners` de respaldo (`NotificationAccess.combine`): si las dos dicen lo mismo, eso; si discrepan o las dos fallan, `UNKNOWN`. `GRANTED` solo si el sistema lista el componente **y** tiene el listener enlazado; `NOT_GRANTED` si no lo lista (ajuste ausente, vacío o con otros); `UNKNOWN` si no se puede leer, trae entradas ilegibles sin la nuestra, discrepan, o está permitido pero sin enlazar. La pantalla arranca en `UNKNOWN` hasta que el sistema contesta. — Si me equivoco: un "desconocido" de más con el aviso de apagar y encender el acceso (el fallo conocido de Android).
@@ -49,7 +49,8 @@
 12. **Ruling: el texto de la guarda es genérico cuando la causa es la app diciendo que algo de la pantalla está protegido.** — Con `foreground.protected` verdadero la causa puede ser una notificación o una ventana ilegible, no un paquete; "X is a protected app" mentía. Un paquete de la lista sigue diciendo "X is a protected app". — Si me equivoco: el agente lee un mensaje menos preciso, nunca uno falso.
 13. **Ruling: el host no concede el acceso a notificaciones en M5c.** — Solo el usuario, en los ajustes del sistema, con el atajo de la pantalla. `cmd notification allow_listener` es 🔴 para el agente; si el `setup` debe ofrecerlo (v1 §3.1, paso 6.2) es decisión de M6a, pasando por `phoneapp.Verified` y por la misma confirmación en la app (ruling 15). **Límite honesto:** el agente podría activar el interruptor del sistema con `adbuddy tap` (esa pantalla es de `com.android.settings`, que no está protegida), pero no leería nada: falta la confirmación de ruling 15, que exige pulsar un botón de ADBuddy, y ADBuddy es una app protegida para `tap`. Validación 28 (ya no bloqueante). — Si me equivoco: añadir esa pantalla a la guarda es una regla más.
 14. **Ruling: el servicio va `exported="false"`**, como el de accesibilidad: el sistema (uid 1000) enlaza componentes no exportados. — Validación 22 en el Pixel; si no enlaza, `exported="true"` con el mismo permiso `BIND_NOTIFICATION_LISTENER_SERVICE`, que ya solo cumple el sistema.
-15. **Ruling: `notifications` exige una confirmación del usuario (`NotificationConsent`) que solo pone el botón de la pantalla de acceso de ADBuddy.** — Que el sistema diga "permitido" no basta: lo puede activar el agente con `adbuddy tap` en la pantalla de Ajustes del sistema. La marca la pone únicamente `NotificationConsent.confirm()`, llamado desde el botón "Dejar que el agente lea mis notificaciones" (visible solo con el acceso permitido y sin confirmar), nunca al observar el estado; un test de fuente (`nothingButTheButtonSetsTheMark`) lo vigila. `NotificationGate` la exige antes de preguntar al listener; si el sistema revoca el acceso, la puerta y la pantalla la borran, y volver a permitirlo exige confirmar otra vez. Sin ella, `unavailable` con un texto fijo: "the user has to confirm it in the ADBuddy app (Settings, Notification access)". — Si me equivoco: un toque de más para el usuario, una vez.
+15. **Ruling: `notifications` exige una confirmación del usuario (`NotificationConsent`) que solo pone el botón de la pantalla de acceso de ADBuddy.** — Que el sistema diga "permitido" no basta: lo puede activar el agente con `adbuddy tap` en la pantalla de Ajustes del sistema. La marca la pone únicamente `NotificationConsent.confirm()`, llamado desde el botón "Dejar que el agente lea mis notificaciones" (visible solo con el acceso permitido y sin confirmar), nunca al observar el estado; un test de fuente (`nothingButTheButtonSetsTheMark`) lo vigila. `NotificationGate` la exige antes de preguntar al listener; si el sistema revoca el acceso, la borra **el propio listener** al desconectarse y al destruirse (`onListenerDisconnected` y `onDestroy`, por `NotificationGate.onUnbound`: no depende de que nadie la mire, porque el agente podría revocar y volver a activar el interruptor con `adbuddy tap` antes de que la puerta o la pantalla la vieran), además de la puerta y la pantalla; volver a permitirlo exige confirmar otra vez. Sin ella, `unavailable` con un texto fijo: "the user has to confirm it in the ADBuddy app (Settings, Notification access)". **Riesgos aceptados:** (a) con la app muerta el sistema no arranca el proceso para desvincular el servicio, así que la marca sobrevive hasta que la puerta o la pantalla ven el acceso retirado (validación 32; si ocurre, el arreglo barato es borrarla también en `onListenerConnected`, a costa de un toque tras cada reenlace); (b) `nothingButTheButtonSetsTheMark` busca `.confirm()` y `::confirm` y se esquiva con `with(consent) { confirm() }`: lo ve la revisión Opus, no el test. — Si me equivoco: un toque de más para el usuario, una vez (cada vez que el sistema reenlaza el listener).
+16. **Ruling: `ChatRoot` recibe `firstRun: Boolean = true`; la burbuja (`ChatBubbleActivity`) lo pone a `false`.** — La burbuja "no abre pantallas de consentimiento" (M4) y con la navegación nueva montaría los pasos del onboarding encima del chat; el paso inicial sale de una función pura (`OnboardingStep.initial(firstRun, done)`, con test) y `MainActivity` no cambia (el valor por defecto es `true`). — Si me equivoco: la burbuja se salta el onboarding hasta que el usuario lo vea en la app (un toque).
 
 ## Mapa de ficheros
 
@@ -57,9 +58,9 @@
 
 **Host (modificado):** `daemon/ui.go` (la ayuda y su camino), `daemon/guard.go`, `daemon/ui_test.go` (texto genérico), `cli/helpers.go` (registro y texto de `foreground`), `cli/helpers_test.go`.
 
-**App (nuevo):** `listener/NotificationReport.kt`, `listener/AgentNotificationListener.kt`, `listener/NotificationAccess.kt`, `listener/NotificationAccessStatus.kt`, `listener/NotificationConsent.kt`, `listener/NotificationGate.kt`, `listener/NotificationRead.kt`, `ui/ProtectedAppsUi.kt`, `ui/Navigation.kt`, `ui/ProtectedAppsScreen.kt`, `ui/NotificationAccessScreen.kt`, `ui/SettingsScreen.kt`, y sus tests (`listener/NotificationReportTest.kt`, `listener/ListenerIsReadOnlyTest.kt`, `listener/NotificationAccessTest.kt`, `listener/NotificationGateTest.kt`, `ui/ProtectedAppsUiTest.kt`, `ui/NavigationTest.kt`, `FakePrefs.kt`).
+**App (nuevo):** `listener/NotificationReport.kt`, `listener/AgentNotificationListener.kt`, `listener/NotificationAccess.kt`, `listener/NotificationAccessStatus.kt`, `listener/NotificationConsent.kt`, `listener/NotificationGate.kt`, `listener/NotificationRead.kt`, `listener/Sensitivity.kt`, `ui/ProtectedAppsUi.kt`, `ui/Navigation.kt`, `ui/ProtectedAppsScreen.kt`, `ui/NotificationAccessScreen.kt`, `ui/SettingsScreen.kt`, y sus tests (`listener/NotificationReportTest.kt`, `listener/ListenerIsReadOnlyTest.kt`, `listener/NotificationAccessTest.kt`, `listener/NotificationGateTest.kt`, `listener/SensitivityTest.kt`, `ui/ProtectedAppsUiTest.kt`, `ui/NavigationTest.kt`, `FakePrefs.kt`).
 
-**App (modificado):** `a11y/UiExecutor.kt`, `a11y/UiHelpers.kt`, `a11y/ProtectedApps.kt`, `ui/RemoteUi.kt`, `ui/ChatRoot.kt`, `ui/ChatScreen.kt`, `ui/ChatParts.kt`, `AndroidManifest.xml`, `res/values/strings.xml` y `values-es/strings.xml`, y los tests `a11y/UiExecutorTest.kt`, `a11y/ProtectedAppsTest.kt`, `ui/RemoteUiTest.kt`.
+**App (modificado):** `a11y/UiExecutor.kt`, `a11y/UiHelpers.kt`, `a11y/ProtectedApps.kt`, `ui/RemoteUi.kt`, `ui/ChatRoot.kt`, `ui/ChatScreen.kt`, `ui/ChatParts.kt`, `ChatBubbleActivity.kt` (el paquete raíz, Tarea 13), `listener/AgentNotificationListener.kt` (creado en la Tarea 6 y tocado en la 7: el listener borra la marca al desconectarse), `AndroidManifest.xml`, `res/values/strings.xml` y `values-es/strings.xml`, y los tests `a11y/UiExecutorTest.kt`, `a11y/ProtectedAppsTest.kt`, `ui/RemoteUiTest.kt`, `listener/ListenerIsReadOnlyTest.kt` (creado en la Tarea 6 y ampliado en la 7).
 
 **Docs:** la spec de M5 (§3.5, §4.3, §9, §13), `pendientes-m3-m5.md`, `android/README.md`. **No se toca** `host/internal/workspace/templates/AGENTS.md` (es del dueño de la plantilla, e5 / skimmer-32): el texto va en la Tarea 14.
 
@@ -73,7 +74,7 @@
 
 **Interfaces:** ninguna.
 
-- [ ] **Step 1: Ledger.** Crear `progress.md` con la cabecera "M5c · notificaciones y pantallas de apps protegidas", el enlace a este plan y los 15 rulings de arriba, cada uno como `Ruling: qué — por qué — qué cuesta si me equivoco`.
+- [ ] **Step 1: Ledger.** Crear `progress.md` con la cabecera "M5c · notificaciones y pantallas de apps protegidas", el enlace a este plan y los 16 rulings de arriba, cada uno como `Ruling: qué — por qué — qué cuesta si me equivoco`.
 - [ ] **Step 2: Spec §3.5.** Añadir tras la línea "No hay respaldo por adb…":
 
 **Editar `docs/superpowers/specs/2026-10-01-adbuddy-m5-ayudas-remoto-design.md`:** reemplazar
@@ -89,7 +90,7 @@ por
 - **Qué sale (M5c).** De ADBuddy, de las apps protegidas (la lista se consulta en cada llamada), de una notificación que la app marca `VISIBILITY_SECRET` y de un paquete que no es un nombre de paquete (su `package` sale vacío) salen `key`, `title` y `text` vacíos: la `key` lleva el tag de la app, que puede llevar texto, y se sustituye por `hidden-<n>`. Lo demás, con el texto cortado a 1024 puntos de código, las 50 más recientes (`truncated`) y el resultado dentro de `MaxUIResult` (se descartan las más antiguas hasta que quepa).
 - **Dos capas.** El daemon repite el vaciado con su copia de `protected.json`, el recorte a 50 y 1024 y el paquete inválido a vacío: una lista desfasada o una app que no sea la verdadera no saca un código. No pasa por la guarda de primer plano (no lee la pantalla), sí por pausa, pregunta 🔴 y diario; el diario guarda la orden, nunca el resultado. Un tiempo agotado es `UI_TIMEOUT`, sin reintento.
 - **El listener solo lee** (no descarta, pospone ni pulsa nada, no abre intents ni registra texto, y nada fuera de su paquete lo alcanza; `ListenerIsReadOnlyTest`). El acceso lo concede el usuario en los ajustes del sistema; la app lo muestra con tres valores (permitido, no permitido, desconocido) y el desconocido nunca se pinta como ninguno de los otros.
-- **Confirmación del usuario.** Que el sistema diga "permitido" no basta para leer: la app exige una marca que solo pone el botón de confirmar de su propia pantalla de acceso (nunca algo automático) y que revocar el acceso invalida; sin ella, `unavailable` con "confírmalo en la app ADBuddy". El agente podría activar el interruptor del sistema con `adbuddy tap`, pero no pulsar el botón de ADBuddy (app protegida).
+- **Confirmación del usuario.** Que el sistema diga "permitido" no basta para leer: la app exige una marca que solo pone el botón de confirmar de su propia pantalla de acceso (nunca algo automático) y que revocar el acceso invalida (el propio listener la borra al desconectarse, sin esperar a que nadie la mire); sin ella, `unavailable` con "confírmalo en la app ADBuddy". El agente podría activar el interruptor del sistema con `adbuddy tap`, pero no pulsar el botón de ADBuddy (app protegida).
 - **Secretas.** Salen vacías las notificaciones que la app marca `VISIBILITY_SECRET`, las de otro usuario o del perfil de trabajo, las que el usuario o el canal ocultan de la pantalla de bloqueo y las que no se pueden leer.
 - **Límite honesto.** Una app que reenvía las notificaciones de otras con su propio paquete (acompañantes de reloj, historiales de notificaciones, KDE Connect) saca el contenido de una app protegida: el paquete que sale es el del reenviador, y no es de la lista. Se documenta; no se puede cerrar desde aquí.
 ```
@@ -1364,15 +1365,15 @@ EOF
 
 ### Task 6: `AgentNotificationListener` de solo lectura 🔒
 
-**Revisión:** `adbuddy-reviewer-opus`. **Para el revisor:** que el servicio no sobreescribe nada más que su ciclo de vida; que `current` es privado y fuera del paquete solo hay `read()` y `connected`; que `read()` devuelve `RawNotification` (sin pasar por ningún log, fichero ni preferencia); que una notificación ilegible, de otro usuario o perfil de trabajo, o que el sistema o el canal ocultan de la pantalla de bloqueo, sale secreta, no omitida; que `ListenerIsReadOnlyTest` cubre de verdad (probarlo añadiendo `cancelNotification` a mano en cualquier fichero de `src/main`); que el manifiesto exige `BIND_NOTIFICATION_LISTENER_SERVICE` y no exporta el servicio.
+**Revisión:** `adbuddy-reviewer-opus`. **Para el revisor:** que el servicio no sobreescribe nada más que su ciclo de vida; que `current` es privado y fuera del paquete solo hay `read()` y `connected`; que `read()` devuelve `RawNotification` (sin pasar por ningún log, fichero ni preferencia); que una notificación ilegible, sin `Ranking` (no se obtiene, no trae su clave o falla), de otro usuario o perfil de trabajo, o que el sistema o el canal ocultan de la pantalla de bloqueo, sale secreta, no omitida (`Sensitivity.of`, con test; antes, un `Ranking` ausente salía como no secreta); que `ListenerIsReadOnlyTest` cubre de verdad (probarlo añadiendo `cancelNotification` a mano en cualquier fichero de `src/main`); que el manifiesto exige `BIND_NOTIFICATION_LISTENER_SERVICE` y no exporta el servicio.
 
 **Files:**
-- Create: `android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/AgentNotificationListener.kt`, `android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/ListenerIsReadOnlyTest.kt`
+- Create: `android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/AgentNotificationListener.kt`, `android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/Sensitivity.kt`, `android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/ListenerIsReadOnlyTest.kt`, `android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/SensitivityTest.kt`
 - Modify: `android/app/src/main/AndroidManifest.xml`, `res/values/strings.xml`, `res/values-es/strings.xml`
 
 **Interfaces:**
 - Consumes: `RawNotification` (Tarea 5).
-- Produces: `AgentNotificationListener` con, en su `companion`, **solo** `connected: StateFlow<Boolean>` y `read(): List<RawNotification>?` (`null`: sin listener, o el sistema no las da; se llama desde el hilo de los ayudantes, nunca el principal); `current` es `private`. El servicio en el manifiesto y la cadena `listener_label`. `ListenerIsReadOnlyTest` recorre **todo** `src/main/kotlin`: ningún fichero usa `cancelNotification`, `cancelAllNotifications` ni `snoozeNotification`; `activeNotifications` solo aparece en el listener (y en `ConfirmNotifier`, que es el `NotificationManager` de la propia app); `AgentNotificationListener.current` no aparece fuera de `listener/`; y dentro de `listener/` tampoco `getMethod`, `getDeclaredMethod`, `.invoke(`, `Class.forName`, `.send(`, `bubbleMetadata`, `publicVersion`, `android.util.Log`, `Log.`, `System.out`/`System.err`, `sendBroadcast`, la palabra `actions`, ni almacenamiento (salvo la marca de `NotificationConsent`, de la Tarea 7).
+- Produces: `AgentNotificationListener` con, en su `companion`, **solo** `connected: StateFlow<Boolean>` y `read(): List<RawNotification>?` (`null`: sin listener, o el sistema no las da; se llama desde el hilo de los ayudantes, nunca el principal); `current` es `private`. `Sensitivity.of(rankingKnown, lockscreenOverride, channelVisibility): Boolean` (pura: sin `Ranking` conocido es secreta). El servicio en el manifiesto y la cadena `listener_label`. `ListenerIsReadOnlyTest` recorre **todo** `src/main/kotlin`: ningún fichero usa `cancelNotification`, `cancelAllNotifications` ni `snoozeNotification`; `activeNotifications` solo aparece en el listener (y en `ConfirmNotifier`, que es el `NotificationManager` de la propia app); `AgentNotificationListener.current` no aparece fuera de `listener/`; `AgentNotificationListener.read`/`::read` solo aparece en `UiHelpers.kt` fuera de `listener/` (sin alias de importación); y dentro de `listener/` tampoco `getMethod`, `getDeclaredMethod`, `.invoke(`, `Class.forName`, `.send(`, `bubbleMetadata`, `publicVersion`, `android.util.Log`, `Log.`, `System.out`/`System.err`, `sendBroadcast`, la palabra `actions`, ni almacenamiento (salvo la marca de `NotificationConsent`, de la Tarea 7).
 
 - [ ] **Step 1: Test que falla.**
 
@@ -1398,9 +1399,13 @@ class ListenerIsReadOnlyTest {
     private val root = File("src/main/kotlin")
     private val dir = File(root, "tech/hybriq/adbuddy/listener")
 
-    /** The code of a file without comments and strings (a small scanner: a regex overflows the stack on big files). */
-    private fun code(f: File): String {
-        val t = f.readText()
+    /**
+     * The code of a file without comments and strings (a small scanner: a regex overflows the stack on big
+     * files). What is inside a template ("${...}") is code, not string: a call hidden in one is seen.
+     */
+    private fun code(f: File): String = code(f.readText())
+
+    private fun code(t: String): String {
         val out = StringBuilder()
         var i = 0
         while (i < t.length) {
@@ -1412,20 +1417,15 @@ class ListenerIsReadOnlyTest {
                     i = if (end < 0) t.length else end + 2
                 }
                 t.startsWith("\"\"\"", i) -> {
-                    val end = t.indexOf("\"\"\"", i + 3)
-                    i = if (end < 0) t.length else end + 3
+                    i = skipString(t, i + 3, raw = true, out)
                     out.append("\"\"")
                 }
                 c == '"' -> {
-                    i++
-                    while (i < t.length && t[i] != '"') i += if (t[i] == '\\') 2 else 1
-                    i++
+                    i = skipString(t, i + 1, raw = false, out)
                     out.append("\"\"")
                 }
                 c == '\'' -> { // a char literal, such as '"'
-                    i++
-                    while (i < t.length && t[i] != '\'') i += if (t[i] == '\\') 2 else 1
-                    i++
+                    i = skipChar(t, i + 1)
                     out.append("''")
                 }
                 else -> {
@@ -1435,6 +1435,51 @@ class ListenerIsReadOnlyTest {
             }
         }
         return out.toString()
+    }
+
+    /** The index just past a string whose content starts at [from]; the code of its templates goes to [out]. */
+    private fun skipString(t: String, from: Int, raw: Boolean, out: StringBuilder): Int {
+        var i = from
+        while (i < t.length) {
+            when {
+                raw && t.startsWith("\"\"\"", i) -> return i + 3
+                !raw && t[i] == '"' -> return i + 1
+                !raw && t[i] == '\\' -> i += 2
+                t.startsWith("\${", i) -> {
+                    val end = templateEnd(t, i + 2)
+                    out.append(' ').append(code(t.substring(i + 2, minOf(end, t.length)))).append(' ')
+                    i = end + 1
+                }
+                else -> i++
+            }
+        }
+        return t.length
+    }
+
+    private fun skipChar(t: String, from: Int): Int {
+        var i = from
+        while (i < t.length && t[i] != '\'') i += if (t[i] == '\\') 2 else 1
+        return i + 1
+    }
+
+    /** The index of the } that closes a template whose code starts at [from]; unbalanced, the rest of the file is code. */
+    private fun templateEnd(t: String, from: Int): Int {
+        var depth = 1
+        var i = from
+        while (i < t.length) {
+            when {
+                t.startsWith("\"\"\"", i) -> i = skipString(t, i + 3, raw = true, StringBuilder())
+                t[i] == '"' -> i = skipString(t, i + 1, raw = false, StringBuilder())
+                t[i] == '\'' -> i = skipChar(t, i + 1)
+                t[i] == '{' -> { depth++; i++ }
+                t[i] == '}' -> {
+                    if (--depth == 0) return i
+                    i++
+                }
+                else -> i++
+            }
+        }
+        return t.length
     }
 
     private fun kotlinFiles(d: File) = d.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
@@ -1492,6 +1537,31 @@ class ListenerIsReadOnlyTest {
         }
     }
 
+    @Test fun theScannerSeesTheCodeInsideATemplateButNotTheTextAroundIt() {
+        // "${cancelNotification()}" is a call, not a string: the scanner must not hide it.
+        val hidden = code("val a = \"x \${cancelNotification()} y\"\n")
+        assertTrue(hidden, hidden.contains("cancelNotification"))
+        val nested = code("val b = \"\${listOf(1).map { \"in\" + it }} snoozeNotification \${'}'}\" + getMethod\n")
+        assertFalse(nested, nested.contains("snoozeNotification") || nested.contains("\"in\""))
+        assertTrue(nested, nested.contains("listOf(1).map") && nested.contains("getMethod"))
+        val raw = code("val c = \"\"\"a \${cancelAllNotifications()} b\"\"\"\n")
+        assertTrue(raw, raw.contains("cancelAllNotifications"))
+        assertTrue(code("val d = \"\${ never closed cancelNotification").contains("cancelNotification"))
+        assertFalse(code("val e = \"\$cancelNotification and \\\${snoozeNotification}\"").contains("snoozeNotification"))
+    }
+
+    @Test fun onlyTheWiringOfTheHelpersReadsThroughTheListener() {
+        // read() is the one way out of the listener: only UiHelpers (through NotificationGate, so with the user's
+        // confirmation) may call it, and nothing outside the package may rename the class to hide the call.
+        val call = Regex("AgentNotificationListener\\s*(\\.|::)\\s*read\\b")
+        val alias = Regex("import\\s+\\S*AgentNotificationListener\\s+as\\b")
+        val outside = kotlinFiles(root).filter { it.parentFile != dir }
+        val callers = outside.filter { call.containsMatchIn(code(it)) }.map { it.name }.toSet()
+        assertTrue(callers.toString(), setOf("UiHelpers.kt").containsAll(callers))
+        assertTrue("an alias of the listener hides its read()", outside.none { alias.containsMatchIn(code(it)) })
+        assertTrue(call.containsMatchIn("AgentNotificationListener::read") && call.containsMatchIn("AgentNotificationListener . read"))
+    }
+
     @Test fun theTextOfARawNotificationIsOnlyReadByTheReport() {
         // RawNotification travels only through these files; the report turns it into what leaves the phone.
         val users = kotlinFiles(root).filter { it.readText().contains("RawNotification") }.map { it.name }.toSet()
@@ -1502,13 +1572,68 @@ class ListenerIsReadOnlyTest {
 }
 ```
 
-- [ ] **Step 2: Ver que falla** (el paquete `listener/` aún no tiene el servicio: el test lee su fuente).
+**Crear `android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/SensitivityTest.kt`:**
+
+```kotlin
+package tech.hybriq.adbuddy.listener
+
+import android.app.Notification
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SensitivityTest {
+    private val secret = Notification.VISIBILITY_SECRET
+    private val noOverride = -1000 // Ranking.VISIBILITY_NO_OVERRIDE
+    private val public = Notification.VISIBILITY_PUBLIC
+
+    @Test fun withoutARankingForTheNotificationItIsSecretNeverVisible() {
+        // The system's ranking could not be had, or has no entry for this key: nothing is known, so nothing is shown.
+        assertTrue(Sensitivity.of(rankingKnown = false, lockscreenOverride = null, channelVisibility = null))
+        assertTrue(Sensitivity.of(rankingKnown = false, lockscreenOverride = public, channelVisibility = public))
+    }
+
+    @Test fun theUserOrTheChannelHidingItFromTheLockScreenMakesItSecret() {
+        assertTrue(Sensitivity.of(true, lockscreenOverride = secret, channelVisibility = null))
+        assertTrue(Sensitivity.of(true, lockscreenOverride = null, channelVisibility = secret))
+        assertTrue(Sensitivity.of(true, lockscreenOverride = noOverride, channelVisibility = secret))
+    }
+
+    @Test fun aKnownRankingThatHidesNothingLeavesItVisible() {
+        assertFalse(Sensitivity.of(true, lockscreenOverride = null, channelVisibility = null)) // before Android 12, no channel
+        assertFalse(Sensitivity.of(true, lockscreenOverride = noOverride, channelVisibility = noOverride))
+        assertFalse(Sensitivity.of(true, lockscreenOverride = public, channelVisibility = public))
+    }
+}
+```
+
+- [ ] **Step 2: Ver que falla** (el paquete `listener/` aún no tiene el servicio: el test lee su fuente; y `Sensitivity` no existe).
 
 ```bash expect=fail
 cd android && gradle :app:testDebugUnitTest --tests '*ListenerIsReadOnlyTest*'
 ```
 
-- [ ] **Step 3: Implementar.** `raw()` marca secreta, además de la que lo es por `VISIBILITY_SECRET`, la notificación de otro usuario o del perfil de trabajo (`sbn.user != Process.myUserHandle()`), la que el usuario o el canal ocultan de la pantalla de bloqueo (`Ranking.lockscreenVisibilityOverride`, desde Android 12, y `channel.lockscreenVisibility`), y cualquiera cuyo `Ranking` no se pueda leer. (`Ranking.hasSensitiveContent`, que Android 15 rellena para códigos de un solo uso, no es API pública en el SDK 37: validación 30.)
+- [ ] **Step 3: Implementar.** `raw()` marca secreta, además de la que lo es por `VISIBILITY_SECRET`, la notificación de otro usuario o del perfil de trabajo (`sbn.user != Process.myUserHandle()`), la que el usuario o el canal ocultan de la pantalla de bloqueo (`Ranking.lockscreenVisibilityOverride`, desde Android 12, y `channel.lockscreenVisibility`), y cualquiera cuyo `Ranking` no se pueda obtener, no traiga su clave o no se pueda leer (`Sensitivity.of`, pura y con test: lo desconocido es secreto). (`Ranking.hasSensitiveContent`, que Android 15 rellena para códigos de un solo uso, no es API pública en el SDK 37: validación 30.)
+
+**Crear `android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/Sensitivity.kt`:**
+
+```kotlin
+package tech.hybriq.adbuddy.listener
+
+import android.app.Notification
+
+/**
+ * Whether a notification is secret because of what the system says about it (M5c). Pure, so it is
+ * unit-tested: only what is known to be visible is visible. No Ranking, or none for this notification, is
+ * secret (failing open here would let a code out whenever the system's ranking cannot be had).
+ */
+internal object Sensitivity {
+    fun of(rankingKnown: Boolean, lockscreenOverride: Int?, channelVisibility: Int?): Boolean =
+        !rankingKnown ||
+            lockscreenOverride == Notification.VISIBILITY_SECRET ||
+            channelVisibility == Notification.VISIBILITY_SECRET
+}
+```
 
 **Crear `android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/AgentNotificationListener.kt`:**
 
@@ -1584,18 +1709,21 @@ class AgentNotificationListener : NotificationListenerService() {
                 null
             }
             val r = NotificationListenerService.Ranking()
-            return active.map { sbn -> raw(sbn, sensitive = ranking != null && sensitive(ranking, sbn.key, r)) }
+            return active.map { sbn -> raw(sbn, sensitive = sensitive(ranking, sbn.key, r)) }
         }
 
         /**
          * The user, or the app's channel, hides it from the lock screen. Whatever cannot be asked counts as
-         * sensitive. (Ranking.hasSensitiveContent, which Android 15 fills for one-time codes, is not public API.)
+         * sensitive: no Ranking at all, or one without this key (Sensitivity.of). (Ranking.hasSensitiveContent,
+         * which Android 15 fills for one-time codes, is not public API.)
          */
-        private fun sensitive(ranking: NotificationListenerService.RankingMap, key: String, r: NotificationListenerService.Ranking): Boolean = try {
-            ranking.getRanking(key, r) && (
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && r.lockscreenVisibilityOverride == Notification.VISIBILITY_SECRET ||
-                    r.channel?.lockscreenVisibility == Notification.VISIBILITY_SECRET
-                )
+        private fun sensitive(ranking: NotificationListenerService.RankingMap?, key: String, r: NotificationListenerService.Ranking): Boolean = try {
+            val known = ranking != null && ranking.getRanking(key, r)
+            Sensitivity.of(
+                rankingKnown = known,
+                lockscreenOverride = if (known && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) r.lockscreenVisibilityOverride else null,
+                channelVisibility = if (known) r.channel?.lockscreenVisibility else null,
+            )
         } catch (e: RuntimeException) {
             true
         }
@@ -1695,7 +1823,7 @@ cd android && gradle :app:testDebugUnitTest --tests '*listener*' :app:assembleDe
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/AgentNotificationListener.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/ListenerIsReadOnlyTest.kt android/app/src/main/AndroidManifest.xml android/app/src/main/res/values/strings.xml android/app/src/main/res/values-es/strings.xml
+git add android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/AgentNotificationListener.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/Sensitivity.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/ListenerIsReadOnlyTest.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/SensitivityTest.kt android/app/src/main/AndroidManifest.xml android/app/src/main/res/values/strings.xml android/app/src/main/res/values-es/strings.xml
 git commit -m "$(cat <<'EOF'
 feat(app): AgentNotificationListener de solo lectura
 
@@ -1712,10 +1840,11 @@ EOF
 
 ### Task 7: Acceso a notificaciones, confirmación del usuario y puerta de lectura 🔒
 
-**Revisión:** `adbuddy-reviewer-opus`. **Para el revisor:** que la marca de confirmación (`NotificationConsent.confirm()`) solo la llama el botón de la pantalla (Tarea 12; `nothingButTheButtonSetsTheMark` lo vigila) y nunca nada que observe que el sistema dice "permitido"; que sin la marca `NotificationGate` no lee aunque el sistema diga permitido; que revocar el acceso en el sistema invalida la marca y volver a permitirlo exige confirmar otra vez; que lo que no se puede saber es `NoAccess` y no borra la marca; que `combine` nunca convierte un desacuerdo o un fallo en "permitido".
+**Revisión:** `adbuddy-reviewer-opus`. **Para el revisor:** que la marca de confirmación (`NotificationConsent.confirm()`) solo la llama el botón de la pantalla (Tarea 12; `nothingButTheButtonSetsTheMark` lo vigila) y nunca nada que observe que el sistema dice "permitido"; que sin la marca `NotificationGate` no lee aunque el sistema diga permitido; que revocar el acceso en el sistema invalida la marca y volver a permitirlo exige confirmar otra vez; que lo que no se puede saber es `NoAccess` y no borra la marca; que `combine` nunca convierte un desacuerdo o un fallo en "permitido"; que el propio listener borra la marca en `onListenerDisconnected` y en `onDestroy` (`NotificationGate.onUnbound`, sin condición y sin que nadie mire: es lo que impide que el agente revoque y reactive el interruptor con `adbuddy tap` y lea sin confirmar otra vez), y que con la app muerta la marca puede sobrevivir (riesgo aceptado del ruling 15, validación 32).
 
 **Files:**
 - Create: `android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationAccess.kt`, `NotificationAccessStatus.kt`, `NotificationConsent.kt`, `NotificationGate.kt`, `NotificationRead.kt` (todos en `listener/`), `android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/NotificationAccessTest.kt`, `NotificationGateTest.kt`, `android/app/src/test/kotlin/tech/hybriq/adbuddy/FakePrefs.kt`
+- Modify: `android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/AgentNotificationListener.kt` (borra la marca al desconectarse y al destruirse), `android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/ListenerIsReadOnlyTest.kt` (lo vigila)
 
 **Interfaces:**
 - Consumes: `AgentNotificationListener.connected`, la clase del servicio y `RawNotification` (Tareas 5 y 6).
@@ -1724,7 +1853,7 @@ EOF
   - `NotificationAccessStatus.listed(context): Listed?` (`NotificationManager.isNotificationListenerAccessGranted` con `enabled_notification_listeners` de respaldo; `null` si ninguno se puede leer), `.observe(context): Flow<State>`, `.openSystemSettings(context)`.
   - `NotificationConsent(prefs)` con `confirmed()`, `confirm()`, `revoke()` y `NotificationConsent.of(context)`.
   - `NotificationRead { Ok(items), NoAccess, NotConfirmed }`.
-  - `NotificationGate.read(confirmed, listed, onRevoked, source): NotificationRead`.
+  - `NotificationGate.read(confirmed, listed, onRevoked, source): NotificationRead` y `NotificationGate.onUnbound(revoke)` (el listener la llama al desconectarse y al destruirse).
   - El soporte de tests `FakePrefs`.
 
 - [ ] **Step 1: Tests que fallan.**
@@ -1919,6 +2048,21 @@ class NotificationGateTest {
         assertEquals(NotificationRead.Ok(listOf(one)), read(Listed.YES))
     }
 
+    @Test fun unbindingTheListenerClearsTheMarkAtOnceWhoeverIsLooking() {
+        val prefs = FakePrefs()
+        val consent = NotificationConsent(prefs)
+        consent.confirm()
+        NotificationGate.onUnbound(consent::revoke) // the system revoked the access: no screen is open, no read is asked
+        assertFalse(NotificationConsent(prefs).confirmed())
+        // The agent turns the switch back on: still not enough.
+        assertEquals(NotificationRead.NotConfirmed, NotificationGate.read(consent::confirmed, { Listed.YES }, consent::revoke) { listOf(one) })
+        assertEquals("nothing was read", 0, sourceCalls)
+        NotificationGate.onUnbound(consent::revoke) // already clear: nothing breaks
+        assertFalse(consent.confirmed())
+    }
+
+    // Accepted risk (ruling 15): this looks for `.confirm()` and `::confirm`, so `with(consent) { confirm() }`
+    // gets round it. The Opus review reads the screen by hand; the test catches the plain mistakes.
     @Test fun nothingButTheButtonSetsTheMark() {
         // The gate and the status never confirm: confirm() is called from the confirm button only.
         val calls = java.io.File("src/main/kotlin").walkTopDown().filter { it.isFile && it.extension == "kt" }
@@ -1928,10 +2072,50 @@ class NotificationGateTest {
 }
 ```
 
+**Editar `android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/ListenerIsReadOnlyTest.kt`:** reemplazar
+
+```kotlin
+        assertTrue(users.toString(), "NotificationReport.kt" in users)
+    }
+}
+```
+
+por
+
+```kotlin
+        assertTrue(users.toString(), "NotificationReport.kt" in users)
+    }
+
+    /** The body, braces included, of `override fun name(...) {...}` in [src] (already without comments and strings). */
+    private fun body(src: String, name: String): String {
+        val at = src.indexOf("override fun $name(")
+        assertTrue("no override of $name", at >= 0)
+        val open = src.indexOf('{', at)
+        var depth = 0
+        for (i in open until src.length) {
+            if (src[i] == '{') depth++
+            if (src[i] == '}' && --depth == 0) return src.substring(open, i + 1)
+        }
+        error("$name is not closed")
+    }
+
+    @Test fun theListenerClearsTheUsersMarkWhenTheSystemUnbindsIt() {
+        // Revoking the access unbinds the service: the mark goes at once, even if nobody is looking (the gate and the
+        // screen only see the revoke when asked, and the agent could turn the switch back on before that).
+        val src = code(File(dir, "AgentNotificationListener.kt"))
+        val call = Regex("NotificationGate\\.onUnbound\\s*\\{[^}]*NotificationConsent\\.of\\(this\\)\\.revoke\\(\\)[^}]*}")
+        for (name in listOf("onListenerDisconnected", "onDestroy")) {
+            assertTrue("$name does not clear the mark", call.containsMatchIn(body(src, name)))
+        }
+    }
+}
+```
+
 - [ ] **Step 2: Ver que fallan** (no compila).
 
 ```bash expect=fail
 cd android && gradle :app:testDebugUnitTest --tests '*NotificationAccessTest*' --tests '*NotificationGateTest*'
+
 ```
 
 - [ ] **Step 3: Implementar.**
@@ -2122,7 +2306,8 @@ import androidx.core.content.edit
  * on the confirm button of ADBuddy's notification access screen sets (confirm()). Nothing sets it by seeing
  * that the system says "allowed": an agent that taps the system's switch with `adbuddy tap` still gets
  * `unavailable` until the person confirms here, and it cannot press ADBuddy's buttons (ADBuddy is protected).
- * The gate (NotificationGate) clears it when the system revokes the access. It holds a flag, never content.
+ * The system revoking the access clears it: the listener itself when it is unbound (NotificationGate.onUnbound),
+ * and the gate and the screen when they see it. It holds a flag, never content.
  */
 class NotificationConsent(private val prefs: SharedPreferences) {
     fun confirmed(): Boolean = prefs.getBoolean(KEY, false)
@@ -2190,7 +2375,57 @@ object NotificationGate {
         if (l != Listed.YES) return NotificationRead.NoAccess
         return source()?.let { NotificationRead.Ok(it) } ?: NotificationRead.NoAccess
     }
+
+    /**
+     * The system unbound the listener (the access was revoked, or the service is gone): the user's mark goes
+     * with it at once, whether or not anyone is looking. Otherwise an agent could revoke the access and turn the
+     * system's switch back on (`adbuddy tap`) before the gate or the screen noticed, and read without a new
+     * confirmation. Allowing it again needs a new tap on ADBuddy's confirm button.
+     */
+    fun onUnbound(revoke: () -> Unit) = revoke()
 }
+```
+
+**Editar `android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/AgentNotificationListener.kt`:** reemplazar
+
+```kotlin
+    override fun onListenerDisconnected() {
+        if (current === this) {
+            current = null
+            _connected.value = false
+        }
+    }
+
+    override fun onDestroy() {
+        if (current === this) {
+            current = null
+            _connected.value = false
+        }
+        super.onDestroy()
+    }
+```
+
+por
+
+```kotlin
+    override fun onListenerDisconnected() {
+        // The system unbinds the listener when the access is revoked: the user's mark goes at once, without waiting
+        // for the gate or the screen to look (ListenerIsReadOnlyTest keeps this call here).
+        NotificationGate.onUnbound { NotificationConsent.of(this).revoke() }
+        if (current === this) {
+            current = null
+            _connected.value = false
+        }
+    }
+
+    override fun onDestroy() {
+        NotificationGate.onUnbound { NotificationConsent.of(this).revoke() }
+        if (current === this) {
+            current = null
+            _connected.value = false
+        }
+        super.onDestroy()
+    }
 ```
 
 - [ ] **Step 4: Ver que pasan** (con `ListenerIsReadOnlyTest`, que mira toda la app) y que compila con lint.
@@ -2202,13 +2437,13 @@ cd android && gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationAccess.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationAccessStatus.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationConsent.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationGate.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationRead.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/NotificationAccessTest.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/NotificationGateTest.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/FakePrefs.kt
+git add android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/AgentNotificationListener.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/ListenerIsReadOnlyTest.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationAccess.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationAccessStatus.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationConsent.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationGate.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/listener/NotificationRead.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/NotificationAccessTest.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/listener/NotificationGateTest.kt android/app/src/test/kotlin/tech/hybriq/adbuddy/FakePrefs.kt
 git commit -m "$(cat <<'EOF'
 feat(app): acceso a notificaciones de tres valores y confirmación del usuario
 
 Permitido exige el sistema y el listener enlazado; lo que no se puede leer es
 desconocido. Para leer, el usuario además confirma en la pantalla de ADBuddy
-(una marca que solo su botón pone y que revocar el acceso invalida).
+(una marca que solo su botón pone y que revocar el acceso invalida: el listener la borra al desconectarse).
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
@@ -2714,7 +2949,7 @@ EOF
 
 ### Task 9: Lista de apps protegidas confirmable, con Mensajes y Gmail protegidos desde el principio 🔒
 
-**Revisión:** `adbuddy-reviewer-opus`. **Para el revisor:** que la propuesta (`propose`, la que llega al host por `device.info` al arrancar la app) ya incluye las apps que reciben códigos instaladas, la app de SMS predeterminada y Google Play services, sin esperar a ninguna confirmación, y que por tanto `screen`/`tap` quedan protegidos sobre ellas desde el primer arranque; que `confirm` nunca guarda ADBuddy ni paquetes inválidos y que confirmar vacío sigue siendo "confirmado" y viaja como `[]` (no ausente); que una lista confirmada no la toca ninguna propuesta, tampoco una concurrente (`synchronized`); que la selección inicial sin confirmar no pierde lo que el host ya protege y solo añade; que `publishProtectedApps` manda la lista entera.
+**Revisión:** `adbuddy-reviewer-opus`. **Para el revisor:** que la propuesta (`propose`, la que llega al host por `device.info` al arrancar la app) ya incluye las apps que reciben códigos instaladas, la app de SMS predeterminada y Google Play services, sin esperar a ninguna confirmación, y que por tanto `screen`/`tap` quedan protegidos sobre ellas desde el primer arranque; que los receptores van antes del `take(MAX_PROTECTED_APPS)` (una heurística que llena la lista no los expulsa); que `confirm` nunca guarda ADBuddy ni paquetes inválidos y que confirmar vacío sigue siendo "confirmado" y viaja como `[]` (no ausente); que una lista confirmada no la toca ninguna propuesta, tampoco una concurrente (`synchronized`); que la selección inicial sin confirmar no pierde lo que el host ya protege y solo añade; que `publishProtectedApps` manda la lista entera.
 
 **Files:**
 - Create: `android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ProtectedAppsUi.kt`, `android/app/src/test/kotlin/tech/hybriq/adbuddy/ui/ProtectedAppsUiTest.kt`
@@ -2757,6 +2992,7 @@ import org.junit.Test
 import tech.hybriq.adbuddy.FakePrefs
 import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.bridge.DeviceInfo
+import tech.hybriq.adbuddy.bridge.UiLimits
 
 class ProtectedAppsTest {
     @Test fun proposesByName() {
@@ -2850,6 +3086,14 @@ por
         assertEquals(p.list().sorted(), p.deviceInfo().protectedApps)
         assertTrue(p.isProtected("com.google.android.gm"))
         assertFalse(p.isProtected("com.whatsapp"))
+    }
+
+    @Test fun theReceiversSurviveWhenTheHeuristicFillsTheList() {
+        // A phone with as many bank-like apps as the protocol allows: the apps that hold the codes still make the list.
+        val banks = (0 until UiLimits.MAX_PROTECTED_APPS).map { "com.bank$it.app" to "Bank $it" }
+        val got = ProtectedApps.Heuristic.proposeWithReceivers(banks + ("com.google.android.gm" to "Gmail"), ProtectedApps.Heuristic.receivers(null))
+        assertEquals(UiLimits.MAX_PROTECTED_APPS, got.size)
+        assertTrue("com.google.android.gm" in got && "com.google.android.gms" in got)
     }
 
     @Test fun aReceiverThatIsNotInstalledIsNotProposedExceptThePlayServices() {
@@ -3194,8 +3438,10 @@ por
         /** propose(apps) plus the receivers that are installed (in the launcher, or with no icon of their own). */
         fun proposeWithReceivers(apps: List<Pair<String, String>>, receivers: Set<String>): Set<String> {
             val here = apps.map { it.first }.toSet()
-            return (propose(apps) + receivers.filter { it in here || it in NO_LAUNCHER_ICON }.filter(UiLimits::validPackage))
-                .filter { it != Packages.ADBUDDY }.take(UiLimits.MAX_PROTECTED_APPS).toSet()
+            // The receivers go first: if the heuristic fills the list, it is the heuristic that yields at the limit,
+            // never the apps that receive the codes.
+            val installed = receivers.filter { it in here || it in NO_LAUNCHER_ICON }.filter(UiLimits::validPackage)
+            return (installed + propose(apps)).filter { it != Packages.ADBUDDY }.take(UiLimits.MAX_PROTECTED_APPS).toSet()
         }
 
         /** Found anywhere in a package part or a label word ("kutxabank", "mybank"). */
@@ -3383,7 +3629,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `FakePrefs` (Tarea 7, solo en el test).
-- Produces: `Route { CHAT, ACTIVITY, SETTINGS, PROTECTED_APPS, NOTIFICATION_ACCESS }` con `parent: Route?`; `OnboardingStep { PROTECTED_APPS, NOTIFICATION_ACCESS }` con `number`, `next()`, `previous()` y `OnboardingStep.total`; `Onboarding(prefs)` con `done()`, `finish()` y `Onboarding.of(context)`; `RemoteUi.treatAsRemote(remote: RemoteState?): Boolean`.
+- Produces: `Route { CHAT, ACTIVITY, SETTINGS, PROTECTED_APPS, NOTIFICATION_ACCESS }` con `parent: Route?`; `OnboardingStep { PROTECTED_APPS, NOTIFICATION_ACCESS }` con `number`, `next()`, `previous()`, `OnboardingStep.total` y `OnboardingStep.initial(firstRun, done)` (la burbuja no muestra el onboarding); `Onboarding(prefs)` con `done()`, `finish()` y `Onboarding.of(context)`; `RemoteUi.treatAsRemote(remote: RemoteState?): Boolean`.
 
 - [ ] **Step 1: Tests que fallan.**
 
@@ -3423,6 +3669,14 @@ class NavigationTest {
         assertNull(OnboardingStep.NOTIFICATION_ACCESS.next())
         assertNull(OnboardingStep.PROTECTED_APPS.previous())
         assertEquals(OnboardingStep.PROTECTED_APPS, OnboardingStep.NOTIFICATION_ACCESS.previous())
+    }
+
+    @Test fun theBubbleNeverShowsTheOnboarding() {
+        assertEquals(OnboardingStep.PROTECTED_APPS, OnboardingStep.initial(firstRun = true, done = false))
+        assertNull(OnboardingStep.initial(firstRun = true, done = true))
+        // The chat bubble opens no first-run screen (M4: that is MainActivity's), done or not.
+        assertNull(OnboardingStep.initial(firstRun = false, done = false))
+        assertNull(OnboardingStep.initial(firstRun = false, done = true))
     }
 
     @Test fun theOnboardingShowsUntilItIsFinishedAndThenNeverAgain() {
@@ -3514,6 +3768,9 @@ enum class OnboardingStep {
 
     companion object {
         val total: Int get() = entries.size
+
+        /** The step to open with: the first until the steps are done, and none at all for a screen that is not the first run (the bubble). */
+        fun initial(firstRun: Boolean, done: Boolean): OnboardingStep? = if (firstRun && !done) PROTECTED_APPS else null
     }
 }
 
@@ -3967,9 +4224,11 @@ EOF
 
 ---
 
-### Task 12: Pantalla de acceso a notificaciones
+### Task 12: Pantalla de acceso a notificaciones 🔒
 
-Sin test JVM (Compose): el estado y la puerta ya están probados en `NotificationAccessTest` y `NotificationGateTest` (Tarea 7). Cada estado lleva su icono y sus palabras, no solo su color; `UNKNOWN` es el valor inicial hasta que el sistema contesta. **El botón "Dejar que el agente lea mis notificaciones" es lo único que pone la marca de confirmación** (`NotificationConsent.confirm()`; `nothingButTheButtonSetsTheMark` lo vigila): solo aparece con el acceso permitido en el sistema y sin confirmar, y ni observar el estado ni ningún otro camino lo pulsa; el agente tampoco, porque ADBuddy es una app protegida para `tap`. Si el sistema retira el acceso, la pantalla quita la marca (`revoke()`), y volver a permitirlo exige confirmar otra vez. Con la marca puesta hay un botón para retirarla.
+**Revisión:** `adbuddy-reviewer-opus`. Esta pantalla es el único sitio que **pone** la marca de confirmación (el botón) y, con el listener (Tarea 7) y la puerta, uno de los que la quitan. **Para el revisor:** que `consent.confirm()` solo se llama desde `onConfirm`, y solo con `state == State.GRANTED`; que ni el `LaunchedEffect` ni ninguna observación del estado confirma; que el botón solo se ve en `NEEDS_CONFIRMATION` (permitido sin confirmar); que un estado desconocido nunca se pinta como permitido ni como confirmado; que `revoke()` solo se llama al ver `NOT_GRANTED` y desde "Que el agente deje de leerlas"; y que nada de lo que dice una notificación pasa por aquí.
+
+Sin test JVM (Compose): el estado y la puerta ya están probados en `NotificationAccessTest` y `NotificationGateTest` (Tarea 7). Cada estado lleva su icono y sus palabras, no solo su color; `UNKNOWN` es el valor inicial hasta que el sistema contesta. **El botón "Dejar que el agente lea mis notificaciones" es lo único que pone la marca de confirmación** (`NotificationConsent.confirm()`; `nothingButTheButtonSetsTheMark` lo vigila): solo aparece con el acceso permitido en el sistema y sin confirmar, y ni observar el estado ni ningún otro camino lo pulsa; el agente tampoco, porque ADBuddy es una app protegida para `tap`. Si el sistema retira el acceso, el listener ya la ha quitado al desconectarse (Tarea 7) y la pantalla también la quita (`revoke()`) si la ve, y volver a permitirlo exige confirmar otra vez. Con la marca puesta hay un botón para retirarla.
 
 **Files:**
 - Create: `android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/NotificationAccessScreen.kt`
@@ -4272,14 +4531,13 @@ Sin test JVM nuevo (Compose): `Route`, `OnboardingStep` y `RemoteUi.treatAsRemot
 
 **Files:**
 - Create: `android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/SettingsScreen.kt`
-- Modify: `android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ChatRoot.kt`, `ChatScreen.kt`, `ChatParts.kt`, `res/values/strings.xml`, `res/values-es/strings.xml`
+- Modify: `android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ChatRoot.kt`, `ChatScreen.kt`, `ChatParts.kt`, `android/app/src/main/kotlin/tech/hybriq/adbuddy/ChatBubbleActivity.kt`, `res/values/strings.xml`, `res/values-es/strings.xml`
 
 **Interfaces:**
 - Consumes: `ProtectedAppsScreen` (Tarea 11), `NotificationAccessScreen`, `stateTitle(effective)` (Tarea 12), `NotificationAccess.effective`, `NotificationConsent` (Tarea 7), `Route`, `OnboardingStep`, `Onboarding`, `RemoteUi.treatAsRemote` (Tarea 10), `RemoteCard` (M5b).
-- Produces: `SettingsScreen(app, state, onOpen: (Route) -> Unit, onBack, onMessage)`, `SettingsContent(protectedCount, protectedConfirmed, access: Effective, onOpen, onBack, remoteCard)` sin estado (la fila del acceso marca en rojo "desconocido" y "permitido sin confirmar"); `ChatActions.openSettings`; el parámetro `onSettings` de `ChatHeader`.
+- Produces: `ChatRoot(app, focusConfirm, closed, firstRun: Boolean = true, onClose)` (con `firstRun = false` no hay onboarding: lo pone `ChatBubbleActivity`, que no abre pantallas de consentimiento; `MainActivity`, que llama sin `firstRun`, no cambia); `SettingsScreen(app, state, onOpen: (Route) -> Unit, onBack, onMessage)`, `SettingsContent(protectedCount, protectedConfirmed, access: Effective, onOpen, onBack, remoteCard)` sin estado (la fila del acceso marca en rojo "desconocido" y "permitido sin confirmar"); `ChatActions.openSettings`; el parámetro `onSettings` de `ChatHeader`.
 
-- [ ] **Step 1: Implementar.** (`ChatRoot.kt` está en CRLF en el árbol de trabajo aunque `.gitattributes` pide LF: si Edit no encuentra el texto, primero `sed -i 's/
-$//' android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ChatRoot.kt`; git lo normaliza igual.)
+- [ ] **Step 1: Implementar.**
 
 **Crear `android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/SettingsScreen.kt`:**
 
@@ -4579,12 +4837,12 @@ import tech.hybriq.adbuddy.files.DownloadState
 import tech.hybriq.adbuddy.files.FileIntents
 
 /**
- * The app's screens: the first-run steps until they are done, then the chat, the activity panel and
- * Settings (with the protected apps and the notification access under it), and the red questions over
- * all of them.
+ * The app's screens: the first-run steps until they are done (only when firstRun: the chat bubble passes
+ * false and never shows them), then the chat, the activity panel and Settings (with the protected apps and
+ * the notification access under it), and the red questions over all of them.
  */
 @Composable
-fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, onClose: (String) -> Unit) {
+fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, onClose: (String) -> Unit) {
     val context = LocalContext.current
 ```
 
@@ -4607,7 +4865,7 @@ por
         .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context.contentResolver))
     val snackbar = remember { SnackbarHostState() }
     val onboarding = remember(context) { Onboarding.of(context) }
-    var step by rememberSaveable { mutableStateOf<OnboardingStep?>(if (onboarding.done()) null else OnboardingStep.PROTECTED_APPS) }
+    var step by rememberSaveable { mutableStateOf<OnboardingStep?>(OnboardingStep.initial(firstRun, onboarding.done())) }
     var route by rememberSaveable { mutableStateOf(Route.CHAT) }
     val attachFailed = stringResource(R.string.attach_failed)
     val cutFailed = stringResource(R.string.cut_failed)
@@ -4653,7 +4911,7 @@ por
         BackHandler { showActivity = false }
         ActivityScreen(state, onBack = { showActivity = false })
     } else {
-        ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions) {
+        ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now) {
             RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
         }
     }
@@ -4684,7 +4942,7 @@ por
         }
     } else {
         when (route) {
-            Route.CHAT -> ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions) {
+            Route.CHAT -> ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now) {
                 RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
             }
             Route.ACTIVITY -> {
@@ -4700,6 +4958,30 @@ por
         }
     }
     // After both screens, so a question shows wherever the person is.
+```
+
+**Editar `android/app/src/main/kotlin/tech/hybriq/adbuddy/ChatBubbleActivity.kt`:** (cambio 1 de 2) reemplazar
+
+```kotlin
+/** The chat inside a bubble (Bubbles API, spec M3 section 7.4). Opens no consent screen: that is MainActivity's. */
+```
+
+por
+
+```kotlin
+/** The chat inside a bubble (Bubbles API, spec M3 section 7.4). Opens no consent screen nor first-run steps: those are MainActivity's. */
+```
+
+**Editar `android/app/src/main/kotlin/tech/hybriq/adbuddy/ChatBubbleActivity.kt`:** (cambio 2 de 2) reemplazar
+
+```kotlin
+        setContent { AdbuddyTheme { ChatRoot(app, focusConfirm = null, closed = closed, onClose = { closed = closed + it }) } }
+```
+
+por
+
+```kotlin
+        setContent { AdbuddyTheme { ChatRoot(app, focusConfirm = null, closed = closed, firstRun = false, onClose = { closed = closed + it }) } }
 ```
 
 **Editar `android/app/src/main/res/values/strings.xml`:** (EN) reemplazar
@@ -4741,13 +5023,13 @@ cd android && gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 - [ ] **Step 3: Commit.**
 
 ```bash
-git add android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/SettingsScreen.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ChatRoot.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ChatScreen.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ChatParts.kt android/app/src/main/res/values/strings.xml android/app/src/main/res/values-es/strings.xml
+git add android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/SettingsScreen.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/ChatBubbleActivity.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ChatRoot.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ChatScreen.kt android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/ChatParts.kt android/app/src/main/res/values/strings.xml android/app/src/main/res/values-es/strings.xml
 git commit -m "$(cat <<'EOF'
 feat(app): Ajustes y onboarding de apps protegidas y acceso a notificaciones
 
 Pantalla de Ajustes con las dos pantallas nuevas y el modo remoto, dos pasos
-de onboarding tras el consentimiento y la navegación dentro de ChatRoot.
-remoteMode pasa a RemoteUi.treatAsRemote.
+de onboarding tras el consentimiento y la navegación dentro de ChatRoot (la
+burbuja no muestra el onboarding). remoteMode pasa a RemoteUi.treatAsRemote.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
@@ -4763,7 +5045,7 @@ EOF
 
 **Interfaces:** ninguna.
 
-- [ ] **Step 1: `pendientes-m3-m5.md`** (anclas de una sola línea: el fichero puede estar en CRLF). Marcar lo hecho:
+- [ ] **Step 1: `pendientes-m3-m5.md`** (anclas de una sola línea: este fichero está en CRLF en el árbol de trabajo). Marcar lo hecho:
 
 **Editar `docs/superpowers/plans/pendientes-m3-m5.md`:** (cambio 1 de 5) reemplazar
 
@@ -4907,6 +5189,7 @@ Solo con el móvil del usuario (Pixel 9 Pro XL, Android 17) y su permiso explíc
 29. **Estabilidad del listener** con la app en segundo plano, tras `kill` del proceso y tras reiniciar el móvil: sigue enlazado (la pantalla vuelve a "Permitido") sin abrir ADBuddy a mano; `AgentNotificationListener.current` es `null` mientras no lo está y `adbuddy notifications` lo dice en vez de colgarse.
 30. **Perfil de trabajo y contenido sensible (I2, minor a):** con un perfil de trabajo (o un segundo usuario), una notificación de ese perfil sale vacía en `adbuddy notifications`; una que el usuario oculta de la pantalla de bloqueo (ajuste del canal) sale vacía; en Android 15+, ¿hay algún camino público para el contenido sensible que detecta el sistema (`Ranking.hasSensitiveContent` no es público en el SDK 37)? Si no, las apps con códigos siguen cubiertas por la lista y por `VISIBILITY_SECRET`.
 31. **Reenviadores (límite honesto de la spec §3.5):** con KDE Connect, un acompañante de reloj o un historial de notificaciones instalado, ¿reenvía notificaciones de una app protegida con su propio paquete? Si sí, el contenido sale con el paquete del reenviador: documentarlo en el README y decidir si se protege a los reenviadores conocidos.
+32. **Revocar el acceso borra la marca aunque nadie mire (re-revisión, hallazgo 1):** (a) con la app viva (ADBuddy en segundo plano, listener enlazado): confirmar en la app, revocar el acceso en los ajustes del sistema y, **sin abrir ADBuddy ni pedir `adbuddy notifications`**, volver a permitirlo; la pantalla dice "Permitido en el sistema, sin confirmar aquí" y `adbuddy notifications` da `UI_UNAVAILABLE` con "confirm it in the ADBuddy app" (el listener borró la marca al desconectarse). (b) Con la app muerta (proceso matado, listener sin enlazar): confirmar, matar el proceso, revocar y volver a permitir sin abrir la app: ¿el sistema arranca el proceso y llama a `onListenerDisconnected`/`onDestroy` antes de la nueva conexión? Si la marca sobrevive (el sistema no arranca el proceso para desvincular), es el riesgo aceptado del ruling 15; el arreglo barato es borrarla también en `onListenerConnected`, a costa de un toque tras cada reenlace del listener (reinicio del móvil, actualización de la app).
 
 ## Autorrevisión del plan
 
@@ -4925,6 +5208,18 @@ Solo con el móvil del usuario (Pixel 9 Pro XL, Android 17) y su permiso explíc
 | Minor (e): `canSave` | Tarea 9: `ProtectedAppsUi.canSave(loaded, onboarding, dirty, confirmed)` con test; la usa la pantalla (Tarea 11). |
 | Minor (f): reenviadores de notificaciones | Spec §3.5 (Tarea 1), validación 31 y `pendientes` (Tarea 14). |
 | Minor (g): `key` sin recortar | Se deja como está (acotada por `MaxUIResult`); dicho en el ruling 4. |
+
+### Correcciones de la re-revisión Opus (tras corregir y rebasar sobre M4, ya incorporadas)
+
+| Hallazgo | Dónde está resuelto |
+|---|---|
+| 1 (Important): revocar solo borraba la marca si alguien miraba; el agente podía revocar y reactivar con `adbuddy tap` | Ruling 15 y Tareas 7 y 12: `AgentNotificationListener.onListenerDisconnected()` y `onDestroy()` llaman a `NotificationGate.onUnbound { NotificationConsent.of(this).revoke() }` (función pura con test con `FakePrefs`; un test de fuente exige la llamada en los dos métodos; el listener sigue sin `SharedPreferences` y solo sobreescribe su ciclo de vida). T12 es 🔒 (único sitio que pone la marca). Validación 32 (app viva y app muerta); el riesgo con la app muerta queda aceptado y escrito en el ruling 15. |
+| 2 (Important): `sensitive()` fallaba abierto | Ruling 4 y Tarea 6: `Sensitivity.of(rankingKnown, lockscreenOverride, channelVisibility)`, pura, con `SensitivityTest` (sin `Ranking` conocido, o sin la clave: secreta). |
+| 3 (Important): ancla de T13 rota por M4 | Tarea 13, cambio 5 de 5: la llamada real es `ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now) {` (comprobado contra `ChatRoot.kt` de `main` 0a22518; el texto "reemplazar" es único). |
+| 4 (Important): la burbuja montaría el onboarding | Ruling 16 y Tareas 10 y 13: `ChatRoot(..., firstRun: Boolean = true, ...)`, `OnboardingStep.initial(firstRun, done)` con test, y `ChatBubbleActivity` pasa `firstRun = false`; `MainActivity` no cambia. |
+| 5 (Minor): textos con base vieja y nota de CRLF | `main` 0a22518 en la cabecera y en las Global Constraints; fuera la nota de CRLF y el `sed` de `ChatRoot.kt` (en LF). `pendientes-m3-m5.md` **sí** está en CRLF en este árbol (`core.autocrlf=true`, sin atributo `eol`), y su nota se queda (anclas de una línea). |
+| 6 (Minor): `proposeWithReceivers`, escáner de I1, `with(consent) { confirm() }` | Tarea 9: receptores antes del `take` (con test con `MAX_PROTECTED_APPS` heurísticas). Tarea 6: el escáner trata como código lo de dentro de `${…}` (con test), y un test exige que `AgentNotificationListener.read`/`::read` solo aparezca en `UiHelpers.kt` fuera de `listener/` y que no haya alias de importación. El esquive de `nothingButTheButtonSetsTheMark` se documenta como riesgo aceptado (ruling 15, Tarea 7, "Riesgos abiertos"). |
+| 7: repetir la réplica acumulada sobre `main` 0a22518 | Ver "Réplica acumulada tarea a tarea". |
 
 ### Cobertura frente al handoff y la spec
 
@@ -4957,12 +5252,18 @@ Solo con el móvil del usuario (Pixel 9 Pro XL, Android 17) y su permiso explíc
 
 ### Réplica acumulada tarea a tarea
 
-Tras las correcciones de la revisión Opus se volvió a aplicar este documento tal cual (un script lee los bloques `Crear` y `Editar`, y ejecuta cada bloque `expect=fail|pass`, comprobando que falla o pasa como dice el plan) sobre una copia limpia de `main` f9f4422, tarea a tarea y en orden. Entorno: Windows 11, Go 1.27.0, Gradle 9.8.0 y JDK 17. Resultado: **22 ejecuciones, todas como se esperaba, a la primera.**
+Tras las correcciones de la revisión Opus y las de la re-revisión (sobre `main` 0a22518, con M4 dentro) se volvió a aplicar este documento tal cual, **desde cero y tarea a tarea**: un script (`replay.py`, en la carpeta temporal de la sesión, nunca en el repo) lee los bloques `Crear` y `Editar` en orden (cada texto "reemplazar" debe aparecer **una sola vez** en su fichero), ejecuta cada bloque `expect=fail|pass` comprobando que falla o pasa como dice el plan, y ejecuta los bloques `git add`/`git commit` en un repositorio desechable. La copia sale de `git archive HEAD` de la rama `m5c` (0a22518 más el plan). Entorno: Windows 11, Go 1.27.0, Gradle 9.8.0 (`--offline`) y JDK 17; sin `-race` (que lo corra la CI).
 
-- **Tareas 2-10 (con tests):** cada una **falla** con sus tests antes de implementar (error de compilación o test rojo) y **pasa** después (Go: `go vet`, `gofmt -l` y `go test` del paquete; Kotlin: `:app:testDebugUnitTest` con la suite completa y `:app:assembleDebug`, y `:app:lintDebug` en las tareas 6, 7 y 9). Las tareas 7 y 8 se intercambiaron respecto a la primera versión (la puerta de lectura necesita el estado del acceso, y el ejecutor la puerta), y cada una sigue compilando y pasando sola.
-- **Tareas 11-13 (Compose, sin test JVM):** `:app:testDebugUnitTest :app:assembleDebug :app:lintDebug` pasan, sin avisos de lint nuevos (quedan solo `InlinedApi` en `Overlay.kt` y `home_title` sin uso).
-- **Tarea 14:** la suite completa del host (`go build`, `go vet`, `gofmt -l`, `go test ./...`) y la de la app pasan (`TestAgentInterrupt`, intermitente bajo carga, no falló esta vez).
-- **Tarea 1 y ediciones de la 14 (documentos):** cada texto "reemplazar" aparece una sola vez en su fichero, también en los `.md` y en `ChatRoot.kt`, que están en CRLF en el árbol de trabajo.
+**Resultado real:** la primera pasada de esta ronda **encontró un fallo en el propio plan** (la Tarea 7 pedía en un test de fuente `NotificationGate.onUnbound(` y el listener lo llama con lambda, `NotificationGate.onUnbound { … }`: el test fallaba con la suite completa); se corrigió el plan (el test busca ahora la llamada con lambda y el `revoke()` dentro) y se repitió **desde cero**: **22 ejecuciones, todas como se esperaba** (9 `expect=fail` que fallan y 13 `expect=pass` que pasan), los 14 commits del plan aplicados con el trailer exacto `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`, y ningún "reemplazar" ambiguo ni ausente (incluido el de `ChatRoot.kt`, ya contra `ChatScreen(…, actions, app.chat, app.clock::now) {` de M4).
+
+- **Tareas 2-4 (host):** `go vet`, `gofmt -l` y `go test -count=1 -timeout 5m` de `./internal/daemon` (T2), `./internal/cli` (T3) y de los dos (T4): fallan antes de implementar y pasan después.
+- **Tareas 5-10 (app, con tests):** cada una **falla** con sus tests antes de implementar (error de compilación o test rojo) y **pasa** después (`:app:testDebugUnitTest` con la suite completa y `:app:assembleDebug`, y `:app:lintDebug` en las tareas 6, 7 y 9). Las tareas 7 y 8 se intercambiaron respecto a la primera versión (la puerta de lectura necesita el estado del acceso, y el ejecutor la puerta), y cada una sigue compilando y pasando sola; el listener (T6) no usa nada de la T7 hasta que la T7 lo toca.
+- **Tareas 11-13 (Compose, sin test JVM):** `:app:testDebugUnitTest :app:assembleDebug :app:lintDebug` pasan, con `ChatBubbleActivity` compilando con `firstRun = false`.
+- **Tarea 14:** `cd host && go build ./... && go vet ./... && gofmt -l . && go test -count=1 -timeout 5m ./...` y la suite de la app pasan (`TestAgentInterrupt` no falló esta vez).
+- **Estado final de la app** (con `gradle --offline --rerun-tasks :app:testDebugUnitTest :app:assembleDebug :app:lintDebug` sobre el árbol resultante: 51 tareas ejecutadas, ninguna en caché): **504 tests, 0 fallos, 0 errores, `BUILD SUCCESSFUL`**.
+- **Lint:** 0 errores y 4 avisos, **todos de antes de M5c**: `InlinedApi` ×2 en `Overlay.kt:84`, `MissingQuantity` de `values-es/strings.xml:90` (el plural de M4) y `UnusedResources` de `home_title`. Sobre `main` 0a22518 sin tocar salen 6: los mismos cuatro más dos `UseKtx` de `ProtectedApps.kt` que la Tarea 9 arregla al usar `edit { }`. M5c no añade ninguno.
+- **Los nuevos tests vigilan lo que dicen:** se estropeó a mano el código ya aplicado y cada test falló: quitar la llamada de `onDestroy` (`theListenerClearsTheUsersMarkWhenTheSystemUnbindsIt`), una llamada escondida en `"${…}"` en otro fichero (`nothingInTheAppActsOnNotificationsOrReadsThemOutsideTheListener`), un segundo lector de `AgentNotificationListener::read` (`onlyTheWiringOfTheHelpersReadsThroughTheListener`), `Sensitivity.of` abierto sin `Ranking` (`SensitivityTest`), receptores después del `take` (`theReceiversSurviveWhenTheHeuristicFillsTheList`) y `OnboardingStep.initial` sin `firstRun` (`theBubbleNeverShowsTheOnboarding`).
+- **Tarea 1 y ediciones de la 14 (documentos):** cada texto "reemplazar" aparece una sola vez en su fichero. Los ficheros de `android/` y la spec están en LF en este árbol; solo `pendientes-m3-m5.md` está en CRLF (`core.autocrlf=true`), por eso sus anclas son de una sola línea.
 
 ### Riesgos abiertos para el revisor Opus
 
@@ -4970,16 +5271,18 @@ Tras las correcciones de la revisión Opus se volvió a aplicar este documento t
 - **Código de Compose sin probar en un móvil** (T11-T13): compila, pasa `lintDebug` y tiene vistas previas, pero nada se ha visto en pantalla; lo que sí tiene test JVM es toda la lógica (`ProtectedAppsUi`, `NotificationAccess`, `NotificationGate`, `Route`/`OnboardingStep`, `treatAsRemote`). Validación 27.
 - **Fuente del acceso en Android 17** (validación 23): si ni la API ni el ajuste se pudieran leer, la pantalla diría siempre "Desconocido" y `notifications` daría `unavailable` (falla cerrado, nunca "Permitido").
 - **La confirmación es una marca en preferencias privadas de la app:** solo la pone su botón y un test de fuente lo vigila, pero un proceso con acceso a las preferencias de ADBuddy (root) la podría poner; fuera de alcance, como el resto de datos de la app.
+- **La marca de confirmación con la app muerta** (ruling 15, validación 32): el listener la borra al desconectarse y al destruirse, pero si el proceso está muerto el sistema no lo arranca para desvincular, y la marca sobrevive hasta que la puerta o la pantalla ven el acceso retirado. Arreglo barato si ocurre: borrarla también en `onListenerConnected` (un toque tras cada reenlace).
+- **`nothingButTheButtonSetsTheMark` se esquiva con `with(consent) { confirm() }`** (busca `.confirm()` y `::confirm`): riesgo aceptado, lo mira la revisión Opus de la Tarea 12.
 - **`MessagingStyle` sin `EXTRA_TEXT`** sale con texto vacío (validación 26); un `Bundle` o un `Ranking` ilegible sale secreto, no omitido.
 - **Reenviadores de notificaciones** (acompañantes de reloj, KDE Connect): sacan contenido de apps protegidas con su propio paquete; límite documentado (validación 31).
 - **`ListenerIsReadOnlyTest` es un test de fuente:** vigila por texto (con un escáner de comentarios y cadenas); un rodeo ingenioso lo salta, así que la revisión Opus mira el servicio a mano, sobre todo si añade métodos.
 - **`Telephony.Sms.getDefaultSmsPackage`** bajo la visibilidad de paquetes de Android 11+: si devolviera `null`, solo se proponen los cinco paquetes fijos.
 - **Google Play services protegido por defecto** (`com.google.android.gms`): sus notificaciones salen vacías y, si algún día aparece en primer plano, la guarda bloquea; se puede desmarcar en la pantalla.
-- **Avisos de `lintDebug` que quedan:** solo los de antes de M5c (`InlinedApi` en `Overlay.kt`, `home_title` sin uso); M5c no añade ninguno.
+- **Avisos de `lintDebug` que quedan:** solo los de antes de M5c (`InlinedApi` ×2 en `Overlay.kt`, `MissingQuantity` del plural de M4 en `values-es` y `home_title` sin uso); M5c no añade ninguno y quita los dos `UseKtx` de `ProtectedApps.kt`.
 
 ### Decisiones y dudas para el supervisor (adbuddy-e5)
 
 - **El protocolo no cambia:** no hay nada que pedir a e5 sobre `protocol/`.
 - **Para M6a:** ¿el `setup` debe ofrecer `cmd notification allow_listener`? Hoy lo concede solo el usuario, y la lectura exige además su confirmación en la app (rulings 13 y 15).
 - **Para el dueño de `AGENTS.md` (skimmer-32):** el texto de `adbuddy notifications` y el cambio de "is a protected app" (Tarea 14, `pendientes`).
-- **Ledger y proceso:** revisión del plan por `adbuddy-reviewer-opus` (hecha una vez; esta es la versión corregida); tareas 🔒 (2, 5, 6, 7, 8, 9) con revisor Opus; el resto con `adbuddy-reviewer`.
+- **Ledger y proceso:** revisión del plan por `adbuddy-reviewer-opus` (hecha una vez; esta es la versión corregida); tareas 🔒 (2, 5, 6, 7, 8, 9, 12) con revisor Opus; el resto con `adbuddy-reviewer`.
