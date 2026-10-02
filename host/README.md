@@ -89,7 +89,7 @@ It fails if the phone says a program or an option does not exist, and it refuses
 cd host && go test -timeout 15m -count=1 ./internal/emutest
 ```
 
-Without `ADBUDDY_EMULATOR_SERIAL` the tests skip; they refuse a serial that is not `emulator-*` and an `ANDROID_ADB_SERVER_PORT` that is unset or adb's default 5037. They uninstall what they installed. The `emulator` workflow runs them after the app's instrumented tests.
+Without `ADBUDDY_EMULATOR_SERIAL` the tests skip; they refuse a serial that is not `emulator-*` and an `ANDROID_ADB_SERVER_PORT` that is unset or adb's default 5037. `TestInstrumentedSuite` also runs the app's instrumented tests (`TokenProviderTest`, `AdbWifiObserverTest`, `LocalesTest`) with `am instrument`, and fails on any failure, skipped test or missing class. They uninstall what they installed. The `emulator` workflow runs them.
 
 ### Claude Code with a real agent
 
