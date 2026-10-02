@@ -131,4 +131,23 @@
     <string name="remote_disable_confirm">Turn off</string>
     <string name="remote_failed">Could not change remote mode</string>
     <string name="listener_label">ADBuddy notification reader</string>
+    <string name="step_progress">Step %1$d of %2$d</string>
+    <string name="onboarding_skip">Not now</string>
+    <string name="onboarding_done">Done</string>
+    <string name="settings_protected_confirmed">Protected apps: %1$d</string>
+    <string name="protected_title">Protected apps</string>
+    <string name="protected_intro">Choose the apps the agent must never read or touch: banking, payments, passwords, 2FA and the apps that receive your codes. ADBuddy itself is always protected.</string>
+    <string name="protected_proposal">This list is a proposal made by name. Review it and confirm it: once you do, ADBuddy never changes it by itself.</string>
+    <string name="protected_search">Search apps</string>
+    <string name="protected_loading">Loading your apps…</string>
+    <string name="protected_empty">No app matches.</string>
+    <string name="protected_reason_codes">Receives your login codes</string>
+    <string name="protected_reason_guess">Looks like banking, payments or passwords</string>
+    <string name="protected_confirm">Confirm the list</string>
+    <string name="protected_save">Save</string>
+    <string name="protected_discard_title">Discard your changes?</string>
+    <string name="protected_discard_body">The list was not saved.</string>
+    <string name="protected_discard_confirm">Discard</string>
+    <string name="protected_saved_sent">Sent to the PC.</string>
+    <string name="protected_saved_later">Saved. The PC gets it when it connects.</string>
 </resources>

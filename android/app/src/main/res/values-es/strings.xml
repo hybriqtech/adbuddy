@@ -129,4 +129,23 @@
     <string name="remote_disable_confirm">Desactivar</string>
     <string name="remote_failed">No se pudo cambiar el modo remoto</string>
     <string name="listener_label">Lector de notificaciones de ADBuddy</string>
+    <string name="step_progress">Paso %1$d de %2$d</string>
+    <string name="onboarding_skip">Ahora no</string>
+    <string name="onboarding_done">Listo</string>
+    <string name="settings_protected_confirmed">Apps protegidas: %1$d</string>
+    <string name="protected_title">Apps protegidas</string>
+    <string name="protected_intro">Elige las apps que el agente nunca debe leer ni tocar: banca, pagos, contraseñas, 2FA y las apps que reciben tus códigos. ADBuddy siempre está protegida.</string>
+    <string name="protected_proposal">Esta lista es una propuesta hecha por nombre. Revísala y confírmala: cuando lo hagas, ADBuddy nunca la cambia por su cuenta.</string>
+    <string name="protected_search">Buscar apps</string>
+    <string name="protected_loading">Cargando tus apps…</string>
+    <string name="protected_empty">Ninguna app coincide.</string>
+    <string name="protected_reason_codes">Recibe tus códigos de acceso</string>
+    <string name="protected_reason_guess">Parece de banca, pagos o contraseñas</string>
+    <string name="protected_confirm">Confirmar la lista</string>
+    <string name="protected_save">Guardar</string>
+    <string name="protected_discard_title">¿Descartar los cambios?</string>
+    <string name="protected_discard_body">La lista no se ha guardado.</string>
+    <string name="protected_discard_confirm">Descartar</string>
+    <string name="protected_saved_sent">Enviado al PC.</string>
+    <string name="protected_saved_later">Guardado. El PC la recibirá cuando se conecte.</string>
 </resources>
