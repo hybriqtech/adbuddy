@@ -339,7 +339,7 @@ Exit codes:
 "err.serve.adb_not_configured" = "ADBuddy's adb is not installed"
 "err.serve.adb_not_configured.fix" = "Run `adbuddy setup` (or pass --adb <path to adb 37 or newer>)."
 "err.serve.workspace_failed.fix" = "Pass --workspace with an absolute path."
-"err.serve.device_not_found" = "the phone did not show up, and its saved address did not work (%[1]s: %[2]s)"
+"err.serve.device_not_found" = "the phone did not show up, and none of its saved addresses worked (tried %[1]s; last error seen: %[2]s)"
 "err.serve.device_not_found.fix" = "The port changes each time wireless debugging is turned on: %[3]s"
 "err.serve.device_not_found_2" = "no phone in state `device` on adb server port %[1]s"
 "err.serve.device_not_found_2.fix" = "Turn on wireless debugging on the phone and keep it on the same Wi-Fi as this PC; if it was never paired, run `adbuddy setup`; on another network (e.g. Tailscale), run `adbuddy connect <ip:port>`."

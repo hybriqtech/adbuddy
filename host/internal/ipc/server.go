@@ -164,9 +164,18 @@ func (w frameWriter) Write(p []byte) (int, error) {
 // ErrClosed.
 type Handler func(ctx context.Context, req Request, c *Conn) Exit
 
+// maxPreauth bounds the connections that have not authenticated yet: each
+// may keep the server reading a request (up to MaxFrame) for 5 seconds. One
+// over it is closed at once. A process of the same user can use up the quota
+// (a local denial of service, bounded to 5 s per connection; not a privilege
+// boundary), and the connection over it is closed: it fails closed.
+const maxPreauth = 32
+
 // Server accepts requests on the daemon socket.
 type Server struct {
 	ln      net.Listener
+	lock    *os.File      // held until Close (lockPath)
+	preauth chan struct{} // a slot per connection that has not authenticated yet
 	secret  string
 	handler Handler
 	ctx     context.Context
@@ -190,27 +199,43 @@ func Listen(dataDir, secret string, h Handler) (*Server, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
+	// One daemon per data directory, for as long as it serves: two serve that
+	// start at once could otherwise both find a dead socket and the second
+	// remove the first one's live socket (Stat, Dial and Remove are not one
+	// step).
+	lock, err := tryLock(lockPath(dataDir))
+	if errors.Is(err, errLocked) {
+		return nil, ErrAlreadyRunning
+	}
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (*Server, error) {
+		lock.Close()
+		return nil, err
+	}
 	if _, err := os.Stat(path); err == nil {
+		// A daemon of an older version holds no lock, but it answers.
 		if c, err := net.DialTimeout("unix", path, 500*time.Millisecond); err == nil {
 			c.Close()
-			return nil, ErrAlreadyRunning
+			return fail(ErrAlreadyRunning)
 		}
 		if err := os.Remove(path); err != nil {
-			return nil, err
+			return fail(err)
 		}
 	}
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	if runtime.GOOS != "windows" {
 		if err := os.Chmod(path, 0o600); err != nil {
 			ln.Close()
-			return nil, err
+			return fail(err)
 		}
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
-	return &Server{ln: ln, secret: secret, handler: h, ctx: ctx, cancel: cancel}, nil
+	return &Server{ln: ln, lock: lock, preauth: make(chan struct{}, maxPreauth), secret: secret, handler: h, ctx: ctx, cancel: cancel}, nil
 }
 
 // Serve accepts connections until Close.
@@ -223,9 +248,16 @@ func (s *Server) Serve() error {
 			}
 			return err
 		}
+		select {
+		case s.preauth <- struct{}{}: // handle gives it back once authenticated or gone
+		default:
+			nc.Close() // too many connections waiting to authenticate
+			continue
+		}
 		s.mu.Lock()
 		if s.closed {
 			s.mu.Unlock()
+			<-s.preauth
 			nc.Close()
 			return nil
 		}
@@ -246,6 +278,8 @@ func (s *Server) Close() error {
 	s.cancel(ErrClosed)
 	err := s.ln.Close()
 	s.wg.Wait()
+	// Released after the socket is gone: the next daemon finds none alive.
+	_ = s.lock.Close()
 	return err
 }
 
@@ -263,6 +297,8 @@ func (s *Server) handle(nc net.Conn) {
 			peer.release()
 		}
 	}()
+	release := sync.OnceFunc(func() { <-s.preauth }) // the slot Serve took for it
+	defer release()
 	_ = nc.SetReadDeadline(time.Now().Add(5 * time.Second))
 	typ, payload, err := ReadFrame(nc)
 	if err != nil || typ != FrameRequest {
@@ -274,10 +310,13 @@ func (s *Server) handle(nc net.Conn) {
 	}
 	c = &Conn{nc: nc, resize: make(chan [2]int, 4), peer: peer}
 	if subtle.ConstantTimeCompare([]byte(req.Secret), []byte(s.secret)) != 1 {
+		// Refused: it keeps its slot (the deferred release) while finish
+		// waits up to 2 s for the client to close, so refusals stay bounded.
 		writeExit(c, Exit{Code: 1, Error: "unauthorized"})
 		finish(nc, nil)
 		return
 	}
+	release() // authenticated: it no longer waits
 	_ = nc.SetReadDeadline(time.Time{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()

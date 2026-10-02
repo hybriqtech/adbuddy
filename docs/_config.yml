@@ -10,3 +10,4 @@ exclude:
   - spikes
   - pre-public-checklist.md
   - releasing.md
+  - ci-self-hosted.md

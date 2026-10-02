@@ -121,4 +121,63 @@ class TerminalFeedTest {
         ch.emit(Protocol.TERMINAL_SIZE, """{"epoch":"e1","offset":5,"cols":100,"rows":30}""")
         assertEquals(listOf("Reset", "Resize"), got.map { it::class.simpleName })
     }
+
+    /**
+     * V43: a bubble over a visible activity is a second view on top. When it goes, the view under it draws again
+     * (from memory, without asking the host) and the stream goes on: no unwatch, so the terminal does not freeze.
+     */
+    @Test fun whenTheBubbleGoesTheViewUnderItDrawsAgain() {
+        val under = mutableListOf<TermEffect>()
+        val activity = TermSink { under += it }
+        val bubble = TermSink { got += it }
+        feed.attach(activity)
+        snapshot(5)
+        feed.attach(bubble)
+        ch.emit(Protocol.TERMINAL_OUTPUT, """{"epoch":"e1","offset":5,"data":"${b64("ab")}"}""")
+        assertEquals("only the view on top draws", listOf("Reset"), under.map { it::class.simpleName })
+        under.clear()
+        feed.detach(bubble)
+        assertEquals("the stream goes on", 0, types().count { it == Protocol.TERMINAL_UNWATCH })
+        assertEquals("the view under it is redrawn from memory", listOf("Reset", "Write"), under.map { it::class.simpleName })
+        under.clear()
+        ch.emit(Protocol.TERMINAL_OUTPUT, """{"epoch":"e1","offset":7,"data":"${b64("c")}"}""")
+        assertEquals(listOf("Write"), under.map { it::class.simpleName })
+        assertEquals("the bubble no longer draws", 2, got.size)
+    }
+
+    /** V43: the stream stops only when the last view goes, in whatever order they go. */
+    @Test fun theLastViewToGoUnwatches() {
+        val a = TermSink { }
+        val b = TermSink { }
+        feed.attach(a)
+        feed.attach(b)
+        feed.detach(b)
+        feed.detach(a)
+        assertEquals(1, types().count { it == Protocol.TERMINAL_UNWATCH })
+        feed.attach(a)
+        feed.attach(a) // the same view twice is one view
+        feed.detach(a)
+        assertEquals(2, types().count { it == Protocol.TERMINAL_UNWATCH })
+        feed.detach(a) // a view that is not attached cannot unwatch again
+        assertEquals(2, types().count { it == Protocol.TERMINAL_UNWATCH })
+    }
+
+    /** When the model cannot redraw (too much output under the bubble), the view under it asks the host for a screen. */
+    @Test fun aViewUnderTheBubbleAsksForTheScreenWhenTheModelCannotRedraw() {
+        val under = mutableListOf<TermEffect>()
+        val activity = TermSink { under += it }
+        val bubble = TermSink { got += it }
+        feed.attach(activity)
+        snapshot(5)
+        feed.attach(bubble)
+        val big = "x".repeat(TerminalModel.MAX_TAIL + 1)
+        ch.emit(Protocol.TERMINAL_OUTPUT, """{"epoch":"e1","offset":5,"data":"${b64(big)}"}""")
+        val watches = types().count { it == Protocol.TERMINAL_WATCH }
+        feed.detach(bubble)
+        assertEquals("a new watch asks for the snapshot", watches + 1, types().count { it == Protocol.TERMINAL_WATCH })
+        assertEquals("the stream goes on", 0, types().count { it == Protocol.TERMINAL_UNWATCH })
+        under.clear()
+        snapshot(5 + big.length.toLong())
+        assertEquals("the view under it is not left mute", "Reset", under.first()::class.simpleName)
+    }
 }

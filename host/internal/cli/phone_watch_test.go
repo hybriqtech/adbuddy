@@ -414,3 +414,23 @@ func TestWatchPhoneCancelEndsAHungConnect(t *testing.T) {
 		t.Fatalf("serial %q", active.Serial())
 	}
 }
+
+// V38: a look at `adb devices` that hangs is cut at TryWait, so the watcher
+// does not stop for good inside one step (adb failing says nothing about the
+// phone: nothing changes).
+func TestWatchPhoneAHungDevicesIsCut(t *testing.T) {
+	hang := testutil.FakeRule{Match: "^devices$", SleepMs: 20000}
+	r := newRig(t, hang)
+	active := newActivePhone(adb.Runner{Path: r.runner.Path, Serial: phoneSerial})
+	w := newWatcher(phoneWatch{Active: active, Runner: r.runner, Serial: phoneSerial,
+		Cfg: func() config.Config { return tsConfig() }, RemoteOn: func() bool { return false }, Log: &bytes.Buffer{},
+		Every: time.Millisecond, Misses: 1, TryWait: 500 * time.Millisecond})
+	start := time.Now()
+	w.step(context.Background())
+	if d := time.Since(start); d > 10*time.Second {
+		t.Fatalf("one step took %v", d)
+	}
+	if active.Serial() != phoneSerial || w.count != 0 {
+		t.Fatalf("serial %q count %d", active.Serial(), w.count)
+	}
+}

@@ -18,12 +18,19 @@ fun interface TermSink { fun apply(e: TermEffect) }
  * One per process: the model survives a rotation, so the new view is redrawn
  * from memory. It watches only while a view is attached (the host sends
  * nothing else), and Channel's listeners run on OkHttp's reader thread: the
- * sink must hand over to the main thread by itself.
+ * sink must hand over to the main thread by itself. The last view to arrive wins: if the main activity stops
+ * and starts again with the bubble open, the bubble stays undrawn until the main one detaches.
  */
 class TerminalFeed(private val channel: Channel) {
     private val lock = Any()
     private val model = TerminalModel()
-    private var sink: TermSink? = null
+
+    /**
+     * The views attached, the newest last; only that one draws. A bubble over the activity attaches on top of the
+     * activity's view, and when it goes the view under it draws again. Guarded by lock.
+     */
+    private val sinks = ArrayList<TermSink>()
+    private val sink: TermSink? get() = sinks.lastOrNull()
     private var resyncing = false
 
     init {
@@ -53,10 +60,11 @@ class TerminalFeed(private val channel: Channel) {
         watch?.let(::sendWatch)
     }
 
-    /** The view appeared: redraw from memory and watch. */
+    /** The view appeared: it goes on top, is redrawn from memory, and watches. */
     fun attach(sink: TermSink) {
         val watch = synchronized(lock) {
-            this.sink = sink
+            sinks.removeAll { it === sink }
+            sinks.add(sink)
             resyncing = false
             model.replay().forEach { sink.apply(it) }
             model.watch()
@@ -65,12 +73,31 @@ class TerminalFeed(private val channel: Channel) {
     }
 
     /**
-     * The view left: stop the stream. Only the view that is attached can: with a bubble over the activity the new
-     * view attaches before the old one detaches, and the old one must not take the new one's stream away.
+     * The view left. The stream stops only with the last view: with a bubble over the activity the new view
+     * attaches before the old one detaches, and the old one must not take the new one's stream away. When the view
+     * on top goes, the one under it draws again from memory; the stream goes on, so no watch is needed.
      */
     fun detach(sink: TermSink) {
-        val was = synchronized(lock) { if (this.sink === sink) { this.sink = null; true } else false }
-        if (was) channel.send(Protocol.TERMINAL_UNWATCH, Protocol.json.encodeToJsonElement(Empty.serializer(), Empty))
+        var unwatch = false
+        val watch = synchronized(lock) {
+            val wasOnTop = this.sink === sink
+            if (!sinks.removeAll { it === sink }) return
+            val under = this.sink
+            unwatch = under == null
+            if (under != null && wasOnTop) {
+                val fx = model.replay()
+                if (fx.isEmpty()) {
+                    // Not replayable (too much output while the view on top was there): ask the host for a screen.
+                    resyncing = false
+                    model.watch()
+                } else {
+                    fx.forEach { under.apply(it) }
+                    null
+                }
+            } else null
+        }
+        if (unwatch) channel.send(Protocol.TERMINAL_UNWATCH, Protocol.json.encodeToJsonElement(Empty.serializer(), Empty))
+        if (watch != null) sendWatch(watch)
     }
 
     /** The channel is back (or gone): a view on screen watches again, from what it has. */

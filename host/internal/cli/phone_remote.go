@@ -262,11 +262,14 @@ func (r *remoteLink) run(j remoteJob) {
 	}
 	now := r.refresh()
 	if j.reply != nil {
-		j.reply <- remoteResult{state: st, err: err}
-		// The app is told what the host has, as after a remote.set.
+		// The app is told what the host has, as after a remote.set, before
+		// the CLI gets its answer: whoever sees the answer finds the app
+		// already notified. The reply channel is buffered, so this order
+		// cannot block.
 		if !errors.Is(err, remote.ErrNoTailscale) {
 			r.publish(now)
 		}
+		j.reply <- remoteResult{state: st, err: err}
 		return
 	}
 	switch {

@@ -51,11 +51,20 @@ func (d *Daemon) guard(ctx context.Context, res classify.Result, args []string) 
 			return aloneReason
 		}
 		// am start and monkey may name the app they open, as a component,
-		// a package or inside an intent URI.
+		// a package or inside an intent URI, and %-encoded: Android decodes
+		// %XX in a URI's host and in an intent URI's values. Every decoding
+		// is looked at, and anything that cannot be in a package name splits
+		// it (/, ;, =, ?, @, %…).
 		for _, w := range f.Words[1:] {
-			for _, tok := range strings.FieldsFunc(w, func(r rune) bool { return strings.ContainsRune("/;=:#,{} \t", r) }) {
-				if d.protected(tok) {
-					return protectedReason(tok)
+			forms, ok := decodings(w)
+			if !ok {
+				return encodedReason
+			}
+			for _, form := range forms {
+				for _, tok := range strings.FieldsFunc(form, notInPackageName) {
+					if d.protected(tok) {
+						return protectedReason(tok)
+					}
 				}
 			}
 		}
@@ -71,6 +80,73 @@ func (d *Daemon) guard(ctx context.Context, res classify.Result, args []string) 
 		return aloneReason
 	}
 	return d.guardForeground(ctx, res.Findings[0].Words)
+}
+
+// encodedReason is why a word %-encoded more than maxDecodings times blocks:
+// the app it opens cannot be told.
+const encodedReason = "the app this command opens is hidden under too many layers of %-encoding; ADBuddy does not open an app without knowing which"
+
+// maxDecodings is how many times decodings undoes the %-encoding of a word.
+const maxDecodings = 4
+
+// decodings returns w and each of its successive %-decodings (percentDecode),
+// up to maxDecodings of them. ok is false when w still changes after that
+// many: what it would end up naming is not known.
+func decodings(w string) (forms []string, ok bool) {
+	forms = []string{w}
+	cur := w
+	for range maxDecodings {
+		next := percentDecode(cur)
+		if next == cur {
+			return forms, true
+		}
+		forms = append(forms, next)
+		cur = next
+	}
+	return forms, percentDecode(cur) == cur
+}
+
+// percentDecode turns each %XX (two hex digits, in either case) into its
+// byte and leaves any other % as it is. Android's Uri.decode turns a
+// malformed escape into U+FFFD (it consumes the next character and adds a
+// control byte), which no package name has either. Ours differs there, but it
+// does not matter: the % splits the token (notInPackageName), and Android
+// does not split a name at U+FFFD.
+func percentDecode(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) && isHex(s[i+1]) && isHex(s[i+2]) {
+			b.WriteByte(unhex(s[i+1])<<4 | unhex(s[i+2]))
+			i += 2
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func isHex(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
+}
+
+// unhex is the value of the hex digit c (isHex(c)).
+func unhex(c byte) byte {
+	switch {
+	case c <= '9':
+		return c - '0'
+	case c <= 'F':
+		return c - 'A' + 10
+	}
+	return c - 'a' + 10
+}
+
+// notInPackageName reports whether r cannot be in an Android package name
+// (ASCII letters, digits, _ and .).
+func notInPackageName(r rune) bool {
+	return !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '_' || r == '.')
 }
 
 // runsUnwrapped reports whether the shell text of args starts with the

@@ -424,6 +424,69 @@ func TestGuardBlocksOpeningAProtectedApp(t *testing.T) {
 	}
 }
 
+// V11: the name of the app may come %-encoded (Android decodes %XX in a
+// URI's host and in an intent URI's values), with hex digits in either case,
+// encoded more than once, or after a character that cannot be in a package
+// name (?, @): every decoding is looked at, and that character splits it.
+func TestGuardBlocksOpeningAProtectedAppEncoded(t *testing.T) {
+	e := newEnv(t)
+	e.withApp("com.example.bank")
+	const named, layers = "is a protected app", "too many layers of %-encoding"
+	for _, c := range []struct {
+		name string
+		argv []string
+		want string // "" = it runs
+	}{
+		{"encoded dots", []string{"shell", "am", "start", "-d", "android-app://com%2Eexample%2Ebank"}, named},
+		{"lower-case hex", []string{"shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "android-app://com%2eexample%2ebank/https/example.com"}, named},
+		{"every letter encoded", []string{"shell", "am", "start", "-d", "android-app://%63%6F%6D%2E%65%78%61%6D%70%6C%65%2E%62%61%6E%6B"}, named},
+		{"encoded twice", []string{"shell", "am", "start", "-d", "android-app://com%252Eexample%252Ebank"}, named},
+		{"encoded slashes", []string{"shell", "am", "start", "-d", "android-app:%2F%2Fcom.example.bank"}, named},
+		{"encoded scheme", []string{"shell", "am", "start", "-d", "android-app%3A%2F%2Fcom.example.bank"}, named},
+		{"query", []string{"shell", "am", "start", "-d", "android-app://com.example.bank?x=1"}, named},
+		{"user info", []string{"shell", "am", "start", "-d", "android-app://u@com.example.bank"}, named},
+		{"intent URI", []string{"shell", "am start 'intent:#Intent;package=com%2Eexample%2Ebank;end'"}, named},
+		{"ADBuddy", []string{"shell", "am", "start", "-d", "android-app://tech%2Ehybriq%2Eadbuddy"}, named},
+		{"a cut % after the name", []string{"shell", "am", "start", "-d", "android-app://com.example.bank%2"}, named},
+		{"five layers", []string{"shell", "am", "start", "-d", "android-app://com%252525252Eexample%252525252Ebank"}, layers},
+		{"malformed % is not a name", []string{"shell", "am", "start", "-d", "android-app://com%2Eexample%ZZbank"}, ""},
+		{"another app", []string{"shell", "am", "start", "-d", "android-app://com%2Eandroid%2Esettings"}, ""},
+	} {
+		s, exit := e.exec(t, c.argv...)
+		if c.want == "" {
+			if exit.Code != 0 {
+				t.Errorf("%s: blocked: %+v %q", c.name, exit, s.errOut.String())
+			}
+			continue
+		}
+		if exit.Code != 126 || !strings.Contains(s.errOut.String(), c.want) {
+			t.Errorf("%s: %q: %+v %q", c.name, c.argv, exit, s.errOut.String())
+		}
+	}
+}
+
+func TestPercentDecodings(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want []string
+		ok   bool
+	}{
+		{"plain", []string{"plain"}, true},
+		{"a%2Eb", []string{"a%2Eb", "a.b"}, true},
+		{"a%2eb", []string{"a%2eb", "a.b"}, true},
+		{"a%252Eb", []string{"a%252Eb", "a%2Eb", "a.b"}, true},
+		{"a%2525252Eb", []string{"a%2525252Eb", "a%25252Eb", "a%252Eb", "a%2Eb", "a.b"}, true},
+		{"a%ZZb%2", []string{"a%ZZb%2"}, true},
+		{"%", []string{"%"}, true},
+		{"a%25252525252Eb", nil, false},
+	} {
+		got, ok := decodings(c.in)
+		if ok != c.ok || ok && !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%q: %q %v, want %q %v", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}
+
 func TestGuardFailsClosed(t *testing.T) {
 	e := newEnv(t)
 	a := e.withApp()

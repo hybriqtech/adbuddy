@@ -12,6 +12,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n/i18ntest"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
@@ -223,6 +224,32 @@ func TestServeSavedAddressGone(t *testing.T) {
 	code, errOut, _, _ = serveOnce(t, remoteRules("ZZZZ9999"), cfg)
 	if code != ExitTransient || !strings.Contains(errOut, wrongPhoneWarning) || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, "adbuddy connect <new ip:port>") {
 		t.Fatalf("other phone: exit %d stderr %q", code, errOut)
+	}
+}
+
+// V38: with several saved addresses, the error says that none worked, which
+// ones were tried, and that the error shown is the last one (not the error
+// of every address). For a person it is in their language (M6c catalog).
+func TestServeSavedAddressesGoneSaysWhichWereTried(t *testing.T) {
+	shortWaits(t)
+	cfg := config.Default()
+	cfg.Serial, cfg.Address = phoneSerial, lanAddr
+	cfg.TailscaleIP, cfg.TailscalePort = "100.64.0.5", 41234
+	rules := []testutil.FakeRule{
+		{Match: "^connect ", Stdout: "failed to connect: Connection refused\n"},
+		{Match: "^devices$", Stdout: phoneGone},
+		{Match: "^mdns services$", Stdout: "List of discovered mdns services\n"},
+	}
+	code, errOut, _, _ := serveOnce(t, rules, cfg)
+	want := "none of its saved addresses worked (tried " + lanAddr + ", " + tsAddr + "; last error seen: "
+	if code != ExitTransient || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, want) {
+		t.Fatalf("exit %d stderr %q", code, errOut)
+	}
+	i18ntest.Lang(t, i18n.ES)
+	code, errOut, _, _ = serveOnce(t, rules, cfg)
+	wantES := "no funcionó ninguna de sus direcciones guardadas (probadas: " + lanAddr + ", " + tsAddr + "; último error visto: "
+	if code != ExitTransient || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, wantES) {
+		t.Fatalf("Spanish: exit %d stderr %q", code, errOut)
 	}
 }
 
