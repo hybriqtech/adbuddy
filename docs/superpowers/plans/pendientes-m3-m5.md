@@ -366,3 +366,9 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
   - Flake: `session.TestResumeFallsBackToANewConversation` (visto dos veces con carga, antes de tocar `ipc`), junto a `TestRemoteOnClientGoneWhileAsking`; mismo género que V37.
   - Validaciones en dispositivo 36 a 41 de este plan (`%XX` en `android-app://`, "off" sin cortar la conexión, burbuja sobre la terminal, badge en el chat, dos `serve` a la vez): ya están en "Validaciones manuales pendientes" del plan, no se repiten aquí.
   - `remote.Reconcile` y el camino de fallo de `Enable` siguen con `port != Port` y, con una caducidad guardada y otro puerto abierto (p. ej. 7777), borran la caducidad sin `adb usb` (visto en la revisión final; el arranque de `serve` probablemente lo cierra con `EnsureNoTCPPort`: por comprobar). Fuera del diff de esta rama.
+
+## V46 · Apps protegidas en vivo (plan `docs/superpowers/plans/2026-10-02-adbuddy-v46.md`)
+
+- **V46 ACEPTABLE (sin bug):** el cambio de apps protegidas se refleja en vivo; límite: con el canal caído el host conserva la lista anterior hasta el welcome (documentado en `safety.md` y en el aviso de la app). Tests de no-regresión en `cli` (`TestUILinkSecondListReplacesLive`, `TestProtectedChangeReachesTheGuardLive`).
+- **DEFER (menor):** carrera entre `srv.Current(m)` y `setProtected` en `uiLink.onDeviceInfo`: un hilo lector de una conexión vieja puede escribir su lista después de la de la nueva (ventana de microsegundos; exige un cambio de lista a través de una reconexión).
+- **DEFER (menor):** `writeProtected` fuera del mutex: el fichero y la memoria pueden quedar en orden distinto. Arreglo si se quiere (para ambos): un mutex que cubra comprobación, asignación y escritura, o una generación de conexión comparada en `setProtected`.
