@@ -64,7 +64,7 @@ rules:
   - {id: sys.ps, cmd: ps, level: green, anyArgs: true, title: {en: "List processes", es: "Listar procesos"}}
   - {id: sys.top, cmd: top, level: green, anyArgs: true, title: {en: "Show process activity", es: "Mostrar la actividad de los procesos"}}
   - {id: sys.pidof, cmd: pidof, level: green, anyArgs: true, title: {en: "Find a process: {args}", es: "Buscar un proceso: {args}"}}
-  - {id: sys.pgrep, cmd: pgrep, level: green, anyArgs: true, title: {en: "Find a process: {args}", es: "Buscar un proceso: {args}"}}
+  - {id: sys.pgrep, cmd: pgrep, level: green, anyArgs: true, check: pgrep, title: {en: "Find a process: {args}", es: "Buscar un proceso: {args}"}}
   - {id: sys.free, cmd: free, level: green, anyArgs: true, title: {en: "Show memory use", es: "Mostrar el uso de memoria"}}
   - {id: sys.vmstat, cmd: vmstat, level: green, anyArgs: true, title: {en: "Show memory statistics", es: "Mostrar estadísticas de memoria"}}
   - {id: sys.nproc, cmd: nproc, level: green, title: {en: "Count processors", es: "Contar procesadores"}}
@@ -75,7 +75,7 @@ rules:
   - {id: net.ip, cmd: ip, level: green, anyArgs: true, check: ip, title: {en: "Show network state: {args}", es: "Mostrar el estado de la red: {args}"}}
   - {id: net.ifconfig, cmd: ifconfig, level: green, check: ifconfig, title: {en: "Show network interfaces", es: "Mostrar las interfaces de red"}}
   - {id: net.netstat, cmd: netstat, level: green, anyArgs: true, title: {en: "Show network connections", es: "Mostrar las conexiones de red"}}
-  - {id: net.ss, cmd: ss, level: green, anyArgs: true, title: {en: "Show network connections", es: "Mostrar las conexiones de red"}}
+  - {id: net.ss, cmd: ss, level: green, anyArgs: true, check: ss, title: {en: "Show network connections", es: "Mostrar las conexiones de red"}}
   - {id: net.ping, cmd: ping, level: green, anyArgs: true, title: {en: "Ping {args}", es: "Hacer ping a {args}"}}
   - {id: android.dumpsys, cmd: dumpsys, level: green, anyArgs: true, check: dumpsys, title: {en: "Read system state: {args}", es: "Leer el estado del sistema: {args}"}}
   - {id: android.logcat, cmd: logcat, level: green, anyArgs: true, check: logcat, title: {en: "Read the phone's logs", es: "Leer los registros del móvil"}}

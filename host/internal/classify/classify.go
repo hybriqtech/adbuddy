@@ -1,11 +1,9 @@
 package classify
 
 import (
-	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -147,6 +145,14 @@ func (c *Classifier) classifyAdb(argv []string) []Finding {
 		return c.classifyShellCommand(argv[1:], true)
 	case argv[0] == "exec-out":
 		return c.classifyExecOut(argv[1:])
+	case argv[0] == "exec-in":
+		// adb pipes the agent's stdin into the command: decided before the
+		// rules, so a user rule cannot lower it.
+		return []Finding{unanalysable("shell.stdin", reason("exec-in: the command reads what comes through stdin, which is not analysed"), argv, textStdinCmd)}
+	case argv[0] == "abb_exec" || argv[0] == "abb":
+		// exec-in for a system service: adb hands it the agent's stdin (adb
+		// install streams the APK this way). Before the rules, like exec-in.
+		return []Finding{unanalysable("shell.stdin", reason("abb_exec and abb: the system service reads what comes through stdin, which is not analysed"), argv, textStdinCmd)}
 	case strings.HasPrefix(argv[0], "wait-for-") && len(argv) > 1:
 		// adb runs the rest of the line once the device is there.
 		return append([]Finding{c.evalRule("adb", lits(argv[:1]))}, c.classifyAdb(argv[1:])...)
@@ -163,16 +169,23 @@ func (c *Classifier) classifyAdb(argv []string) []Finding {
 // first argument as is and every other one single-quoted (adb's escape_arg).
 func (c *Classifier) classifyExecOut(args []string) []Finding {
 	if len(args) == 0 {
-		return []Finding{redFinding("shell.interactive", reason("exec-out without a command"), args, textInteractive)}
+		return []Finding{interactive(args)}
 	}
 	line := args[0]
 	for _, a := range args[1:] {
 		line += " " + adbEscapeArg(a)
 	}
 	if strings.TrimSpace(line) == "" {
-		return []Finding{redFinding("shell.interactive", reason("exec-out without a command"), args, textInteractive)}
+		return []Finding{interactive(args)}
 	}
 	return c.classifyScript(line, scope{})
+}
+
+// interactive is adb shell or exec-out without a command: the commands come
+// through the agent's stdin, which the daemon forwards and nobody sees. Allowed
+// for the session, it would allow whatever comes next (A4-1): it is special.
+func interactive(args []string) Finding {
+	return unanalysable("shell.interactive", reason("the commands come through stdin and are not analysed"), args, textInteractive)
 }
 
 // adbEscapeArg quotes like adb's escape_arg: always single quotes, with each
@@ -193,7 +206,9 @@ func (c *Classifier) classifyShellCommand(args []string, options bool) []Finding
 		case "-e":
 			i += 2
 		default:
-			return []Finding{redFinding("shell.option", reason("unknown adb shell option {arg}", "arg", args[i]), args, textUnknown)}
+			// adb reads its options with getopt (-nt, --): what runs, maybe
+			// an interactive shell, is not known.
+			return []Finding{unanalysable("shell.option", reason("unknown adb shell option {arg}", "arg", args[i]), args, textUnknown)}
 		}
 	}
 	if i > len(args) {
@@ -201,7 +216,7 @@ func (c *Classifier) classifyShellCommand(args []string, options bool) []Finding
 	}
 	line := strings.Join(args[i:], " ")
 	if strings.TrimSpace(line) == "" {
-		return []Finding{redFinding("shell.interactive", reason("interactive shell: the commands would come from stdin"), args, textInteractive)}
+		return []Finding{interactive(args)}
 	}
 	return c.classifyScript(line, scope{})
 }
@@ -308,9 +323,12 @@ func values(ws []Word) []string {
 	return out
 }
 
-// display shortens a command for titles.
+// display shortens a command, or one of its words, for titles: escaped,
+// runs of blanks of any mix compacted (compact: padding cannot push the rest
+// out of the title) and cut to 80 runes. The whole command is in the question's raw
+// command.
 func display(ws []string) string {
-	s := Printable(strings.Join(ws, " "))
+	s := compact(strings.Join(ws, " "), func(b *strings.Builder, r rune) { b.WriteString(Printable(string(r))) })
 	if utf8.RuneCountInString(s) > 80 {
 		r := []rune(s)
 		s = string(r[:79]) + "…"
@@ -318,9 +336,10 @@ func display(ws []string) string {
 	return s
 }
 
-// Printable escapes what could hide or rewrite text on a terminal: control
-// characters (ANSI sequences start with one), DEL, bidirectional overrides
-// and zero-width characters. Everything the agent chose that a person will
+// Printable escapes what could hide or rewrite text on a terminal (hidden):
+// control characters (ANSI sequences start with one), DEL, bidirectional
+// overrides, zero-width characters, spaces other than U+0020, fillers and
+// combining marks. Everything the agent chose that a person will
 // read (titles, the raw command, the journal view) goes through it.
 func Printable(s string) string {
 	var b strings.Builder
@@ -332,8 +351,8 @@ func Printable(s string) string {
 			b.WriteString(`\r`)
 		case r == '\t':
 			b.WriteString(`\t`)
-		case unicode.IsControl(r), unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp), r == utf8.RuneError:
-			fmt.Fprintf(&b, `\u%04x`, r)
+		case hidden(r):
+			escape(&b, r)
 		default:
 			b.WriteRune(r)
 		}
@@ -348,7 +367,7 @@ func baseVars(ws []Word) map[string]string {
 		vars["args"] = display(vals[1:])
 	}
 	for i, v := range vals {
-		vars[strconv.Itoa(i)] = Printable(v)
+		vars[strconv.Itoa(i)] = display([]string{v}) // A4-3: no endless title nor detail line
 	}
 	return vars
 }
@@ -357,6 +376,7 @@ var (
 	textUnknown      = Text{EN: "Run a command ADBuddy does not recognise: {cmd}", ES: "Ejecutar un comando que ADBuddy no reconoce: {cmd}"}
 	textDynamic      = Text{EN: "Run a command whose arguments are only known on the phone: {cmd}", ES: "Ejecutar un comando cuyos argumentos solo se conocen en el móvil: {cmd}"}
 	textInteractive  = Text{EN: "Open an interactive shell on the phone", ES: "Abrir una shell interactiva en el móvil"}
+	textStdinCmd     = Text{EN: "Run a command that reads what comes through stdin: {cmd}", ES: "Ejecutar un comando que lee lo que llega por la entrada estándar: {cmd}"}
 	textScript       = Text{EN: "Run a script on the phone: {cmd}", ES: "Ejecutar un script en el móvil: {cmd}"}
 	textParse        = Text{EN: "Run shell code ADBuddy cannot analyse: {cmd}", ES: "Ejecutar código de shell que ADBuddy no puede analizar: {cmd}"}
 	textRedirect     = Text{EN: "Write to a file on the phone: {cmd}", ES: "Escribir en un fichero del móvil: {cmd}"}
@@ -441,7 +461,7 @@ func (c *Classifier) evalWith(rs ruleSet, scope string, ws []Word) Finding {
 			f.Level, f.Reason = res.level, res.reason
 		}
 		for k, v := range res.vars {
-			vars[k] = Printable(v)
+			vars[k] = display([]string{v})
 		}
 		if res.op != nil && f.Level != Red {
 			f.Op = res.op

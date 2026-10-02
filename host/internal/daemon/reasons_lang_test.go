@@ -55,10 +55,14 @@ func TestTheQuestionDecidesTheSameInEnglishAndSpanish(t *testing.T) {
 		notInES string // English that must not be in the Spanish detail
 		keyed   bool   // a question of a rule has a key; one that depends on state has none
 	}{
-		{name: "a reason of a rule", argv: []string{"shell", "sed", "-i", "s/a/b/", "/sdcard/x"},
-			en: "sed -i edits files in place", es: "sed -i modifica los ficheros directamente", notInES: "edits files in place", keyed: true},
-		{name: "a reason with a value", argv: []string{"shell", "sed", "-Q", "s/a/b/", "/sdcard/x"},
-			en: "unknown sed option -Q", es: "opción de sed desconocida: -Q", notInES: "unknown sed option", keyed: true},
+		// Not sed: it may run what comes through stdin (its e command), so it
+		// has no key whatever the rule says (classify.StdinDecides, H1).
+		{name: "a reason of a rule", argv: []string{"shell", "mv", "a", "b"},
+			en: "mv with relative paths", es: "mv con rutas relativas", notInES: "relative paths", keyed: true},
+		{name: "a reason with a value", argv: []string{"shell", "settings", "put", "frob", "k", "v"},
+			en: "unknown settings namespace frob", es: "espacio de nombres de settings desconocido: frob", notInES: "unknown settings namespace", keyed: true},
+		{name: "a reason of a rule, sed", argv: []string{"shell", "sed", "-i", "s/a/b/", "/sdcard/x"},
+			en: "sed -i edits files in place", es: "sed -i modifica los ficheros directamente", notInES: "edits files in place"},
 		{name: "the PC folder of adb pull", cwd: outside, argv: []string{"pull", "/sdcard/Download/x", "run.txt"},
 			en: "writes outside the agent environment: " + outside, es: "escribe fuera del entorno del agente: " + outside, notInES: "writes outside"},
 		{name: "the state of the phone", argv: []string{"shell", "pm", "uninstall", "--user", "0", "com.user"},

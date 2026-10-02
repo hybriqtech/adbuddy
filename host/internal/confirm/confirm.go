@@ -29,6 +29,10 @@ type Request struct {
 	ExpiresAt  time.Time
 	Special    bool   // may cut the connection or affect ADBuddy
 	Key        string // the rule and the exact arguments: what "allow during the session" covers
+	// Stdin: what the command does may come from its stdin (an interactive
+	// shell, exec-in, a shell or xargs reading it…), which the key does not
+	// cover and nobody sees. Never allowed for the session (classify.StdinDecides).
+	Stdin bool
 }
 
 // Decision is the answer.
