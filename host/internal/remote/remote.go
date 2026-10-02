@@ -189,10 +189,17 @@ func (c *Controller) Disable(ctx context.Context) (State, error) {
 }
 
 // disable runs `adb usb` and clears the expiry. When clearing failed after
-// `adb usb` closed the port, the next call for the same expiry only clears it
-// (closedFor): each `adb usb` restarts adbd and the phone's connection.
+// `adb usb` closed the port, the next call for the same expiry skips `adb usb`
+// (closedFor: each one restarts adbd and the phone's connection) only if the
+// port reads as closed: someone may have reopened 5555 meanwhile, and an
+// unreadable port is not known to be closed.
 func (c *Controller) disable(ctx context.Context) (State, error) {
 	until := c.st.Until()
+	if !c.closedFor.IsZero() && until.Equal(c.closedFor) {
+		if port, err := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); err != nil || port == Port {
+			c.closedFor = time.Time{}
+		}
+	}
 	if c.closedFor.IsZero() || !until.Equal(c.closedFor) {
 		if _, err := c.adbCmd(ctx, "usb"); err != nil {
 			return c.State(), err

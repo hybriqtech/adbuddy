@@ -495,14 +495,14 @@ func TestExpireAfterAFailedSaveDoesNotRunUsbAgain(t *testing.T) {
 	if s, changed, err := c.Expire(context.Background()); err == nil || changed || !s.Enabled || !s.Closing {
 		t.Fatalf("second: %+v %v %v", s, changed, err)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb usb" {
+	if got := strings.Join(e.events, "|"); got != "adb usb|adb "+getprop {
 		t.Fatalf("events %q: adb usb ran again", got)
 	}
 	e.saveFail = false
 	if s, changed, err := c.Expire(context.Background()); err != nil || !changed || s != (State{}) {
 		t.Fatalf("third: %+v %v %v", s, changed, err)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
+	if got := strings.Join(e.events, "|"); got != "adb usb|adb "+getprop+"|adb "+getprop+"|save zero" {
 		t.Fatalf("events %q", got)
 	}
 	// A failed save again, then a new expiry: its port is closed with adb usb.
@@ -552,5 +552,41 @@ func TestEnableForgetsTheExpiryItsPortWasClosedFor(t *testing.T) {
 	}
 	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
 		t.Fatalf("events %q: the port was not closed again", got)
+	}
+}
+
+// V38 (review): after `adb usb` closed the port and clearing the expiry
+// failed, someone may have reopened 5555 before the next attempt. The retry
+// reads the port (it does not restart adbd) and skips `adb usb` only when the
+// read works and is not 5555; unreadable or 5555 runs `adb usb` again.
+func TestRetryAfterAFailedSaveLooksAtThePortBeforeSkippingUsb(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		port      string
+		portFails bool
+		want      string
+	}{
+		{"closed", "", false, "adb " + getprop + "|save zero"},
+		{"zero", "0", false, "adb " + getprop + "|save zero"},
+		{"another port", "37123", false, "adb " + getprop + "|save zero"},
+		{"reopened", "5555", false, "adb " + getprop + "|adb usb|save zero"},
+		{"unreadable", "", true, "adb " + getprop + "|adb usb|save zero"},
+	} {
+		e := newEnv()
+		e.until = t0.Add(time.Hour)
+		e.now = t0.Add(2 * time.Hour)
+		e.saveFail = true
+		ctl := e.controller()
+		if _, _, err := ctl.Expire(context.Background()); err == nil {
+			t.Fatalf("%s: the save did not fail", c.name)
+		}
+		e.saveFail, e.events = false, nil
+		e.port, e.portFails = c.port, c.portFails
+		if s, changed, err := ctl.Expire(context.Background()); err != nil || !changed || s != (State{}) {
+			t.Fatalf("%s: %+v %v %v", c.name, s, changed, err)
+		}
+		if got := strings.Join(e.events, "|"); got != c.want {
+			t.Fatalf("%s: events %q, want %q", c.name, got, c.want)
+		}
 	}
 }
