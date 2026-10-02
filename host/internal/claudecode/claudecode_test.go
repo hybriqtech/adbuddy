@@ -752,8 +752,8 @@ func TestValidTranscript(t *testing.T) {
 }
 
 // V24 with symbolic links (the junctions are in paths_windows_test.go): a
-// linked directory under projects/ is refused, also when it appears after the
-// check; a linked projects/ is followed.
+// directory under projects/ linked out of it is refused, also when it appears
+// after the check; a linked projects/ is followed.
 func TestTranscriptLinksUnderAndAboveProjects(t *testing.T) {
 	out := t.TempDir()
 	write(t, filepath.Join(out, "s.jsonl"), os.O_TRUNC, textLine("u9", "m9", "secreto"))

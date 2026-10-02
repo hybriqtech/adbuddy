@@ -47,9 +47,8 @@ func (t Transcript) String() string { return filepath.Join(t.dir, t.rel) }
 // ValidTranscript checks a transcript_path that came in a hook payload,
 // which a process that is not to be trusted can write (spec M4 §4.1): it must
 // be absolute, end in .jsonl, lie under <configDir>/projects and be a regular
-// file (not a link) reached with no link under that directory: a link or
-// junction strictly under projects/ is refused, wherever it points; one in
-// the path of projects/ itself is followed. The file may not exist yet, nor
+// file (not a link): under projects/, a junction, or a link that leads out
+// of projects/, is refused; one in the path of projects/ itself is followed. The file may not exist yet, nor
 // projects/ (Claude Code makes it with its first write).
 func ValidTranscript(path, configDir string) (Transcript, error) {
 	if !filepath.IsAbs(path) || !strings.EqualFold(filepath.Ext(path), ".jsonl") {

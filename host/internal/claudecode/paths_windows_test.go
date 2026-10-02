@@ -99,8 +99,8 @@ func TestTailerRefusesAJunctionThatAppearsLater(t *testing.T) {
 	}
 }
 
-// The restriction of V24: only what lies strictly under projects/ must be no
-// link. A user who moved .claude or projects/ to another disk with a junction
+// The restriction of V24: only what lies strictly under projects/ is checked
+// for links. A user who moved .claude or projects/ to another disk with a junction
 // keeps the chat.
 func TestValidTranscriptFollowsALinkedConfigOrProjectsDir(t *testing.T) {
 	elsewhere := t.TempDir()
