@@ -60,3 +60,60 @@ Task 2a (no-emulator part): complete — commits 0e00a8a, fbb4351 (guard moved t
 
 Task 3a (no-emulator part): complete — commit 6e711dc. Pending for emulator window: steps 5,6 of Tarea 3.
 Pending overall: T1 spike retry (after puffin PR #27 in main, ADBUDDY_EMU_GPU=swangle_indirect), T2 steps 2,3,4,6,7, T3 steps 5,6, T4 (variant by spike), T5 (emulator.yml after puffin changes), T6 docs.
+
+## Spike (Tarea 1), reintento tras PR #27 de puffin (2026-10-02, implementador opus)
+
+Base: rama en e7ab4f3 (contiene 2f3d650 y a154ec9: `scripts/emulator.sh` exporta ADB_MDNS=0/ADB_MDNS_AUTO_CONNECT=0, aborta si su servidor ve otro dispositivo, lee ADBUDDY_EMU_GPU con `swiftshader_indirect` por defecto). HEAD..origin/main vacío. Emulador 37.2.12, AVD adbuddy-dev (ya existía), emulator-5600, servidor adb 5060.
+Condiciones de arranque: RAM libre 15.5 GB; qemu de la CI (`-avd adbuddy-ci-api37 -port 5590`, job en curso en main y otro en cola) presente y sin tocar (ruling del supervisor: coexistir); ningún qemu con `-port 5600`. Antes de cada orden, `adb -P 5060 devices` comprobado: solo `emulator-5600` (nunca apareció otro dispositivo).
+
+### S1 con la GPU por defecto del script (swiftshader_indirect): mismo bucle
+
+Arranque 19:10:21 → `sys.boot_completed=1` y env impreso 19:10:51 (30 s). `ro.build.version.release=17`, sdk 37, `ro.hardware=ranchu`, `ro.hardware.egl=emulation`.
+
+```
+$ EMU; "$ADB" -s "$S" shell 'a=$(pidof system_server); f=$(pidof surfaceflinger); sleep 120; echo "system_server $a -> $(pidof system_server)"; echo "surfaceflinger $f -> $(pidof surfaceflinger)"; logcat -d -b crash | grep -c -i surfaceflinger'
+system_server 2470 -> 19243
+surfaceflinger 2378 -> 19163
+96
+```
+
+No sirve. Líneas de surfaceflinger del buffer `crash` (`logcat -d -b crash | grep -i -E "surfaceflinger|Abort message|mapper" | tail -30`, recortadas las rutas largas de los marcos #06-#10):
+
+```
+10-02 19:12:39.373 F DEBUG   : pid: 15588, ppid: 1, tid: 15635, name: RegionSampling  >>> /system/bin/surfaceflinger <<<
+10-02 19:12:39.373 F DEBUG   : Abort message: 'Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma'
+10-02 19:12:39.377 F DEBUG   :       #03 pc 0000000000005adf  /vendor/lib64/hw/mapper.ranchu.so ((anonymous namespace)::GoldfishMapper::readFromHost(cb_handle_t const&) const+543)
+10-02 19:12:39.377 F DEBUG   :       #04 pc 00000000000055b0  /vendor/lib64/hw/mapper.ranchu.so (GoldfishMapper::GoldfishMapper()::lambda::__invoke+704)
+10-02 19:12:39.377 F DEBUG   :       #05 pc 00000000000498cf  /system/lib64/libui.so (android::Gralloc5Mapper::lock(...)+63)
+10-02 19:12:39.377 F DEBUG   :       #06 pc 00000000000338d6  /system/lib64/libui.so (android::GraphicBufferMapper::lock(...)+198)
+10-02 19:12:39.377 F DEBUG   :       #09 pc 000000000042059b  /system/bin/surfaceflinger (android::RegionSamplingThread::threadMain()+2571)
+10-02 19:12:39.377 F DEBUG   :       #10 pc 00000000004c9727  /system/bin/surfaceflinger (std::__thread_proxy<... RegionSamplingThread ...>+39)
+10-02 19:12:46.802 F libc    : Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE) in tid 16896 (RegionSampling), pid 16870 (surfaceflinger)
+10-02 19:12:47.116 F DEBUG   : Executable: /system/bin/surfaceflinger
+10-02 19:12:47.116 F DEBUG   : Cmdline: /system/bin/surfaceflinger
+10-02 19:12:47.116 F DEBUG   : pid: 16870, ppid: 1, tid: 16896, name: RegionSampling  >>> /system/bin/surfaceflinger <<<
+10-02 19:12:47.116 F DEBUG   : Abort message: 'Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma'
+10-02 19:12:47.116 F DEBUG   :       #03 pc 0000000000005adf  /vendor/lib64/hw/mapper.ranchu.so (GoldfishMapper::readFromHost(cb_handle_t const&) const+543)
+10-02 19:12:47.116 F DEBUG   :       #04 pc 00000000000055b0  /vendor/lib64/hw/mapper.ranchu.so (GoldfishMapper::GoldfishMapper()::lambda::__invoke+704)
+10-02 19:12:47.116 F DEBUG   :       #05 pc 00000000000498cf  /system/lib64/libui.so (android::Gralloc5Mapper::lock(...)+63)
+10-02 19:12:47.116 F DEBUG   :       #06 pc 00000000000338d6  /system/lib64/libui.so (android::GraphicBufferMapper::lock(...)+198)
+10-02 19:12:47.116 F DEBUG   :       #09 pc 000000000042059b  /system/bin/surfaceflinger (android::RegionSamplingThread::threadMain()+2571)
+10-02 19:12:47.116 F DEBUG   :       #10 pc 00000000004c9727  /system/bin/surfaceflinger (std::__thread_proxy<... RegionSamplingThread ...>+39)
+10-02 19:12:54.790 F libc    : Fatal signal 6 (SIGABRT), code -1 (SI_QUEUE) in tid 17936 (RegionSampling), pid 17887 (surfaceflinger)
+10-02 19:12:55.427 F DEBUG   : Executable: /system/bin/surfaceflinger
+10-02 19:12:55.427 F DEBUG   : Cmdline: /system/bin/surfaceflinger
+10-02 19:12:55.427 F DEBUG   : pid: 17887, ppid: 1, tid: 17936, name: RegionSampling  >>> /system/bin/surfaceflinger <<<
+10-02 19:12:55.427 F DEBUG   : Abort message: 'Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma'
+10-02 19:12:55.427 F DEBUG   :       #03 pc 0000000000005adf  /vendor/lib64/hw/mapper.ranchu.so (GoldfishMapper::readFromHost(cb_handle_t const&) const+543)
+10-02 19:12:55.427 F DEBUG   :       #04 pc 00000000000055b0  /vendor/lib64/hw/mapper.ranchu.so (GoldfishMapper::GoldfishMapper()::lambda::__invoke+704)
+10-02 19:12:55.427 F DEBUG   :       #05 pc 00000000000498cf  /system/lib64/libui.so (android::Gralloc5Mapper::lock(...)+63)
+10-02 19:12:55.427 F DEBUG   :       #06 pc 00000000000338d6  /system/lib64/libui.so (android::GraphicBufferMapper::lock(...)+198)
+10-02 19:12:55.427 F DEBUG   :       #09 pc 000000000042059b  /system/bin/surfaceflinger (android::RegionSamplingThread::threadMain()+2571)
+10-02 19:12:55.427 F DEBUG   :       #10 pc 00000000004c9727  /system/bin/surfaceflinger (std::__thread_proxy<... RegionSamplingThread ...>+39)
+```
+
+Mismo aborto que en el primer intento (cada ~8 s). La RAM libre bajó a 6.37 GB durante la medida (los dos emuladores, el mío en bucle): parado al momento, 19:13:06 (`scripts/emulator.sh stop`, rc 0). Tras el stop: ningún qemu/emulator con `-port 5600`; solo el vigilante `emulator -kill <pid> -sleep 20` (sale solo) y el emulador de la CI (`-port 5590`), sin tocar. RAM libre 16.82 GB.
+
+Nota: que el emulador de la CI "aguante" con swiftshader_indirect solo se ve desde el shell (adbd y mksh sobreviven a las caídas de surfaceflinger); no lo he comprobado en su emulador (no se toca), pero con la misma imagen y GPU es probable que también reinicie surfaceflinger sin que el oráculo lo note.
+
+Siguiente: reintento único con ADBUDDY_EMU_GPU=swangle_indirect.
