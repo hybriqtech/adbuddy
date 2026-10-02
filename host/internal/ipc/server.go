@@ -165,7 +165,9 @@ type Handler func(ctx context.Context, req Request, c *Conn) Exit
 
 // maxPreauth bounds the connections that have not authenticated yet: each
 // may keep the server reading a request (up to MaxFrame) for 5 seconds. One
-// over it is closed at once.
+// over it is closed at once. A process of the same user can use up the quota
+// (a local denial of service, bounded to 5 s per connection; not a privilege
+// boundary), and the connection over it is closed: it fails closed.
 const maxPreauth = 32
 
 // Server accepts requests on the daemon socket.

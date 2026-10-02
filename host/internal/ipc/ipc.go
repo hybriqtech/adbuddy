@@ -259,10 +259,11 @@ func ReadFrame(r io.Reader) (byte, []byte, error) {
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return 0, nil, err
 	}
-	n := int(binary.BigEndian.Uint32(hdr[1:]))
-	if n > MaxFrame {
-		return 0, nil, fmt.Errorf("frame of %d bytes exceeds %d", n, MaxFrame)
+	size := binary.BigEndian.Uint32(hdr[1:])
+	if size > MaxFrame {
+		return 0, nil, fmt.Errorf("frame of %d bytes exceeds %d", size, MaxFrame)
 	}
+	n := int(size)
 	payload := make([]byte, min(n, frameChunk))
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return 0, nil, err
