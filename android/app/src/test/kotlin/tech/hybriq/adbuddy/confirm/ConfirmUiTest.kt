@@ -88,28 +88,28 @@ class ConfirmUiTest {
     @Test fun theReceiverSendsAnOpenQuestion() {
         val s = state(q("j_1", allowSession = true))
         for (d in listOf(Decision.DENY, Decision.ALLOW, Decision.ALLOW_SESSION)) {
-            assertTrue(d, ConfirmUi.canSend(s, "j_1", d, now, locked = false))
+            assertTrue(d, ConfirmUi.canSend(s, "j_1", d, now, locked = false, notification = true))
         }
     }
 
     @Test fun aLockedPhoneCanDenyButNotAllow() {
         val s = state(q("j_1", allowSession = true))
-        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = true))
-        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = true))
-        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = true))
+        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = true, notification = true))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = true, notification = true))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = true, notification = true))
     }
 
     @Test fun theReceiverSendsNothingThatIsNotOpen() {
-        assertFalse("gone", ConfirmUi.canSend(state(), "j_1", Decision.DENY, now, locked = false))
-        assertFalse("sending", ConfirmUi.canSend(state(q("j_1"), answering = setOf("j_1")), "j_1", Decision.DENY, now, locked = false))
-        assertFalse("expired", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.DENY, now + 61_000, locked = false))
+        assertFalse("gone", ConfirmUi.canSend(state(), "j_1", Decision.DENY, now, locked = false, notification = true))
+        assertFalse("sending", ConfirmUi.canSend(state(q("j_1"), answering = setOf("j_1")), "j_1", Decision.DENY, now, locked = false, notification = true))
+        assertFalse("expired", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.DENY, now + 61_000, locked = false, notification = true))
         val offline = state(q("j_1"), connection = BridgeState.Connection.CONNECTING)
-        assertFalse("offline", ConfirmUi.canSend(offline, "j_1", Decision.DENY, now, locked = false))
+        assertFalse("offline", ConfirmUi.canSend(offline, "j_1", Decision.DENY, now, locked = false, notification = true))
     }
 
     @Test fun theReceiverSendsOnlyKnownDecisions() {
-        assertFalse(ConfirmUi.canSend(state(q("j_1")), "j_1", "allow_forever", now, locked = false))
-        assertFalse("not offered", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.ALLOW_SESSION, now, locked = false))
+        assertFalse(ConfirmUi.canSend(state(q("j_1")), "j_1", "allow_forever", now, locked = false, notification = true))
+        assertFalse("not offered", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.ALLOW_SESSION, now, locked = false, notification = true))
     }
 
     // --- the dialog's question ---
@@ -153,38 +153,102 @@ class ConfirmUiTest {
 
     // --- what the question says, rule first ---
 
-    @Test fun theRuleComesBeforeTheAgentsCommand() {
+    private val nl = Char(10).toString()
+    private fun more(n: Int) = "and $n more"
+    private fun notif(r: ConfirmRequest, special: String = "May cut the link.", footer: String = "x", open: String? = null, ltr: Boolean = false) =
+        ConfirmUi.notificationLines(r, special, footer, ::more, open, ltr)
+
+    // A4-3: the ⚠ warning goes first, before the detail the agent can make long.
+    @Test fun theWarningComesFirstThenTheRuleThenTheAgentsCommand() {
         val r = ConfirmRequest(
             id = "j_1", title = "Restart", detail = "Reboots the phone.", rawCommand = "adb shell reboot",
             expiresAt = "2026-09-30T10:01:00Z", special = true,
         )
         assertEquals(
-            listOf("Reboots the phone.", "⚠ May cut the link.", "adb shell reboot", "Expires at 10:01"),
-            ConfirmUi.lines(r, special = "May cut the link.", footer = "Expires at 10:01"),
+            listOf("⚠ May cut the link.", "Reboots the phone.", "adb shell reboot", "Expires at 10:01"),
+            notif(r, footer = "Expires at 10:01"),
         )
     }
 
     @Test fun withoutDetailOrWarningOnlyTheCommandAndTheFooter() {
-        assertEquals(listOf("adb shell reboot", "x"), ConfirmUi.lines(q("j_1"), special = "never shown", footer = "x"))
+        assertEquals(listOf("adb shell reboot", "x"), notif(q("j_1"), special = "never shown"))
     }
 
     @Test fun theNotificationsCommandAndDetailStartWithALeftToRightMarkButTheLabelsDoNot() {
         val r = ConfirmRequest(
-            id = "j_1", title = "Restart", detail = "Reboots the phone.", rawCommand = "א reboot",
+            id = "j_1", title = "Restart", detail = "Reboots the phone.${nl}Deletes א", rawCommand = "א reboot",
             expiresAt = "2026-09-30T10:01:00Z", special = true,
         )
         assertEquals(
-            listOf("‎Reboots the phone.", "⚠ May cut the link.", "‎א reboot", "Expires at 10:01"),
-            ConfirmUi.lines(r, special = "May cut the link.", footer = "Expires at 10:01", ltr = true),
+            listOf("⚠ May cut the link.", "‎Reboots the phone.", "‎Deletes א", "‎א reboot", "Open it", "Expires at 10:01"),
+            notif(r, footer = "Expires at 10:01", open = "Open it", ltr = true),
         )
-        assertEquals(listOf("‎א reboot", "x"), ConfirmUi.lines(r.copy(detail = "", special = false), special = "", footer = "x", ltr = true))
+        assertEquals(listOf("‎א reboot", "x"), notif(r.copy(detail = "", special = false), special = "", ltr = true))
     }
 
-    @Test fun aLongCommandIsCut() {
+    // A4-3: the detail of the notification is at most three lines, and says how many more.
+    @Test fun theNotificationsDetailIsCappedAndSaysHowManyMore() {
+        val detail = (1..15).joinToString(nl) { "Finding $it" }
+        val r = q("j_1").copy(detail = detail, special = true)
+        assertEquals(
+            listOf("⚠ May cut the link.", "Finding 1", "Finding 2", "Finding 3", "and 12 more", "adb shell reboot", "Open it", "x"),
+            notif(r, open = "Open it"),
+        )
+        assertEquals(15, ConfirmUi.shown(r).detail.size) // the dialog shows them all
+    }
+
+    @Test fun aLongCommandIsCutInTheNotification() {
         val r = q("j_1").copy(rawCommand = "adb shell " + "a".repeat(1_000))
-        val cmd = ConfirmUi.lines(r, special = "", footer = "x", maxCommand = 50)[0]
-        assertEquals(50, cmd.length)
+        val cmd = notif(r, special = "")[0]
+        assertEquals(ConfirmUi.MAX_COMMAND, cmd.length)
         assertTrue(cmd.endsWith("…"))
+        assertTrue(ConfirmUi.cut(r))
+        assertFalse(ConfirmUi.cut(q("j_1")))
+    }
+
+    // A4-2: the dialog shows much more, and says how much it still hides.
+    @Test fun theDialogShowsTheWholeCommandOrSaysHowMuchIsHidden() {
+        val fits = q("j_1").copy(rawCommand = "a".repeat(ConfirmUi.DIALOG_MAX_COMMAND))
+        assertEquals(fits.rawCommand, ConfirmUi.shown(fits).command)
+        assertEquals(0, ConfirmUi.shown(fits).hidden)
+        val long = q("j_1").copy(rawCommand = "a".repeat(ConfirmUi.DIALOG_MAX_COMMAND + 500))
+        val s = ConfirmUi.shown(long)
+        assertEquals(ConfirmUi.DIALOG_MAX_COMMAND, s.command.length)
+        assertTrue(s.command.endsWith("…"))
+        assertEquals(501, s.hidden)
+    }
+
+    // --- what the notification itself may allow ---
+
+    // A4-2/A4-3: a special question, or a command the notification cuts, is
+    // not allowed from the notification: only Deny, and the dialog to read it all.
+    @Test fun aSpecialOrCutQuestionOffersOnlyDenyInTheNotification() {
+        val special = q("j_1").copy(special = true)
+        val cut = q("j_2", allowSession = true).copy(rawCommand = "adb shell " + " ".repeat(400) + "reboot")
+        for (r in listOf(special, cut)) {
+            assertEquals(r.id, listOf(Decision.DENY), ConfirmUi.notificationDecisions(r, ConfirmUi.Status.OPEN))
+        }
+        assertEquals(
+            listOf(Decision.DENY, Decision.ALLOW, Decision.ALLOW_SESSION),
+            ConfirmUi.notificationDecisions(q("j_3", allowSession = true), ConfirmUi.Status.OPEN),
+        )
+        assertTrue(ConfirmUi.notificationDecisions(special, ConfirmUi.Status.EXPIRED).isEmpty())
+    }
+
+    // A4-2: a command longer than the notification shows is never allowed for the session.
+    @Test fun aCutCommandIsNeverAllowedForTheSession() {
+        val cut = q("j_1", allowSession = true).copy(rawCommand = "adb shell " + "a".repeat(ConfirmUi.MAX_COMMAND))
+        assertEquals(listOf(Decision.DENY, Decision.ALLOW), ConfirmUi.decisions(cut, ConfirmUi.Status.OPEN))
+    }
+
+    @Test fun theNotificationButtonsCannotSendWhatTheNotificationDoesNotOffer() {
+        val s = state(q("j_1").copy(special = true), q("j_2", allowSession = true).copy(rawCommand = "x".repeat(ConfirmUi.MAX_COMMAND + 1)))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, notification = true))
+        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = false, notification = true))
+        assertTrue("the dialog can", ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, notification = false))
+        assertFalse(ConfirmUi.canSend(s, "j_2", Decision.ALLOW, now, locked = false, notification = true))
+        assertFalse(ConfirmUi.canSend(s, "j_2", Decision.ALLOW_SESSION, now, locked = false, notification = false))
+        assertTrue(ConfirmUi.canSend(s, "j_2", Decision.ALLOW, now, locked = false, notification = false))
     }
 
     // --- when the screen must look again ---

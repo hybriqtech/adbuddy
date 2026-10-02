@@ -46,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +54,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -136,19 +139,25 @@ private fun ConsentScreenPreview() {
 
 /**
  * The same question as the notification, when the app is open (spec §4.5):
- * the host's rule first, then the agent's command, and it scrolls if long.
- * It offers its buttons only while the question is open, and says why
- * otherwise. It can always be closed (back or a tap outside; Close when it
- * has no buttons): Pause and Cut access are never hidden with no way out,
- * and the notification is still there. Touches are refused while another
- * app's window covers it (filterTouchesWhenObscured).
+ * the ⚠ warning first, the host's rule, then the agent's command, and it
+ * scrolls if long. The whole detail and up to ConfirmUi.DIALOG_MAX_COMMAND
+ * characters of the command are shown, with how many more are hidden, and the
+ * Allow buttons wait until the text has been scrolled to its end (A4-2), as
+ * in the PermissionCard; Deny never waits. It offers its buttons only while
+ * the question is open, and says why otherwise. It can always be closed (back
+ * or a tap outside; Close when it has no buttons): Pause and Cut access are
+ * never hidden with no way out, and the notification is still there. Touches
+ * are refused while another app's window covers it (filterTouchesWhenObscured).
  */
 @Composable
 fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock, onClose: () -> Unit, onAnswer: (String) -> Unit) {
     val context = LocalContext.current
     val decisions = ConfirmUi.decisions(r, status)
     val footer = ConfirmNotifier.footer(context, status, ConfirmUi.expiry(r)?.let { clock.toLocal(it) })
-    val lines = ConfirmUi.lines(r, stringResource(R.string.confirm_special), footer, maxCommand = DIALOG_MAX_COMMAND)
+    val shown = ConfirmUi.shown(r)
+    // The scroll state starts "can scroll forward" until the text is measured: Allow stays off until it is known there is no more to read.
+    val scroll = key(r.id, r.detail, r.rawCommand) { rememberScrollState() }
+    val unread = scroll.canScrollForward
     AlertDialog(
         onDismissRequest = onClose,
         // The title comes from the host's rules, but it never takes the whole dialog.
@@ -165,24 +174,37 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
                 view.rootView.filterTouchesWhenObscured = true
                 onDispose {}
             }
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                for ((i, line) in lines.withIndex()) {
-                    val small = i >= lines.size - 2 // the command and the footer
-                    // The agent's command (second to last) and the host's detail (first, when there is one) are code: left to right
-                    // whatever their first letter, so what is read is in the order it runs. The labels follow the language.
-                    val code = i == lines.size - 2 || (i == 0 && r.detail.isNotEmpty())
-                    val base = if (small) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium
-                    Text(line, style = if (code) base.copy(textDirection = TextDirection.Ltr) else base)
+            Column(Modifier.verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (shown.warning) {
+                    Text("⚠ " + stringResource(R.string.confirm_special), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 }
+                // The host's detail and the agent's command are code: left to right whatever their first letter, so
+                // what is read is in the order it runs. The labels follow the language.
+                for (line in shown.detail) {
+                    Text(line, style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr))
+                }
+                Text(shown.command, style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr))
+                if (shown.hidden > 0) {
+                    Text(
+                        pluralStringResource(R.plurals.confirm_hidden, shown.hidden, shown.hidden),
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(footer, style = MaterialTheme.typography.bodySmall)
             }
         },
         confirmButton = {
             Column {
+                if (unread && Decision.ALLOW in decisions) {
+                    Text(stringResource(R.string.confirm_scroll), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
                 if (Decision.ALLOW in decisions) {
-                    TextButton(onClick = { onAnswer(Decision.ALLOW) }) { Text(stringResource(R.string.action_allow)) }
+                    TextButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread) { Text(stringResource(R.string.action_allow)) }
                 }
                 if (Decision.ALLOW_SESSION in decisions) {
-                    TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }) { Text(stringResource(R.string.action_allow_session)) }
+                    TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }, enabled = !unread) {
+                        Text(stringResource(R.string.action_allow_session))
+                    }
                 }
                 if (decisions.isEmpty()) {
                     TextButton(onClick = onClose) { Text(stringResource(R.string.action_close)) }
@@ -196,6 +218,3 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
         },
     )
 }
-
-/** The dialog scrolls, so it shows much more of the command than the notification. */
-private const val DIALOG_MAX_COMMAND = 4_000

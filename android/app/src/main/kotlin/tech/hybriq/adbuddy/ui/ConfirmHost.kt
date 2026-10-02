@@ -43,7 +43,7 @@ fun ConfirmHost(
             // phone sleeps. Allowing needs the phone unlocked here too.
             val t = clock.now()
             val locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-            if (ConfirmUi.canSend(bridge.state.value, question.id, decision, t, locked)) {
+            if (ConfirmUi.canSend(bridge.state.value, question.id, decision, t, locked, notification = false)) {
                 bridge.reply(question.id, decision)
             } else {
                 now = t

@@ -11,7 +11,8 @@ import tech.hybriq.adbuddy.AdbuddyApp
  *
  * It sends only what ConfirmUi.canSend allows right now: the question is
  * still pending, open (not answered here, not expired, the PC connected) and
- * offers that decision; Allow and Allow during the session also need the
+ * the notification offers that decision (never Allow for a special question or
+ * a command it cuts: those are allowed from the dialog); Allow and Allow during the session also need the
  * phone unlocked (isDeviceLocked), besides setAuthenticationRequired. A tap
  * that arrives late or from a stale notification sends nothing.
  *
@@ -26,7 +27,7 @@ class ConfirmReceiver : BroadcastReceiver() {
         val decision = intent.getStringExtra(EXTRA_DECISION) ?: return
         val app = context.applicationContext as AdbuddyApp
         val locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-        if (!ConfirmUi.canSend(app.bridge.state.value, id, decision, app.clock.now(), locked)) return
+        if (!ConfirmUi.canSend(app.bridge.state.value, id, decision, app.clock.now(), locked, notification = true)) return
         app.bridge.reply(id, decision)
     }
 

@@ -16,7 +16,9 @@ import tech.hybriq.adbuddy.ui.Formats
 
 /**
  * Shows each pending 🔴 question as a high-priority notification (spec §4.5)
- * with Allow, Deny and, when the host offers it, Allow during the session.
+ * with Allow, Deny and, when the host offers it, Allow during the session; a
+ * special question or a command the notification cuts gets only Deny and Open
+ * (ConfirmUi.notificationDecisions): it is allowed from the dialog.
  * Allowing needs the phone unlocked (setAuthenticationRequired, Android 12+,
  * and ConfirmReceiver checks it again). The notification stays on this phone
  * (setLocalOnly: not on watches nor mirrors). Questions answered elsewhere or
@@ -75,8 +77,17 @@ object ConfirmNotifier {
     private fun build(context: Context, p: ConfirmUi.Post, localExpires: Long): android.app.Notification {
         val r = p.request
         val footer = footer(context, p.status, localExpires)
-        // The rule first, the agent's command after it and cut: it never pushes the rule out of sight.
-        val lines = ConfirmUi.lines(r, context.getString(R.string.confirm_special), footer, ltr = true)
+        // A special question or a cut command is allowed only from the dialog (A4-2, A4-3): say why to open it.
+        val decisions = ConfirmUi.notificationDecisions(r, p.status)
+        val withheld = decisions != ConfirmUi.decisions(r, p.status)
+        val why = when {
+            !withheld -> null
+            ConfirmUi.cut(r) -> context.getString(R.string.confirm_open_cut)
+            else -> context.getString(R.string.confirm_open_special)
+        }
+        // The ⚠ first, the rule, the agent's command after it and cut: it never pushes the rule out of sight.
+        val lines = ConfirmUi.notificationLines(r, context.getString(R.string.confirm_special), footer,
+            { n -> context.resources.getQuantityString(R.plurals.confirm_more, n, n) }, why, ltr = true)
         val open = PendingIntent.getActivity(context, 0,
             Intent(context, MainActivity::class.java).setData(uri("open", r.id)).putExtra(MainActivity.EXTRA_CONFIRM, r.id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -91,7 +102,8 @@ object ConfirmNotifier {
             .setTimeoutAfter(p.left)
             .setOnlyAlertOnce(true)
             .setLocalOnly(true)
-        for (d in ConfirmUi.decisions(r, p.status)) b.addAction(action(context, r.id, d))
+        for (d in decisions) b.addAction(action(context, r.id, d))
+        if (withheld) b.addAction(NotificationCompat.Action.Builder(0, context.getString(R.string.action_open), open).build())
         return b.build()
     }
 
