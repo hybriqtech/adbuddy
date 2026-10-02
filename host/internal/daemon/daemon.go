@@ -233,7 +233,7 @@ func (d *Daemon) waitChanges(ctx context.Context, q *question) error {
 		d.askMu.Unlock()
 		if !told {
 			told = true
-			d.o.OnNotice(d.lang().T("daemon.waiting", classify.Printable(running), classify.Printable(q.title)))
+			d.o.OnNotice(d.lang().T("daemon.waiting", classify.Visible(running), classify.Visible(q.title)))
 		}
 		select {
 		case <-idle:

@@ -6,6 +6,7 @@
 "confirm.header" = "🔴 Confirmation needed (expires in %[1]s)"
 "confirm.why" = "Why:"
 "confirm.special" = "⚠ This may cut the connection with the phone or affect ADBuddy."
+"confirm.rtl_escaped" = "Some characters read right to left; they are shown as \\uXXXX (for example \\u05d0) so the order you see is the order that runs."
 "confirm.howto" = "To allow it type %[1]s and press Enter; anything else denies it."
 "confirm.code" = "Code:"
 "confirm.allowed" = "→ allowed"
