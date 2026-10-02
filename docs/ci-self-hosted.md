@@ -18,7 +18,7 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 | --- | --- | --- | --- |
 | `CI_HOST_MATRIX` | `host.yml` | the three hosted cells (`ubuntu-latest`, `windows-latest`, `macos-latest`) | A JSON array of cells `{"name": ..., "runner": ...}`. A Linux cell needs `gcc` (for `go test -race`); a Windows cell needs Git for Windows. Leave a cell out of the array to drop it. |
 | `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min). |
-| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, the AVD `adbuddy-ci-api37`, hardware acceleration; a Linux runner needs `/dev/kvm` (see section 6). |
+| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, hardware acceleration (the AVD `adbuddy-ci-api37` is created by `scripts/emulator.sh` when it is missing); a Linux runner needs `/dev/kvm` (see section 6). |
 | `CI_RUNNER_RELEASE` | `release-check.yml` (`scripts` and `goreleaser`) | `"ubuntu-latest"` | Linux with `shellcheck`. |
 | `CI_RUNNER_SIGN` | `release-check.yml` (`sign`) | `"ubuntu-latest"` | Linux with an Android SDK: `apksigner` and `zipalign` are Linux scripts here. |
 
@@ -30,10 +30,11 @@ Example for "only a Windows runner for now":
 
 ```sh
 gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-local"]'
+gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-local"]'
 ```
 
-Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`. The same goes for `CI_RUNNER_EMULATOR`.
+The Ubuntu cell of the matrix stays on a GitHub-hosted runner here; no label `linux` appears because there is no Linux runner. Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`.
 
 Example with both runners (Windows and the Linux runner of section 4):
 
@@ -42,6 +43,7 @@ gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":["self-
 gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
 gh variable set CI_RUNNER_RELEASE --body '["self-hosted","linux","adbuddy-local"]'
 gh variable set CI_RUNNER_SIGN --body '["self-hosted","linux","adbuddy-local"]'
+gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-local"]'
 ```
 
 The emulator stays on the Windows runner (`CI_RUNNER_EMULATOR`): it has the AVD and the hardware acceleration of Windows, and the WSL2 runner has no KVM.
@@ -60,16 +62,18 @@ For `CI_HOST_MATRIX`, `"none"` and `[]` are not valid: they break the workflow. 
 | --- | --- |
 | `ADBUDDY_EMU_AVD` | AVD name. The CI uses `adbuddy-ci-api37`. |
 | `ADBUDDY_EMU_PORT` | Emulator port. The CI uses `5590`. |
-| `ADBUDDY_EMU_ADB_PORT` | Port of the script's own adb server. The CI uses `5049`. |
+| `ADBUDDY_EMU_ADB_PORT` | Port of the script's own adb server. The CI uses `5049`. It must be a number in 1024-65535 and not `5037` (the user's adb server) nor `5038` (ADBuddy's); otherwise the script exits with 2. |
 | `ADBUDDY_EMU_GPU` | GPU mode (default `swiftshader_indirect`). |
 | `ADBUDDY_EMU_IMAGE` | System image used when the AVD is created (the AVD is created with it the first time only: to change the image, use another AVD name). |
 | `ADBUDDY_EMU_STABLE_SECS` | After boot, watch this many seconds that `system_server` and `surfaceflinger` do not restart. Default `0` (off); on a restart the script exits with 4. |
 
 The CI values differ from the defaults so that a job does not collide with an emulator started by hand.
 
+The script also runs `unset ADB_SERVER_SOCKET ANDROID_ADB_SERVER_ADDRESS`: adb gives them priority over `ANDROID_ADB_SERVER_PORT`, so they would point it at another server (the user's).
+
 The script exports `ADB_MDNS=0` and `ADB_MDNS_AUTO_CONNECT=0` so that its adb server never auto-connects a real phone found over mDNS, and it aborts (exit 3) if that server sees any other device.
 
-Exit codes: `1` SDK or packages missing; `2` incorrect usage; `3` the adb server sees another device (or none); `4` the emulator is not stable; `124` it did not boot in 10 minutes.
+Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT`; `3` the adb server sees another device (or none); `4` the emulator is not stable; `124` it did not boot in 10 minutes.
 
 ## 3. Setting up a Windows runner
 
@@ -276,7 +280,7 @@ gh variable delete CI_RUNNER_SIGN
 
 A runner executes the code of the branches it builds, as the user that runs it. That user can reach its adb key (authorised on the phone), the adb server, SSH keys, the `gh` token and the credentials of any coding agent.
 
-- **Recommended:** run the runner under a dedicated local Windows account that has none of those.
+- **Requirement** to keep `CI_HOST_MATRIX` or `CI_RUNNER_EMULATOR` on Windows while agents push branches to the repository: run the runner under a dedicated local Windows account that has none of those. For adb it is the only barrier (see below).
 - **Minimum:** start `run.cmd` from a clean console, without `ADBUDDY_*`, `ANDROID_SERIAL` or `ANDROID_ADB_SERVER_PORT` in the environment.
 
 The real barriers are:
@@ -288,6 +292,12 @@ The real barriers are:
 The fork guard in the workflows is only an extra, and it acts only when the job's variable is defined: a pull request runs the workflow files of its own merge commit, so it can remove the guard. The real barrier is the repository configuration.
 
 Bots and agents that open pull requests from branches of the repository itself pass the guard and run their code on the runner. There is no `dependabot.yml` today.
+
+The practical route to the key-reading risk is the branches that local coding agents push. An agent that is tricked (a poisoned web page, a malicious dependency, a prompt injection in an issue) can add a test or a script to a branch of this very repository, and the runner will run it as the PC's user, with no fork involved and past every guard above. Reviewing the diff before the runner picks it up is not realistic for agent branches.
+
+adb on Windows loads the real key from \Users\<user>\.android\adbkey whatever `HOME`, `USERPROFILE` and `ANDROID_USER_HOME` say (measured with adb 37 and `ADB_TRACE=all`: `auth.cpp loaded new key from 'C:\Users\...\.android\adbkey'`). Isolating the environment of the job therefore does not protect the adb key. For adb the only barrier is a dedicated Windows account for the runner.
+
+What `host.yml` does (and `emulator.yml` does not, because its adb and emulator must share the real key or adb reports `unauthorized`): each self-hosted Windows job gets its own `HOME`, `USERPROFILE`, `ANDROID_USER_HOME`, `APPDATA` and `LOCALAPPDATA` (folders inside `RUNNER_TEMP`) and an empty `ADB_VENDOR_KEYS`. That covers only what depends on the environment: ssh, gh, git, the configuration of coding agents and of ADBuddy. It covers `gh` and git only in part: on Windows `gh` keeps its configuration in `%AppData%\GitHub CLI` and the git token is in the Credential Manager, and neither depends on `HOME`; the isolated `APPDATA`/`LOCALAPPDATA` cover the first only partly. `GOPATH` moves to the isolated home, with no effect because `GOMODCACHE` and `GOCACHE` are explicit. A malicious process can still read the real profile by absolute path, so this stops accidents and naive code, not an attacker.
 
 ### Linux runner
 
@@ -302,7 +312,7 @@ Residual risk: a bug in the guest kernel gives root, and root can mount C: and r
 
 Phone: do not use `adb tcpip`, and reject any unexpected authorization dialog on the phone (the NAT reaches the LAN).
 
-Persistence between jobs: the `runner` user can read the runner's credentials and poison `GOMODCACHE`, `GOCACHE` and Gradle in the runner folder, which affects later jobs. This is the cost of a non-ephemeral runner; `--ephemeral` with a new registration per job would avoid it.
+Persistence between jobs: the runner is not ephemeral, so its jobs share the runner folder and its caches. The `runner` user can read the runner's credentials and poison `GOMODCACHE`, `GOCACHE` and Gradle in the runner folder, which affects later jobs. This is the cost of a non-ephemeral runner; `--ephemeral` with a new registration per job would avoid it.
 
 ### Also
 
@@ -312,6 +322,40 @@ Persistence between jobs: the `runner` user can read the runner's credentials an
 - The emulator job uses and stops the AVD `adbuddy-ci-api37` (emulator port 5590) and the adb server on port 5049 of the runner's machine: do not use them by hand meanwhile. It no longer uses the script's default AVD and ports, which can be used by hand at the same time.
 - Two emulators at once need about 5 GB of RAM each.
 - A Linux runner needs /dev/kvm accessible through the kvm group for the emulator job (WSL2 here has no /dev/kvm without nested virtualization, so the emulator job stays on the Windows runner). Never give the runner user sudo: root in the distribution can mount C: and read your adb key.
+
+### Repository settings
+
+What is applied today (replace `OWNER/REPO`):
+
+- **Actions permissions.** Actions enabled, and pinning to a full commit SHA required (`sha_pinning_required=true`): a workflow that uses an action by tag or branch fails. Apply (together with the allowed actions below):
+
+  ```sh
+  gh api -X PUT repos/OWNER/REPO/actions/permissions -F enabled=true -f allowed_actions=selected -F sha_pinning_required=true
+  ```
+
+- **Allowed actions.** `allowed_actions=selected`: GitHub-owned actions (`github_owned_allowed=true`), no actions from verified creators (`verified_allowed=false`) and only these patterns: `gradle/actions/setup-gradle@*` and `goreleaser/goreleaser-action@*`. Warning: a workflow that uses a new action from another owner fails at once with `startup_failure` until you add it:
+
+  ```sh
+  gh api -X PUT repos/OWNER/REPO/actions/permissions/selected-actions -F github_owned_allowed=true -F verified_allowed=false -f 'patterns_allowed[]=gradle/actions/setup-gradle@*' -f 'patterns_allowed[]=goreleaser/goreleaser-action@*'
+  ```
+
+  The PUT replaces the whole list: to add an owner, repeat the command with every pattern plus `-f 'patterns_allowed[]=NEW-OWNER/NEW-ACTION@*'`.
+
+  Revert (any action allowed, pinning kept): `gh api -X PUT repos/OWNER/REPO/actions/permissions -F enabled=true -f allowed_actions=all -F sha_pinning_required=true`. To drop the pinning too, repeat it with `-F sha_pinning_required=false`.
+
+- **Default workflow permissions.** `default_workflow_permissions=read` was already the default (not changed by us): a workflow without its own `permissions:` block gets a read-only token. To set it explicitly:
+
+  ```sh
+  gh api -X PUT repos/OWNER/REPO/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
+  ```
+
+- **Run workflows from fork pull requests:** already off by default in private repositories (not changed by us). Check: `gh api repos/OWNER/REPO/actions/permissions/fork-pr-workflows-private-repos` returns `run_workflows_from_fork_pull_requests: false`.
+
+What is not applied, and why:
+
+- **The guard in the workflows and the private repository** are what stop forks, besides the setting above.
+- **The `release` environment does not exist yet.** Create it with required reviewers before releases depend on it.
+- **Rulesets and branch protection are not available** in the free plan for a private repository. When the repository goes public, create the `release` environment with a reviewer and protect `main` in the same step.
 
 ## 7. What is not covered locally
 

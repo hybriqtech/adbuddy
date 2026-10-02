@@ -39,6 +39,8 @@ jobs:
     # whatever ANDROID_AVD_HOME says, and the emulator looks under
     # ANDROID_AVD_HOME or $HOME/.android: the step "Point the emulator at the
     # AVD" makes the emulator look where avdmanager wrote it.
+    # adb on Windows loads %USERPROFILE%\.android\adbkey whatever HOME/USERPROFILE/ANDROID_USER_HOME say (measured),
+    # so isolating the environment does not protect the key; see docs/ci-self-hosted.md section 6.
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
