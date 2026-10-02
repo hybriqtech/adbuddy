@@ -18,7 +18,8 @@ fun interface TermSink { fun apply(e: TermEffect) }
  * One per process: the model survives a rotation, so the new view is redrawn
  * from memory. It watches only while a view is attached (the host sends
  * nothing else), and Channel's listeners run on OkHttp's reader thread: the
- * sink must hand over to the main thread by itself.
+ * sink must hand over to the main thread by itself. The last view to arrive wins: if the main activity stops
+ * and starts again with the bubble open, the bubble stays undrawn until the main one detaches.
  */
 class TerminalFeed(private val channel: Channel) {
     private val lock = Any()
@@ -77,14 +78,26 @@ class TerminalFeed(private val channel: Channel) {
      * on top goes, the one under it draws again from memory; the stream goes on, so no watch is needed.
      */
     fun detach(sink: TermSink) {
-        val unwatch = synchronized(lock) {
+        var unwatch = false
+        val watch = synchronized(lock) {
             val wasOnTop = this.sink === sink
             if (!sinks.removeAll { it === sink }) return
             val under = this.sink
-            if (under != null && wasOnTop) model.replay().forEach { under.apply(it) }
-            under == null
+            unwatch = under == null
+            if (under != null && wasOnTop) {
+                val fx = model.replay()
+                if (fx.isEmpty()) {
+                    // Not replayable (too much output while the view on top was there): ask the host for a screen.
+                    resyncing = false
+                    model.watch()
+                } else {
+                    fx.forEach { under.apply(it) }
+                    null
+                }
+            } else null
         }
         if (unwatch) channel.send(Protocol.TERMINAL_UNWATCH, Protocol.json.encodeToJsonElement(Empty.serializer(), Empty))
+        if (watch != null) sendWatch(watch)
     }
 
     /** The channel is back (or gone): a view on screen watches again, from what it has. */
