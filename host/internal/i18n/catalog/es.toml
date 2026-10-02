@@ -37,6 +37,7 @@
 "notice.unsupported" = "Esta versión de ADBuddy en el PC todavía no gestiona %[1]s."
 "notice.chat_off" = "La vista del chat está desactivada (%[1]s); las respuestas siguen llegando al final de cada turno y la terminal lo muestra todo."
 "notice.stale_reply" = "Esa pregunta ya se respondió o pasó a la terminal del PC."
+"notice.typing_dropped" = "El agente no está leyendo lo que escribes: algunas teclas no se enviaron. Vuelve a intentarlo en un momento."
 
 # attach.go: cobra
 "help.attach.short" = "Conecta esta terminal a la sesión del agente en adbuddy serve (Ctrl+] para desconectar)"

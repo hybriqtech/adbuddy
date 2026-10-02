@@ -401,9 +401,7 @@ func (l *phoneLink) onTermInput(m bridge.Message) {
 	if json.Unmarshal(m.Payload, &in) != nil || len(in.Data) == 0 || len(in.Data) > maxTermInput {
 		return // no rid: dropped
 	}
-	if mgr := l.session(); mgr != nil {
-		_ = mgr.Input(in.Data)
-	}
+	l.typeKeys(in.Data)
 }
 
 // onTermResize gives the agent the size that fits the phone's view: only

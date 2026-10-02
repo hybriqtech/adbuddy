@@ -127,10 +127,21 @@ type proc struct {
 	done    chan struct{}
 	// grace is readGrace as it was when the process started: pump reads it
 	// from its own goroutine, which a test's restore of the variable does
-	// not wait for.
+	// not wait for. gap is pasteGap the same way, for the writer.
 	grace time.Duration
-	// wmu keeps a paste (text, pause, Enter) and other typing apart.
-	wmu sync.Mutex
+	gap   time.Duration
+
+	// The writer (writer.go): q is its queue, never closed; stopped is
+	// closed once (stop) when the process stops or ends, and the writer then
+	// drops what is queued; wdone is closed when the writer returns. drains
+	// counts the times the writer emptied the queue (under qmu, as each
+	// enqueue without waiting).
+	q        chan *writeJob
+	stopped  chan struct{}
+	stopOnce sync.Once
+	wdone    chan struct{}
+	qmu      sync.Mutex
+	drains   uint64
 }
 
 // New returns a Manager with no session.
@@ -182,7 +193,8 @@ func (m *Manager) startLocked(agent string, resume bool) error {
 	if err != nil {
 		return err
 	}
-	pr := &proc{p: p, agent: agent, resumed: len(args) > 0, started: time.Now(), grace: readGrace, gen: m.gen, done: make(chan struct{})}
+	pr := &proc{p: p, agent: agent, resumed: len(args) > 0, started: time.Now(), grace: readGrace, gap: pasteGap, gen: m.gen, done: make(chan struct{}),
+		q: make(chan *writeJob, writeQueue), stopped: make(chan struct{}), wdone: make(chan struct{})}
 	pr.screen = term.New(newID("e_"), cols, rows)
 	pr.quiet = time.AfterFunc(time.Hour, func() { m.quietFor(pr) })
 	pr.quiet.Stop()
@@ -193,6 +205,7 @@ func (m *Manager) startLocked(agent string, resume bool) error {
 	m.publish(Output{Epoch: pr.screen.Epoch()})
 	m.emitInfo()
 	go m.pump(pr)
+	go pr.writer()
 	return nil
 }
 
@@ -232,6 +245,7 @@ func (m *Manager) pump(pr *proc) {
 		}
 	}
 	close(readDone)
+	pr.stop() // the process ended: nothing more is typed into it
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	code, _ := pr.p.Wait(ctx)
 	cancel()
@@ -354,6 +368,10 @@ func (m *Manager) stopLocked() {
 	if pr == nil {
 		return
 	}
+	// Before the hangup and the kill: nothing more is typed, and nothing here
+	// waits for the writer (a Write stuck in a terminal nobody reads ends
+	// with the Kill).
+	pr.stop()
 	_ = pr.p.Hangup()
 	t := time.NewTimer(stopWait)
 	select {
@@ -387,47 +405,6 @@ func (m *Manager) current() *proc {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.cur
-}
-
-// Input types bytes into the agent's terminal, as they are.
-func (m *Manager) Input(p []byte) error {
-	pr := m.current()
-	if pr == nil {
-		return ErrNoAgent
-	}
-	pr.wmu.Lock()
-	defer pr.wmu.Unlock()
-	_, err := pr.p.Write(p)
-	return err
-}
-
-// pasteGap separates the pasted text from the Enter that sends it.
-var pasteGap = 100 * time.Millisecond
-
-// Paste sends text as one message (spec M3 §5.1): bracketed paste when the
-// agent turned it on, else one line; then Enter. Control characters are
-// dropped first, so the text cannot end the paste early (ESC[201~) and type
-// the rest as keys. Nothing else is typed between the text and its Enter.
-func (m *Manager) Paste(text string) error {
-	pr := m.current()
-	if pr == nil {
-		return ErrNoAgent
-	}
-	text = clean(text)
-	pr.wmu.Lock()
-	defer pr.wmu.Unlock()
-	var msg string
-	if pr.screen.BracketedPaste() {
-		msg = "\x1b[200~" + text + "\x1b[201~"
-	} else {
-		msg = strings.Join(strings.Fields(strings.ReplaceAll(text, "\n", " ")), " ")
-	}
-	if _, err := pr.p.Write([]byte(msg)); err != nil {
-		return err
-	}
-	time.Sleep(pasteGap)
-	_, err := pr.p.Write([]byte("\r"))
-	return err
 }
 
 // Clean is the cleaning Paste applies to its text: what is left of text when
@@ -466,7 +443,12 @@ func (m *Manager) Busy() string {
 	if pr == nil {
 		return ""
 	}
-	text := pr.screen.Text()
+	return busyOn(pr.screen)
+}
+
+// busyOn is Busy for one screen.
+func busyOn(s *term.Screen) string {
+	text := s.Text()
 	for _, p := range busyPrompts {
 		if strings.Contains(text, p) {
 			return "Answer the question in the agent's terminal first."
