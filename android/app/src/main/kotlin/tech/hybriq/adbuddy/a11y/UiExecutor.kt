@@ -7,6 +7,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import tech.hybriq.adbuddy.bridge.Empty
 import tech.hybriq.adbuddy.bridge.ErrorCode
 import tech.hybriq.adbuddy.bridge.ErrorReply
 import tech.hybriq.adbuddy.bridge.Message
@@ -16,11 +17,14 @@ import tech.hybriq.adbuddy.bridge.UiClicked
 import tech.hybriq.adbuddy.bridge.UiDumpArgs
 import tech.hybriq.adbuddy.bridge.UiForeground
 import tech.hybriq.adbuddy.bridge.UiLimits
+import tech.hybriq.adbuddy.bridge.UiNotifications
 import tech.hybriq.adbuddy.bridge.UiOp
 import tech.hybriq.adbuddy.bridge.UiRequest
 import tech.hybriq.adbuddy.bridge.UiResponse
 import tech.hybriq.adbuddy.bridge.UiSetTextArgs
 import tech.hybriq.adbuddy.bridge.UiTextSet
+import tech.hybriq.adbuddy.listener.NotificationRead
+import tech.hybriq.adbuddy.listener.NotificationReport
 
 /** What the helpers need of the accessibility service (AgentAccessibilityService); a fake in tests. */
 interface Screen {
@@ -53,7 +57,8 @@ interface Screen {
  * same id, never once expired (in the host's clock), and never on ADBuddy, a
  * protected app or, while a 🔴 question waits, the system UI, nor while a
  * notification may be on screen (a heads-up). It answers each
- * one with send.
+ * one with send. notifications is the one op that does not need the
+ * accessibility service: it reads what the notification listener has.
  */
 class UiExecutor(
     private val screen: () -> Screen?,
@@ -64,6 +69,8 @@ class UiExecutor(
     private val paused: () -> Boolean,
     private val notificationOnScreen: () -> Boolean,
     private val executor: Executor,
+    /** The active notifications from the listener, or why not (M5c): no access, or not confirmed by the user. */
+    private val notifications: () -> NotificationRead = { NotificationRead.NoAccess },
 ) {
     private val seen = object : LinkedHashMap<String, Boolean>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > SEEN
@@ -122,6 +129,7 @@ class UiExecutor(
             return fail(r, ErrorCode.INVALID, "expiresAt is not a time.")
         }
         if (now() > expires) return fail(r, ErrorCode.EXPIRED, "The request expired before it ran.")
+        if (r.op == UiOp.NOTIFICATIONS) return notificationsOp(r)
         val s = screen() ?: return fail(r, ErrorCode.UNAVAILABLE, "ADBuddy's accessibility service is off: turn it on in the phone's accessibility settings.")
         return try {
             when (r.op) {
@@ -129,12 +137,30 @@ class UiExecutor(
                 UiOp.CLICK -> click(r, s, args(r, UiClickArgs.serializer()) ?: return invalid(r))
                 UiOp.SET_TEXT -> setText(r, s, args(r, UiSetTextArgs.serializer()) ?: return invalid(r))
                 UiOp.FOREGROUND -> foreground(r, s)
-                UiOp.NOTIFICATIONS -> fail(r, ErrorCode.UNAVAILABLE, "Reading notifications is not available yet.")
                 else -> fail(r, ErrorCode.UNSUPPORTED, "This version of the ADBuddy app does not handle ${r.op.take(64)}.")
             }
         } catch (e: RuntimeException) {
             fail(r, ErrorCode.FAILED, "The app could not do it: ${e.javaClass.simpleName}.")
         }
+    }
+
+    /**
+     * The notifications of the phone, without the content of ADBuddy and the
+     * protected apps (NotificationReport). No access is `unavailable`, with how
+     * to grant it; there is no other source (the host has no fallback).
+     */
+    private fun notificationsOp(r: UiRequest): UiResponse = try {
+        if (args(r, Empty.serializer()) == null) {
+            invalid(r)
+        } else {
+            when (val read = notifications()) {
+                is NotificationRead.Ok -> ok(r, NotificationReport.build(read.items, ::guarded), UiNotifications.serializer())
+                NotificationRead.NoAccess -> fail(r, ErrorCode.UNAVAILABLE, NO_NOTIFICATION_ACCESS)
+                NotificationRead.NotConfirmed -> fail(r, ErrorCode.UNAVAILABLE, NOTIFICATIONS_NOT_CONFIRMED)
+            }
+        }
+    } catch (e: RuntimeException) {
+        fail(r, ErrorCode.FAILED, "The app could not do it: ${e.javaClass.simpleName}.")
     }
 
     private fun <T> args(r: UiRequest, serializer: KSerializer<T>): T? = try {
@@ -274,6 +300,17 @@ class UiExecutor(
     companion object {
         /** The ids remembered so none runs twice. */
         const val SEEN = 64
+
+        /** What the agent is told when the listener is not there: how the user grants it. */
+        const val NO_NOTIFICATION_ACCESS =
+            "ADBuddy cannot read the notifications: the user has not allowed notification access to ADBuddy. " +
+                "Ask them to allow it in the ADBuddy app (Settings, Notification access) or in the phone's Settings, " +
+                "Notifications, Device & app notifications. If it is already allowed, turning it off and on again fixes it."
+
+        /** Allowed in the system but not confirmed by the user in ADBuddy: only they can, the agent cannot press it. */
+        const val NOTIFICATIONS_NOT_CONFIRMED =
+            "ADBuddy cannot read the notifications yet: the user has to confirm it in the ADBuddy app " +
+                "(Settings, Notification access). Ask them to; it cannot be done for them."
 
         /** The longest id that is answered when the request does not decode. */
         const val MAX_ID = 128

@@ -5,6 +5,10 @@ import java.util.concurrent.Executors
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.bridge.DeviceInfo
 import tech.hybriq.adbuddy.bridge.Protocol
+import tech.hybriq.adbuddy.listener.AgentNotificationListener
+import tech.hybriq.adbuddy.listener.NotificationAccessStatus
+import tech.hybriq.adbuddy.listener.NotificationConsent
+import tech.hybriq.adbuddy.listener.NotificationGate
 
 /**
  * Connects the agent's helpers to the channel with the host (M5 spec §2):
@@ -31,6 +35,7 @@ object UiHelpers {
 
     fun install(app: AdbuddyApp) {
         val protected = ProtectedApps.of(app)
+        val consent = NotificationConsent.of(app)
         val work = Executors.newSingleThreadExecutor { Thread(it, "adbuddy-helpers") }
         val ui = UiExecutor(
             screen = { AgentAccessibilityService.current },
@@ -41,6 +46,9 @@ object UiHelpers {
             paused = { app.bridge.state.value.sessionState.paused },
             notificationOnScreen = AgentAccessibilityService.notifications::active,
             executor = work,
+            notifications = {
+                NotificationGate.read(consent::confirmed, { NotificationAccessStatus.listed(app) }, consent::revoke, AgentNotificationListener::read)
+            },
         )
         fun sendList() {
             val info = DeviceInfo(protectedApps = protected.list().sorted())

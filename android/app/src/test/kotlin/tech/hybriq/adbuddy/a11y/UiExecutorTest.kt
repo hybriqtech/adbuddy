@@ -16,6 +16,8 @@ import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.bridge.UiOp
 import tech.hybriq.adbuddy.bridge.UiRequest
 import tech.hybriq.adbuddy.bridge.UiResponse
+import tech.hybriq.adbuddy.listener.NotificationRead
+import tech.hybriq.adbuddy.listener.RawNotification
 
 class UiExecutorTest {
     private class FakeScreen(
@@ -53,7 +55,19 @@ class UiExecutorTest {
     private var notificationAfter = Int.MAX_VALUE // checks that pass before a heads-up appears
     private var checks = 0
     private val protected = mutableSetOf("com.example.bank")
-    private val x = UiExecutor({ screen }, { sent += it }, { now }, { it in protected }, { question }, { paused }, { notification || ++checks > notificationAfter }, { it.run() })
+    private var notes: List<RawNotification>? = emptyList() // null: no access
+    private var userConfirmed = true
+    private var notesThrow = false
+    private val x = UiExecutor(
+        { screen }, { sent += it }, { now }, { it in protected }, { question }, { paused }, { notification || ++checks > notificationAfter }, { it.run() },
+        notifications = {
+            when {
+                notesThrow -> throw IllegalStateException("boom")
+                !userConfirmed -> NotificationRead.NotConfirmed
+                else -> notes?.let { NotificationRead.Ok(it) } ?: NotificationRead.NoAccess
+            }
+        },
+    )
 
     private fun req(op: String, args: JsonElement = JsonObject(emptyMap()), id: String = "u_1", expires: String = "2026-10-01T10:00:10Z") =
         UiRequest(id, op, args, expires)
@@ -252,7 +266,6 @@ class UiExecutorTest {
     @Test fun expiredUnavailableAndUnknown() {
         assertEquals(ErrorCode.EXPIRED, error(x.run(req(UiOp.DUMP, expires = "2026-10-01T09:59:59Z"))))
         assertEquals(ErrorCode.UNSUPPORTED, error(x.run(req("swipe"))))
-        assertEquals(ErrorCode.UNAVAILABLE, error(x.run(req(UiOp.NOTIFICATIONS))))
         screen = null
         assertEquals(ErrorCode.UNAVAILABLE, error(x.run(req(UiOp.DUMP))))
     }
@@ -351,6 +364,80 @@ class UiExecutorTest {
         x.onMessage(message("u_1"))
         x.onMessage(message("u_2"))
         assertEquals(listOf("u_1", "u_2"), sent.map { it.id })
+    }
+
+    // --- notifications (M5c) ---
+
+    private fun note(pkg: String, title: String, text: String, at: Long = now, secret: Boolean = false) =
+        RawNotification("0|$pkg|1|null|1", pkg, title, text, at, ongoing = false, secret = secret)
+
+    private fun notificationsOf(r: UiResponse) = r.result!!.jsonObject["notifications"]!!.toString()
+
+    @Test fun notificationsHideWhatAProtectedAppAndAdbuddySay() {
+        notes = listOf(
+            note("com.whatsapp", "Ana", "¿Comemos?"),
+            note("com.example.bank", "Bank", "Your code is 482913"),
+            note("tech.hybriq.adbuddy", "The agent wants to", "adb shell reboot"),
+        )
+        val r = x.run(req(UiOp.NOTIFICATIONS))
+        assertTrue(r.ok)
+        val out = notificationsOf(r)
+        assertTrue(out.contains("¿Comemos?"))
+        for (secret in listOf("482913", "Bank", "reboot", "The agent wants")) assertFalse("$secret in $out", out.contains(secret))
+        assertTrue(out.contains("com.example.bank")) // the package is still said
+        assertEquals("false", r.result!!.jsonObject["truncated"]!!.toString())
+    }
+
+    @Test fun notificationsFollowTheProtectedListAsItChanges() {
+        notes = listOf(note("com.new.bank", "Bank", "482913"))
+        assertTrue(notificationsOf(x.run(req(UiOp.NOTIFICATIONS, id = "u_1"))).contains("482913"))
+        protected += "com.new.bank"
+        assertFalse(notificationsOf(x.run(req(UiOp.NOTIFICATIONS, id = "u_2"))).contains("482913"))
+    }
+
+    @Test fun notificationsNeedNoAccessibilityServiceAndNeverTouchTheScreen() {
+        screen = null // the service is off
+        notes = listOf(note("com.whatsapp", "Ana", "hola"))
+        val r = x.run(req(UiOp.NOTIFICATIONS))
+        assertTrue(r.ok)
+        assertFalse(notificationsOf(r).isEmpty())
+    }
+
+    @Test fun notificationsWithoutAccessAreUnavailableWithHowToGrantIt() {
+        notes = null
+        val r = x.run(req(UiOp.NOTIFICATIONS))
+        assertEquals(ErrorCode.UNAVAILABLE, error(r))
+        assertTrue(r.error!!.text.contains("Notification access"))
+        assertTrue(r.error!!.text.contains("Device & app notifications"))
+    }
+
+    @Test fun notificationsNeedTheUsersConfirmationAndSayWhereToGiveIt() {
+        notes = listOf(note("com.whatsapp", "Ana", "hola"))
+        userConfirmed = false
+        val r = x.run(req(UiOp.NOTIFICATIONS))
+        assertEquals(ErrorCode.UNAVAILABLE, error(r))
+        assertTrue(r.error!!.text.contains("confirm it in the ADBuddy app"))
+        assertFalse(r.error!!.text.contains("whatsapp"))
+        userConfirmed = true
+        assertTrue(x.run(req(UiOp.NOTIFICATIONS, id = "u_2")).ok)
+    }
+
+    @Test fun notificationsChecksItsArgsTheExpiryAndNeverThrows() {
+        assertEquals(ErrorCode.INVALID, error(x.run(req(UiOp.NOTIFICATIONS, obj("all" to 1)))))
+        assertEquals(ErrorCode.INVALID, error(x.run(req(UiOp.NOTIFICATIONS, JsonPrimitive("x")))))
+        assertEquals(ErrorCode.EXPIRED, error(x.run(req(UiOp.NOTIFICATIONS, expires = "2026-10-01T09:59:59Z"))))
+        notesThrow = true
+        assertEquals(ErrorCode.FAILED, error(x.run(req(UiOp.NOTIFICATIONS))))
+        notesThrow = false
+        assertTrue(x.run(req(UiOp.NOTIFICATIONS)).ok)
+    }
+
+    @Test fun readingNotificationsDoesNotNeedADishonestHeadsUpOrAPause() {
+        // It reads no screen: neither a heads-up window nor a pause (the host's doors handle it) stops it.
+        notes = listOf(note("com.whatsapp", "Ana", "hola"))
+        notification = true
+        paused = true
+        assertTrue(x.run(req(UiOp.NOTIFICATIONS)).ok)
     }
 }
 
