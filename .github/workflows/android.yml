@@ -1,7 +1,9 @@
 name: android
+# Runners come from repository variables (docs/ci-self-hosted.md); with none
+# set, GitHub-hosted runners are used.
 
 # Like host.yml: only on pull requests and pushes to main, never on every
-# branch push. Linux only (macOS minutes count 10 times).
+# branch push. One runner (Linux by default; Windows self-hosted works too).
 on:
   pull_request:
     paths: ["android/**", "protocol/**", ".github/workflows/android.yml"]
@@ -14,12 +16,18 @@ permissions:
 
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    # Fork pull requests never reach a self-hosted runner.
+    if: ${{ vars.CI_RUNNER_ANDROID != '"none"' && (vars.CI_RUNNER_ANDROID == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ANDROID || '"ubuntu-latest"') }}
+    timeout-minutes: 45
     defaults:
       run:
+        shell: bash -e {0}
         working-directory: android
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
@@ -27,8 +35,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           gradle-version: "9.8.0"
+          cache-disabled: ${{ runner.environment != 'github-hosted' }}
       # compileSdk = 37 (android/app/build.gradle.kts); its SDK package is "platforms;android-37.0".
+      # On Windows sdkmanager is sdkmanager.bat.
       - name: Install Android SDK platform 37
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0"
+        run: |
+          sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -e "$sm" ] || sm="$sm.bat"
+          yes | "$sm" "platforms;android-37.0"
       - name: "Unit tests, debug build, lint, and the instrumented tests compile (they run on an emulator by hand: see android/README.md)"
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest
