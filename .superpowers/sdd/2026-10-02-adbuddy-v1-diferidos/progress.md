@@ -24,3 +24,9 @@ Supervisor: adbuddy-e5 (Sonnet en sesión e implementadores; opus solo plan, seg
 
 ## Corte (límite de uso)
 Plan reescrito con los hallazgos de la revisión opus del plan y las órdenes del supervisor: 11 tareas (T1 undo/V01, T2 clasificador V06/V02/V03, T3 tarjetas y atención V04/V05, T4 transcript V24 + PTY V25, T5 workspace V14/V26/V15/V32, T6 instalación y CI V16/V17/V30, T7 guarda de pantalla, T8 IPC V29, T9 chat y ficheros, T10 tests, T11 JVM). Pendiente: commitear (hecho al cortar), generar briefs con `task-brief` y ejecutar T1 (implementador Sonnet, revisor opus) de uno en uno; recordar avisar a tern de los textos nuevos de T1-T3 y reconciliar `pendientes-m3-m5.md` al final. Ningún subagente en vuelo.
+
+## Ejecución
+- T1 despachada (implementador a0448e97e886b22e6, BASE abe6b37). Siguiente: review-package + revisor opus.
+- T1 ronda 0: commit 74ed01b; revision opus (a6bf78baa3d46459b): 2 Important (titulo forjable §4.5, undo fuera de inFlight tras preguntar) + minors. Ronda 1 enviada al implementador. Aplazados: M4 registro denegacion, M6 comparar Op.Args, M9 Detail ingles. Para tern: Long de cli/undo.go y undoFixes sin UNDO_DENIED.
+- Pendiente tras T1: quitar T8 (IPC V29) y T11 (JVM V21/V42/V43) del plan (nautilus los toma), y V11/V38 (guard.go); rebasar sobre main 2fcf8e2.
+- Task 1: complete (74ed01b + 002b19c; re-revision sonnet sin hallazgos importantes). Para tern: textos nuevos en task-1-report.md; Long de cli/undo.go y undoFixes UNDO_DENIED.
