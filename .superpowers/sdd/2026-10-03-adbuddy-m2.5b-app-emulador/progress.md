@@ -57,3 +57,6 @@ Otros hallazgos:
 Estado antes del reinicio del PC (WSL2): T1 spike BLOQUEADO en S1 (surfaceflinger en bucle con swiftshader_indirect; ver S1 arriba). Esperar PR ci/emulator-no-mdns de puffin en main (mDNS apagado + ADBUDDY_EMU_GPU); luego integrar main y reintentar T1 con ADBUDDY_EMU_GPU=swangle_indirect (AVD adbuddy-dev, 5600/5060). Si sigue inestable: escalar a adbuddy-54 con el log. Plan con la regla del movil real en 931f9f3. T2-T6 sin empezar.
 
 Task 2a (no-emulator part): complete — commits 0e00a8a, fbb4351 (guard moved to taskGraph.whenReady after controller found doFirst runs after install deps). Pending for emulator window: steps 2,3,4,6,7 of Tarea 2 (guard with real connected task must show no "Installing APK"; TokenProviderTest, mutations, AdbWifiObserverTest run). Ruling: no separate review of 2a; opus review of T2 after emulator steps.
+
+Task 3a (no-emulator part): complete — commit 6e711dc. Pending for emulator window: steps 5,6 of Tarea 3.
+Pending overall: T1 spike retry (after puffin PR #27 in main, ADBUDDY_EMU_GPU=swangle_indirect), T2 steps 2,3,4,6,7, T3 steps 5,6, T4 (variant by spike), T5 (emulator.yml after puffin changes), T6 docs.
