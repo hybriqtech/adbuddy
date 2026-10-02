@@ -420,3 +420,36 @@ start: 21:35:20 rc=124 "the emulator did not finish booting in 10 minutes"
 ```
 
 El sistema arranca en 18 s (según el emulador) pero `emulator-5600` queda `offline` los 10 min: `adb_enabled=0` sigue en los datos del AVD (`-no-snapshot` no lo borra) y adbd no acepta al servidor. (v) **no se cumple**: un test de Cortar acceso que falle a medias deja el AVD sin adb en el siguiente arranque, y el script no lo distingue de un emulador que no arranca (sale con 124). Parada 21:35:28 (`stop` rc 0; a las 21:35:30 ningún qemu `-port 5600`, solo el vigilante `-kill`).
+
+Tras S7: recuperación de `adbuddy-dev34` otra vez (borrados sus `userdata-qemu.img` y `.qcow2`; ningún otro AVD), `start` 21:36:14 → rc 0 a las 21:38:57 (estabilidad 120 s pasada), ADB-ON (`1`; `adb_wifi_enabled=0`; pids 427 555) y parada final 21:39:04 (`stop` rc 0). A las 21:39:24 ningún proceso `qemu-system*`/`emulator*` en el PC; RAM libre 18.45 GB. El AVD queda con adb y sin la app (los datos se recrearon).
+
+### Paso 9
+
+Borrados `CutAccessOnEmulatorTest.kt`, `/tmp/adbuddy-m25b-timeline.sh`, `/tmp/adbuddy-m25b-tl.txt` y los env temporales; `git status --short` vacío (el ledger está commiteado).
+
+### Paso 10: regla de decisión (android-34)
+
+Nota de puertos (paso 1) con lo medido en (ii): 5600 está fuera del rango 5555-5585 que escanea el servidor adb, y aun así el servidor 5060 reenganchó `emulator-5600` solo en cuanto adbd volvió: ~2 s después de `restored` en R3 (17 s desde el corte, con reactivateAfter 15 s) y en R2 (20 s), sin `reconnect`. Medidas válidas para 5600/5060; no para el puerto por defecto 5580.
+
+- (i) sí: sale de `device` ~2 s tras el corte (R3 y R3 en tcpip).
+- (ii) sí: vuelve solo a ~17 s del corte (< 105 s).
+- (iii) sí: `cut=true isCut=true`, `restored=true isCut=false`, `adb_enabled=1`.
+- (iv) sí: S6 dos veces, `scripts/emulator.sh stop` apaga sin `Stop-Process`.
+- (v) **no**: S7 dos veces (la segunda limpia, 10 min): el sistema arranca (18 s) pero `emulator-5600` queda `offline`; hace falta la recuperación (borrar los datos del AVD).
+
+Ruling (propuesta del implementador; la confirma el controlador): variante **A en local** de la Tarea 4 — con android-34 (i)-(iv) se cumplen (fuera de `device` en ~2 s, de vuelta solo a ~17 s, logcat y `adb_enabled=1` correctos, `stop` apaga con adb cortado) y (v) no (tras un corte que nadie deshace, el AVD arranca sin adb y `emulator.sh start` acaba en 124 a los 10 min) — si me equivoco y la CI lo corre, un fallo a medias del test deja el AVD que el runner conserva sin adb y los jobs siguientes del oráculo fallan por tiempo hasta que alguien borre sus datos; el test solo corre con `ADBUDDY_EMULATOR_CUT=1` y la CI no lo pone.
+
+Ruling (propuesta): tcpipOnEmulator=true — tras `adb tcpip 5555` vuelve `emulator-5600` en ~2 s (`service.adb.tcp.port=5555`), R3 en tcpip cumple (i)-(iii) con `listening before the cut: true` y `listening after the cut: false`, y `adb usb` lo devuelve a `device` en ~1 s (`service.adb.tcp.port=0`) — si me equivoco: en el emulador esas dos líneas de `listening` salen igual sin tcpip (adbd escucha en 5555 como transporte del emulador, ver S2), así que no prueban que el corte cierre el modo tcpip en concreto, solo que cierra adbd; el test de la Tarea 4 no debe presentarlas como prueba de tcpip, y en el Pixel sigue manual comprobar que el puerto tcpip queda cerrado tras Cortar acceso.
+
+Consecuencias para el resto del plan: el plan da por hecha la imagen android-37.0 y el AVD `adbuddy-dev`; ahora la de desarrollo es android-34 (`ADBUDDY_EMU_IMAGE='system-images;android-34;google_apis;x86_64'`, `ADBUDDY_EMU_AVD=adbuddy-dev34`, `ADBUDDY_EMU_STABLE_SECS=120`). La CI (`adbuddy-ci-api37`, android-37.0) tendría el mismo bucle de surfaceflinger para la app: la Tarea 5 necesita que el job ponga `ADBUDDY_EMU_IMAGE` de android-34 y otro nombre de AVD (lo decide el controlador; el script es de puffin). Recuperación del AVD: en la receta hay que leer `adbuddy-dev34` donde dice `adbuddy-dev`.
+
+### Validaciones que dependen de Android 17 (API 37) y siguen manuales en el Pixel
+
+Lo medido en android-34 (UE1A.230829.050) no cubre lo que cambia en Android 15-17. Quedan manuales en el Pixel (Android 17), aunque el emulador las pase:
+
+- **6, Cortar acceso con `adb_wifi_enabled` (depuración inalámbrica):** en el emulador `adb_wifi_enabled` vale 0 antes y después; no se ha probado el corte con la depuración inalámbrica activa ni que Reactivar la vuelva a encender en Android 17 (redes de confianza, el sistema puede apagarla al cambiar de red o pedir confirmación). Tampoco el cierre del puerto tcpip en un móvil real (en el emulador 5555 es también su transporte).
+- **10 y la lectura de `adb_wifi_enabled` por la app:** qué ajustes ocultos de `Settings.Global` puede leer una app con targetSdk alto lo decide la versión de la plataforma (anotaciones `@Readable` del proveedor de ajustes); que en 34 se lea no dice que en 37 se pueda. Además `CutAccess` trata un `SecurityException` como "nunca escrito" (0), así que R3 no distingue "leído 0" de "no se puede leer".
+- **Ajustes restringidos ("restricted settings") para apps instaladas fuera de una tienda** (accesibilidad y similares): Android 13 los introdujo y Android 15-17 los endurecieron; el comportamiento de 34 no vale para el Pixel (afecta a la 4).
+- **3, servicio en primer plano desde el proveedor:** las restricciones de arranque en segundo plano y de tipos de servicio en primer plano cambian en 15-17 (p. ej. límites de `dataSync`); lo que pase en 34 no garantiza 17.
+- **2, `content write` por stdin:** la parte de Android 17 sigue en el Pixel (el emulador cubre 34, ni 11-13 ni 17).
+- **Comportamientos ligados a targetSdk 37 que solo se activan en una plataforma 37:** edge-to-edge obligatorio (35+), y las restricciones de acceso a la red local de Android 16/17 si la app habla con el PC por la LAN. En 34 no se activan.
