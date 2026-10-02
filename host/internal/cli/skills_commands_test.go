@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -86,7 +87,7 @@ func forbiddenRecipe(file string, fields []string) bool {
 			if slices.Contains(toks[i+1:], "-delete") {
 				return true
 			}
-		case tk == "uninstall" && i > 0 && (toks[i-1] == "pm" || toks[i-1] == "package"):
+		case tk == "uninstall" && i > 0 && (path.Base(toks[i-1]) == "pm" || toks[i-1] == "package"):
 			// Only for one user, never for the whole phone.
 			rest := toks[i+1:]
 			if !slices.ContainsFunc(rest, func(o string) bool { return o == "--user" || strings.HasPrefix(o, "--user=") }) {
@@ -513,6 +514,7 @@ func TestForbiddenRecipesAreCaught(t *testing.T) {
 		"shell /system/bin/find /sdcard/x -delete",
 		"shell 'cd /sdcard;find . -delete'",
 		"shell pm uninstall com.example.app",
+		"shell /system/bin/pm uninstall com.example.app",
 		"shell pm uninstall -k com.example.app",
 		"shell cmd package uninstall com.example.app",
 		"shell am broadcast -a android.intent.action.MASTER_CLEAR",
@@ -528,6 +530,7 @@ func TestForbiddenRecipesAreCaught(t *testing.T) {
 	}
 	for _, cmd := range []string{
 		"shell pm uninstall --user 0 com.example.app",
+		"shell /system/bin/pm uninstall --user 0 com.example.app",
 		"shell pm uninstall --user=0 com.example.app",
 		"shell find /sdcard/x -type f",
 	} {

@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,7 +46,8 @@ func TestFramesOfUnacceptedIDsDoNotCutTheChannel(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(seen) != 3 || len(kept) != 1 || kept[0] != "yes" {
+	wantSeen := []string{stranger.String(), accepted.String(), stranger.String()}
+	if !slices.Equal(seen, wantSeen) || len(kept) != 1 || kept[0] != "yes" {
 		t.Fatalf("frames seen %v, kept %v", seen, kept)
 	}
 }
