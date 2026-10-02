@@ -281,4 +281,5 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
   - T9: las mutaciones de los otros `catch` (`ConfirmReducer.snapshot`, `RemoteReducer.read`, `Protocol.payload`) no tienen RED propio.
   - T11: si `main` hace stop/start con la burbuja abierta, gana el último en llegar (solo documentado).
   - Flake: `session.TestResumeFallsBackToANewConversation` (visto dos veces con carga, antes de tocar `ipc`), junto a `TestRemoteOnClientGoneWhileAsking`; mismo género que V37.
-  - Validaciones en dispositivo 36 a 40 de este plan (`%XX` en `android-app://`, "off" sin cortar la conexión, burbuja sobre la terminal, badge en el chat, dos `serve` a la vez): ya están en "Validaciones manuales pendientes" del plan, no se repiten aquí.
+  - Validaciones en dispositivo 36 a 41 de este plan (`%XX` en `android-app://`, "off" sin cortar la conexión, burbuja sobre la terminal, badge en el chat, dos `serve` a la vez): ya están en "Validaciones manuales pendientes" del plan, no se repiten aquí.
+  - `remote.Reconcile` y el camino de fallo de `Enable` siguen con `port != Port` y, con una caducidad guardada y otro puerto abierto (p. ej. 7777), borran la caducidad sin `adb usb` (visto en la revisión final; el arranque de `serve` probablemente lo cierra con `EnsureNoTCPPort`: por comprobar). Fuera del diff de esta rama.
