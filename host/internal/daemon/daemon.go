@@ -405,7 +405,7 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 	case ipc.KindUI:
 		return d.ui(ctx, req, s)
 	case ipc.KindPing:
-		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.currentSerial(), Identity: d.identity(), Journal: d.o.Journal.Dir()})
+		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.currentSerial(), Identity: d.identity(), Journal: d.o.Journal.Dir(), Paused: d.o.Paused()})
 		return ipc.Exit{}
 	}
 	return ipc.Exit{Code: 1, ErrorCode: "UNKNOWN_REQUEST", Error: "unknown request " + req.Kind}

@@ -280,6 +280,19 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 	// depends on it. It is reported after the adb server, its dependency.
 	running, ping, perr := servePing(ctx, e.dirs.Data)
 
+	// V20: paused from the phone, the agent's doctor calls no adb either: it
+	// would run outside the shim, which refuses everything meanwhile. This is
+	// coherence, not a boundary (an agent that clears ADBUDDY_SOURCE still
+	// runs it); the pause shows as a warning of serve.
+	if running && ping.Paused && app.Getenv("ADBUDDY_SOURCE") == "agent" {
+		paused := i18n.M("doctor.skip.paused")
+		skip(paused, "adb", "adb server")
+		add(checkServe(running, ping, perr, e.dirs.Data))
+		skip(paused, "phone", "identity", "network port", "phone app")
+		addPCChecks(add, e, running, ping)
+		return rep
+	}
+
 	adbPath := configuredADB(e, "")
 	runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
 	adbCheck := mk("adb", checkFail, i18n.M("doctor.adb.not_installed")).withRun("adbuddy setup")
@@ -326,13 +339,19 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 		add(checkApp(ctx, phone, e, running))
 	}
 
+	addPCChecks(add, e, running, ping)
+	return rep
+}
+
+// addPCChecks adds the checks that only read the PC: the environment
+// (serve's, when it runs) and Claude Code's global hooks.
+func addPCChecks(add func(check), e env, running bool, ping ipc.Ping) {
 	ws := e.workspace("")
 	if w := serveWorkspace(ping); running && w != "" {
 		ws = w
 	}
 	add(checkWorkspace(ws))
 	add(checkClaudeHooks())
-	return rep
 }
 
 func verdict(cs []check) string {
@@ -415,6 +434,8 @@ func checkServe(running bool, ping ipc.Ping, perr error, dataDir string) check {
 	switch {
 	case perr != nil:
 		return mk("serve", checkWarn, causeMsg(perr)).withGuide(i18n.M("doctor.serve.stuck", ipc.SocketPath(dataDir)))
+	case running && ping.Paused:
+		return mk("serve", checkWarn, i18n.M("doctor.serve.running", ping.Session, ping.Serial)).withGuide(i18n.M("doctor.serve.paused"))
 	case running:
 		return mk("serve", checkOK, i18n.M("doctor.serve.running", ping.Session, ping.Serial))
 	}

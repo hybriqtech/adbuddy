@@ -99,6 +99,9 @@ type Ping struct {
 	// empty from a host that predates it.
 	Identity string `json:"identity,omitempty"`
 	Journal  string `json:"journal"`
+	// Paused: the person paused the agent from the phone (V20); false from
+	// a host that predates it.
+	Paused bool `json:"paused,omitempty"`
 }
 
 // Phone is the phone the host serves, as the agent names it in
