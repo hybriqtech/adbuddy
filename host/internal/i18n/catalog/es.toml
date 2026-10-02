@@ -159,8 +159,9 @@ abierto. No disponible para el agente."""
 "help.run.short" = "Arranca un agente de código en el entorno de ADBuddy"
 "help.run.long" = """
 Arranca el agente (claude, codex, gemini, opencode…) en el entorno de ADBuddy,
-con el adb de ADBuddy el primero en su PATH y el móvil seleccionado. `adbuddy serve --no-agent`
-debe estar en marcha en otra terminal. El código de salida es el del agente."""
+con el adb de ADBuddy el primero en su PATH y el móvil seleccionado. Necesita
+`adbuddy serve` en marcha en otra terminal; arráncalo con `--no-agent` si
+quieres arrancar el agente tú. El código de salida es el del agente."""
 
 # run.go: flag
 "help.run.flag.workspace" = "entorno del agente; debe ser el que vigila `adbuddy serve` (por defecto: ese)"
