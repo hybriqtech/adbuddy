@@ -35,7 +35,7 @@ class TermWebPolicyTest {
     @Test fun edgeCasesAreBlocked() {
         for (rest in listOf(
             "", "?x=1", "index.html?x=1", "#frag", "index.html#frag", "a?/../b", "%2F", "index%2Ehtml", "..", "...", ".",
-            ".hidden", "/index.html", "sub/index.html", "index.html/", "a\b", "a b", "índex.html", "index.html\u0000",
+            ".hidden", "/index.html", "sub/index.html", "index.html/", "a\\b", "a\u0008b", "a b", "índex.html", "index.html\u0000",
         )) assertFalse("rest \"$rest\"", TermWebPolicy.allowed(base + rest))
         for (u in listOf(
             "HTTPS://APPASSETS.ANDROIDPLATFORM.NET/assets/term/index.html",
