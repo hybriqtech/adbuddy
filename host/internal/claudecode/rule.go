@@ -202,7 +202,41 @@ func CardSafe(tool string, raw json.RawMessage) bool {
 	if tool == "Bash" && !bashRestOff(in) {
 		return false
 	}
+	switch tool {
+	case "Edit", "MultiEdit", "Write", "NotebookEdit":
+		if configPath(str(in, "file_path")) || configPath(str(in, "notebook_path")) {
+			return false
+		}
+	}
 	return true
+}
+
+// configPath reports whether a file tool would write what configures the agent
+// or git: a component .claude or .git, or a .mcp.json (V04, round 1). The card
+// shows the path, not the content, and such a write could add rules, hooks or
+// servers that skip every later question. It looks at every component as
+// written, in any case and with either slash, so it holds before and after
+// cleaning the path (cleaning only drops components) and when one of them is a
+// link. Windows also reaches a name with trailing dots or spaces, a stream
+// (name:…) or its 8.3 short name (CLAUDE~1, GIT~1, MCP~1.JSO).
+func configPath(p string) bool {
+	for _, c := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		c = strings.ToLower(c)
+		if i := strings.IndexByte(c, ':'); i >= 0 {
+			c = c[:i]
+		}
+		c = strings.TrimRight(c, ". ")
+		switch c {
+		case ".claude", ".git", ".mcp.json":
+			return true
+		}
+		for _, short := range []string{"claude~", "git~", "mcp~"} {
+			if rest, ok := strings.CutPrefix(c, short); ok && rest != "" && rest[0] >= '0' && rest[0] <= '9' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // bashShown are the fields of a Bash input its card accounts for: the command

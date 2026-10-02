@@ -992,3 +992,53 @@ func TestParserIgnoresIdsThatAreNotPlainTokens(t *testing.T) {
 		t.Errorf("a 64-char id is fine: %+v", ev)
 	}
 }
+
+// V04, round 1: a file tool's card shows the path, not the content. A write to
+// what configures the agent or git (rules, hooks, MCP servers) could approve,
+// unseen, what skips every later question: it is asked on the terminal.
+func TestCardSafeFileToolsOnTheAgentsConfig(t *testing.T) {
+	in := func(key, p string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{key: p, "content": "x"})
+		return b
+	}
+	bad := []string{
+		"/home/u/proj/.claude/settings.local.json",
+		".claude/hooks/x.sh",
+		"/home/u/proj/.git/hooks/pre-commit",
+		"/home/u/proj/.mcp.json",
+		".mcp.json",
+		"sub/.Claude/x",
+		"/home/u/.CLAUDE/settings.json",
+		"src/../.claude/settings.json",
+		"/home/u/proj/.claude/../x.go", // .claude may be a link: refused before cleaning too
+		`C:\Users\u\proj\.claude\settings.json`,
+		`C:\Users\u\proj\.GIT\config`,
+		`C:\Users\u\proj\sub\..\.mcp.JSON`,
+		`C:\Users\u\proj\.claude.\settings.json`, // Windows drops trailing dots and spaces
+		`C:\Users\u\proj\.git \config`,
+		`C:\Users\u\proj\.git::$INDEX_ALLOCATION\config`, // a stream of the folder
+		`C:\Users\u\proj\CLAUDE~1\settings.json`,         // the 8.3 name of .claude
+		`C:\Users\u\proj\GIT~1\config`,
+		`C:\Users\u\proj\MCP~1.JSO`,
+	}
+	for _, tool := range []string{"Edit", "MultiEdit", "Write", "NotebookEdit"} {
+		key := "file_path"
+		if tool == "NotebookEdit" {
+			key = "notebook_path"
+		}
+		for _, p := range bad {
+			if CardSafe(tool, in(key, p)) {
+				t.Errorf("%s %s accepted", tool, p)
+			}
+		}
+		for _, p := range []string{"/home/u/proj/src/main.go", `C:\Users\RUNNER~1\proj\a.ipynb`, "/home/u/proj/claude/x.md", "/home/u/proj/.github/workflows/ci.yml", "/home/u/proj/docs/mcp.json", "/home/u/proj/.gitignore"} {
+			if !CardSafe(tool, in(key, p)) {
+				t.Errorf("%s %s refused", tool, p)
+			}
+		}
+	}
+	// Reading them changes nothing: Read keeps its card.
+	if !CardSafe("Read", in("file_path", "/home/u/proj/.claude/settings.json")) {
+		t.Error("Read of the config refused")
+	}
+}
