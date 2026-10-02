@@ -949,6 +949,44 @@ func TestCardSafeUnicodeTheCardCannotShow(t *testing.T) {
 	}
 }
 
+// Right-to-left letters reorder what is read around them: the card does not
+// show them and the question stays on the terminal.
+func TestCardSafeRTL(t *testing.T) {
+	for _, r := range []rune{0x590, 0x8ff, 0xfb1d, 0xfdff, 0xfe70, 0xfeff, 0x10800, 0x10fff, 0x1e800, 0x1efff, 0x5d0, 0x627} {
+		if shownRune(r) || shown("a"+string(r)+"b") {
+			t.Errorf("U+%04X shown", r)
+		}
+	}
+	// Just outside the ranges: the answer is what it was before (a graphic
+	// character is shown; Mn and unassigned were already not).
+	for r, want := range map[rune]bool{0x58f: true, 0x900: false, 0xfb1c: false, 0xfe6f: false, 0x107ff: false, 0x11000: true, 0x1e7ff: false} {
+		if shownRune(r) != want {
+			t.Errorf("U+%04X: shown %v, want %v", r, !want, want)
+		}
+	}
+	// A tool name is shown too: an MCP or unknown tool is summarised by it.
+	for _, tool := range []string{"mcp__srv__א", "mcp__א__x", "Toolא"} {
+		if CardSafe(tool, json.RawMessage(`{}`)) {
+			t.Errorf("%q accepted", tool)
+		}
+	}
+	if !CardSafe("mcp__srv__name", json.RawMessage(`{}`)) {
+		t.Error("a clean MCP tool refused")
+	}
+	js := func(cmd, desc string) json.RawMessage {
+		b, _ := json.Marshal(map[string]string{"command": cmd, "description": desc})
+		return b
+	}
+	if CardSafe("Bash", js("mv א ב", "")) || CardSafe("Bash", js("ls", "א")) {
+		t.Error("RTL accepted in a Bash card")
+	}
+	for _, s := range []string{"é", "日本語", "Ж", "😀", "ñ", "\t", "\n"} {
+		if !CardSafe("Bash", js("x"+s+"y", "x"+s+"y")) {
+			t.Errorf("%q refused", s)
+		}
+	}
+}
+
 // V04: the card of a Bash shows the command and the description only. A field
 // that changes how it runs where the card does not say (out of the sandbox, in
 // the background, or one this host does not know) leaves the question on the

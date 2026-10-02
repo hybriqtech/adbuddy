@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
 // Publisher is the part of Server a Confirmer uses.
@@ -31,6 +32,10 @@ type Confirmer struct {
 	// StaleText is what the app is told when its answer comes too late, in the
 	// language of the PC; StaleReplyText (English) if empty.
 	StaleText string
+	// RTLNote is the line a question gets when right-to-left characters in it
+	// were escaped (see confirm.Request.Shown), in the language of the PC;
+	// English if empty.
+	RTLNote string
 
 	mu      sync.Mutex
 	pending map[string]*pendingReq
@@ -68,7 +73,14 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 	if !c.App.Connected() {
 		return c.Fallback.Confirm(ctx, r)
 	}
-	req := ConfirmRequest{ID: r.ID, Level: "red", Title: r.Title, Detail: r.Detail, RawCommand: r.RawCommand,
+	// What the app shows is what Shown makes visible; the Fallback (the
+	// terminal) gets the original and does the same.
+	note := c.RTLNote
+	if note == "" {
+		note = i18n.EN.T("confirm.rtl_escaped")
+	}
+	shown := r.Shown(note)
+	req := ConfirmRequest{ID: r.ID, Level: "red", Title: shown.Title, Detail: shown.Detail, RawCommand: shown.RawCommand,
 		ExpiresAt: r.ExpiresAt.UTC(), Special: r.Special, AllowSession: allowSession}
 	p := &pendingReq{req: req, reply: make(chan confirm.Decision, 1), key: r.Key, gone: make(chan struct{})}
 	c.mu.Lock()
@@ -113,7 +125,7 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 				// snapshot), so it keeps waiting there.
 				p.gone = make(chan struct{})
 				c.mu.Unlock()
-				c.notify(r.Title, false)
+				c.notify(shown.Title, false)
 				// If it left again before the new channel was in place,
 				// AppGone closed the old one only.
 				if !c.App.Connected() {
@@ -123,7 +135,7 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 			}
 			delete(c.pending, r.ID)
 			c.mu.Unlock()
-			c.notify(r.Title, true)
+			c.notify(shown.Title, true)
 			return c.Fallback.Confirm(ctx, r)
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {

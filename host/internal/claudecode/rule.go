@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
@@ -137,13 +138,15 @@ func fullDetail(tool string, raw json.RawMessage) string {
 // has no glyph the card can draw as it is: private use (Co), unassigned (Cn,
 // which covers noncharacters), surrogates (Cs) and the object replacement
 // character U+FFFC (V18). Only what Go's unicode tables call graphic is shown.
-// Fail safe by design: an emoji newer than Go's unicode tables is Cn and a
+// Right-to-left letters (classify.RTL, the one table) are not shown either:
+// they reorder what is read around them, so a card with one is left to the
+// terminal. Fail safe by design: an emoji newer than Go's unicode tables is Cn and a
 // variation selector 16 is Mn, so text with them goes to the terminal.
 func shownRune(r rune) bool {
 	switch {
 	case r == '\n' || r == '\t' || r == ' ':
 		return true
-	case r == utf8.RuneError, r == 0xfffc, unicode.IsControl(r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Z, r),
+	case r == utf8.RuneError, r == 0xfffc, classify.RTL(r), unicode.IsControl(r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Z, r),
 		unicode.Is(unicode.Mn, r), unicode.Is(unicode.Me, r), unicode.Is(unicode.Co, r),
 		!unicode.IsGraphic(r) && !unicode.IsSpace(r):
 		return false
@@ -197,6 +200,10 @@ func detailShown(s string) bool {
 func CardSafe(tool string, raw json.RawMessage) bool {
 	d := fullDetail(tool, raw)
 	if len(d) > maxDetail || !detailShown(d) {
+		return false
+	}
+	// The title of an MCP or unknown tool is made of its name.
+	if !shown(tool) {
 		return false
 	}
 	in := input(raw)

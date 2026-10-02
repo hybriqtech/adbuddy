@@ -70,7 +70,7 @@ type DenyAll struct {
 
 func (d DenyAll) Confirm(_ context.Context, r Request) Decision {
 	if d.Out != nil {
-		fmt.Fprintln(d.Out, d.Lang.T("confirm.nobody", classify.Printable(r.Title)))
+		fmt.Fprintln(d.Out, d.Lang.T("confirm.nobody", classify.Visible(r.Title)))
 	}
 	return Nobody
 }
@@ -164,12 +164,13 @@ func (t *Terminal) Confirm(ctx context.Context, r Request) Decision {
 		code = t.code()
 	}
 	t.last = code
+	r = r.Shown(t.lang.T("confirm.rtl_escaped"))
 	fmt.Fprintf(t.out, "\n%s\n   %s\n   %s\n",
-		t.lang.T("confirm.header", time.Until(r.ExpiresAt).Round(time.Second)), classify.Printable(r.Title), classify.Printable(r.RawCommand))
+		t.lang.T("confirm.header", time.Until(r.ExpiresAt).Round(time.Second)), classify.Visible(r.Title), classify.Visible(r.RawCommand))
 	if r.Detail != "" {
 		var parts []string
 		for _, l := range strings.Split(r.Detail, "\n") {
-			parts = append(parts, classify.Printable(l))
+			parts = append(parts, classify.Visible(l))
 		}
 		why := t.lang.T("confirm.why")
 		fmt.Fprintf(t.out, "   %s %s\n", why, strings.Join(parts, "\n   "+strings.Repeat(" ", utf8.RuneCountInString(why)+1)))
