@@ -187,7 +187,7 @@
     <string name="error_too_large">Es demasiado grande para enviarlo</string>
     <string name="error_checksum">El fichero llegó dañado: inténtalo de nuevo</string>
     <string name="error_failed">El PC no pudo hacerlo</string>
-    <string name="error_unavailable">Eso no está disponible en el PC</string>
+    <string name="error_unavailable">Eso no está disponible ahora</string>
     <string name="error_protected">Está protegido: el agente no puede usarlo</string>
     <string name="error_expired">Esa petición caducó</string>
     <string name="error_ambiguous">Hay más de uno que coincide: indica cuál</string>

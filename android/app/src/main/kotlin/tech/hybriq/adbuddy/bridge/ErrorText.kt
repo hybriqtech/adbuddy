@@ -35,11 +35,28 @@ object ErrorText {
         else -> R.string.error_unknown
     }
 
-    /** The text for [e], with [getString] resolving the string in the language in force. For `failed` and an unknown code the host's own text follows, in parentheses and at most 200 characters. */
+    /**
+     * The text for [e], with [getString] resolving the string in the language in force. For the codes whose cause the
+     * host explains and the person can act on (`failed`, `busy`, `unavailable`, `too_large`) and for an unknown code,
+     * the host's own text follows, in parentheses and at most 200 characters; an unknown code with no text shows the
+     * code itself (at most 64). The other codes explain themselves and the host's text is ignored.
+     */
     fun text(getString: (Int) -> String, e: ErrorReply): String {
+        val unknown = resFor(e.code) == R.string.error_unknown
         val own = getString(resFor(e.code))
-        val detail = e.text.trim().take(200)
-        val withDetail = e.code == ErrorCode.FAILED || resFor(e.code) == R.string.error_unknown
-        return if (withDetail && detail.isNotEmpty()) "$own ($detail)" else own
+        val withDetail = unknown || e.code in WITH_DETAIL
+        if (!withDetail) return own
+        val host = e.text.trim()
+        val detail = if (host.isNotEmpty()) cut(host, 200) else if (unknown) cut(e.code.trim(), 64) else ""
+        return if (detail.isNotEmpty()) "$own ($detail)" else own
+    }
+
+    private val WITH_DETAIL = setOf(ErrorCode.FAILED, ErrorCode.BUSY, ErrorCode.UNAVAILABLE, ErrorCode.TOO_LARGE)
+
+    /** At most [max] chars, never between the two halves of a surrogate pair. */
+    private fun cut(s: String, max: Int): String {
+        if (s.length <= max) return s
+        val end = if (Character.isHighSurrogate(s[max - 1]) && Character.isLowSurrogate(s[max])) max - 1 else max
+        return s.substring(0, end)
     }
 }

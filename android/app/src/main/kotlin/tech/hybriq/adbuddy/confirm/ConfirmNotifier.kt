@@ -37,6 +37,21 @@ object ConfirmNotifier {
     }
 
     /**
+     * Paints again, in the language now in force, the questions on screen (a change of language: [sync] works by
+     * differences and would not touch them). The same ids replace the old notifications, with the same status,
+     * decisions and codes; only the words of the phone change.
+     */
+    @Synchronized
+    fun repaint(context: Context, state: BridgeState) {
+        val nm = context.getSystemService(NotificationManager::class.java)
+        val clock = (context.applicationContext as AdbuddyApp).clock
+        val plan = ConfirmUi.repaint(shown, state, clock.now())
+        for (id in plan.cancel) nm.cancel(id, NOTIFICATION_ID)
+        for (p in plan.post) nm.notify(p.request.id, NOTIFICATION_ID, build(context, p, clock.toLocal(p.expires)))
+        shown = plan.shown
+    }
+
+    /**
      * Removes every question notification, those of an earlier process too:
      * nobody can answer them without the channel.
      */

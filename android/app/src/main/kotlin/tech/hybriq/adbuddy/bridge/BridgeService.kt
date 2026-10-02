@@ -135,7 +135,11 @@ class BridgeService : LifecycleService() {
      */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (foreground) shown?.let { post(it) }
+        if (foreground) {
+            shown?.let { post(it) }
+            // The pending questions are painted by differences (sync): they are painted again by hand.
+            ConfirmNotifier.repaint(this, (application as AdbuddyApp).bridge.state.value)
+        }
     }
 
     override fun onDestroy() {

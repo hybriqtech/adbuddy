@@ -189,7 +189,7 @@
     <string name="error_too_large">That is too large to send</string>
     <string name="error_checksum">The file arrived damaged: try again</string>
     <string name="error_failed">The PC could not do it</string>
-    <string name="error_unavailable">That is not available on the PC</string>
+    <string name="error_unavailable">That is not available right now</string>
     <string name="error_protected">That is protected: the agent cannot use it</string>
     <string name="error_expired">That request expired</string>
     <string name="error_ambiguous">More than one thing matches: say which</string>

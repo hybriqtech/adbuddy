@@ -119,5 +119,17 @@ object ConfirmUi {
         return Plan(cancel = shown.keys - ids, post = post, shown = next)
     }
 
+    /**
+     * What to post to paint again, in the language now in force, the questions already on screen: the same ids (the
+     * notification is replaced, not duplicated) and the status each has now; nothing that was not shown, nothing past
+     * its expiry (it timed out by itself), and the ones no longer pending are cancelled.
+     */
+    fun repaint(shown: Map<String, Status>, state: BridgeState, now: Long): Plan {
+        val ids = state.pending.map { it.id }.toSet()
+        val post = plan(emptyMap(), state, now).post.filter { it.request.id in shown }
+        val next = shown.filterKeys { it in ids } + post.associate { it.request.id to it.status }
+        return Plan(cancel = shown.keys - ids, post = post, shown = next)
+    }
+
     const val MAX_COMMAND = 300
 }

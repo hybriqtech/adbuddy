@@ -247,4 +247,31 @@ class ConfirmUiTest {
         assertTrue(p.post.isEmpty())
         assertTrue("still tracked, so it is cancelled when it leaves", "j_1" in p.shown)
     }
+
+    // --- a change of language repaints what is on screen ---
+
+    @Test fun repaintPostsAgainEveryShownQuestionWithTheSameIdsAndStatuses() {
+        val s = state(q("j_1"), q("j_2")).answered("j_2")
+        val first = ConfirmUi.plan(emptyMap(), s, now)
+        val p = ConfirmUi.repaint(first.shown, s, now + 5_000)
+        assertEquals(listOf("j_1", "j_2"), p.post.map { it.request.id })
+        assertEquals(listOf(ConfirmUi.Status.OPEN, ConfirmUi.Status.SENDING), p.post.map { it.status })
+        assertEquals(first.shown, p.shown)
+        assertTrue(p.cancel.isEmpty())
+        assertEquals(55_000L, p.post[0].left)
+    }
+
+    @Test fun repaintDoesNotPostWhatWasNotShownNorWhatExpired() {
+        val s = state(q("j_1"), q("j_2"))
+        val p = ConfirmUi.repaint(mapOf("j_1" to ConfirmUi.Status.OPEN), s, now)
+        assertEquals(listOf("j_1"), p.post.map { it.request.id })
+        val late = ConfirmUi.repaint(mapOf("j_1" to ConfirmUi.Status.OPEN), s, now + 61_000)
+        assertTrue(late.post.isEmpty())
+    }
+
+    @Test fun repaintCancelsWhatIsNoLongerPending() {
+        val p = ConfirmUi.repaint(mapOf("j_1" to ConfirmUi.Status.OPEN, "j_9" to ConfirmUi.Status.OPEN), state(q("j_1")), now)
+        assertEquals(setOf("j_9"), p.cancel)
+        assertEquals(mapOf("j_1" to ConfirmUi.Status.OPEN), p.shown)
+    }
 }

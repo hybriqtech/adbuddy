@@ -27,11 +27,32 @@ class ErrorTextTest {
         assertEquals(R.string.error_unknown, ErrorText.resFor(""))
     }
 
-    @Test fun theHostTextIsShownOnlyForFailedAndUnknownCodes() {
+    @Test fun theHostTextIsShownForTheCodesWhoseCauseItExplains() {
         assertEquals("s${R.string.error_failed} (disk full)", ErrorText.text(str, ErrorReply(ErrorCode.FAILED, "disk full")))
         assertEquals("s${R.string.error_unknown} (new thing)", ErrorText.text(str, ErrorReply("new_code", "new thing")))
-        assertEquals("s${R.string.error_busy}", ErrorText.text(str, ErrorReply(ErrorCode.BUSY, "The agent is busy")))
-        assertEquals("s${R.string.error_too_large}", ErrorText.text(str, ErrorReply(ErrorCode.TOO_LARGE, "x")))
+        assertEquals("s${R.string.error_busy} (Answer the pending question first.)", ErrorText.text(str, ErrorReply(ErrorCode.BUSY, "Answer the pending question first.")))
+        assertEquals("s${R.string.error_unavailable} (Turn on Tailscale on the phone first)", ErrorText.text(str, ErrorReply(ErrorCode.UNAVAILABLE, "Turn on Tailscale on the phone first")))
+        assertEquals("s${R.string.error_too_large} (The inbox is full (2 GiB))", ErrorText.text(str, ErrorReply(ErrorCode.TOO_LARGE, "The inbox is full (2 GiB)")))
+    }
+
+    @Test fun theCodesThatExplainThemselvesIgnoreTheHostText() {
+        assertEquals("s${R.string.error_unsupported}", ErrorText.text(str, ErrorReply(ErrorCode.UNSUPPORTED, "x")))
+        assertEquals("s${R.string.error_checksum}", ErrorText.text(str, ErrorReply(ErrorCode.CHECKSUM, "x")))
+        assertEquals("s${R.string.error_no_agent}", ErrorText.text(str, ErrorReply(ErrorCode.NO_AGENT, "x")))
+    }
+
+    @Test fun anUnknownCodeWithNoTextShowsItsCodeCut() {
+        assertEquals("s${R.string.error_unknown} (new_code)", ErrorText.text(str, ErrorReply("new_code", "")))
+        assertEquals("s${R.string.error_unknown} (${"c".repeat(64)})", ErrorText.text(str, ErrorReply("c".repeat(100), "  ")))
+        assertEquals("s${R.string.error_unknown}", ErrorText.text(str, ErrorReply("", "")))
+    }
+
+    @Test fun theCutNeverSplitsASurrogatePair() {
+        val emoji = "😀"
+        val out = ErrorText.text(str, ErrorReply(ErrorCode.FAILED, "x".repeat(199) + emoji + "tail"))
+        assertEquals("s${R.string.error_failed} (${"x".repeat(199)})", out)
+        val fits = ErrorText.text(str, ErrorReply(ErrorCode.FAILED, "x".repeat(198) + emoji))
+        assertEquals("s${R.string.error_failed} (${"x".repeat(198)}$emoji)", fits)
     }
 
     @Test fun anEmptyHostTextAddsNothingAndALongOneIsCut() {
