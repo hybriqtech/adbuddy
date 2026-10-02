@@ -361,3 +361,28 @@
 {"sh":"echo com.x | xargs pkill","level":"red","special":true}
 {"sh":"killall adbd -9","level":"red","special":true}
 {"sh":"/system/bin/killall com.x","level":"red","special":true}
+# Settings that hand an app what you type, fill in or say, the notifications or the SMS, that send the traffic elsewhere, or that change the location, the setup state or the lock screen (security review 2026-10-03, A1-1 and A1-2); harmless settings stay yellow
+{"sh":"settings put secure default_input_method com.evil/.Ime","level":"red","special":true}
+{"sh":"settings put secure enabled_input_methods com.google.android.inputmethod.latin/.LatinIME:com.evil/.Ime","level":"red","special":true}
+{"sh":"cmd settings put secure default_input_method com.evil/.Ime","level":"red","special":true}
+{"sh":"settings put secure autofill_service com.evil/.Fill","level":"red","special":true}
+{"sh":"settings put secure enabled_notification_listeners com.evil/.Listener","level":"red","special":true}
+{"sh":"settings put global http_proxy 192.0.2.9:8080","level":"red","special":true}
+{"sh":"settings put global private_dns_specifier dns.example.com","level":"red","special":true}
+{"sh":"settings put secure location_mode 3","level":"red","special":true}
+{"sh":"settings put global device_provisioned 0","level":"red","special":true}
+{"sh":"settings put secure lock_screen_allow_private_notifications 1","level":"red","special":true}
+{"sh":"settings get secure default_input_method","level":"green"}
+{"sh":"settings get global http_proxy","level":"green"}
+{"sh":"settings put global stay_on_while_plugged_in 7","level":"yellow"}
+{"sh":"settings put system screen_off_timeout 600000","level":"yellow"}
+{"sh":"settings put secure show_ime_with_hard_keyboard 0","level":"yellow"}
+# Reading the text messages or the telephony provider, where verification codes arrive (security review 2026-10-03, A1-3); every other content provider keeps its level
+{"sh":"content query --uri content://sms/inbox","level":"red","special":true}
+{"sh":"content query --uri content://sms/inbox --projection address:body --sort \"date DESC\"","level":"red","special":true}
+{"sh":"content query --uri content://mms-sms/conversations","level":"red","special":true}
+{"sh":"content query --user 0 --uri content://telephony/carriers","level":"red","special":true}
+{"sh":"content read --uri content://mms/part/7","level":"red","special":true}
+{"sh":"content query --uri content://com.android.contacts/contacts","level":"green"}
+{"sh":"content query --uri content://call_log/calls","level":"green"}
+{"sh":"content query --uri content://media/external/images/media","level":"green"}

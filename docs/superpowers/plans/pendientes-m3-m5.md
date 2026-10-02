@@ -366,3 +366,21 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
   - Flake: `session.TestResumeFallsBackToANewConversation` (visto dos veces con carga, antes de tocar `ipc`), junto a `TestRemoteOnClientGoneWhileAsking`; mismo género que V37.
   - Validaciones en dispositivo 36 a 41 de este plan (`%XX` en `android-app://`, "off" sin cortar la conexión, burbuja sobre la terminal, badge en el chat, dos `serve` a la vez): ya están en "Validaciones manuales pendientes" del plan, no se repiten aquí.
   - `remote.Reconcile` y el camino de fallo de `Enable` siguen con `port != Port` y, con una caducidad guardada y otro puerto abierto (p. ej. 7777), borran la caducidad sin `adb usb` (visto en la revisión final; el arranque de `serve` probablemente lo cierra con `EnsureNoTCPPort`: por comprobar). Fuera del diff de esta rama.
+
+## Revisión de seguridad independiente (2026-10-03)
+
+Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasificador, guarda y shim; área 2: daemon, sesión, IPC y CLI). Las áreas A4 y A5 siguen por revisar.
+
+- **Resueltos (rama `fix/v1-classifier-sens`):**
+  - A1-1: `default_input_method`, `enabled_input_methods` y `disabled_system_input_methods` pasan a 🔴 especial (un teclado instalado y puesto por defecto es un keylogger).
+  - A1-2: `sensitiveSettings` pasa de 11 a 46 claves, con su motivo por grupo: teclado, autorrelleno y passkeys, asistente, escucha de notificaciones, app de SMS por defecto, proxy, DNS privado, URLs del portal cautivo, VPN siempre activa, ubicación, estado de configuración inicial y pantalla de bloqueo. Sigue siendo una lista negra: el resto de `settings put` es 🟡. Pasar a lista blanca o confirmar todo `put` en `secure`/`global` es decisión para después de v1.
+  - A1-3: `content query` y `content read` sobre `sms`, `mms`, `mms-sms`, `sms-changes`, `telephony` y cualquier autoridad con una parte que contenga `sms` o empiece por `mms` son 🔴 especial (`sms.read`). Contactos, registro de llamadas y el resto de proveedores siguen 🟢.
+  - A2-1 queda documentado como límite de v1 en `docs/safety.md` (la pausa no detiene una orden que ya corre: `sleep 600; settings put …` sigue). El arreglo de verdad (cancelar los cambios en vuelo al pausar) queda abajo.
+- **Aplazados (post-v1):**
+  - A2-1 (arreglo): al pausar, cancelar el contexto de las órdenes en vuelo (`inFlight` ya existe: guardar el `cancel` de cada una y llamarlo desde `CancelConfirmations`); o tratar `sleep` y los bucles delante de un cambio 🟡 como la guarda trata la pantalla.
+  - A2-2: `stopLocked` pone `m.cur = nil` antes de matar el árbol; mientras termina, sus procesos cuentan como humanos para `attach`, `new`, `stop` y `remote` (no ejecuta 🔴 sin confirmación).
+  - A2-3: `exec` y `ui` siguen atribuyendo la orden por `ADBUDDY_SOURCE` y no por el par del socket; el diario y el móvil pueden mostrar como `user` una orden del agente (no cambia niveles ni confirmaciones).
+  - A2-4: en Windows, con `ADBUDDY_DATA_DIR` fuera de `%LOCALAPPDATA%`, la carpeta de datos (y `ipc.secret`) hereda la ACL del padre; crearla con DACL propia o avisar, y como mínimo decirlo en `install.md`.
+  - A2-5: `setup`, `connect`, `doctor --fix`, `remote off` sin `serve` y `serve` solo miran `ADBUDDY_SOURCE`; documentarlo como en `serve` y, opcionalmente, preguntar al `serve` vivo por el par.
+  - Caminos ya 🔴 pero no especiales, que una regla del usuario podría bajar: `ime enable`/`ime set` y `cmd input_method …` (el mismo teclado que A1-1 sin pasar por `settings`), `cmd notification allow_listener`, `cmd role add-role-holder`, `cmd location …`, `dpm set-active-admin`. Valorar hacerlos especiales.
+  - `appops set <pkg> android:mock_location allow` (o `MOCK_LOCATION`) es 🟡: deja a una app falsear la ubicación del móvil. Valorar subirlo.

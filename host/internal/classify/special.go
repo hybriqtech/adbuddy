@@ -26,13 +26,159 @@ var adbAlwaysRed = map[string]Text{
 }
 
 // sensitiveSettings would cut the connection, disable ADBuddy's service or
-// weaken the phone's security.
-var sensitiveSettings = map[string]bool{
-	"adb_enabled": true, "adb_wifi_enabled": true, "development_settings_enabled": true,
-	"adb_allowed_connection_time": true, "enabled_accessibility_services": true,
-	"accessibility_enabled": true, "wifi_on": true, "airplane_mode_on": true,
-	"package_verifier_enable": true, "verifier_verify_adb_installs": true,
-	"install_non_market_apps": true,
+// weaken the phone's security. The value says why; an empty one gives the
+// generic reason. The keys are the names in AOSP's Settings.java (the value
+// of each constant, not its Java name), compared in lower case. Reversible is
+// not harmless: a keyboard or a proxy is undone with one more command, after
+// it has seen what you typed or your traffic (security review 2026-10-03,
+// A1-1 and A1-2). Left out on purpose: stay_on_while_plugged_in,
+// bugreport_in_power_menu, captive_portal_mode and the other switches that
+// only turn a check on or off, lock_screen_show_notifications (what they
+// show is lock_screen_allow_private_notifications), mock_location (a no-op
+// since Android 6: mock locations are an app op now), and keys that are not
+// in Settings.java (allow_mock_location, unknown_sources, device_admin):
+// installing from unknown sources is an app op and device admins are dpm,
+// whose commands are red already.
+var sensitiveSettings = map[string]Text{
+	"adb_enabled":                    {},
+	"adb_wifi_enabled":               {},
+	"development_settings_enabled":   {},
+	"adb_allowed_connection_time":    {},
+	"enabled_accessibility_services": {},
+	"accessibility_enabled":          {},
+	"wifi_on":                        {},
+	"airplane_mode_on":               {},
+	"package_verifier_enable":        {},
+	"verifier_verify_adb_installs":   {},
+	"install_non_market_apps":        {},
+
+	// An app that sees what you type, fill in or say.
+	"default_input_method":          whyKeyboard,
+	"enabled_input_methods":         whyKeyboard,
+	"disabled_system_input_methods": whyKeyboard,
+	"autofill_service":              whyPasswords,
+	"credential_service":            whyPasswords,
+	"credential_service_primary":    whyPasswords,
+	"assistant":                     whyAssistant,
+	"voice_interaction_service":     whyAssistant,
+	"voice_recognition_service":     whyAssistant,
+
+	// An app that reads or silences the notifications, or gets the SMS.
+	"enabled_notification_listeners":              whyNotifications,
+	"enabled_notification_assistant":              whyNotifications,
+	"enabled_notification_policy_access_packages": whyNotifications,
+	"sms_default_application":                     whySMSApp,
+
+	// Where the phone's traffic goes.
+	"http_proxy":                         whyTraffic,
+	"global_http_proxy_host":             whyTraffic,
+	"global_http_proxy_port":             whyTraffic,
+	"global_http_proxy_exclusion_list":   whyTraffic,
+	"global_proxy_pac_url":               whyTraffic,
+	"private_dns_mode":                   whyTraffic,
+	"private_dns_specifier":              whyTraffic,
+	"captive_portal_http_url":            whyTraffic,
+	"captive_portal_https_url":           whyTraffic,
+	"captive_portal_fallback_url":        whyTraffic,
+	"captive_portal_other_fallback_urls": whyTraffic,
+	"captive_portal_server":              whyTraffic,
+	"always_on_vpn_app":                  whyVPN,
+	"always_on_vpn_lockdown":             whyVPN,
+
+	// Where the phone is.
+	"location_mode":              whyLocation,
+	"location_providers_allowed": whyLocation,
+
+	// The phone's setup state and its lock screen.
+	"device_provisioned":                      whySetup,
+	"user_setup_complete":                     whySetup,
+	"secure_frp_mode":                         whySetup,
+	"lockscreen.disabled":                     whyLock,
+	"lock_screen_lock_after_timeout":          whyLock,
+	"lock_screen_allow_private_notifications": whyLock,
+}
+
+var (
+	whyKeyboard      = reason("chooses the keyboard, which sees everything you type, passwords included")
+	whyPasswords     = reason("chooses the app that fills in your passwords and sees the login forms")
+	whyAssistant     = reason("chooses the assistant, which can read the screen or hear what you say")
+	whyNotifications = reason("lets an app read or silence every notification, codes included")
+	whySMSApp        = reason("chooses the app that gets your text messages, codes included")
+	whyTraffic       = reason("sends the phone's traffic or its network checks to a server the command chooses")
+	whyVPN           = reason("sets an always-on VPN, which carries all the traffic and can cut the connection")
+	whyLocation      = reason("turns location on or changes how the phone finds where it is")
+	whySetup         = reason("changes the phone's setup state, which can lock features or start the setup again")
+	whyLock          = reason("weakens the lock screen")
+)
+
+// sensitiveSetting reports whether w names a sensitive setting, and why.
+func sensitiveSetting(w string) (Text, bool) {
+	why, ok := sensitiveSettings[strings.ToLower(w)]
+	if ok && why.Empty() {
+		why = reason("setting {key} affects the connection, ADBuddy or the phone's security", "key", w)
+	}
+	return why, ok
+}
+
+// readsMessages reports whether a content command reads the text messages
+// or the telephony provider: query or read (the verbs that return data) with
+// a URI whose authority is one of them. The content tool takes the URI after
+// --uri, in any position, and Uri.getAuthority() decodes %xx; ADBuddy looks
+// at every word that has "://" in it, decoded until nothing changes, so a
+// --where or a --projection that names such a URI counts too (fail closed).
+func readsMessages(v []string) bool {
+	if verb := strings.ToLower(subOf(lits(v))); verb != "query" && verb != "read" {
+		return false
+	}
+	for _, w := range v[1:] {
+		s := strings.ToLower(w)
+		for range 4 {
+			d := strings.ToLower(percentDecode(s))
+			if d == s {
+				break
+			}
+			s = d
+		}
+		for {
+			i := strings.Index(s, "://")
+			if i < 0 {
+				break
+			}
+			s = s[i+3:]
+			end := strings.IndexAny(s, `/\?#`) // android.net.Uri's parseAuthority ends at a backslash too
+			if end < 0 {
+				end = len(s)
+			}
+			if messagesAuthority(s[:end]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// messagesAuthority: AOSP's TelephonyProvider serves sms, mms, mms-sms,
+// sms-changes and telephony (carriers and SIM information, the phone number
+// included). An authority may carry a user (0@sms) or a port. Any other
+// authority with a part that contains "sms" or starts with "mms" (an OEM's
+// message store) counts too; "comms" does not.
+func messagesAuthority(a string) bool {
+	if at := strings.LastIndexByte(a, '@'); at >= 0 {
+		a = a[at+1:]
+	}
+	if colon := strings.IndexByte(a, ':'); colon >= 0 {
+		a = a[:colon]
+	}
+	a = strings.TrimSpace(a)
+	if a == "telephony" {
+		return true
+	}
+	for _, part := range strings.FieldsFunc(a, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') }) {
+		if strings.Contains(part, "sms") || strings.HasPrefix(part, "mms") {
+			return true
+		}
+	}
+	return false
 }
 
 func applySpecial(scope string, ws []Word, f *Finding) {
@@ -54,6 +200,8 @@ func specialIdentity(scope string, v []string) (string, Text, bool) {
 		return "screen.record", Text{EN: "Record the screen", ES: "Grabar la pantalla"}, true
 	case v[0] == "dumpsys" && revealsNotifications(v):
 		return "notifications.reveal", Text{EN: "Read the text of every app's notifications", ES: "Leer el texto de las notificaciones de todas las apps"}, true
+	case v[0] == "content" && readsMessages(v):
+		return "sms.read", Text{EN: "Read the text messages or the telephony data: {args}", ES: "Leer los mensajes de texto o los datos de telefonía: {args}"}, true
 	}
 	return "", Text{}, false
 }
@@ -113,8 +261,8 @@ func specialReason(scope string, ws []Word, level Level) Text {
 		}
 		if verb == "put" || verb == "delete" {
 			for i, w := range v[2:] {
-				if sensitiveSettings[w] {
-					return reason("setting {key} affects the connection, ADBuddy or the phone's security", "key", w)
+				if why, ok := sensitiveSetting(w); ok {
+					return why
 				}
 				if ws[2+i].Dynamic {
 					// On the phone it may split or expand into a sensitive key.
@@ -144,6 +292,11 @@ func specialReason(scope string, ws []Word, level Level) Text {
 			// $(…), $VAR, a loop variable or xargs' stdin: on the phone it
 			// may become ADBuddy's authority.
 			return reason("arguments only known on the phone could point at the ADBuddy app's own channel")
+		}
+		if readsMessages(v) {
+			// Two-factor codes arrive by SMS; the shell's UID can read the
+			// provider on many phones (security review 2026-10-03, A1-3).
+			return reason("reads the text messages (SMS and MMS) or the telephony data, verification codes included")
 		}
 		if level != Green && strings.Contains(all, "settings") {
 			return reason("changes system settings directly, including the connection ones")
