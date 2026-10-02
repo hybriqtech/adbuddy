@@ -25,8 +25,14 @@ func capturePeer(nc net.Conn) Peer {
 		var n uint32
 		err = windows.WSAIoctl(windows.Handle(fd), sioAFUnixGetPeerPID, nil, 0,
 			(*byte)(unsafe.Pointer(&pid)), uint32(unsafe.Sizeof(pid)), &n, nil, 0)
-	}) || err != nil {
-		return Peer{} // a Windows without the ioctl does not say who
+	}) {
+		return Peer{} // not a local socket
+	}
+	if err != nil {
+		if ioctlUnsupported(err) {
+			return Peer{} // a Windows without the ioctl does not say who
+		}
+		return unverifiable(err)
 	}
 	p := Peer{PID: int(pid), Known: true}
 	if pid == 0 {
@@ -40,6 +46,13 @@ func capturePeer(nc net.Conn) Peer {
 	}
 	p.id.h = h
 	return p
+}
+
+// ioctlUnsupported reports whether err says the system has no such ioctl, the
+// only case in which it does not name the peer; any other failure is a peer
+// that could not be verified.
+func ioctlUnsupported(err error) bool {
+	return errors.Is(err, windows.WSAEINVAL) || errors.Is(err, windows.WSAEOPNOTSUPP)
 }
 
 func (id peerID) same(int) bool {

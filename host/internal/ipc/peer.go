@@ -45,6 +45,13 @@ func (p Peer) Same() bool {
 	return p.id.same(p.PID)
 }
 
+// unverifiable is the peer of a connection the system was asked about and
+// could not answer for: it is Known, so the client's own declaration does not
+// decide (the agent can clear it), and it has Err, so callers do not trust it.
+func unverifiable(err error) Peer {
+	return Peer{Known: true, Err: err}
+}
+
 // withFD runs f with the connection's socket. It reports false when nc has
 // none (a net.Pipe) or it cannot be reached.
 func withFD(nc net.Conn, f func(fd uintptr)) bool {

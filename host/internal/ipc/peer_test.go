@@ -140,3 +140,10 @@ func TestPeerWithoutAConnectionIsUnknown(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 }
+
+func TestUnverifiableIsKnownWithErr(t *testing.T) {
+	p := unverifiable(io.ErrUnexpectedEOF)
+	if !p.Known || p.Err == nil || p.PID != 0 || p.Same() {
+		t.Fatalf("unverifiable peer = %+v", p)
+	}
+}
