@@ -33,6 +33,13 @@ object UiHelpers {
         }
     }
 
+    /**
+     * Sends the protected apps to the host in device.info (spec §4.3). false when the host is not
+     * reachable: it gets the list with the next welcome. Quick (no socket wait): safe to call from the UI.
+     */
+    fun publishProtectedApps(app: AdbuddyApp): Boolean =
+        app.bridge.send(Protocol.DEVICE_INFO, Protocol.json.encodeToJsonElement(DeviceInfo.serializer(), ProtectedApps.of(app).deviceInfo()))
+
     fun install(app: AdbuddyApp) {
         val protected = ProtectedApps.of(app)
         val consent = NotificationConsent.of(app)
@@ -51,8 +58,7 @@ object UiHelpers {
             },
         )
         fun sendList() {
-            val info = DeviceInfo(protectedApps = protected.list().sorted())
-            app.bridge.send(Protocol.DEVICE_INFO, Protocol.json.encodeToJsonElement(DeviceInfo.serializer(), info))
+            publishProtectedApps(app)
         }
         app.bridge.listen(Protocol.UI_REQUEST) { m ->
             try {
@@ -66,7 +72,8 @@ object UiHelpers {
         // host at once if it is connected; otherwise with the next welcome.
         work.execute {
             try {
-                if (protected.propose(ProtectedApps.launcherApps(app))) sendList()
+                val receivers = ProtectedApps.Heuristic.receivers(ProtectedApps.defaultSms(app))
+                if (protected.propose(ProtectedApps.launcherApps(app), receivers)) sendList()
             } catch (e: RuntimeException) {
                 Log.w(TAG, "protected apps", e)
             }
