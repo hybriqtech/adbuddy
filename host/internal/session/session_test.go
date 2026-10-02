@@ -252,8 +252,13 @@ func TestResumeFallsBackToANewConversation(t *testing.T) {
 	if args := r.starts[1].Args; len(args) != 0 {
 		t.Fatalf("second start args %v", args)
 	}
-	if r.m.Info().State != StateIdle {
-		t.Fatalf("state %q", r.m.Info().State)
+	// The start is recorded before the manager marks itself idle: wait for it.
+	idleBy := time.Now().Add(3 * time.Second)
+	for r.m.Info().State != StateIdle {
+		if time.Now().After(idleBy) {
+			t.Fatalf("state %q", r.m.Info().State)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
