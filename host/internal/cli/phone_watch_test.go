@@ -435,18 +435,20 @@ func TestWatchPhoneAHungDevicesIsCut(t *testing.T) {
 	}
 }
 
-// Validation 15: the worst case of the switch of address with the remote mode
-// on. The watcher needs watchMisses looks, watchEvery apart, to notice the
-// phone is gone; then each candidate address costs up to watchTryWait in
-// `adb connect` (connectAddr) plus identityWait in verifyAt, one after the
-// other. With the three addresses of a phone that has its home address, its
-// Tailscale address with the wireless debugging port and the port of the remote
-// mode, that is 2*10 + 3*(8+8) = 68 s: MORE than the ~30 s the validation
-// promised (misses*every + tryWait = 28 s is only the best case of the last
-// address answering at once). The test fixes the real bound so that a change
-// to any of those times, or to the candidates, is a decision and not an
-// accident; it does not say 68 s is acceptable (see the deferred item of
-// the plan).
+// Validation 15: the switch of address with the remote mode on. The watcher
+// needs watchMisses looks, watchEvery apart, to notice the phone is gone; then
+// each candidate address costs up to watchTryWait in `adb connect`
+// (connectAddr) plus identityWait in verifyAt, one after the other. With the
+// three addresses of a phone that has its home address, its Tailscale address
+// with the wireless debugging port and the port of the remote mode, that is
+// 2*10 + 3*(8+8) = 68 s. This is the bound of the candidate loop; the
+// `adb devices` look (+ watchTryWait) and the mDNS-named entries (each a
+// verifyAt: + identityWait) add on top, so 68 s is not a ceiling. It is MORE
+// than the ~30 s the validation promised (misses*every + tryWait = 28 s is only
+// the best case of the last address answering at once). The test fixes the
+// bound so that a change to any of those times, or to the candidates, is a
+// decision and not an accident; it does not say 68 s is acceptable (see the
+// deferred item of the plan).
 func TestWatchPhoneSwitchBudget(t *testing.T) {
 	const worstCase = 68 * time.Second
 	cfg := config.Default()

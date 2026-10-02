@@ -328,6 +328,7 @@ func TestReadTLSPortParses(t *testing.T) {
 		{"0", 0},
 		{"abc", 0},
 		{"", 0},
+		{"65536", 0},
 		{"70000", 0},
 		{"-5", 0},
 	} {
