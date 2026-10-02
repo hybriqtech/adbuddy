@@ -64,10 +64,16 @@ func TestTerminalShowsNoRTL(t *testing.T) {
 		out := &syncBuffer{}
 		term := testTerminal(pr, out, "42").WithLang(lang)
 		done := make(chan Decision, 1)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 		go func() {
-			done <- term.Confirm(context.Background(), hostile())
+			done <- term.Confirm(ctx, hostile())
 		}()
-		waitFor(t, out, ": ", 1)
+		prompt := "Code: "
+		if lang == i18n.ES {
+			prompt = "Código: "
+		}
+		waitFor(t, out, prompt, 1)
 		io.WriteString(pw, "42\n")
 		if d := <-done; d != Allow {
 			t.Fatalf("%s: %v", lang, d)
