@@ -271,3 +271,17 @@ last: 20:43:51 offline
 ```
 
 Tampoco vuelve con `reconnect`. Según el paso 5, se hace aquí la segunda mitad del paso 8 (S6 y S7). Si la restauración programada (`sleep 20; settings put global adb_enabled 1`) llegó a correr se verá en S7 por el valor de `adb_enabled` al arrancar.
+
+### S6 (paso 8, tras R1): `stop` con adb cortado — apaga
+
+```
+$ guard: emulator-5600	offline;
+$ (20:44:06) EMU; scripts/emulator.sh stop
+stop rc=0
+$ (espera de SIN-EMULADOR, solo -port 5600) 20:44:11
+emulator.exe -avd adbuddy-ci-api37 -port 5590 ...          (CI, sin tocar)
+qemu-system-x86_64-headless.exe -avd adbuddy-ci-api37 -port 5590 ...   (CI, sin tocar)
+emulator -kill 24616 -sleep 20                             (vigilante del propio `emu kill`, sale solo)
+```
+
+El qemu de 5600 desaparece en ≤5 s sin `Stop-Process`: (iv) se cumple (`emu kill` va por la consola del emulador, no por adbd).
