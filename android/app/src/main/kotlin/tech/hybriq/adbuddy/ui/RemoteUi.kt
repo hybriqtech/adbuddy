@@ -55,5 +55,11 @@ object RemoteUi {
         return if (left <= 0) null else left + 500
     }
 
+    /**
+     * Whether the app must behave as in remote mode (the tighter download limit): on, closing, or
+     * not known. Only a known "off" is not remote: unknown counts as remote, never as a false off.
+     */
+    fun treatAsRemote(remote: RemoteState?): Boolean = remote?.enabled != false
+
     fun request(enabled: Boolean): JsonElement = Protocol.json.encodeToJsonElement(RemoteSet.serializer(), RemoteSet(enabled))
 }

@@ -124,4 +124,11 @@ class RemoteUiTest {
         assertNull(RemoteUi.msUntilClosing(exp, exp.toEpochMilli() + 5))
         assertNull(RemoteUi.msUntilClosing(null, 0))
     }
+
+    @Test fun `only a known off is not remote`() {
+        assertTrue(RemoteUi.treatAsRemote(null)) // unknown: the tighter limit
+        assertTrue(RemoteUi.treatAsRemote(RemoteState(enabled = true, expiresAt = future)))
+        assertTrue(RemoteUi.treatAsRemote(RemoteState(enabled = true, expiresAt = past))) // closing
+        assertFalse(RemoteUi.treatAsRemote(RemoteState(enabled = false)))
+    }
 }
