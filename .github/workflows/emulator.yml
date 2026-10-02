@@ -29,6 +29,9 @@ jobs:
       ADBUDDY_EMU_AVD: adbuddy-ci-api37
       ADBUDDY_EMU_PORT: "5590"
       ADBUDDY_EMU_ADB_PORT: "5049"
+      # Its adb server never auto-connects a phone over mDNS.
+      ADB_MDNS: "0"
+      ADB_MDNS_AUTO_CONNECT: "0"
     defaults:
       run:
         shell: bash -e {0}
