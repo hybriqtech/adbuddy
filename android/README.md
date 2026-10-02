@@ -32,7 +32,7 @@ never run them on your own phone.
 
 - **Protected apps** (Settings, and the first-run step after the consent): the agent never reads or
   touches them. The list starts as a proposal made by name (banking, payments, passwords, 2FA, and the
-  apps that receive your login codes, such as Messages and Gmail, which are protected from the first launch,
+  apps that receive your login codes, such as Messages, Gmail, Outlook, Telegram or WhatsApp (those installed), which are protected from the first launch,
   before you confirm anything); you confirm or edit it, and from then on ADBuddy never changes it by itself. ADBuddy itself is always protected. Saving sends the list to the PC.
 - **Notification access** (optional): `adbuddy notifications` reads what the phone's notifications say,
   through a read-only listener (`listener/`) that you allow in the system's own screen. The title and text

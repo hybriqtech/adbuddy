@@ -69,7 +69,7 @@ class ProtectedAppsTest {
         "com.google.android.apps.messaging" to "Messages",
         "com.google.android.gm" to "Gmail",
         "com.vendor.sms" to "Vendor SMS",
-        "com.whatsapp" to "WhatsApp",
+        "com.example.chat" to "Chat",
     )
 
     @Test fun theProposalProtectsTheAppsThatReceiveCodesBeforeAnyConfirmation() {
@@ -83,7 +83,7 @@ class ProtectedAppsTest {
         // What reaches the host in device.info protects them from screen and tap too.
         assertEquals(p.list().sorted(), p.deviceInfo().protectedApps)
         assertTrue(p.isProtected("com.google.android.gm"))
-        assertFalse(p.isProtected("com.whatsapp"))
+        assertFalse(p.isProtected("com.example.chat"))
     }
 
     @Test fun theReceiversSurviveWhenTheHeuristicFillsTheList() {
@@ -96,7 +96,7 @@ class ProtectedAppsTest {
 
     @Test fun aReceiverThatIsNotInstalledIsNotProposedExceptThePlayServices() {
         val p = ProtectedApps(FakePrefs())
-        p.propose(listOf("com.whatsapp" to "WhatsApp"), ProtectedApps.Heuristic.receivers(null))
+        p.propose(listOf("com.example.chat" to "Chat"), ProtectedApps.Heuristic.receivers(null))
         assertEquals(setOf("com.google.android.gms"), p.list())
     }
 
@@ -144,7 +144,7 @@ class ProtectedAppsTest {
         assertEquals(setOf("com.mine.app"), p.list())
     }
 
-    @Test fun theFiveCodeReceiversAreTheContract() {
+    @Test fun theElevenCodeReceiversAreTheContract() {
         assertEquals(
             setOf(
                 "com.google.android.apps.messaging",
@@ -152,6 +152,12 @@ class ProtectedAppsTest {
                 "com.android.mms",
                 "com.google.android.gm",
                 "com.google.android.gms",
+                "com.microsoft.office.outlook",
+                "com.samsung.android.email.provider",
+                "ch.protonmail.android",
+                "com.yahoo.mobile.client.android.mail",
+                "org.telegram.messenger",
+                "com.whatsapp",
             ),
             ProtectedApps.Heuristic.CODE_RECEIVERS,
         )
@@ -204,11 +210,35 @@ class ProtectedAppsTest {
         assertTrue(json, json.contains("\"protectedApps\":[]"))
     }
 
+    @Test fun mailAndChatClientsThatReceiveCodesAreProposedWhenInstalled() {
+        val p = ProtectedApps(FakePrefs())
+        val apps = listOf(
+            "com.microsoft.office.outlook" to "Outlook",
+            "ch.protonmail.android" to "Proton Mail",
+            "org.telegram.messenger" to "Telegram",
+            "com.whatsapp" to "WhatsApp",
+            "com.example.chat" to "Chat",
+        )
+        p.propose(apps, ProtectedApps.Heuristic.receivers(null))
+        assertEquals(
+            setOf("com.microsoft.office.outlook", "ch.protonmail.android", "org.telegram.messenger", "com.whatsapp", "com.google.android.gms"),
+            p.list(),
+        )
+    }
+
+    @Test fun addingReceiversToTheProposalNeverTouchesAConfirmedList() {
+        val p = ProtectedApps(FakePrefs())
+        p.confirm(setOf("com.mine.app"))
+        assertFalse(p.propose(listOf("com.whatsapp" to "WhatsApp", "org.telegram.messenger" to "Telegram"), ProtectedApps.Heuristic.receivers(null)))
+        assertEquals(setOf("com.mine.app"), p.list())
+        assertFalse(p.isProtected("com.whatsapp"))
+    }
+
     @Test fun adbuddyIsAlwaysProtected() {
         val p = ProtectedApps(FakePrefs())
         assertTrue(p.isProtected(Packages.ADBUDDY))
         assertFalse(p.list().contains(Packages.ADBUDDY))
-        assertFalse(p.isProtected("com.whatsapp"))
+        assertFalse(p.isProtected("com.example.chat"))
     }
 
     @Test fun ensurePutsWhatItAddsBeforeTheListItAlreadyHasSoAFullOneDoesNotLeaveItOut() {

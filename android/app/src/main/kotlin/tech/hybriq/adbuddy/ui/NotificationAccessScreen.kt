@@ -31,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -41,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,6 +70,12 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 fun NotificationAccessScreen(step: OnboardingStep?, onBack: () -> Unit, onDone: () -> Unit, onSkip: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // Another window drawn over the screen must not get the user's tap on a button that grants or saves.
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.rootView.filterTouchesWhenObscured = true
+        onDispose {}
+    }
     val consent = remember(context) { NotificationConsent.of(context) }
     // Refreshing the system's answer after a click that could not confirm: the flow is read again.
     var refresh by remember { mutableIntStateOf(0) }

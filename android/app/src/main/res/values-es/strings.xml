@@ -156,7 +156,7 @@
     <string name="access_state_denied">No permitido</string>
     <string name="access_state_unknown">Desconocido</string>
     <string name="access_state_checking">Comprobando…</string>
-    <string name="access_codes_hint">Mensajes y Gmail, que reciben tus códigos de acceso, están protegidas por defecto salvo que las quitaras de la lista de apps protegidas.</string>
+    <string name="access_codes_hint">Los mensajes, el correo y las apps de chat que reciben tus códigos de acceso (Gmail, Outlook, Telegram, WhatsApp…) están protegidos por defecto, si están instalados, salvo que los quitaras de la lista de apps protegidas.</string>
     <string name="access_detail_granted">El agente puede leer tus notificaciones. Puedes quitárselo aquí o en los ajustes del sistema.</string>
     <string name="access_detail_confirm">El sistema deja que ADBuddy lea tus notificaciones, pero el agente todavía no puede. Confirma aquí que quieres que lo haga. Solo tú puedes: el agente no puede pulsar este botón.</string>
     <string name="access_detail_denied">El agente no puede leer tus notificaciones.</string>

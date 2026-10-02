@@ -75,9 +75,11 @@ open class ProtectedApps(private val prefs: SharedPreferences) {
     /** Guesses by name which apps to protect. */
     object Heuristic {
         /**
-         * Apps that receive the login codes of every other service, by SMS, mail or sign-in prompt: Google
-         * Messages, Samsung Messages, AOSP Messaging, Gmail and Google Play services (sign-in prompts and
-         * verification codes). Proposed, never forced: the user edits the list.
+         * Apps that receive the login codes of every other service, by SMS, mail, chat or sign-in prompt: Google
+         * Messages, Samsung Messages, AOSP Messaging, the common mail clients (Gmail, Outlook, Samsung Email,
+         * Proton Mail, Yahoo Mail), Telegram, WhatsApp and Google Play services (sign-in prompts and
+         * verification codes). Proposed (those installed), never forced: the user edits the list, and a list the
+         * user confirmed is never touched by a change here.
          */
         val CODE_RECEIVERS: Set<String> = setOf(
             "com.google.android.apps.messaging",
@@ -85,6 +87,12 @@ open class ProtectedApps(private val prefs: SharedPreferences) {
             "com.android.mms",
             "com.google.android.gm",
             "com.google.android.gms",
+            "com.microsoft.office.outlook",
+            "com.samsung.android.email.provider",
+            "ch.protonmail.android",
+            "com.yahoo.mobile.client.android.mail",
+            "org.telegram.messenger",
+            "com.whatsapp",
         )
 
         /** Receivers that have no icon in the launcher, so "installed" cannot be told from the launcher's list. */

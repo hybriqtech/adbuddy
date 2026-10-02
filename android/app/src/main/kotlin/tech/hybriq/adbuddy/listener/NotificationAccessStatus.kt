@@ -15,7 +15,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 
 /**
  * Binds NotificationAccess to the system: reads the list of enabled
@@ -48,9 +50,10 @@ object NotificationAccessStatus {
     fun observe(context: Context): Flow<NotificationAccess.State> {
         val resolver = context.contentResolver
         val setting = callbackFlow {
+            // onChange runs on the main thread: it only signals, listed() (binder) is read below, off it.
             val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) {
-                    trySend(listed(context))
+                    trySend(Unit)
                 }
             }
             try {
@@ -58,12 +61,12 @@ object NotificationAccessStatus {
             } catch (e: RuntimeException) {
                 // Not observable: the value read below still shows when the screen is opened again.
             }
-            trySend(listed(context))
+            trySend(Unit)
             awaitClose { resolver.unregisterContentObserver(observer) }
-        }
+        }.conflate().map { listed(context) }
         return combine(setting, AgentNotificationListener.connected) { listed, connected -> NotificationAccess.state(listed, connected) }
             .distinctUntilChanged()
-            // listed() talks to the system (binder): the first read and each change run off the main thread.
+            // listed() talks to the system (binder): the first read and each change run in the map above, off the main thread.
             .flowOn(Dispatchers.IO)
     }
 

@@ -17,7 +17,7 @@ class ProtectedAppsUiTest {
         "com.example.mybank" to "Mi Banco",
         messages to "Messages",
         gmail to "Gmail",
-        "com.whatsapp" to "WhatsApp",
+        "com.example.chat" to "Chat",
         "com.android.settings" to "Settings",
         Packages.ADBUDDY to "ADBuddy",
         "not a package" to "Bank",
@@ -33,7 +33,7 @@ class ProtectedAppsUiTest {
 
     @Test fun onlyTheCodeReceiversThatAreInstalledAreProposed() {
         // Google Play services has no icon in the launcher, so it is proposed always; the others only if installed.
-        val start = ProtectedAppsUi.initialSelection(listOf("com.whatsapp" to "WhatsApp"), emptySet(), confirmed = false, receivers = receivers)
+        val start = ProtectedAppsUi.initialSelection(listOf("com.example.chat" to "Chat"), emptySet(), confirmed = false, receivers = receivers)
         assertEquals(setOf(gms), start)
     }
 
@@ -74,18 +74,18 @@ class ProtectedAppsUiTest {
         val initial = ProtectedAppsUi.initialSelection(installed, emptySet(), false, receivers)
         val first = ProtectedAppsUi.rows(installed, initial, initial, receivers, "")
         // Play services has no launcher icon: it shows by package name, so it can be unchecked.
-        assertEquals(listOf(gms, "Gmail", "Messages", "Mi Banco", "Settings", "WhatsApp"), first.map { it.label })
+        assertEquals(listOf(gms, "Gmail", "Messages", "Mi Banco", "Chat", "Settings"), first.map { it.label })
         assertEquals(listOf(Reason.CODES, Reason.CODES, Reason.CODES, Reason.GUESS, Reason.NONE, Reason.NONE), first.map { it.reason })
         assertEquals(listOf(true, true, true, true, false, false), first.map { it.checked })
-        val after = ProtectedAppsUi.toggle(ProtectedAppsUi.toggle(initial, "com.whatsapp", true), gmail, false)
+        val after = ProtectedAppsUi.toggle(ProtectedAppsUi.toggle(initial, "com.example.chat", true), gmail, false)
         val second = ProtectedAppsUi.rows(installed, initial, after, receivers, "")
         assertEquals(first.map { it.pkg }, second.map { it.pkg }) // same order
-        assertEquals(listOf(true, false, true, true, false, true), second.map { it.checked })
+        assertEquals(listOf(true, false, true, true, true, false), second.map { it.checked })
     }
 
     @Test fun searchMatchesTheLabelAndThePackage() {
         val sel = emptySet<String>()
-        assertEquals(listOf("WhatsApp"), ProtectedAppsUi.rows(installed, sel, sel, receivers, "  WHATS ").map { it.label })
+        assertEquals(listOf("Chat"), ProtectedAppsUi.rows(installed, sel, sel, receivers, "  CHA ").map { it.label })
         assertEquals(listOf("Settings"), ProtectedAppsUi.rows(installed, sel, sel, receivers, "android.settings").map { it.label })
         assertTrue(ProtectedAppsUi.rows(installed, sel, sel, receivers, "zzz").isEmpty())
     }

@@ -20,7 +20,11 @@ data class RawNotification(
     /** Epoch milliseconds, the phone's clock. */
     val postedAtMs: Long,
     val ongoing: Boolean,
-    /** The app marked it VISIBILITY_SECRET: not even the lock screen shows it. */
+    /**
+     * True when its content must never leave the phone, whatever the app: the app marked it VISIBILITY_SECRET,
+     * or PRIVATE explicitly (the lock screen hides its content); it belongs to another user or profile; or its
+     * ranking is unknown or fails, or the notification itself cannot be read (the safe answer when the system says nothing).
+     */
     val secret: Boolean,
 ) {
     /** A data class would print key, title and text: nothing may log them. */
