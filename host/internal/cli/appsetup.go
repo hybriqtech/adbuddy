@@ -73,6 +73,16 @@ func releaseURL(app *App) (string, error) {
 // lives on this PC) is trusted as the development build once it installs
 // (spec M6a §6.1).
 func chooseAPK(e *env, apk string) (copyPath, devDigest string, err error) {
+	// Stat follows links, so a link to an APK is fine; a FIFO, a device or a
+	// directory is not, and is never opened (a FIFO with no writer would
+	// block os.Open for ever).
+	info, err := os.Stat(apk)
+	if err != nil {
+		return "", "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", "", fmt.Errorf("%s is not a regular file", apk)
+	}
 	f, err := os.Open(apk)
 	if err != nil {
 		return "", "", err
