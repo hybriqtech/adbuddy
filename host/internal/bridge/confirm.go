@@ -43,10 +43,11 @@ type Confirmer struct {
 }
 
 type pendingReq struct {
-	req   ConfirmRequest
-	reply chan confirm.Decision
-	key   string
-	gone  chan struct{} // closed by AppGone; replaced when the question stays on the phone
+	req     ConfirmRequest
+	reply   chan confirm.Decision
+	key     string
+	gone    chan struct{} // closed by AppGone; replaced when the question stays on the phone
+	granted bool          // the answer added key to the session (under c.mu)
 }
 
 // NewConfirmer returns a Confirmer that asks on app, or fallback.
@@ -110,7 +111,7 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 		c.mu.Unlock()
 		select {
 		case d := <-p.reply:
-			return d
+			return c.answer(ctx, p, d)
 		case <-gone:
 			// Never under c.mu: the server answers Connected under its
 			// lock, and holds that lock when a snapshot calls Pending.
@@ -119,7 +120,7 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 			_, waiting := c.pending[r.ID]
 			if !waiting { // answered just now
 				c.mu.Unlock()
-				return <-p.reply
+				return c.answer(ctx, p, <-p.reply)
 			}
 			if back {
 				// Back already: it has the question (resent, or in a
@@ -139,12 +140,34 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 			c.notify(shown.Title, true)
 			return c.Fallback.Confirm(ctx, r)
 		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return confirm.Timeout
-			}
-			return confirm.Deny
+			// An answer may have come at the same moment: no longer
+			// pending from here on, so none can, and what it brought is
+			// undone (answer).
+			c.mu.Lock()
+			delete(c.pending, r.ID)
+			c.mu.Unlock()
+			return c.answer(ctx, p, confirm.Deny)
 		}
 	}
+}
+
+// answer is the app's decision d, unless the question expired or was
+// abandoned meanwhile: a select picks at random when the answer and the
+// expiry come together, and an answer after the expiry never allows (A4-5).
+// Then an allow_session it brought is not kept either.
+func (c *Confirmer) answer(ctx context.Context, p *pendingReq, d confirm.Decision) confirm.Decision {
+	if ctx.Err() == nil {
+		return d
+	}
+	c.mu.Lock()
+	if p.granted {
+		delete(c.session, p.key)
+	}
+	c.mu.Unlock()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return confirm.Timeout
+	}
+	return confirm.Deny
 }
 
 // AppGone moves the questions waiting on the phone to Fallback: the app
@@ -199,8 +222,9 @@ func (c *Confirmer) Reply(raw json.RawMessage) {
 		d = confirm.Allow
 	case "allow_session":
 		d = confirm.Allow
-		if p.req.AllowSession {
+		if p.req.AllowSession && !c.session[p.key] {
 			c.session[p.key] = true
+			p.granted = true
 		}
 	}
 	delete(c.pending, rep.ID)

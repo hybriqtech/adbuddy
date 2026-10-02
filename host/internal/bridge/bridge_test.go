@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"reflect"
@@ -609,6 +610,47 @@ func TestStdinCommandIsNeverAllowedForTheSession(t *testing.T) {
 		cancel()
 		if got != confirm.Timeout {
 			t.Fatalf("%s was remembered for the session: %v", argv, got)
+		}
+	}
+}
+
+// syncApp answers in Publish itself, so the answer is waiting before Confirm
+// looks at its channels.
+type syncApp struct {
+	c        *Confirmer
+	decision string
+}
+
+func (a *syncApp) Connected() bool { return true }
+func (a *syncApp) Publish(_ string, payload any) error {
+	if r, ok := payload.(ConfirmRequest); ok {
+		reply(a.c, r.ID, a.decision)
+	}
+	return nil
+}
+
+// A4-5: an answer and the expiry at the same moment: the expiry wins, every
+// time (a select picks at random), and a late allow_session is not kept.
+func TestAnAnswerAfterTheExpiryDoesNotAllow(t *testing.T) {
+	for _, decision := range []string{"allow", "allow_session"} {
+		app := &syncApp{decision: decision}
+		c := NewConfirmer(app, fixed(confirm.Deny))
+		app.c = c
+		for i := range 40 {
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			r := confirm.Request{ID: fmt.Sprintf("j_%s_%d", decision, i), Key: "k", ExpiresAt: time.Now().Add(time.Minute)}
+			got := c.Confirm(ctx, r)
+			cancel()
+			if got != confirm.Timeout {
+				t.Fatalf("%s %d: %v, want timeout", decision, i, got)
+			}
+		}
+		app.decision = "deny"
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		got := c.Confirm(ctx, confirm.Request{ID: "j_after_" + decision, Key: "k", ExpiresAt: time.Now().Add(time.Minute)})
+		cancel()
+		if got != confirm.Deny {
+			t.Fatalf("%s: a late answer was kept for the session: %v", decision, got)
 		}
 	}
 }
