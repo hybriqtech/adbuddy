@@ -2,6 +2,10 @@ package tech.hybriq.adbuddy.screens
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.hasScrollToKeyAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -49,10 +53,22 @@ class OnboardingScreensTest(private val mode: ScreenMode) {
         // A lazy list only composes the rows in view: scroll by key, then look, and check the rows' texts too.
         compose.onNode(hasScrollToKeyAction()).performScrollToKey("com.google.android.gm")
         compose.onNodeWithText("Gmail").assertIsDisplayed()
+        compose.onNodeWithText("com.google.android.gm").assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.protected_reason_codes)).assertIsDisplayed()
+        compose.onNode(isToggleable() and hasText("Gmail")).assertIsOn()
         compose.assertTextsFit(scrolled = true)
-        compose.shot("onboarding_1_protected_apps_rows", mode)
+        // At 100 % the rows are already in the first image.
+        if (mode.fontScale > 1f) compose.shot("onboarding_1_protected_apps_rows", mode)
         compose.onNode(hasScrollToKeyAction()).performScrollToKey("com.example.mybank")
         compose.onNodeWithText("Mi Banco").assertIsDisplayed()
+        compose.onNodeWithText("com.example.mybank").assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.protected_reason_guess)).assertIsDisplayed()
+        compose.onNode(isToggleable() and hasText("Mi Banco")).assertIsOn()
+        compose.assertTextsFit(scrolled = true)
+        compose.onNode(hasScrollToKeyAction()).performScrollToKey("com.whatsapp")
+        compose.onNodeWithText("WhatsApp").assertIsDisplayed()
+        compose.onNodeWithText("com.whatsapp").assertIsDisplayed()
+        compose.onNode(isToggleable() and hasText("WhatsApp")).assertIsOff()
         compose.assertTextsFit(scrolled = true)
     }
 
@@ -69,6 +85,9 @@ class OnboardingScreensTest(private val mode: ScreenMode) {
         compose.shot("onboarding_2_notification_access", mode)
         compose.onNodeWithText(text(R.string.access_open)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(text(R.string.access_codes_hint)).performScrollTo().assertIsDisplayed()
+        // What was under the bottom bar: scrolled into view, whole and apart from the bar's buttons.
+        compose.assertTextsFit(scrolled = true)
+        if (mode.fontScale > 1f) compose.shot("onboarding_2_notification_access_below", mode)
     }
 
     @Test fun stepTwoWithTheAccessOnHasNoNotNow() {
