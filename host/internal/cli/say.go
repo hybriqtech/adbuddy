@@ -19,11 +19,15 @@ type langWriter struct {
 // tell writes the message key, with its arguments, and a line break, in the
 // language of w (English when w is not a langWriter).
 func tell(w io.Writer, key string, args ...any) {
-	lang := i18n.EN
+	fmt.Fprintln(w, langOf(w).T(key, args...))
+}
+
+// langOf is the language of w: that of a langWriter, English otherwise.
+func langOf(w io.Writer) i18n.Lang {
 	if lw, ok := w.(langWriter); ok {
-		lang = lw.Lang
+		return lw.Lang
 	}
-	fmt.Fprintln(w, lang.T(key, args...))
+	return i18n.EN
 }
 
 // Log is where serve and setup write what a person reads as it happens: the

@@ -211,7 +211,11 @@ func (t *Terminal) expired(ctx context.Context) Decision {
 		fmt.Fprintln(t.out, "\n"+t.lang.T("confirm.expired"))
 	case cause != nil && !errors.Is(cause, context.Canceled):
 		// Withdrawn by the host, with a reason (a pause from the phone).
-		fmt.Fprintln(t.out, "\n"+t.lang.T("confirm.withdrawn", classify.Printable(cause.Error())))
+		var why any = classify.Printable(cause.Error())
+		if m, ok := i18n.AsMsg(cause); ok {
+			why = m // a fixed reason of ours: said in the language of the terminal
+		}
+		fmt.Fprintln(t.out, "\n"+t.lang.T("confirm.withdrawn", why))
 	default:
 		fmt.Fprintln(t.out, "\n"+t.lang.T("confirm.abandoned"))
 	}

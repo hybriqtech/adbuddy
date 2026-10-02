@@ -256,6 +256,9 @@ func TestReasonAndJoinReason(t *testing.T) {
 	if !(Text{}).Empty() || r.Empty() {
 		t.Fatal("Empty")
 	}
+	if (Text{ES: "solo en español"}).Empty() {
+		t.Fatal("a text with only Spanish is not empty")
+	}
 	j := Join(reason("restarts adbd"), reason("changes how adbd runs"))
 	if j.EN != "restarts adbd; changes how adbd runs" || j.ES != "reinicia adbd; cambia cómo se ejecuta adbd" {
 		t.Fatalf("join: %+v", j)

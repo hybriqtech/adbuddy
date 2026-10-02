@@ -38,7 +38,8 @@ func spanishReq() Request {
 }
 
 func TestSpanishQuestionDecidesLikeTheEnglishOne(t *testing.T) {
-	cases := map[string]Decision{"42\n": Allow, " 42 \r\n": Allow, "y\n": Deny, "sí\n": Deny, "yes\n": Deny, "\n": Deny, "24\n": Deny}
+	cases := map[string]Decision{"42\n": Allow, " 42 \r\n": Allow, "y\n": Deny, "sí\n": Deny, "yes\n": Deny, "\n": Deny, "24\n": Deny,
+		"s\n": Deny, "si\n": Deny, "SÍ\n": Deny, "permitir\n": Deny, "42 extra\n": Deny}
 	for input, want := range cases {
 		pr, pw := io.Pipe()
 		out := &syncBuffer{}
@@ -121,10 +122,14 @@ func TestSpanishWithdrawnAndAbandoned(t *testing.T) {
 		term.Confirm(ctx, spanishReq())
 		return out.String()
 	}
-	if got := run(func(cancel context.CancelCauseFunc) { cancel(errors.New("paused from the phone")) }); !strings.Contains(got, "→ retirada: paused from the phone") {
+	if got := run(func(cancel context.CancelCauseFunc) { cancel(errors.New("paused from the phone")) }); !strings.Contains(got, "→ retirado: paused from the phone") {
 		t.Errorf("no Spanish withdrawal:\n%s", got)
 	}
-	if got := run(func(cancel context.CancelCauseFunc) { cancel(nil) }); !strings.Contains(got, "→ abandonada por el agente") {
+	// A fixed reason of ours (the daemon's pause) is said in Spanish too.
+	if got := run(func(cancel context.CancelCauseFunc) { cancel(i18n.M("confirm.cause.paused").Err()) }); !strings.Contains(got, "→ retirado: pausado desde el móvil") {
+		t.Errorf("a withdrawal reason of ours is not in Spanish:\n%s", got)
+	}
+	if got := run(func(cancel context.CancelCauseFunc) { cancel(nil) }); !strings.Contains(got, "→ abandonado por el agente") {
 		t.Errorf("no Spanish abandonment:\n%s", got)
 	}
 }

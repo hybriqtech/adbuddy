@@ -211,7 +211,7 @@ func (w *watcher) skip(addr string, err error) {
 		return
 	}
 	w.wrong[addr] = true
-	tell(w.Log, "phone_watch.warning_the_phone_at", classify.Printable(addr), wrongPhoneWarningText)
+	tell(w.Log, "connect.warning_the_phone_at", classify.Printable(addr), wrongPhoneWarningText)
 }
 
 func (w *watcher) disconnect(ctx context.Context, addr string) {

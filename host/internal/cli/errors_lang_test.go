@@ -7,6 +7,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n/i18ntest"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 )
 
 // runCLI is Main with its output, in English or Spanish as ADBUDDY_LANG says.
@@ -73,5 +74,32 @@ func TestNewErrorTComputesTheEnglishAtOnce(t *testing.T) {
 	}
 	if tr := TransientErrorT("X", "error.cause", "", "boom"); !tr.Transient || ExitCode(tr) != ExitTransient {
 		t.Fatalf("%+v", tr)
+	}
+}
+
+// M6c H0: mainContext (what Main wraps) writes the same JSON whatever the
+// language: --json is for programs.
+func TestMainContextJSONIgnoresTheLanguage(t *testing.T) {
+	isolate(t)
+	var got [2]string
+	for i, lang := range []i18n.Lang{i18n.EN, i18n.ES} {
+		i18ntest.Lang(t, lang)
+		out, errOut, _ := runCtx(t, t.Context(), "undo", "--json")
+		got[i] = out + "|" + errOut
+	}
+	if got[0] != got[1] || !strings.Contains(got[0], `"code":"DAEMON_NOT_RUNNING"`) {
+		t.Fatalf("--json changed with the language:\n%s\n%s", got[0], got[1])
+	}
+}
+
+// M6c H2: the fix of a code the daemon answers `adbuddy remote on` with is in
+// the language of the person; the cause (the daemon's English) stays as it is.
+func TestRemoteDeniedFixIsSpanish(t *testing.T) {
+	data := isolate(t)
+	fakeDaemon(t, data, nil, ipc.Exit{Code: 126, ErrorCode: "REMOTE_DENIED", Error: "the remote mode was not turned on"})
+	i18ntest.Lang(t, i18n.ES)
+	exit, _, es := runCLI(t, "remote", "on")
+	if exit != 126 || !strings.Contains(es, "Error: REMOTE_DENIED — the remote mode was not turned on\nArreglo: Vuelve a ejecutar `adbuddy remote on` y permite la pregunta") {
+		t.Fatalf("exit %d %q", exit, es)
 	}
 }

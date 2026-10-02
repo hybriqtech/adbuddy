@@ -293,6 +293,20 @@ func waitText(d time.Duration) i18n.Msg {
 // fmtApp is the human summary of the app, in English (what the tests read).
 func fmtApp(r appResult) string { return fmtAppMsg(r).String() }
 
+// consentWord is the state of the consent as a person reads it; the value of
+// the JSON (appResult.Consent) stays as it is.
+func consentWord(c string) any {
+	switch c {
+	case "denied":
+		return i18n.M("appsetup.consent.denied")
+	case "timeout":
+		return i18n.M("appsetup.consent.timeout")
+	case "skipped":
+		return i18n.M("appsetup.consent.skipped")
+	}
+	return c
+}
+
 // fmtAppMsg is the human summary of the app as a message of its own.
 func fmtAppMsg(r appResult) i18n.Msg {
 	switch {
@@ -301,7 +315,7 @@ func fmtAppMsg(r appResult) i18n.Msg {
 	case !r.Installed:
 		return i18n.M("appsetup.summary.not_installed")
 	case r.Consent != "granted":
-		return i18n.M("appsetup.summary.consent", r.Version, r.Consent)
+		return i18n.M("appsetup.summary.consent", r.Version, consentWord(r.Consent))
 	}
 	var off []any
 	if !r.Permission {

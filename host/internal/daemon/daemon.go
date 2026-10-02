@@ -136,7 +136,7 @@ func (q *question) blocks() string {
 }
 
 // errWithdrawn is why a question is withdrawn when the agent is paused.
-var errWithdrawn = errors.New("paused from the phone")
+var errWithdrawn = i18n.M("confirm.cause.paused").Err()
 
 // flight is a change admitted to adb.
 type flight struct{ title string }

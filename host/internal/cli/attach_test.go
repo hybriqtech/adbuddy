@@ -3,7 +3,10 @@ package cli
 import (
 	"bytes"
 	"io"
+	"strings"
 	"testing"
+
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
 // chunks is a reader that returns one chunk per Read, like a terminal.
@@ -64,5 +67,20 @@ func TestLeaveTerminal(t *testing.T) {
 	}
 	if len(order) != 2 || order[0] != "in:"+want || order[1] != "out" {
 		t.Fatalf("restores %q", order)
+	}
+}
+
+// The messages printed when the terminal leaves raw mode start with "\r\n"
+// (the cursor is at the end of the agent's last line): in both languages.
+func TestAttachClosingMessagesStartWithCarriageReturn(t *testing.T) {
+	for _, lang := range []i18n.Lang{i18n.EN, i18n.ES} {
+		for _, key := range []string{"attach.detached_adbuddy_attach_connects_again", "attach.adbuddy_serve_closed_the_connection"} {
+			if got := lang.T(key); !strings.HasPrefix(got, "\r\n") || strings.Count(got, "\n") != 1 {
+				t.Errorf("%s %s: %q", lang, key, got)
+			}
+		}
+	}
+	if got, want := i18n.EN.T("attach.detached_adbuddy_attach_connects_again"), "\r\nDetached. `adbuddy attach` connects again."; got != want {
+		t.Errorf("%q, want %q", got, want)
 	}
 }

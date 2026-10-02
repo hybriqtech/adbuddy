@@ -159,7 +159,7 @@ func TestHelpStaysEnglishForPrograms(t *testing.T) {
 		args  []string
 		want  string
 	}{
-		{"json", false, []string{"doctor", "--help", "--json"}, ""},
+		{"json", false, []string{"doctor", "--help", "--json"}, want},
 		{"agent", true, []string{"doctor", "--help"}, want},
 		{"person", false, []string{"doctor", "--help"}, es},
 	}
@@ -172,14 +172,6 @@ func TestHelpStaysEnglishForPrograms(t *testing.T) {
 			out, errb, code := runCtx(t, t.Context(), c.args...)
 			if code != 0 {
 				t.Fatalf("exit %d: %s%s", code, out, errb)
-			}
-			if c.name == "json" {
-				// The --json flag itself is listed in the global flags; compare the rest.
-				out = strings.ReplaceAll(out, "\r\n", "\n")
-				if strings.Contains(out, "Uso:") || !strings.Contains(out, "Usage:") {
-					t.Errorf("--json help is not English:\n%s", out)
-				}
-				return
 			}
 			if out != c.want {
 				t.Errorf("help differs:\n--- want\n%s\n--- got\n%s", c.want, out)

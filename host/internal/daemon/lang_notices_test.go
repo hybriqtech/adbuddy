@@ -55,4 +55,11 @@ func TestUndoPrefixAndWarningsFollowTheLanguage(t *testing.T) {
 	if got := e.d.lang().T("daemon.journal_failed", "j_1", "disco lleno"); !strings.HasPrefix(got, "falló la escritura en el diario para j_1: ") {
 		t.Errorf("warning: %q", got)
 	}
+	if got := e.d.lang().T("daemon.inverse_failed", "j_1", "sin inverso"); got != "no se pudo calcular cómo deshacer j_1: sin inverso" {
+		t.Errorf("inverse warning: %q", got)
+	}
+	e.d.o.Lang = "en"
+	if got := e.d.lang().T("daemon.inverse_failed", "j_1", "x"); got != "could not compute the inverse of j_1: x" {
+		t.Errorf("English inverse warning: %q", got)
+	}
 }

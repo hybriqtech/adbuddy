@@ -299,7 +299,8 @@ func skipAddr(log io.Writer, addr string, err error) {
 		tell(log, "connect.warning_the_phone_at", addr, wrongPhoneWarningText)
 		return
 	}
-	tell(log, "connect.the_address_did_not_work", addr, AsError(err).Message)
+	why, _ := AsError(err).in(langOf(log))
+	tell(log, "connect.the_address_did_not_work", addr, why)
 }
 
 // wrongPhoneWarningText follows "the phone at <addr>" when it is another phone.

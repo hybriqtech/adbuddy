@@ -6,6 +6,7 @@ package i18n
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -120,6 +121,25 @@ type Msg struct {
 
 // M builds a Msg.
 func M(key string, args ...any) Msg { return Msg{key, args} }
+
+// Err is an error that carries a Msg (a pointer, so the one value can be
+// compared with errors.Is): its Error() is the English, and what
+// writes it for a person can ask for the Msg with AsMsg to say it in their
+// language.
+func (m Msg) Err() error { return &msgError{m} }
+
+type msgError struct{ m Msg }
+
+func (e *msgError) Error() string { return e.m.String() }
+
+// AsMsg is the Msg of an error made with Msg.Err (or wrapping one).
+func AsMsg(err error) (Msg, bool) {
+	var e *msgError
+	if errors.As(err, &e) {
+		return e.m, true
+	}
+	return Msg{}, false
+}
 
 // In writes m in l.
 func (m Msg) In(l Lang) string { return l.T(m.Key, m.Args...) }

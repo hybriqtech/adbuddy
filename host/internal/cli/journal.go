@@ -91,7 +91,7 @@ func newJournalCmd(app *App) *cobra.Command {
 				fmt.Fprintln(app.Stderr, app.T("journal.the_journal_is_empty"))
 			}
 			if skipped > 0 {
-				fmt.Fprintln(app.Stderr, app.T("journal.damaged_journal_lines_were_skipped", skipped))
+				fmt.Fprintln(app.Stderr, app.TN("journal.damaged_journal_lines_were_skipped", skipped))
 			}
 			return nil
 		},

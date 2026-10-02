@@ -20,7 +20,7 @@ func reason(en string, kv ...string) Text {
 }
 
 // Empty reports whether t says nothing: no reason.
-func (t Text) Empty() bool { return t.EN == "" }
+func (t Text) Empty() bool { return t.EN == "" && t.ES == "" }
 
 // Join is two reasons in one line, either of which may be empty.
 func Join(a, b Text) Text {

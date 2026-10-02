@@ -33,7 +33,7 @@ func TestDoctorInSpanish(t *testing.T) {
 		{"old adb", doctorRules(testutil.FakeRule{Match: `^version$`, Stdout: "Version 35.0.2-1\n"}), []string{
 			"✗ adb:", "versión 35.0.2", "    Ejecuta: adbuddy setup", "· servidor adb: no comprobado: el adb de ADBuddy no funciona"}, []string{"adbuddy setup"}},
 		{"wrong phone", doctorRules(testutil.FakeRule{Match: `^shell getprop ro\.serialno$`, Stdout: "ZZZZ9999\n"}), []string{
-			"✗ identidad: el móvil de ", "no es el que configuraste", "ejecuta `adbuddy connect <ip:puerto>`"}, []string{"adbuddy connect <ip:port>", "adbuddy connect <ip:puerto>"}},
+			"✗ identidad: el móvil en ", "no es el que configuraste", "ejecuta `adbuddy connect <ip:puerto>`"}, []string{"adbuddy connect <ip:port>", "adbuddy connect <ip:puerto>"}},
 		{"app without its settings", doctorRules(testutil.FakeRule{Match: `^shell dumpsys deviceidle whitelist$`, Stdout: "user,com.other,10124\n"}), []string{
 			"⚠ app del móvil: 0.2.0 instalada, pero sin: la exención de batería", "    Qué hacer: Acepta la pantalla de consentimiento"}, []string{"adbuddy setup"}},
 		{"adb server down", doctorRules(noServer), []string{

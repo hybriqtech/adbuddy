@@ -29,7 +29,7 @@ Comandos disponibles:
   screen        Lista lo que hay en la pantalla del móvil: ids, textos y dónde tocar
   screenshot    Guarda una captura del móvil, reducida
   send          Envía un fichero del entorno al móvil del usuario (para el agente)
-  serve         Ejecuta el host de ADBuddy: diario en vivo y confirmaciones de los comandos adb del agente
+  serve         Ejecuta ADBuddy en el PC: diario en vivo y confirmaciones de los comandos adb del agente
   setup         Configura ADBuddy: consigue adb, empareja el móvil por Wi-Fi y prepara el entorno del agente
   stop          Para el agente que ejecuta adbuddy serve (serve sigue en marcha)
   tap           Toca un elemento de la pantalla del móvil por su texto, su id o un punto
