@@ -325,6 +325,9 @@ var dumpsysVerbs = map[string]bool{
 
 // dumpsysReads lists, for the services whose arguments are commonly used to
 // read, the arguments known to read. Any other service is 🟢 only alone.
+// --checkin is left out of procstats, batterystats and activity: there it
+// consumes state (procstats renames its saved files, batterystats deletes its
+// checkin file, activity clears the broadcast statistics); -c only prints.
 var dumpsysReads = map[string]func(args []string) bool{
 	"activity": dumpsysActivity,
 	"package": wordsOrNames("packages", "p", "permissions", "perm", "permission", "features", "f",
@@ -335,8 +338,8 @@ var dumpsysReads = map[string]func(args []string) bool{
 	"meminfo": wordsOrNames("-a", "-d", "-c", "-s", "-S", "-h", "--oom", "--local", "--package",
 		"--checkin", "--proto", "--unreachable"),
 	"gfxinfo":      wordsOrNames("framestats"),
-	"procstats":    wordsOrNames("--hours", "--last", "--current", "--details", "--full-details", "--active", "-a", "-c", "--checkin", "-h"),
-	"batterystats": wordsOrNames("--charged", "--checkin", "-c", "--history", "--daily", "--proto", "-h"),
+	"procstats":    wordsOrNames("--hours", "--last", "--current", "--details", "--full-details", "--active", "-a", "-c", "-h"),
+	"batterystats": wordsOrNames("--charged", "-c", "--history", "--daily", "--proto", "-h"),
 	"window": wordsOrNames("windows", "w", "displays", "d", "tokens", "t", "policy", "p", "animator", "a",
 		"sessions", "s", "lastanr", "l", "input", "visible", "visible-apps", "containers", "-a", "-h"),
 }
@@ -382,7 +385,7 @@ var activitySections = []string{
 	"permissions", "perm", "processes", "p", "oom", "o", "lmk", "lru", "services", "s", "providers",
 	"prov", "top", "starter", "containers", "lastanr", "lastanr-traces", "associations", "as",
 	"exit-info", "users", "settings", "binder-proxies",
-	"-a", "-c", "-v", "-f", "-h", "--checkin", "--proto",
+	"-a", "-c", "-v", "-f", "-h", "--proto",
 }
 
 // dumpsysActivity: sections and names; `service NAME` and `provider NAME`

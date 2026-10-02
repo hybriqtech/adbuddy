@@ -234,7 +234,7 @@
 {"sh":"dumpsys gfxinfo com.x","level":"green"}
 {"sh":"dumpsys gfxinfo com.x framestats","level":"green"}
 {"sh":"dumpsys batterystats --charged com.x","level":"green"}
-{"sh":"dumpsys batterystats --checkin","level":"green"}
+{"sh":"dumpsys batterystats --checkin","level":"red"}
 {"sh":"dumpsys procstats --hours 3","level":"green"}
 {"sh":"dumpsys package packages","level":"green"}
 {"sh":"dumpsys package -f com.x","level":"green"}
@@ -280,7 +280,7 @@
 {"sh":"dumpstate -z -o /data/local/tmp/br","level":"red","special":true}
 {"sh":"am bug-report","level":"red","special":true}
 {"sh":"cmd activity bug-report --progress","level":"red","special":true}
-# A UID or a PID the classifier cannot tell apart from ADBuddy's (v1 V03). kill on a literal PID stays as it was (see kill -9 1234 above): the shell's UID cannot signal another app's process
+# A UID or a PID the classifier cannot tell apart from ADBuddy's (v1 V03). kill on a literal PID stays a plain red only because kill -9 1234 above fixes it so: adbd runs with the shell's UID and could be the target (accepted risk)
 {"sh":"appops set 10234 RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
 {"sh":"cmd appops set 10234 RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
 {"sh":"appops set --user 0 10234 RUN_ANY_IN_BACKGROUND ignore","level":"red","special":true}
@@ -309,3 +309,38 @@
 {"sh":"cmd -w netpolicy remove restrict-background-whitelist 10234","level":"red","special":true}
 {"sh":"cmd netpolicy list wifi-networks","level":"red"}
 {"sh":"cmd netpolicy get restrict-background","level":"red"}
+# --checkin consumes state in AOSP (procstats renames its saved files, batterystats deletes its checkin file, activity clears the broadcast statistics): red (v1 T2, round 1). -c and meminfo/package --checkin only print
+{"sh":"dumpsys procstats --checkin","level":"red"}
+{"sh":"dumpsys activity --checkin","level":"red"}
+{"sh":"dumpsys activity broadcast-stats --checkin","level":"red"}
+{"sh":"dumpsys batterystats -c","level":"green"}
+{"sh":"dumpsys procstats -c","level":"green"}
+{"sh":"dumpsys meminfo --checkin","level":"green"}
+{"sh":"dumpsys package --checkin","level":"green"}
+# Restarting the system, stopping or switching the user, or killing adbd cut the connection or stop ADBuddy (v1 T2, round 1)
+{"sh":"am restart","level":"red","special":true}
+{"sh":"cmd activity restart","level":"red","special":true}
+{"sh":"am stop-user 10","level":"red","special":true}
+{"sh":"am stop-user -w -f 0","level":"red","special":true}
+{"sh":"am switch-user 10","level":"red","special":true}
+{"sh":"pkill adbd","level":"red","special":true}
+{"sh":"pkill -9 adb","level":"red","special":true}
+{"sh":"pkill -f /apex/com.android.adbd","level":"red","special":true}
+{"sh":"pkill -x 'ad.d'","level":"red","special":true}
+{"sh":"pkill -v com.x","level":"red","special":true}
+{"sh":"pkill -u shell","level":"red","special":true}
+{"sh":"pkill $P","level":"red","special":true}
+{"sh":"pkill '('","level":"red","special":true}
+{"sh":"/system/bin/pkill adbd","level":"red","special":true}
+{"sh":"toybox pkill adbd","level":"red","special":true}
+{"sh":"su -c 'pkill adbd'","level":"red","special":true}
+{"sh":"killall adbd","level":"red","special":true}
+{"sh":"killall -9 adbd","level":"red","special":true}
+{"sh":"killall -s KILL /apex/com.android.adbd/bin/adbd","level":"red","special":true}
+{"sh":"busybox killall adbd","level":"red","special":true}
+{"sh":"killall $P","level":"red","special":true}
+{"sh":"pkill com.x","level":"red"}
+{"sh":"pkill -9 -f com.x","level":"red"}
+{"sh":"killall com.x","level":"red"}
+{"sh":"killall -9 com.x","level":"red"}
+{"sh":"killall -l","level":"red"}

@@ -1,6 +1,7 @@
 package classify
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -182,6 +183,10 @@ func specialReason(scope string, ws []Word, level Level) Text {
 		if killsBeyondAPID(v) {
 			return reason("kill on every process, a process group or a job could stop adbd or ADBuddy")
 		}
+	case "pkill", "killall":
+		if killsAdbd(name, ws) {
+			return reason("may kill adbd, which cuts the connection")
+		}
 	case "reboot", "stop", "start":
 		return reason("may restart the phone or adbd")
 	case "setprop":
@@ -250,6 +255,10 @@ func amSpecial(ws []Word) Text {
 		return reason("the bug report includes what is on screen and the notifications")
 	case "kill-all":
 		return reason("kills every app in the background, ADBuddy's included")
+	case "restart":
+		return reason("restarts the phone's system, which cuts the connection")
+	case "stop-user", "switch-user":
+		return reason("stops or switches the phone's user, which can stop ADBuddy")
 	case "crash":
 		// am crash takes a package or a PID; ADBuddy's PID is not known here.
 		if t, ok := firstTarget(ws, at+1); ok && !ws[t].Dynamic && !packageName(ws[t].Value) {
@@ -287,11 +296,12 @@ func firstTarget(ws []Word, from int) (int, bool) {
 }
 
 // killsBeyondAPID reports whether kill signals something other than literal
-// PIDs: -1 (every process the shell's UID may signal, adbd included on a
-// production phone), 0 or -PGID (a process group) or %job. mksh's kill takes
-// -SIGNAL (a digit or a capital after the dash), or -s SIGNAL and -l, then
-// "--". A literal PID stays a plain 🔴 (testdata/habitual.jsonl): the
-// shell's UID cannot signal another app's process, ADBuddy's included.
+// PIDs: -1 (every process the shell's UID may signal), 0 or -PGID (a process
+// group) or %job. mksh's kill takes -SIGNAL (a digit or a capital after the
+// dash), or -s SIGNAL and -l, then "--". On a production phone adbd runs with
+// the shell's UID (2000), so kill -9 <adbd's PID> does cut the connection; a
+// literal PID stays a plain 🔴 only because testdata/habitual.jsonl fixes it
+// so (kill -9 1234). Accepted risk: a user rule can lower it.
 func killsBeyondAPID(v []string) bool {
 	args := v[1:]
 	if len(args) > 0 && len(args[0]) > 1 && args[0][0] == '-' && (args[0][1] >= '0' && args[0][1] <= '9' || args[0][1] >= 'A' && args[0][1] <= 'Z') {
@@ -319,6 +329,57 @@ func killsBeyondAPID(v []string) bool {
 	for _, t := range args {
 		if !isDigits(t) || strings.Trim(t, "0") == "" {
 			return true
+		}
+	}
+	return false
+}
+
+// adbdNames are what pkill matches its pattern against for adbd: the process
+// name and, with -f, the command line.
+var adbdNames = []string{"adbd", "/apex/com.android.adbd/bin/adbd", "/system/bin/adbd"}
+
+// killsAdbd reports whether pkill or killall (toybox) may reach adbd. pkill
+// matches a regular expression against the name (adb, ad.d…) or, with -f, the
+// command line; killall compares whole names. Options that pick processes by
+// something else (-u, -U, -g, -G, -P, -s, -t) or invert the match (-v) may
+// take adbd in too, and a word only known on the phone may be adbd: all of
+// them fail closed.
+func killsAdbd(name string, ws []Word) bool {
+	flags := "fnox" // pkill
+	if name == "killall" {
+		flags = "iqvwe"
+	}
+	full := false
+	for i := 1; i < len(ws); i++ {
+		w := ws[i]
+		v := w.Value
+		switch {
+		case w.Dynamic:
+			return true
+		case v == "-l" && name == "killall":
+			return false // lists signals
+		case v == "-l" || (v == "-s" && name == "killall"):
+			i++ // -l SIGNAL (pkill), -s SIGNAL (killall)
+		case len(v) > 1 && v[0] == '-' && (v[1] >= '0' && v[1] <= '9' || v[1] >= 'A' && v[1] <= 'Z'):
+			// -SIGNAL
+		case len(v) > 1 && v[0] == '-' && strings.Trim(v[1:], flags) == "":
+			full = full || (name == "pkill" && strings.Contains(v, "f"))
+		case strings.HasPrefix(v, "-"):
+			return true
+		case name == "killall":
+			if v == "adbd" || strings.HasSuffix(v, "/adbd") {
+				return true
+			}
+		default:
+			re, err := regexp.Compile(v)
+			if err != nil {
+				return true
+			}
+			for _, n := range adbdNames {
+				if (n == "adbd" || full) && re.MatchString(n) {
+					return true
+				}
+			}
 		}
 	}
 	return false
