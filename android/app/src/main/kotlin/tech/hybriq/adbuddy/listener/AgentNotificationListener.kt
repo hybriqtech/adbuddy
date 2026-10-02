@@ -79,6 +79,7 @@ class AgentNotificationListener : NotificationListenerService() {
          */
         private fun sensitive(ranking: NotificationListenerService.RankingMap?, sbn: StatusBarNotification, r: NotificationListenerService.Ranking): Boolean = try {
             val known = ranking != null && ranking.getRanking(sbn.key, r)
+            // The channel (r.channel) exists from API 26; the Ranking's lockscreen override, from API 31 (S).
             Sensitivity.of(
                 rankingKnown = known,
                 lockscreenOverride = if (known && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) r.lockscreenVisibilityOverride else null,

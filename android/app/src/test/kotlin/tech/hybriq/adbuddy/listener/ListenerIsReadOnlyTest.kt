@@ -17,6 +17,10 @@ class ListenerIsReadOnlyTest {
     private val root = File("src/main/kotlin")
     private val dir = File(root, "tech/hybriq/adbuddy/listener")
 
+    // Kotlin and, if one ever appears, Java: both are scanned (a Java file could do what a Kotlin one may not).
+    private val roots = listOf(root, File("src/main/java")).filter { it.exists() }
+    private val listenerDirs = roots.map { File(it, "tech/hybriq/adbuddy/listener") }
+
     /**
      * The code of a file without comments and strings (a small scanner: a regex overflows the stack on big
      * files). What is inside a template ("${...}") is code, not string: a call hidden in one is seen.
@@ -100,12 +104,14 @@ class ListenerIsReadOnlyTest {
         return t.length
     }
 
-    private fun kotlinFiles(d: File) = d.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
+    private fun kotlinFiles(d: File) = d.walkTopDown().filter { it.isFile && (it.extension == "kt" || it.extension == "java") }.toList()
+
+    private fun allSources() = roots.flatMap { kotlinFiles(it) }
 
     @Test fun nothingInTheAppActsOnNotificationsOrReadsThemOutsideTheListener() {
         // The app's own NotificationManager.activeNotifications (its confirmation, to cancel it) is not the listener's.
         val ownNotifications = setOf("ConfirmNotifier.kt")
-        for (f in kotlinFiles(root)) {
+        for (f in allSources()) {
             val src = code(f)
             for (token in listOf("cancelNotification", "cancelAllNotifications", "snoozeNotification")) {
                 assertFalse("${f.name} uses $token", src.contains(token))
@@ -113,7 +119,7 @@ class ListenerIsReadOnlyTest {
             if (f.name != "AgentNotificationListener.kt" && f.name !in ownNotifications) {
                 assertFalse("${f.name} reads the active notifications", src.contains("activeNotifications") || src.contains("getActiveNotifications"))
             }
-            if (f.parentFile != dir) {
+            if (f.parentFile !in listenerDirs) {
                 assertFalse("${f.name} reaches the service itself", src.contains("AgentNotificationListener.current"))
             }
         }
@@ -125,11 +131,14 @@ class ListenerIsReadOnlyTest {
             "updateNotificationChannel", "adjustNotification", "contentIntent", "deleteIntent", "fullScreenIntent",
             "PendingIntent", "RemoteInput", "requestInterruptionFilter", "setOnNotificationPostedTrigger",
             "getMethod", "getDeclaredMethod", ".invoke(", "Class.forName", ".send(", "bubbleMetadata", "publicVersion",
+            "requestListenerHints", "clearRequestedListenerHints", "migrateNotificationFilter", "requestUnbind", "requestRebind",
+            "deleteConversationNotificationChannel", "createConversationNotificationChannelForPackage", "getSnoozedNotifications",
+            "snoozedNotifications",
             "android.util.Log", "Log.", "System.out", "System.err", "println", "Timber", "printStackTrace", "sendBroadcast",
         )
         // The consent keeps a flag in preferences; nothing else here stores anything.
         val storage = listOf("SharedPreferences", "openFileOutput", "FileWriter", "File(")
-        for (f in kotlinFiles(dir)) {
+        for (f in listenerDirs.flatMap { kotlinFiles(it) }) {
             val src = code(f)
             for (token in forbidden) assertFalse("${f.name} uses $token", src.contains(token))
             assertFalse("${f.name} uses the notification actions", Regex("\\bactions\\b").containsMatchIn(src))
@@ -137,10 +146,31 @@ class ListenerIsReadOnlyTest {
         }
     }
 
+    private val overrideDecl = Regex("\\boverride\\s+(?:\\w+\\s+)*(?:fun|val|var)\\s+(?:<[^>]*>\\s*)?(\\w+)")
+
+    /** The members a source overrides; each `override` keyword must give one, so a layout that dodges the regex fails. */
+    private fun overrides(src: String): List<String> {
+        val found = overrideDecl.findAll(src).map { it.groupValues[1] }.toList()
+        assertEquals("an override the scanner does not understand: $src", Regex("\\boverride\\b").findAll(src).count(), found.size)
+        return found
+    }
+
     @Test fun onlyTheLifecycleIsOverridden() {
         // The listener overrides only its lifecycle: no onNotificationPosted/Removed that could pass a notification on.
-        val overrides = Regex("override fun (\\w+)").findAll(code(File(dir, "AgentNotificationListener.kt"))).map { it.groupValues[1] }.toSet()
-        assertEquals(setOf("onListenerConnected", "onListenerDisconnected", "onDestroy"), overrides)
+        val seen = overrides(code(File(dir, "AgentNotificationListener.kt")))
+        assertEquals(listOf("onListenerConnected", "onListenerDisconnected", "onDestroy"), seen)
+    }
+
+    @Test fun theOverrideScannerSeesEveryFormOfDeclaration() {
+        assertEquals(listOf("dump"), overrides("override protected fun dump(a: Int) {}"))
+        assertEquals(listOf("x"), overrides("override public fun x() {}"))
+        assertEquals(listOf("v"), overrides("override val v = 1"))
+        assertEquals(listOf("w"), overrides("override var w = 1"))
+        assertEquals(listOf("a", "b"), overrides("override\nfun a() {}\noverride\n  internal\n  fun b() {}"))
+        assertEquals(listOf("g"), overrides("override fun <T> g(t: T) {}"))
+        // One it cannot read makes the count differ, so the check fails instead of letting it through.
+        val failed = try { overrides("override /* x */ fun hidden() {}"); false } catch (e: AssertionError) { true }
+        assertTrue("an override that the scanner does not capture must fail", failed)
     }
 
     @Test fun theScannerSeesCodeNotCommentsOrStrings() {
@@ -168,46 +198,62 @@ class ListenerIsReadOnlyTest {
         assertFalse(code("val e = \"\$cancelNotification and \\\${snoozeNotification}\"").contains("snoozeNotification"))
     }
 
-    // read() is the one way out of the listener: the call, with or without the companion, `.` or `::`.
-    private val readCall = Regex("AgentNotificationListener\\s*(\\.\\s*Companion\\s*)?(\\.|::)\\s*read\\b")
-    private val alias = Regex("import\\s+\\S*AgentNotificationListener\\s+as\\b")
+    // Outside the listener's package, the name of the class may only appear as the class import or as its
+    // `connected` (the state of the setting). Anything else (a call to read(), with, run, let, an assignment,
+    // a typealias, ::class, a static import of read) is a way to reach the service or read(): a white list,
+    // not a list of the ways round that someone has thought of.
+    private val allowedUse = Regex("\\bAgentNotificationListener\\s*(\\.\\s*Companion\\s*)?\\.\\s*connected\\b")
+    private val classImport = Regex("^\\s*import\\s+[\\w.]*\\bAgentNotificationListener(\\s*\\.\\s*Companion)?(\\s*\\.\\s*connected)?\\s*$")
+    private val name = Regex("\\bAgentNotificationListener\\b")
 
-    // A static import of read (or of everything) from the class or its companion: `read()` then needs no prefix.
-    private val readImport = Regex("import\\s+[\\w.]*AgentNotificationListener\\s*(\\.\\s*Companion\\s*)?\\.\\s*(read\\b|\\*)")
+    /** The lines of [src] (already without comments and strings) that use the class in a way that is not allowed. */
+    private fun badUses(src: String): List<String> = src.lines().filter { line ->
+        name.containsMatchIn(line) && !classImport.matches(line) && name.containsMatchIn(allowedUse.replace(line, ""))
+    }.map { it.trim() }
 
     @Test fun onlyTheWiringOfTheHelpersReadsThroughTheListener() {
-        // Only UiHelpers (through NotificationGate, so with the user's confirmation) may call read(), and nothing
-        // outside the package may rename the class or import read() to hide the call.
-        val outside = kotlinFiles(root).filter { it.parentFile != dir }
-        val callers = outside.filter { readCall.containsMatchIn(code(it)) }.map { it.name }.toSet()
-        assertTrue(callers.toString(), setOf("UiHelpers.kt").containsAll(callers))
-        assertTrue("an alias of the listener hides its read()", outside.none { alias.containsMatchIn(code(it)) })
-        val importers = outside.filter { it.name != "UiHelpers.kt" && readImport.containsMatchIn(code(it)) }.map { it.name }
-        assertTrue("a static import of read() hides the call: $importers", importers.isEmpty())
-        assertTrue(readCall.containsMatchIn("AgentNotificationListener::read") && readCall.containsMatchIn("AgentNotificationListener . read"))
+        // Only UiHelpers (through NotificationGate, so with the user's confirmation) may call read(); outside the
+        // package nothing else may mention the class but for its import and `connected`.
+        val outside = allSources().filter { it.parentFile !in listenerDirs && it.name != "UiHelpers.kt" }
+        for (f in outside) {
+            val bad = badUses(code(f))
+            assertTrue("${f.name} reaches the listener beyond connected: $bad", bad.isEmpty())
+        }
     }
 
-    @Test fun theScannerOfTheReadCallSeesTheCompanionAndTheStaticImport() {
-        // The call through the companion, the callable reference and the static imports are all seen.
-        val viaCompanion = code("val n = AgentNotificationListener.Companion.read()\n")
-        assertTrue(viaCompanion, readCall.containsMatchIn(viaCompanion))
-        val spaced = code("val n = AgentNotificationListener . Companion :: read\n")
-        assertTrue(spaced, readCall.containsMatchIn(spaced))
-        val imported = code("import tech.hybriq.adbuddy.listener.AgentNotificationListener.Companion.read\n")
-        assertTrue(imported, readImport.containsMatchIn(imported))
-        val importedPlain = code("import tech.hybriq.adbuddy.listener.AgentNotificationListener.read\n")
-        assertTrue(importedPlain, readImport.containsMatchIn(importedPlain))
-        val star = code("import tech.hybriq.adbuddy.listener.AgentNotificationListener.Companion.*\n")
-        assertTrue(star, readImport.containsMatchIn(star))
-        // What is not a way to read does not trip it: the class import, or `connected`.
-        assertFalse(readImport.containsMatchIn("import tech.hybriq.adbuddy.listener.AgentNotificationListener\n"))
-        assertFalse(readImport.containsMatchIn("import tech.hybriq.adbuddy.listener.AgentNotificationListener.Companion.connected\n"))
-        assertFalse(readCall.containsMatchIn("AgentNotificationListener.connected"))
+    @Test fun theWhiteListSeesEveryWayRoundTheReadCall() {
+        val evasions = listOf(
+            "val n = AgentNotificationListener.read()",
+            "val n = AgentNotificationListener.Companion.read()",
+            "val n = AgentNotificationListener . Companion :: read",
+            "val f = AgentNotificationListener::read",
+            "with(AgentNotificationListener) { read() }",
+            "AgentNotificationListener.run { read() }",
+            "AgentNotificationListener.let { it.read() }",
+            "val l = AgentNotificationListener; l.read()",
+            "typealias L = AgentNotificationListener",
+            "val k = AgentNotificationListener::class",
+            "import tech.hybriq.adbuddy.listener.AgentNotificationListener as L",
+            "import tech.hybriq.adbuddy.listener.AgentNotificationListener.Companion.read",
+            "import tech.hybriq.adbuddy.listener.AgentNotificationListener.read",
+            "import tech.hybriq.adbuddy.listener.AgentNotificationListener.Companion.*",
+        )
+        for (e in evasions) assertEquals(e, listOf(e), badUses(code(e + "\n")))
+        // What is allowed: the class import, `connected`, and a mention in a comment or a string.
+        val fine = listOf(
+            "import tech.hybriq.adbuddy.listener.AgentNotificationListener",
+            "import tech.hybriq.adbuddy.listener.AgentNotificationListener.Companion.connected",
+            "val c = AgentNotificationListener.connected",
+            "val c = AgentNotificationListener.Companion.connected.value",
+            "val c = AgentNotificationListener . connected",
+            "val s = \"AgentNotificationListener.read()\" // AgentNotificationListener.read()",
+        )
+        for (e in fine) assertEquals(e, emptyList<String>(), badUses(code(e + "\n")))
     }
 
     @Test fun theTextOfARawNotificationIsOnlyReadByTheReport() {
         // RawNotification travels only through these files; the report turns it into what leaves the phone.
-        val users = kotlinFiles(root).filter { it.readText().contains("RawNotification") }.map { it.name }.toSet()
+        val users = allSources().filter { it.readText().contains("RawNotification") }.map { it.name }.toSet()
         val allowed = setOf("NotificationReport.kt", "AgentNotificationListener.kt", "NotificationRead.kt", "NotificationGate.kt", "UiExecutor.kt")
         assertTrue(users.toString(), allowed.containsAll(users))
         assertTrue(users.toString(), "NotificationReport.kt" in users)
