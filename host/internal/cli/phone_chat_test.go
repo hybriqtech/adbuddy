@@ -430,13 +430,28 @@ func TestSessionNewErrors(t *testing.T) {
 	}
 }
 
+// processed returns once the host has handled everything the app sent before:
+// the host handles an app's messages one at a time and in order, so the answer
+// to an unsupported request proves the earlier ones are done. Without it a
+// message sent is not yet one handled, and a test that starts the agent next
+// races the host's reader (the interrupt below reached the new agent).
+func (r *chatRig) processed(t *testing.T, rid string) {
+	t.Helper()
+	sendApp(t, r.c, "made.up.barrier", rid, bridge.Empty{})
+	r.readError(t, rid, bridge.CodeUnsupported)
+}
+
 // agent.interrupt types ESC; without an agent it does nothing.
 func TestAgentInterrupt(t *testing.T) {
 	r := newChatRig(t)
 	sendApp(t, r.c, bridge.TypeInterrupt, "", bridge.Empty{})
+	r.processed(t, "r_1") // the interrupt without an agent is over before it starts
 	r.start(t, "claude")
 	sendApp(t, r.c, bridge.TypeInterrupt, "", bridge.Empty{})
-	waitUntil(t, "ESC", func() bool { return r.pty(0).said() == "\x1b" })
+	r.processed(t, "r_2")
+	if got := r.pty(0).said(); got != "\x1b" {
+		t.Fatalf("the agent got %q, want one ESC", got)
+	}
 }
 
 // The snapshot carries the last 100 messages, without thumbnails and with a
