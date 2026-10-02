@@ -50,8 +50,11 @@ start() {
   if [[ "$("$ADB" -s "$SERIAL" get-state 2>/dev/null | tr -d '\r')" != device ]]; then
     # -partition-size: the AVD avdmanager makes on a CI runner has a small data
     # partition, and the oracle pushes some 8000 case files to /data/local/tmp.
-    nohup "$SDK/emulator/emulator$EXE" -avd "$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim \
-      -no-snapshot -partition-size 4096 -gpu swiftshader_indirect >"${TMPDIR:-/tmp}/adbuddy-emulator.log" 2>&1 &
+    # Not on Windows: its emulator caps it at 2047 MB and exits on 4096.
+    args=(-avd "$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim -no-snapshot)
+    [[ -z "$EXE" ]] && args+=(-partition-size 4096)
+    args+=(-gpu swiftshader_indirect)
+    nohup "$SDK/emulator/emulator$EXE" "${args[@]}" >"${TMPDIR:-/tmp}/adbuddy-emulator.log" 2>&1 &
   fi
   if ! MSYS_NO_PATHCONV=1 timeout 600 "$ADB" -s "$SERIAL" wait-for-device shell \
     'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 1; done' </dev/null; then
