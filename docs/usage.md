@@ -232,7 +232,7 @@ ADBuddy finds the phone by mDNS, which only works on one network. Away from home
 
 ### With mobile data only
 
-Without any Wi-Fi, ADBuddy reaches the phone through adb's port 5555. **You** turn this on. A request from the agent's session is refused (`AGENT_SESSION`, a check against mistakes), and turning it on always asks you with a special confirmation:
+Without any Wi-Fi, ADBuddy reaches the phone through adb's port 5555. **You** turn this on. A request from the agent's session is refused (`AGENT_SESSION`, a check against mistakes), and turning it on asks you with a special confirmation:
 
 ```sh
 adbuddy remote on

@@ -50,7 +50,7 @@ This works today, on any of the three systems. You need [Git](https://git-scm.co
    adbuddy dev
    ```
 
-4. Build the phone app. This needs JDK 17, the Android SDK platform 37 and Gradle 9.8; the repository has no Gradle wrapper yet. Gradle must find the SDK: set `ANDROID_HOME` (as the CI does) or put `sdk.dir=<path to the SDK>` in `android/local.properties`, or it stops with "SDK location not found".
+4. Build the phone app. This needs JDK 17, the Android SDK platform 37 and Gradle 9.8; the repository has no Gradle wrapper yet. Gradle must find the SDK: set `ANDROID_HOME` or put `sdk.dir=<path to the SDK>` in `android/local.properties`, or it stops with "SDK location not found".
 
    ```sh
    cd ../android
