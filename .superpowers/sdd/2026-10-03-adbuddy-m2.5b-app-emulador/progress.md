@@ -298,6 +298,35 @@ start: 20:57:40 rc=124 "the emulator did not finish booting in 10 minutes"
 log del emulador (/tmp/adbuddy-emulator.log): "INFO | Boot completed in 97416 ms"   (≈20:49:10)
 ```
 
-El emulador terminó de arrancar (lo dice su propio log, por su canal y no por adb) y `emulator-5600` siguió `offline` en el servidor 5060 durante ~1.5 min más, hasta que lo paró el vigilante de RAM: adbd no acepta al servidor. Lectura: `adb_enabled=0` quedó en los datos del AVD y la restauración programada de R1 no llegó a correr (murió con el grupo de adbd, como prevé el paso 6). No se pudo leer el valor (sin adb); la recuperación borra los datos. La bajada de RAM coincide con el arranque de un emulador nuevo de la CI (qemu `-port 5590` creado a las 20:53:21 con 7.6 GB de working set... el anterior se apagó entre medias) y con el arranque del mío: no es un bucle de reinicios.
+El emulador terminó de arrancar (lo dice su propio log, por su canal y no por adb) y `emulator-5600` siguió `offline` en el servidor 5060 durante ~1.5 min más, hasta que lo paró el vigilante de RAM: adbd no acepta al servidor. Lectura: `adb_enabled=0` quedó en los datos del AVD y la restauración programada de R1 no llegó a correr (murió con el grupo de adbd, como prevé el paso 6). No se pudo leer el valor (sin adb); la recuperación borra los datos. La bajada de RAM (20:50) fue con mi emulador recién arrancado y el qemu de la CI de antes encendido; a las 20:53:21 la CI arrancó otro emulador (`-port 5590`, 7.6 GB de working set a las 20:58). No hay bucle de reinicios en mi lado (S1 lo midió estable).
 
 Tras el corte: ningún qemu `-port 5600` (solo el de la CI, sin tocar). Siguiente: "Recuperación del AVD de desarrollo" sobre `adbuddy-dev34` (y ningún otro AVD), arranque y ADB-ON.
+
+### Recuperación del AVD `adbuddy-dev34` y ADB-ON
+
+Con el emulador parado: `rm -f ~/.android/avd/adbuddy-dev34.avd/userdata-qemu.img ~/.android/avd/adbuddy-dev34.avd/userdata-qemu.img.qcow2` (los dos existían; ningún otro AVD tocado). Espera hasta RAM libre >= 12 GB (13.13 GB a las 21:08:44; la CI tenía otro emulador `-port 5590` con 7.6 GB). `scripts/emulator.sh start` 21:08:55 → rc 0 a las 21:11:42 (vigilante de estabilidad de 120 s pasado). ADB-ON:
+
+```
+$ guard: emulator-5600	device;
+$ EMU; "$ADB" -s "$S" shell 'settings put global adb_enabled 1; settings get global adb_enabled; settings get global adb_wifi_enabled; pidof system_server surfaceflinger; su 0 id'
+1
+0
+422 558
+uid=0(root) ... context=u:r:su:s0
+```
+
+### S3, R2 (paso 6): como root fuera del grupo de adbd — vuelve solo
+
+```
+$ guard: emulator-5600	device;
+$ (21:11:56) EMU; "$ADB" -s "$S" shell 'su 0 setsid sh -c "echo \$\$ >/sys/fs/cgroup/cgroup.procs; sleep 20; settings put global adb_enabled 1" </dev/null >/dev/null 2>&1 & sleep 1; settings put global adb_enabled 0'
+rc=255 (21:11:57)
+registro 120 s:
+21:11:54 device
+21:11:58 gone
+21:11:59 offline
+21:12:17 device
+last: 21:14:03 device
+```
+
+Sale de `device` en ~1-2 s y vuelve solo a los ~20 s del corte (justo cuando corre la restauración), sin `reconnect`. Después: `adb_enabled=1`, `adb_wifi_enabled=0`, pids 422/558 sin cambios. Lectura: lo que impidió volver en R1 fue que la restauración murió con el grupo de adbd; el servidor adb 5060 sí reengancha solo a 5600 cuando adbd vuelve (≤20 s aquí). Existe red de seguridad desde el shell (como root, fuera del cgroup de adbd).
