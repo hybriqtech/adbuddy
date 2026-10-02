@@ -152,8 +152,11 @@ func EnsureSecret(dataDir string) (string, error) {
 		return "", err
 	}
 	lock, err := waitLock(secretLockPath(dataDir), secretWait)
-	if err != nil {
+	if errors.Is(err, errLocked) {
 		return "", fmt.Errorf("another ADBuddy is creating %s: %w", SecretPath(dataDir), err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("lock %s: %w", secretLockPath(dataDir), err)
 	}
 	defer lock.Close()
 	if s, err := ReadSecret(dataDir); err == nil {

@@ -453,16 +453,35 @@ func TestSecretCreatedOnceUnderARace(t *testing.T) {
 			got <- s
 		}()
 	}
-	first := <-got
-	for range n - 1 {
-		if s := <-got; s != first {
-			t.Fatalf("two secrets: %q and %q", first, s)
-		}
+	// Collect every creator and the reader before judging, so that a failure
+	// leaves no goroutine running after the test (t.Error, secretTries).
+	results := make([]string, 0, n)
+	for range n {
+		results = append(results, <-got)
 	}
 	close(stop)
 	stopped = true
-	if err := <-readerErr; err != nil {
-		t.Fatalf("a reader saw %v", err)
+	rerr := <-readerErr
+	for _, s := range results[1:] {
+		if s != results[0] {
+			t.Fatalf("two secrets: %q and %q", results[0], s)
+		}
+	}
+	if rerr != nil {
+		t.Fatalf("a reader saw %v", rerr)
+	}
+}
+
+// A lock that cannot be opened is reported as that, not as another ADBuddy
+// creating the secret.
+func TestEnsureSecretLockFailureIsNotBlamedOnAnotherHost(t *testing.T) {
+	dir := shortDir(t)
+	if err := os.Mkdir(secretLockPath(dir), 0o700); err != nil { // a folder cannot be opened as the lock
+		t.Fatal(err)
+	}
+	_, err := EnsureSecret(dir)
+	if err == nil || strings.Contains(err.Error(), "another ADBuddy") {
+		t.Fatalf("got %v", err)
 	}
 }
 
