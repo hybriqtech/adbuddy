@@ -28,6 +28,21 @@ adbuddy setup --apk app/build/outputs/apk/debug/app-debug.apk
 Instrumented tests (`gradle :app:connectedDebugAndroidTest`) need an emulator:
 never run them on your own phone.
 
+## Protected apps, notification access and settings
+
+- **Protected apps** (Settings, and the first-run step after the consent): the agent never reads or
+  touches them. The list starts as a proposal made by name (banking, payments, passwords, 2FA, and the
+  apps that receive your login codes, such as Messages and Gmail, which are protected from the first launch,
+  before you confirm anything); you confirm or edit it, and from then on ADBuddy never changes it by itself. ADBuddy itself is always protected. Saving sends the list to the PC.
+- **Notification access** (optional): `adbuddy notifications` reads what the phone's notifications say,
+  through a read-only listener (`listener/`) that you allow in the system's own screen. The title and text
+  of protected apps and of ADBuddy never leave the phone, and the agent cannot dismiss or tap a notification.
+  The screen shows allowed, allowed but not confirmed, not allowed or unknown, and never one for another.
+  Allowing it in the system is not enough: you also tap a confirm button in ADBuddy, which nothing else
+  presses for you (and the agent cannot, since ADBuddy is protected); revoking the access in the system
+  takes that confirmation away.
+- **Settings** gathers both, plus the remote-mode switch.
+
 ## Chat and terminal
 
 - **Terminal:** xterm.js 5.5.0 with its fit and web-links addons (MIT), bundled in

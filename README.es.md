@@ -78,7 +78,7 @@ Claude Code (recomendado), Codex, Gemini CLI y OpenCode. ADBuddy no instala agen
 - Todo comando `adb` que ejecuta el agente pasa por el shim y por el host, que lo clasifica: verde (solo lectura), amarillo (reversible o inofensivo) o rojo (irreversible, peligroso o no entendido). Un comando que el host no entiende es rojo.
 - Los comandos verdes y amarillos se ejecutan al instante y quedan en el diario; los amarillos con su forma de deshacerlos cuando la tienen (`adbuddy journal`, `adbuddy undo`). Los toques y la escritura son amarillos y no se pueden deshacer. Un comando amarillo pasa a rojo cuando ADBuddy no puede leer el estado que necesita o el cambio sobrescribiría algo.
 - Los comandos rojos esperan tu respuesta, en el móvil (para permitir, debe estar desbloqueado) o en la terminal del host. Una pregunta sin respuesta cuenta como un no (a los 2 minutos por defecto).
-- Con la app instalada, las apps de banca, pagos, contraseñas y 2FA están protegidas mientras están en primer plano (una suposición a partir de sus nombres hoy; aún no puedes editar la lista). Sin la app, solo está protegido ADBuddy.
+- Con la app instalada, las apps de banca, pagos, contraseñas y 2FA están protegidas mientras están en primer plano (una propuesta a partir de sus nombres que confirmas o editas en la app). Sin la app, solo está protegido ADBuddy.
 - ADBuddy no tiene telemetría ni servidor propio. Lo que el agente lee en tu móvil va al proveedor del propio agente.
 - **El shim protege contra errores e inyecciones de prompts. No protege contra un agente empeñado en buscar otro adb.** La garantía real es **Cortar acceso** en la app, que apaga la depuración desde el móvil: con ella apagada, el PC no puede alcanzar el móvil.
 
@@ -117,6 +117,7 @@ Son los comandos de `adbuddy --help` (el programa los describe en inglés; aquí
 | `adbuddy tap` | Toca un elemento de la pantalla del móvil por su texto, su id o un punto |
 | `adbuddy type "<text>"` | Escribe texto en el campo con foco del móvil (sustituye lo que tenga el campo) |
 | `adbuddy foreground` | Muestra la app y la actividad en primer plano del móvil |
+| `adbuddy notifications` | Lista las notificaciones actuales del móvil (las apps protegidas no muestran texto) |
 | `adbuddy screenshot` | Guarda una captura del móvil, reducida |
 | `adbuddy send <file>` | Envía un fichero del entorno al móvil del usuario (para el agente) |
 | `adbuddy version` | Muestra la versión de ADBuddy |

@@ -173,6 +173,7 @@ adbuddy tap --xy 540,1200
 adbuddy type "Wi-Fi"
 adbuddy foreground
 adbuddy screenshot
+adbuddy notifications
 ```
 
 - `adbuddy screen` lists what is on the screen, one element per line, with its id and position. Run it before tapping.
@@ -180,8 +181,9 @@ adbuddy screenshot
 - `adbuddy type "<text>"` types into the field that has the focus. It replaces the field's text. Without the app, only plain ASCII works.
 - `adbuddy foreground` shows the app in front.
 - `adbuddy screenshot` saves a picture, scaled to half by default, in `screenshots/` of the current folder. `-o` picks the file and `--scale` the size.
+- `adbuddy notifications` lists the notifications on the phone now, newest first, with the app, the time, the title and the text (`--json` gives them whole). Protected apps and ADBuddy show no title or text. It only works once you allow notification access to ADBuddy and confirm it in the app (Settings, Notification access); until then it answers `UI_UNAVAILABLE` and says what to do. It only reads: nothing dismisses or taps a notification.
 
-Each one is journaled like an adb command. With the app, banking, payments, password and 2FA apps, and ADBuddy itself, are protected: while one is in front, the agent can neither read nor touch the screen. Today ADBuddy guesses that list from app names, and you cannot edit it yet. Without the app, only ADBuddy itself is protected. With the app connected, `adbuddy type "<text>"` refuses password fields.
+Each one is journaled like an adb command. With the app, banking, payments, password and 2FA apps, and ADBuddy itself, are protected: while one is in front, the agent can neither read nor touch the screen. ADBuddy proposes that list from app names, plus the apps that receive your login codes (Messages, Gmail), and you confirm or edit it in the app (Settings, Protected apps, and the first-run step). Without the app, only ADBuddy itself is protected. With the app connected, `adbuddy type "<text>"` refuses password fields.
 
 While the agent uses the screen, the phone shows a frame round it and a pill, **Agent using the screen · Pause**. Tap the pill to pause.
 
