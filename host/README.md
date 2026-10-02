@@ -82,14 +82,14 @@ It fails if the phone says a program or an option does not exist, and it refuses
 
 ### The app on the emulator
 
-`internal/emutest` reaches the app over adb, as the host reaches a phone: the provider answers the shell user, the handshake on stdin reaches it, and `BridgeService` goes to the foreground after it (validations 1, 2 and 3 of the M2 plan). It installs the debug APKs, so build them first; with the emulator's variables loaded (`scripts/emulator.sh start`):
+`internal/emutest` reaches the app over adb, as the host reaches a phone: the provider answers the shell user, the handshake on stdin reaches it, `BridgeService` goes to the foreground after it, and Cut access closes the emulator's adb until Reactivar brings it back (validations 1, 2, 3 and 6 of the M2 plan). The cut runs inside the app (`CutAccessOnEmulatorTest`, started without waiting for it), so a failure can leave the emulator without adb: `scripts/emulator.sh stop` still stops it. It only runs with `ADBUDDY_EMULATOR_CUT=1`, and only on a development emulator: a run that fails half way leaves `adb_enabled=0` in the AVD, which then boots without adb (delete the AVD's `userdata-qemu.img*` to recover it). The CI does not run it. On the emulator adbd always listens on 5555 (its own adb transport), so the tcpip half shows that the cut closes adbd, not that it closes tcpip mode in particular: on a phone that stays a manual check. It installs the debug APKs, so build them first; with the emulator's variables loaded (`scripts/emulator.sh start`):
 
 ```sh
 (cd android && gradle :app:assembleDebug :app:assembleDebugAndroidTest)
 cd host && go test -timeout 15m -count=1 ./internal/emutest
 ```
 
-Without `ADBUDDY_EMULATOR_SERIAL` the tests skip; they refuse a serial that is not `emulator-*` and an `ANDROID_ADB_SERVER_PORT` that is unset or adb's default 5037. `TestInstrumentedSuite` also runs the app's instrumented tests (`TokenProviderTest`, `AdbWifiObserverTest`, `LocalesTest`) with `am instrument`, and fails on any failure, skipped test or missing class. They uninstall what they installed. The `emulator` workflow runs them.
+Without `ADBUDDY_EMULATOR_SERIAL` the tests skip; they refuse a serial that is not `emulator-*` and an `ANDROID_ADB_SERVER_PORT` that is unset or adb's default 5037. `TestInstrumentedSuite` also runs the app's instrumented tests (`TokenProviderTest`, `AdbWifiObserverTest`, `LocalesTest`) with `am instrument`, and fails on any failure, missing class or skipped test other than `CutAccessOnEmulatorTest`, which must be skipped there. They uninstall what they installed. The `emulator` workflow runs them.
 
 ### Claude Code with a real agent
 
