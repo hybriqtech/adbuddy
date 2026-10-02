@@ -621,6 +621,7 @@ On the phone: Wireless debugging → Pair device with QR code, and scan:
 "doctor.err.shell_exit" = "adb shell %[1]s: exit %[2]d: %[3]s"
 "doctor.err.not_folder" = "%[1]s is not a folder"
 "doctor.err.read_only" = "%[1]s is read-only"
+"doctor.err.not_regular" = "%[1]s is not a regular file"
 "doctor.fix.serve_running" = "--fix did not restart it: adbuddy serve is running and uses it"
 "doctor.fix.socket_stuck" = "--fix did not restart it: the ADBuddy socket does not answer, so a serve may be using it"
 "doctor.fix.start_failed" = "--fix could not restart it: start-server: %[1]s"

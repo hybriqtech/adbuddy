@@ -620,6 +620,7 @@ En el móvil: Depuración inalámbrica → Vincular dispositivo con código QR, 
 "doctor.err.shell_exit" = "adb shell %[1]s: terminó con código %[2]d: %[3]s"
 "doctor.err.not_folder" = "%[1]s no es una carpeta"
 "doctor.err.read_only" = "%[1]s es de solo lectura"
+"doctor.err.not_regular" = "%[1]s no es un fichero normal"
 "doctor.fix.serve_running" = "--fix no lo reinició: adbuddy serve está en marcha y lo usa"
 "doctor.fix.socket_stuck" = "--fix no lo reinició: el socket de ADBuddy no responde, así que puede que un serve lo esté usando"
 "doctor.fix.start_failed" = "--fix no pudo reiniciarlo: start-server: %[1]s"

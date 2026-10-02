@@ -612,16 +612,17 @@ func checkWorkspace(ws string) check {
 
 // journalWritable checks, without creating or writing anything, that the
 // journal could be appended to: its folder, when there, must be a writable
-// folder, and this month's file, when there, must not be read-only. A
-// missing folder is fine: the journal creates it on first use.
+// folder (not a link or a junction, which the journal refuses), and this
+// month's file, when there, a regular file that is not read-only. A missing
+// folder is fine: the journal creates it on first use.
 func journalWritable(dir string) (firstUse bool, err error) {
-	fi, err := os.Stat(dir)
+	fi, err := os.Lstat(dir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return true, nil
 	case err != nil:
 		return false, err
-	case !fi.IsDir():
+	case fi.Mode().Type() != fs.ModeDir:
 		return false, failf("doctor.err.not_folder", dir)
 	case runtime.GOOS != "windows" && fi.Mode().Perm()&0o200 == 0:
 		// On Windows the read-only attribute of a folder does not stop
@@ -630,7 +631,12 @@ func journalWritable(dir string) (firstUse bool, err error) {
 	}
 	// The file journal.Store appends to this month.
 	f := filepath.Join(dir, time.Now().UTC().Format("2006-01")+".jsonl")
-	if fi, err := os.Stat(f); err == nil && fi.Mode().Perm()&0o200 == 0 {
+	switch fi, err := os.Lstat(f); {
+	case err != nil:
+		// Missing: the journal creates it.
+	case !fi.Mode().IsRegular():
+		return false, failf("doctor.err.not_regular", f)
+	case fi.Mode().Perm()&0o200 == 0:
 		return false, failf("doctor.err.read_only", f)
 	}
 	return false, nil

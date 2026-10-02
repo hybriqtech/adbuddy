@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -493,6 +495,31 @@ func TestDoctorJournalNotWritable(t *testing.T) {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(jdir, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+		// A link (a junction on Windows) in place of the folder: the
+		// journal refuses it.
+		"a link": func(t *testing.T, jdir string) {
+			if err := os.Remove(jdir); err != nil {
+				t.Fatal(err)
+			}
+			target := t.TempDir()
+			if err := os.Symlink(target, jdir); err != nil {
+				if runtime.GOOS != "windows" {
+					t.Fatal(err)
+				}
+				// A junction, with System32's cmd: the PATH of these tests
+				// is the fake adb's.
+				cmd := filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+				if out, err := exec.Command(cmd, "/c", "mklink", "/J", jdir, target).CombinedOutput(); err != nil {
+					t.Skipf("mklink /J: %v %s", err, out)
+				}
+			}
+		},
+		// This month's file is not a regular file: the journal refuses it.
+		"month file not regular": func(t *testing.T, jdir string) {
+			if err := os.Mkdir(filepath.Join(jdir, time.Now().UTC().Format("2006-01")+".jsonl"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 		},
