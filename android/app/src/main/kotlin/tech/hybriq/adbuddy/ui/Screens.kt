@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -167,7 +168,11 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 for ((i, line) in lines.withIndex()) {
                     val small = i >= lines.size - 2 // the command and the footer
-                    Text(line, style = if (small) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium)
+                    // The agent's command (second to last) and the host's detail (first, when there is one) are code: left to right
+                    // whatever their first letter, so what is read is in the order it runs. The labels follow the language.
+                    val code = i == lines.size - 2 || (i == 0 && r.detail.isNotEmpty())
+                    val base = if (small) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium
+                    Text(line, style = if (code) base.copy(textDirection = TextDirection.Ltr) else base)
                 }
             }
         },
