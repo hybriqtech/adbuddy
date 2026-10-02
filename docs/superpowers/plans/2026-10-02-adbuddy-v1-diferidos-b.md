@@ -35,12 +35,12 @@
 
 1. **Ruling: la guarda mira cada decodificación %XX de cada palabra (hasta 4 capas) y parte por todo carácter que no puede estar en un nombre de paquete.** — Android decodifica `%XX` en el host de un URI `android-app://` y en los valores de un URI `intent:`, y hoy `am start -d android-app://com%2Eexample%2Ebank` pasa; además la verificación encontró que `?` y `@` tampoco partían (`android-app://com.example.bank?x=1` y `android-app://u@com.example.bank` pasan hoy). Hex en mayúsculas o minúsculas; un `%` mal formado se deja tal cual (Android lo convierte en U+FFFD, que ningún paquete tiene), y como `%` también parte, `com.example.bank%2` bloquea (falla cerrado). Más de 4 capas: bloquea con un texto propio. — Si me equivoco: un `am start` legítimo con un URI raro que nombra una app protegida queda bloqueado (el usuario lo hace a mano); nunca deja pasar algo que hoy bloquea.
 2. **Ruling: `Disable` sin caducidad guardada lee el puerto antes de `adb usb`.** — Con el modo apagado, `adb usb` reinicia adbd y corta la conexión del móvil por nada (la CLI sin serve ya no lo hace desde la revisión final de M5b, menor 3). Se lee `service.adb.tcp.port`: si no es 5555 no se hace nada; si es 5555 **o no se puede leer**, `adb usb` como antes (falla cerrado: cierra también un 5555 abierto a mano). No cambia ningún estado: sin caducidad ya era "apagado". — Si me equivoco: una lectura de adb más en cada "off" con el modo apagado.
-3. **Ruling: tras un `adb usb` que cerró el puerto y un `SetUntil` que falló, los reintentos de esa misma caducidad solo intentan borrarla.** — Hoy cada reintento de `Expire` (espaciados hasta 2 min, ruling 41 de M5b) vuelve a reiniciar adbd y a cortar la conexión. El controlador recuerda en memoria (`closedFor`, bajo su mutex) la caducidad cuyo puerto ya cerró; cualquier otra caducidad (un `Enable` guarda una nueva) vuelve a pasar por `adb usb`. El estado sigue siendo `Closing` (encendido) hasta que la caducidad se borra: nunca un falso apagado. — Si me equivoco: si alguien abre el 5555 fuera del controlador entre el fallo y el reintento, el reintento no lo cierra (igual que hoy no se cierra un 5555 abierto a mano con el modo apagado).
+3. **Ruling: tras un `adb usb` que cerró el puerto y un `SetUntil` que falló, los reintentos de esa misma caducidad solo intentan borrarla.** — Hoy cada reintento de `Expire` (espaciados hasta 2 min, ruling 41 de M5b) vuelve a reiniciar adbd y a cortar la conexión. El controlador recuerda en memoria (`closedFor`, bajo su mutex) la caducidad cuyo puerto ya cerró; cualquier otra caducidad vuelve a pasar por `adb usb`, y `Enable` lo olvida justo antes de `adb tcpip` (revisión Opus del plan: si `tcpip` diera un falso "sin móvil" aunque la orden llegó, `Enable` restaura la caducidad anterior, que podría ser igual a `closedFor`, y el siguiente `Expire` se saltaría `adb usb`: falso apagado con el 5555 abierto). El estado sigue siendo `Closing` (encendido) hasta que la caducidad se borra: nunca un falso apagado. — Si me equivoco: si alguien abre el 5555 fuera del controlador entre el fallo y el reintento, el reintento no lo cierra (igual que hoy no se cierra un 5555 abierto a mano con el modo apagado).
 4. **Ruling: cada mirada del vigilante a `adb devices` se corta a `TryWait` (8 s).** — Un `adb devices` colgado dejaba la gorrutina de `watchPhone` parada para siempre dentro de un `step`. Un corte es "adb falla", que ya no cambia nada. — Si me equivoco: con un adb lentísimo (> 8 s) el vigilante no ve el móvil en esa mirada y lo vuelve a intentar en la siguiente.
 5. **Ruling: el texto de `DEVICE_NOT_FOUND` con direcciones guardadas dice que no funcionó ninguna, cuáles se probaron y que el error es el último.** — Decía "its saved address did not work (a, b: <error de b>)": en singular y con el error de una sola como si fuera de todas. Desde M6c el texto es la clave `err.serve.device_not_found` del catálogo: se cambia en inglés y en español con los mismos argumentos (`serve.go` no cambia), y va con su línea de `docs/troubleshooting.md` (solo existe en inglés). — Si me equivoco: una frase del catálogo que se retoca en los dos idiomas.
 6. **Ruling: el daemon guarda un cerrojo de sistema (`adbuddy.lock`, `flock` en Unix, `LockFileEx` en Windows) mientras sirve.** — `Listen` hacía Stat, Dial y Remove sin exclusión: dos `serve` que arrancan a la vez con un socket muerto podían quitarse el socket vivo el uno al otro. El cerrojo se suelta en `Close` y con la muerte del proceso, sea como sea; el fichero se queda en disco (borrarlo abriría otra carrera). La comprobación por Dial se mantiene para un daemon de una versión anterior, que no toma el cerrojo. — Si me equivoco: en un sistema de ficheros sin cerrojos (una carpeta de datos en red rara) `serve` no arranca y lo dice; `ADBUDDY_DATA_DIR` local lo arregla.
-7. **Ruling: el secreto se escribe entero con otro nombre en la misma carpeta y se renombra, con un cerrojo de creación (`ipc.secret.lock`), y `ReadSecret` reintenta un momento lo que no puede leer entero.** — Con `O_EXCL` y luego la escritura, un lector veía un secreto vacío o a medias (la réplica lo reproduce: 2 de 10 ejecuciones de `TestSecretCreatedOnceUnderARace` fallan con el código de hoy, con un creador que devuelve `""`). Renombrar no basta solo (el último en renombrar ganaría y el primero serviría con un secreto que ya no está en el fichero): por eso el cerrojo. En Windows un renombrado en curso hace fallar la apertura con "being used by another process": `ReadSecret` reintenta 20 veces cada 10 ms todo error que no sea "no existe" (también un secreto corto de un host antiguo que lo escribe en dos pasos). El fichero temporal se crea en la misma carpeta, así que hereda los mismos permisos y la misma ACL que antes. — Si me equivoco: un secreto de verdad corrupto tarda 200 ms más en dar su error.
-8. **Ruling: como mucho 32 conexiones esperan a autenticarse a la vez, y `ReadFrame` no reserva más de 64 KiB antes de que lleguen los bytes.** — Cada conexión sin autenticar podía hacer que el servidor reservara 1 MiB durante 5 s, sin límite de conexiones. La 33.ª se cierra al aceptarla; la plaza se devuelve en cuanto la conexión se autentica, se rechaza o se va. Por encima de 64 KiB el búfer se dobla solo con lo leído, así que la memoria es a lo sumo el doble de lo recibido. Las tramas grandes siguen llegando enteras. — Si me equivoco: con más de 32 clientes legítimos a la vez en la fase previa a autenticar (microsegundos cada uno), alguno recibe un cierre y su orden falla ("lost the connection"); el agente la repite.
+7. **Ruling: el secreto se escribe entero con otro nombre en la misma carpeta y se renombra, con un cerrojo de creación (`ipc.secret.lock`), y `ReadSecret` reintenta un momento lo que no puede leer entero.** — Con `O_EXCL` y luego la escritura, un lector veía un secreto vacío o a medias (la réplica lo reproduce: 2 de 10 ejecuciones de `TestSecretCreatedOnceUnderARace` fallan con el código de hoy, con un creador que devuelve `""`). Renombrar no basta solo (el último en renombrar ganaría y el primero serviría con un secreto que ya no está en el fichero): por eso el cerrojo. En Windows un renombrado en curso hace fallar la apertura con "being used by another process": `ReadSecret` reintenta 20 veces cada 10 ms (variables: los tests las alargan para una CI lenta) todo error que no sea "no existe" (también un secreto corto de un host antiguo que lo escribe en dos pasos). El fichero temporal se crea en la misma carpeta, así que hereda los mismos permisos y la misma ACL que antes. — Si me equivoco: un secreto de verdad corrupto tarda 200 ms más en dar su error.
+8. **Ruling: como mucho 32 conexiones esperan a autenticarse a la vez, y `ReadFrame` no reserva más de 64 KiB antes de que lleguen los bytes.** — Cada conexión sin autenticar podía hacer que el servidor reservara 1 MiB durante 5 s, sin límite de conexiones. La 33.ª se cierra al aceptarla (falla cerrado); la plaza se devuelve en cuanto la conexión se autentica, y una rechazada o que se va la conserva hasta que termina (`finish` espera hasta 2 s a que el cliente cierre), así que tampoco los rechazos crecen sin tope. Un proceso del mismo usuario puede agotar el cupo (32 conexiones que no mandan nada, renovadas cada 5 s, el plazo absoluto de lectura antes de autenticar): es una denegación de servicio local, no una frontera de privilegios (ese proceso ya podría matar `serve`), y cada plaza se libera sola a los 5 s. Por encima de 64 KiB el búfer se dobla solo con lo leído, así que la memoria es a lo sumo el doble de lo recibido. Las tramas grandes siguen llegando enteras. — Si me equivoco: con más de 32 clientes legítimos a la vez en la fase previa a autenticar (microsegundos cada uno), alguno recibe un cierre y su orden falla ("lost the connection"); el agente la repite.
 9. **Ruling: el WebView de la terminal solo carga un fichero de `/assets/term/` por su nombre llano** (`[A-Za-z0-9_-][A-Za-z0-9._-]*` y sin `..`). — Ningún caso de borde sacaba de la carpeta, pero `index.html?x=1`, `#frag`, `//index.html` o `sub/x` pasaban la política; la carpeta es plana y la página solo enlaza nombres llanos. Una lista blanca no deja forma de salir. — Si me equivoco: un fichero nuevo con otro carácter en el nombre no carga y se ve enseguida.
 10. **Ruling: los tests nuevos de `Bridge` y el fuzz de los reductores son de caracterización; su RED es una mutación comprobada.** — El código ya cumple (el fuzz no encontró ninguna excepción con 3 semillas × 5000 mensajes). Quitar `if (webSocket !== socket) return` de `Listener.onMessage` hace fallar `anOldSocketIsIgnoredAfterANewLink`; cambiar el `catch (e: IllegalArgumentException)` de `ChatReducer.snapshot` por otro tipo hace fallar el fuzz (semilla 20261002, paso 33). La reentrada `onResult → request` no tiene mutación realista que la rompa (los monitores de la JVM son reentrantes): queda como test del contrato. — Si me equivoco: tests que no detectan una regresión concreta; los ve la revisión.
 11. **Ruling: una imagen dentro de un enlace (`[![alt](imagen)](url)`) es el enlace con el alt como texto.** — Hoy sale un enlace con texto `![alt` hacia la URL de la imagen, y el contrato es que la URL de una imagen nunca es un enlace (`imagesAreOnlyTheirAltTextAndTheUrlIsNeverALink`). Si la URL de fuera no es web (o no hay), queda el alt como texto. Sin recursión ni búsquedas nuevas fuera de `Finder`, y con casos hostiles nuevos en el test de tiempo lineal. — Si me equivoco: un texto que empezaba por `![` dentro de corchetes pierde su enlace (queda el texto).
@@ -79,7 +79,7 @@
 
 ## Textos nuevos de cara al usuario (según las reglas de M6c)
 
-1. **Al catálogo (en y es), Tarea 3:** `err.serve.device_not_found` (lo usa `serve.go` con `TransientErrorT`). Inglés: `the phone did not show up, and none of its saved addresses worked (tried %[1]s; last error: %[2]s)`. Español: `el móvil no apareció, y no funcionó ninguna de sus direcciones guardadas (probadas: %[1]s; último error: %[2]s)`. El arreglo (`err.serve.device_not_found.fix`, con `%[3]s`) no cambia. `--json` y la sesión del agente siguen viendo el inglés (`NewErrorT` calcula `Message` en inglés). Y la misma frase inglesa en `docs/troubleshooting.md` ("The Wireless debugging port changed"), que no tiene versión en español ni test que compare su texto con el catálogo (los `TestDocs*` de `cli/docs_test.go` miran vallas, enlaces, órdenes y privacidad).
+1. **Al catálogo (en y es), Tarea 3:** `err.serve.device_not_found` (lo usa `serve.go` con `TransientErrorT`). Inglés: `the phone did not show up, and none of its saved addresses worked (tried %[1]s; last error seen: %[2]s)`. Español: `el móvil no apareció, y no funcionó ninguna de sus direcciones guardadas (probadas: %[1]s; último error visto: %[2]s)`. El arreglo (`err.serve.device_not_found.fix`, con `%[3]s`) no cambia. `--json` y la sesión del agente siguen viendo el inglés (`NewErrorT` calcula `Message` en inglés). Y la misma frase inglesa en `docs/troubleshooting.md` ("The Wireless debugging port changed"), que no tiene versión en español ni test que compare su texto con el catálogo (los `TestDocs*` de `cli/docs_test.go` miran vallas, enlaces, órdenes y privacidad).
 2. **En inglés a propósito, Tarea 1:** la razón nueva de la guarda (`daemon/guard.go`, `encodedReason`), tras "Blocked by ADBuddy: ": `the app this command opens is hidden under too many layers of %-encoding; ADBuddy does not open an app without knowing which`. Spec de M6c §3: los mensajes de bloqueo de la shim y las razones de la guarda son salida para el agente y no se traducen (M6c no tocó `guard.go`; `protectedReason` y `screenProtectedReason` siguen en inglés).
 3. **En inglés a propósito, Tarea 5:** `another ADBuddy is creating <ruta>/ipc.secret: the lock is held` es la causa técnica que devuelve `ipc.EnsureSecret`; `serve.go` ya la mete como argumento de `error.cause` dentro de `SECRET_FAILED` (`NewErrorT("SECRET_FAILED", "error.cause", "err.serve.secret_failed.fix", err.Error(), e.dirs.Data)`), y M6c deja en inglés las causas de paquetes internos (pendientes, "Se quedan en inglés a propósito"). Solo sale si otro proceso tarda más de 5 s en crear el secreto.
 
@@ -140,6 +140,7 @@ func TestGuardBlocksOpeningAProtectedAppEncoded(t *testing.T) {
 		{"every letter encoded", []string{"shell", "am", "start", "-d", "android-app://%63%6F%6D%2E%65%78%61%6D%70%6C%65%2E%62%61%6E%6B"}, named},
 		{"encoded twice", []string{"shell", "am", "start", "-d", "android-app://com%252Eexample%252Ebank"}, named},
 		{"encoded slashes", []string{"shell", "am", "start", "-d", "android-app:%2F%2Fcom.example.bank"}, named},
+		{"encoded scheme", []string{"shell", "am", "start", "-d", "android-app%3A%2F%2Fcom.example.bank"}, named},
 		{"query", []string{"shell", "am", "start", "-d", "android-app://com.example.bank?x=1"}, named},
 		{"user info", []string{"shell", "am", "start", "-d", "android-app://u@com.example.bank"}, named},
 		{"intent URI", []string{"shell", "am start 'intent:#Intent;package=com%2Eexample%2Ebank;end'"}, named},
@@ -171,7 +172,7 @@ func TestGuardFailsClosed(t *testing.T) {
 cd host && go test -count=1 -timeout 5m ./internal/daemon -run TestGuardBlocksOpeningAProtectedAppEncoded
 ```
 
-Esperado: FAIL en 11 casos, todos con `{Code:0 …}` (se ejecutaron) salvo "intent URI", que hoy da el `aloneReason` ("must run alone") en vez de "is a protected app". Salida real de la réplica (recortada):
+Esperado: FAIL en 12 casos, todos con `{Code:0 …}` (se ejecutaron) salvo "intent URI", que hoy da el `aloneReason` ("must run alone") en vez de "is a protected app". Salida real de la réplica (recortada):
 
 ```
 --- FAIL: TestGuardBlocksOpeningAProtectedAppEncoded (0.17s)
@@ -462,6 +463,38 @@ func TestExpireAfterAFailedSaveDoesNotRunUsbAgain(t *testing.T) {
 		t.Fatalf("events %q", got)
 	}
 }
+
+// V38 (plan review): Enable forgets the expiry whose port was closed before
+// it runs `adb tcpip`. If tcpip then fails as "no phone", the old expiry is
+// put back, but the order may have reached adbd: the next Expire must close
+// with `adb usb` again, not only clear the expiry (a false "off" with the
+// port open).
+func TestEnableForgetsTheExpiryItsPortWasClosedFor(t *testing.T) {
+	e := newEnv()
+	old := t0.Add(time.Hour)
+	e.until = old
+	e.now = t0.Add(2 * time.Hour)
+	e.saveFail = true
+	c := e.controller()
+	if _, _, err := c.Expire(context.Background()); err == nil {
+		t.Fatal("the save did not fail")
+	}
+	e.saveFail = false
+	e.tcpipFail, e.tcpipErr = true, "error: no devices/emulators found"
+	if _, err := c.Enable(context.Background()); err == nil || !NoPhone(err) {
+		t.Fatalf("Enable: %v", err)
+	}
+	if !e.until.Equal(old) {
+		t.Fatalf("until %v: the old expiry was not put back", e.until)
+	}
+	e.events = nil
+	if _, changed, err := c.Expire(context.Background()); err != nil || !changed {
+		t.Fatalf("Expire: changed %v err %v", changed, err)
+	}
+	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
+		t.Fatalf("events %q: the port was not closed again", got)
+	}
+}
 ```
 
 - [ ] **Step 2: Ver que fallan.**
@@ -470,7 +503,7 @@ func TestExpireAfterAFailedSaveDoesNotRunUsbAgain(t *testing.T) {
 cd host && go test -count=1 -timeout 5m ./internal/remote
 ```
 
-Esperado (réplica):
+Esperado (réplica; `TestEnableForgetsTheExpiryItsPortWasClosedFor` pasa ya con el código de hoy, que siempre lanza `adb usb`: vigila el cambio 3 del paso 3, y sin ese cambio falla con `events "save zero": the port was not closed again`):
 
 ```
 --- FAIL: TestDisableWithoutTheModeLooksAtThePortFirst (0.00s)
@@ -482,7 +515,7 @@ FAIL
 
 - [ ] **Step 3: Implementar.**
 
-**Editar `host/internal/remote/remote.go`:** (cambio 1 de 2) reemplazar
+**Editar `host/internal/remote/remote.go`:** (cambio 1 de 3) reemplazar
 
 ```go
 type Controller struct {
@@ -508,7 +541,7 @@ type Controller struct {
 }
 ```
 
-**Editar `host/internal/remote/remote.go`:** (cambio 2 de 2) reemplazar
+**Editar `host/internal/remote/remote.go`:** (cambio 2 de 3) reemplazar
 
 ```go
 // Disable closes the port (`adb usb`) and only then clears the expiry: if
@@ -568,6 +601,30 @@ func (c *Controller) disable(ctx context.Context) (State, error) {
 }
 ```
 
+**Editar `host/internal/remote/remote.go`:** (cambio 3 de 3) reemplazar
+
+```go
+	prev := c.st.Until() // zero when off; passed when Closing
+	if err := c.st.SetUntil(c.now().Add(Lifetime)); err != nil {
+		return c.State(), err
+	}
+	if _, err := c.adbCmd(ctx, "tcpip", Port); err != nil {
+```
+
+por
+
+```go
+	prev := c.st.Until() // zero when off; passed when Closing
+	if err := c.st.SetUntil(c.now().Add(Lifetime)); err != nil {
+		return c.State(), err
+	}
+	// The port may open now: whatever expiry ends up saved (prev comes back
+	// on "no phone", and the order may still have reached adbd), the next
+	// disable closes it with `adb usb`.
+	c.closedFor = time.Time{}
+	if _, err := c.adbCmd(ctx, "tcpip", Port); err != nil {
+```
+
 - [ ] **Step 4: Ver que pasan.**
 
 ```bash
@@ -617,7 +674,7 @@ git commit -m "fix(host): el modo remoto no reinicia adbd si ya está apagado ni
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-**Concurrencia:** `closedFor` solo se lee y escribe en `disable`, siempre con `c.mu` tomado (lo toman `Disable`, `Expire` y `Reconcile`). `Enable` no lo toca: guarda una caducidad nueva, que ya no es igual a `closedFor`.
+**Concurrencia:** `closedFor` se lee y escribe en `disable` y se pone a cero en `Enable` antes de `adb tcpip`, siempre con `c.mu` tomado (lo toman `Disable`, `Expire`, `Reconcile` y `Enable`). Que `Enable` lo olvide importa aunque guarde una caducidad nueva: si `tcpip` falla con un texto de "sin móvil" (`NoPhone`), `Enable` restaura la anterior, que puede ser justo `closedFor`, y la orden pudo llegar a adbd; sin ponerlo a cero, el `Expire` siguiente borraría la caducidad sin `adb usb` (lo vigila `TestEnableForgetsTheExpiryItsPortWasClosedFor`).
 
 ---
 
@@ -701,13 +758,13 @@ func TestServeSavedAddressesGoneSaysWhichWereTried(t *testing.T) {
 		{Match: "^mdns services$", Stdout: "List of discovered mdns services\n"},
 	}
 	code, errOut, _, _ := serveOnce(t, rules, cfg)
-	want := "none of its saved addresses worked (tried " + lanAddr + ", " + tsAddr + "; last error: "
+	want := "none of its saved addresses worked (tried " + lanAddr + ", " + tsAddr + "; last error seen: "
 	if code != ExitTransient || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, want) {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
 	i18ntest.Lang(t, i18n.ES)
 	code, errOut, _, _ = serveOnce(t, rules, cfg)
-	wantES := "no funcionó ninguna de sus direcciones guardadas (probadas: " + lanAddr + ", " + tsAddr + "; último error: "
+	wantES := "no funcionó ninguna de sus direcciones guardadas (probadas: " + lanAddr + ", " + tsAddr + "; último error visto: "
 	if code != ExitTransient || !strings.Contains(errOut, "DEVICE_NOT_FOUND") || !strings.Contains(errOut, wantES) {
 		t.Fatalf("Spanish: exit %d stderr %q", code, errOut)
 	}
@@ -772,7 +829,7 @@ El texto vive en el catálogo de M6c (la receta de M6c: la misma clave en `en.to
 por
 
 ```toml
-"err.serve.device_not_found" = "the phone did not show up, and none of its saved addresses worked (tried %[1]s; last error: %[2]s)"
+"err.serve.device_not_found" = "the phone did not show up, and none of its saved addresses worked (tried %[1]s; last error seen: %[2]s)"
 ```
 
 **Editar `host/internal/i18n/catalog/es.toml`:** reemplazar
@@ -784,7 +841,7 @@ por
 por
 
 ```toml
-"err.serve.device_not_found" = "el móvil no apareció, y no funcionó ninguna de sus direcciones guardadas (probadas: %[1]s; último error: %[2]s)"
+"err.serve.device_not_found" = "el móvil no apareció, y no funcionó ninguna de sus direcciones guardadas (probadas: %[1]s; último error visto: %[2]s)"
 ```
 
 **Editar `docs/troubleshooting.md`** (CRLF; ancla de una línea): reemplazar
@@ -1160,9 +1217,16 @@ Y añadir al final de `host/internal/ipc/ipc_test.go`:
 // corrupt one meanwhile.
 func TestSecretCreatedOnceUnderARace(t *testing.T) {
 	dir := shortDir(t)
+	setTries(t, 500) // a slow CI must not turn a rename in progress into an error
 	const n = 16
 	got := make(chan string, n)
 	stop := make(chan struct{})
+	stopped := false
+	defer func() { // a Fatalf must not leave the reader running
+		if !stopped {
+			close(stop)
+		}
+	}()
 	readerErr := make(chan error, 1)
 	go func() {
 		for {
@@ -1194,15 +1258,25 @@ func TestSecretCreatedOnceUnderARace(t *testing.T) {
 		}
 	}
 	close(stop)
+	stopped = true
 	if err := <-readerErr; err != nil {
 		t.Fatalf("a reader saw %v", err)
 	}
+}
+
+// setTries lengthens (or shortens) ReadSecret's retries for one test.
+func setTries(t *testing.T, n int) {
+	t.Helper()
+	old := secretTries
+	secretTries = n
+	t.Cleanup(func() { secretTries = old })
 }
 
 // V29: a secret that is not whole yet (an older host writes it in two steps)
 // is read again for a moment instead of failing as corrupt.
 func TestReadSecretWaitsForAPartialOne(t *testing.T) {
 	dir := shortDir(t)
+	setTries(t, 500) // up to 5 s for a write that comes after 50 ms, on any CI
 	full := strings.Repeat("ab", 32)
 	if err := os.WriteFile(SecretPath(dir), []byte(full[:10]), 0o600); err != nil {
 		t.Fatal(err)
@@ -1220,6 +1294,7 @@ func TestReadSecretWaitsForAPartialOne(t *testing.T) {
 		t.Fatalf("%q %v", s, err)
 	}
 	// A corrupt one stays corrupt, after the retries.
+	secretTries = 3
 	if err := os.WriteFile(SecretPath(dir), []byte("short"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1235,7 +1310,7 @@ func TestReadSecretWaitsForAPartialOne(t *testing.T) {
 cd host && go test -count=10 -timeout 2m ./internal/ipc -run 'TestSecretCreatedOnceUnderARace|TestReadSecretWaitsForAPartialOne'
 ```
 
-Esperado: `TestReadSecretWaitsForAPartialOne` falla siempre (`"" …ipc.secret is corrupt`); `TestSecretCreatedOnceUnderARace` falla en algunas de las 10 vueltas. Réplica (10 vueltas): 2 fallos de la carrera, con `two secrets: "" and "595b…"` y `a reader saw …\ipc.secret is corrupt`.
+Esperado: el paquete de test no compila (`undefined: secretTries`, que `setTries` alarga y que hoy no existe): es el fallo esperado. Comportamiento con el código de hoy, comprobado al redactar el plan con las dos pruebas sin `setTries`: `TestReadSecretWaitsForAPartialOne` falla siempre (`"" …ipc.secret is corrupt`) y `TestSecretCreatedOnceUnderARace` en algunas vueltas (réplica, 10 vueltas: 2 fallos, con `two secrets: "" and "595b…"` y `a reader saw …\ipc.secret is corrupt`).
 
 - [ ] **Step 3: `waitLock`.**
 
@@ -1421,8 +1496,9 @@ func EnsureSecret(dataDir string) (string, error) {
 
 // A secret that cannot be read whole is read again for a moment: on Windows
 // a rename in progress refuses to open it, and a host of an older version
-// wrote it in two steps (create, then write).
-const (
+// wrote it in two steps (create, then write). Variables so a test can
+// lengthen the wait (a slow CI with -race).
+var (
 	secretTries = 20
 	secretPause = 10 * time.Millisecond
 )
@@ -1555,6 +1631,7 @@ por
 ```go
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 ```
 
@@ -1577,20 +1654,30 @@ Añadir al final de `host/internal/ipc/ipc_test.go`:
 
 ```go
 
+// sizeReader records the largest buffer it is asked to fill: what ReadFrame
+// has reserved by then, measured without looking at the whole heap.
+type sizeReader struct {
+	r   io.Reader
+	max int
+}
+
+func (s *sizeReader) Read(p []byte) (int, error) {
+	s.max = max(s.max, len(p))
+	return s.r.Read(p)
+}
+
 // V29: a header that announces a whole frame does not make ReadFrame reserve
 // it before the bytes arrive: what it holds grows with what was read.
 func TestReadFrameGrowsWithWhatArrives(t *testing.T) {
 	hdr := []byte{FrameRequest, 0, 0, 0, 0}
 	binary.BigEndian.PutUint32(hdr[1:], MaxFrame)
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	_, _, err := ReadFrame(io.MultiReader(bytes.NewReader(hdr), strings.NewReader("only this")))
-	runtime.ReadMemStats(&after)
+	r := &sizeReader{r: io.MultiReader(bytes.NewReader(hdr), strings.NewReader("only this"))}
+	_, _, err := ReadFrame(r)
 	if !errors.Is(err, io.ErrUnexpectedEOF) {
 		t.Fatalf("err %v", err)
 	}
-	if got := after.TotalAlloc - before.TotalAlloc; got > 256<<10 {
-		t.Fatalf("allocated %d bytes for 9 that arrived", got)
+	if r.max > 64<<10 {
+		t.Fatalf("asked to fill %d bytes at once, for 9 that arrived", r.max)
 	}
 	// A whole frame, larger than the first chunk, still comes back whole.
 	var buf bytes.Buffer
@@ -1648,6 +1735,38 @@ func TestUnauthenticatedConnectionsAreBounded(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	// A refused request keeps its slot only until its client is gone: more
+	// refusals in a row than there are slots, and a real request is served.
+	bad, err := json.Marshal(Request{Secret: strings.Repeat("0", 64), Kind: KindPing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range maxPreauth + 8 {
+		c, err := net.Dial("unix", SocketPath(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+		if err := WriteFrame(c, FrameRequest, bad); err != nil {
+			t.Fatalf("refusal %d: %v", i, err)
+		}
+		typ, p, err := ReadFrame(c)
+		c.Close()
+		if err != nil || typ != FrameExit || !strings.Contains(string(p), "unauthorized") {
+			t.Fatalf("refusal %d: %c %q %v", i, typ, p, err)
+		}
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		exit, err := Call(context.Background(), dir, Request{Kind: KindPing}, nil, io.Discard, io.Discard, nil)
+		if err == nil && exit.Code == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("not served after the refusals: %+v %v", exit, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 ```
 
@@ -1661,7 +1780,7 @@ Esperado: el paquete de test no compila (`undefined: maxPreauth`): es el fallo e
 
 ```
 --- FAIL: TestReadFrameGrowsWithWhatArrives (0.00s)
-    ipc_test.go:557: allocated 1048728 bytes for 9 that arrived
+    ipc_test.go:557: asked to fill 1048576 bytes at once, for 9 that arrived
 --- FAIL: TestUnauthenticatedConnectionsAreBounded (3.01s)
     ipc_test.go:598: the connection over the limit was kept: read unix @->…\adbuddy.sock: i/o timeout
 ```
@@ -1865,6 +1984,10 @@ func (s *Server) handle(nc net.Conn) {
 	}
 	c := &Conn{nc: nc, resize: make(chan [2]int, 4)}
 	if subtle.ConstantTimeCompare([]byte(req.Secret), []byte(s.secret)) != 1 {
+		writeExit(c, Exit{Code: 1, Error: "unauthorized"})
+		finish(nc, nil)
+		return
+	}
 ```
 
 por
@@ -1884,12 +2007,15 @@ func (s *Server) handle(nc net.Conn) {
 		return
 	}
 	c := &Conn{nc: nc, resize: make(chan [2]int, 4)}
-	authorized := subtle.ConstantTimeCompare([]byte(req.Secret), []byte(s.secret)) == 1
-	release() // authenticated or refused, it no longer waits
-	if !authorized {
+	if subtle.ConstantTimeCompare([]byte(req.Secret), []byte(s.secret)) != 1 {
+		// Refused: it keeps its slot (the deferred release) while finish
+		// waits up to 2 s for the client to close, so refusals stay bounded.
+		writeExit(c, Exit{Code: 1, Error: "unauthorized"})
+		finish(nc, nil)
+		return
+	}
+	release() // authenticated: it no longer waits
 ```
-
-(Lo que sigue al `if` — `writeExit(c, Exit{Code: 1, Error: "unauthorized"})`, `finish(nc, nil)` y `return` — no cambia.)
 
 - [ ] **Step 5: Ver que pasan.**
 
@@ -2371,7 +2497,7 @@ class ReducerFuzzTest {
                     check(seed, i, "${r::class.simpleName}.event", own) { r.event(s, own) }
                     val snap = Protocol.payload<Snapshot>(Message(v = 1, type = Protocol.SNAPSHOT, payload = g.snapshot()))
                     if (snap != null) check(seed, i, "${r::class.simpleName}.snapshot", m) { r.snapshot(s, snap) }
-                    for (why in Reset.values()) check(seed, i, "${r::class.simpleName}.reset($why)", null) { r.reset(s, why) }
+                    for (why in Reset.entries) check(seed, i, "${r::class.simpleName}.reset($why)", null) { r.reset(s, why) }
                 }
                 check(seed, i, "disconnected", null) { s = s.disconnected() }
                 if (i % 50 == 0) check(seed, i, "welcome", welcome) { s = s.apply(welcome) } // out of INCOMPATIBLE now and then
@@ -2839,6 +2965,8 @@ Hecha sobre `git archive` de 2fcf8e2 en una carpeta temporal, con un commit por 
 
 Después, **un script volvió a aplicar este documento** (bloques `Crear`, pares `reemplazar`/`por` y "añadir al final", en orden de tareas) sobre otro `git archive` limpio de 2fcf8e2: cada texto "reemplazar" apareció exactamente una vez, y el árbol resultante pasó `go build`, `go vet` (Windows, Linux y macOS), `gofmt -l`, `go test -count=1 -timeout 15m ./...` y `gradle :app:testDebugUnitTest --offline`, todo en verde. Aplicado hasta cada tarea de host (1 a 5), `go vet ./...` compila y el paquete tocado pasa (en esa comprobación parcial solo se extrajeron `host/` y `docs/`, así que `TestDocsAreGuarded` falló por los ficheros del repo que faltaban, no por el plan). **Tras el rebase sobre 0aaa593 (M6c y M6d):** el mismo script aplicó el plan actualizado sobre un `git archive` limpio de la rama rebasada: 57 operaciones, cada texto "reemplazar" encontrado una vez (la única que había dejado de valer era la edición de `serve.go`, sustituida por las dos del catálogo), y el árbol pasó `go build ./...`, `go vet ./...` (también `GOOS=linux` y `GOOS=darwin`), `gofmt -l .` vacío, `go test -count=1 -timeout 15m ./...` con los 31 paquetes en `ok` (incluidos `i18n` y `i18n/i18ntest`: paridad del catálogo, claves usadas y existentes) y `gradle :app:testDebugUnitTest --offline` en verde (61 clases de test). El RED de `TestServeSavedAddressesGoneSaysWhichWereTried` sobre esa rama, con el catálogo sin tocar, es el mismo texto de antes (`Error: DEVICE_NOT_FOUND — the phone did not show up, and its saved address did not work (198.51.100.7:40000, 100.64.0.5:41234: adb connect 100.64.0.5:41234: failed to connect: Connection refused)`).
 
+**Tras la revisión Opus del plan** (1 Important y 7 menores, todos incorporados: `Enable` olvida `closedFor` antes de `adb tcpip`, la plaza de una conexión rechazada se devuelve al terminar, el riesgo de denegación local explícito, `secretTries` variable y alargada en los tests, `stop` cerrado en un `defer`, la medida de `ReadFrame` por el búfer pedido y no por el heap, "last error seen", `Reset.entries` y el esquema codificado en la guarda): el script aplicó las 58 operaciones sobre otro `git archive` limpio de la rama, y salió verde igual (31 paquetes en `ok`, `go test -count=10 ./internal/ipc` en verde, `gradle :app:testDebugUnitTest --offline` con 61 clases). Mutaciones comprobadas: sin el `c.closedFor = time.Time{}` de `Enable`, `TestEnableForgetsTheExpiryItsPortWasClosedFor` falla (`events "save zero": the port was not closed again`); con el `ReadFrame` de hoy, `TestReadFrameGrowsWithWhatArrives` falla (`asked to fill 1048576 bytes at once, for 9 that arrived`).
+
 Diferencias con la primera réplica: el orden de los tests en `ipc_test.go`, el CRLF de `docs/troubleshooting.md` (que el plan conserva) y un caso de `TermWebPolicyTest` (la primera réplica tenía `"a\b"`, que en Kotlin es un retroceso; el plan dice `"a\\b"`, la barra invertida que se quería probar, y pasa).
 
 ### Riesgos abiertos para el revisor Opus
@@ -2847,7 +2975,7 @@ Diferencias con la primera réplica: el orden de los tests en `ipc_test.go`, el 
 2. **T2:** `closedFor` vive en memoria: si `serve` se reinicia entre el fallo de `SetUntil` y el reintento, `Reconcile` lee el puerto (cerrado) y borra la caducidad sin `adb usb`, que es lo que ya hacía.
 3. **T4:** en Windows, `LockFileEx` sobre un handle síncrono con `Overlapped` a cero: probado aquí. Un daemon de una versión anterior no toma el cerrojo; lo sigue detectando el Dial.
 4. **T5:** el reintento de `ReadSecret` alarga 200 ms el error de un secreto corrupto (también en el shim de cada orden del agente, solo en ese caso). El fichero `ipc.secret.lock` queda en la carpeta de datos.
-5. **T6:** `maxPreauth = 32` y el cierre de la conexión 33 sin respuesta: un cliente legítimo en una ráfaga muy grande vería "lost the connection to the ADBuddy host".
+5. **T6:** `maxPreauth = 32` y el cierre de la conexión 33 sin respuesta (falla cerrado): un cliente legítimo en una ráfaga muy grande vería "lost the connection to the ADBuddy host". Un proceso del mismo usuario puede agotar el cupo a propósito, renovando 32 conexiones mudas cada 5 s (el plazo absoluto antes de autenticar): denegación de servicio local, no una frontera de privilegios (el mismo usuario puede matar `serve`). Una conexión rechazada conserva su plaza durante la espera de hasta 2 s de `finish`, para que los rechazos tampoco lancen gorrutinas sin tope.
 6. **T8:** `anOldSocketIsIgnoredAfterANewLink` depende de que OkHttp siga entregando mensajes tras el cierre iniciado por la app hasta recibir el del host (`holdClose`): es el comportamiento documentado de `RealWebSocket`, comprobado con MockWebServer 5.
 
 ### Decisiones y dudas para el controlador
