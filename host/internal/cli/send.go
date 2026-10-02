@@ -19,6 +19,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/pathguard"
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 	"github.com/spf13/cobra"
 )
 
@@ -254,7 +255,13 @@ func outboxFull() ipc.Exit {
 // links are resolved, the comparison ignores case on Windows and a junction
 // (which EvalSymlinks does not follow) is refused. The file opened must be
 // the one resolved, and it is never opened before it is known to be regular
-// (a FIFO would block open, and with it the shutdown of serve).
+// (a FIFO would block open, and with it the shutdown of serve). A FIFO put
+// in its place after Lstat does not block either: the open does not wait
+// for a writer (safeio.ReadFlags, O_NONBLOCK on Unix), and the Stat after it
+// refuses what is not the regular file checked. Windows has no FIFOs in the
+// file system; its residual is the window between ReparseBelow and Lstat,
+// where a folder on the way can become a junction that the second
+// resolution does not see either (EvalSymlinks does not follow junctions).
 func openInEnvironment(ws, path string) (*os.File, os.FileInfo, ipc.Exit) {
 	outside := sendFail(1, "OUTSIDE_WORKSPACE", "%s is outside the agent environment: only files inside it can be sent", classify.Printable(path))
 	root, err := filepath.EvalSymlinks(ws)
@@ -284,7 +291,8 @@ func openInEnvironment(ws, path string) (*os.File, os.FileInfo, ipc.Exit) {
 	if !lst.Mode().IsRegular() {
 		return nil, nil, sendFail(1, "NOT_A_FILE", "%s is not a regular file: only files can be sent", classify.Printable(path))
 	}
-	f, err := os.Open(real)
+	beforeOpen()
+	f, err := os.OpenFile(real, safeio.ReadFlags, 0) // O_NONBLOCK on Unix: a FIFO swapped in is not waited on
 	if err != nil {
 		return nil, nil, sendFail(1, "SEND_FAILED", "could not open %s", classify.Printable(path))
 	}
@@ -331,6 +339,10 @@ func samePath(a, b string) bool {
 	}
 	return a == b
 }
+
+// beforeOpen runs between the Lstat that found a regular file and its open:
+// a hook for the tests.
+var beforeOpen = func() {}
 
 // afterOpen runs between opening the file and resolving its path again: a
 // hook for the tests.
