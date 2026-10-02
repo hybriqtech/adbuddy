@@ -1150,3 +1150,45 @@ func TestParserIgnoresTheCompactSummary(t *testing.T) {
 		t.Fatalf("a normal prompt is lost: %+v", ev)
 	}
 }
+
+// Two readers of one transcript (a second SessionStart, the host restarted)
+// must give the same ids in the same order: the chat's ids are the same on every
+// read (spec M4 §4.2), so that what the phone already has is replaced, not
+// repeated.
+func TestTwoTailersOfOneTranscriptGiveTheSameIDsInTheSameOrder(t *testing.T) {
+	for _, name := range []string{"transcript-bash.jsonl", "transcript-denied.jsonl"} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "s.jsonl")
+			body := string(readFixture(t, name)) +
+				string(line("user", "typed1", map[string]any{"role": "user", "content": "otra cosa en la terminal"}, nil)) + "\n" +
+				textLine("late1", "msg_late", "Fin.")
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			read := func() []string {
+				tl := tailerAt(path, false)
+				ev, err := tl.Poll()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var ids []string
+				for _, e := range ev {
+					ids = append(ids, fmt.Sprintf("%d|%s|%s|%s|%s|%s|%s", e.Kind, e.MessageID, e.ToolID, e.Status, e.MessageOf, e.Role, e.ToolKey))
+				}
+				return ids
+			}
+			a, b := read(), read()
+			if len(a) < 4 {
+				t.Fatalf("only %d events: %v", len(a), a)
+			}
+			if strings.Join(a, "\n") != strings.Join(b, "\n") {
+				t.Fatalf("two readers differ:\n%v\n%v", a, b)
+			}
+			for _, id := range a {
+				if strings.Contains(id, "|||||") {
+					t.Errorf("an event with no id at all: %q", id)
+				}
+			}
+		})
+	}
+}
