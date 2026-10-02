@@ -3,7 +3,8 @@ package tech.hybriq.adbuddy.ui
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,7 +26,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -36,7 +42,6 @@ import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.a11y.ProtectedApps
 import tech.hybriq.adbuddy.listener.NotificationAccess
 import tech.hybriq.adbuddy.listener.NotificationAccess.Effective
-import tech.hybriq.adbuddy.listener.NotificationAccess.State
 import tech.hybriq.adbuddy.listener.NotificationAccessStatus
 import tech.hybriq.adbuddy.listener.NotificationConsent
 import tech.hybriq.adbuddy.bridge.BridgeState
@@ -58,18 +63,16 @@ fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit,
     val protectedNow by produceState<Pair<Int, Boolean>?>(initialValue = null, context) {
         value = withContext(Dispatchers.IO) { ProtectedApps.of(context).let { it.list().size to it.confirmed } }
     }
-    val systemState by remember(context) { NotificationAccessStatus.observe(context) }.collectAsStateWithLifecycle(initialValue = State.UNKNOWN)
+    // Null until the system answers: that is "checking", not the system's own "unknown".
+    val systemState by remember(context) { NotificationAccessStatus.observe(context) }.collectAsStateWithLifecycle(initialValue = null)
     val markState by remember(consent) { consent.observe() }.collectAsStateWithLifecycle(initialValue = null)
-    // Until the list is read there is nothing true to say about it: only the frame.
-    val loaded = protectedNow
-    if (loaded == null) {
-        Scaffold { inner -> Box(Modifier.padding(inner)) }
-        return
-    }
+    // Until the list is read (or the system and the mark answer) the rows say "checking": nothing is claimed.
+    val system = systemState
+    val mark = markState
     SettingsContent(
-        protectedCount = loaded.first,
-        protectedConfirmed = loaded.second,
-        access = NotificationAccess.effective(systemState, markState == true),
+        protectedCount = protectedNow?.first,
+        protectedConfirmed = protectedNow?.second == true,
+        access = if (system == null || mark == null) null else NotificationAccess.effective(system, mark),
         onOpen = onOpen,
         onBack = onBack,
         remoteCard = { RemoteCard(state, app.bridge, app.clock, onMessage) },
@@ -80,9 +83,9 @@ fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit,
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsContent(
-    protectedCount: Int,
+    protectedCount: Int?,
     protectedConfirmed: Boolean,
-    access: Effective,
+    access: Effective?,
     onOpen: (Route) -> Unit,
     onBack: () -> Unit,
     remoteCard: @Composable () -> Unit,
@@ -90,7 +93,7 @@ fun SettingsContent(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.settings_title)) },
+                title = { Text(stringResource(R.string.settings_title), modifier = Modifier.semantics { heading() }) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
@@ -103,15 +106,19 @@ fun SettingsContent(
             SettingsRow(
                 icon = { Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                 title = R.string.protected_title,
-                summary = stringResource(if (protectedConfirmed) R.string.protected_count else R.string.settings_protected_proposed, protectedCount),
-                // Not yet confirmed: the list is only a proposal, so it is flagged.
-                flagged = !protectedConfirmed,
+                summary = when {
+                    protectedCount == null -> stringResource(R.string.access_state_checking)
+                    protectedConfirmed -> stringResource(R.string.settings_protected_confirmed, protectedCount)
+                    else -> stringResource(R.string.settings_protected_proposed, protectedCount)
+                },
+                // Not yet confirmed: the list is only a proposal, so it is flagged (never while still reading it).
+                flagged = protectedCount != null && !protectedConfirmed,
                 onClick = { onOpen(Route.PROTECTED_APPS) },
             )
             SettingsRow(
                 icon = { Icon(Icons.Default.Notifications, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                 title = R.string.access_title,
-                summary = stringResource(stateTitle(access)),
+                summary = stringResource(if (access == null) R.string.access_state_checking else stateTitle(access)),
                 // Unknown, or allowed in the system but not yet confirmed here: the person has something to do.
                 flagged = access == Effective.UNKNOWN || access == Effective.NEEDS_CONFIRMATION,
                 onClick = { onOpen(Route.NOTIFICATION_ACCESS) },
@@ -124,11 +131,15 @@ fun SettingsContent(
 @Composable
 private fun SettingsRow(icon: @Composable () -> Unit, @StringRes title: Int, summary: String, flagged: Boolean, onClick: () -> Unit) {
     ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.clickable(role = Role.Button, onClick = onClick),
         leadingContent = icon,
         headlineContent = { Text(stringResource(title)) },
         supportingContent = {
-            Text(summary, color = if (flagged) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            // Red is never the only sign: a warning icon goes with it.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (flagged) Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                Text(summary, color = if (flagged) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         },
     )
 }

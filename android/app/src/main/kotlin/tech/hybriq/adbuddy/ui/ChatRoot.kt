@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -123,6 +124,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         )
     }
 
+    val holder = rememberSaveableStateHolder()
     val back = { route = route.parent ?: Route.CHAT }
     val first = step
     if (first != null) {
@@ -135,8 +137,12 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         }
     } else {
         when (route) {
-            Route.CHAT -> ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now) {
-                RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
+            // The chat leaves the composition under Settings and Activity: its state (the text being written,
+            // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
+            Route.CHAT -> holder.SaveableStateProvider("chat") {
+                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now) {
+                    RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
+                }
             }
             Route.ACTIVITY -> {
                 BackHandler(onBack = back)

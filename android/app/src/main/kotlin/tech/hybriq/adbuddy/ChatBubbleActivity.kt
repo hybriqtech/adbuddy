@@ -10,7 +10,12 @@ import androidx.compose.runtime.setValue
 import tech.hybriq.adbuddy.ui.ChatRoot
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 
-/** The chat inside a bubble (Bubbles API, spec M3 section 7.4). Opens no consent screen nor first-run steps: those are MainActivity's. */
+/**
+ * The chat inside a bubble (Bubbles API, spec M3 section 7.4). It shows no consent screen nor first-run steps
+ * (those are MainActivity's), but Settings is reachable from the chat menu, as in the app. That is acceptable:
+ * the only thing there that widens what the agent may read is the confirm button, a tap by the person, and
+ * ADBuddy is a protected app, so the host's guard blocks the agent when ADBuddy is in front.
+ */
 class ChatBubbleActivity : ComponentActivity() {
     /** Questions whose dialog the person closed: without this, a closed 🔴 dialog would come straight back. */
     private var closed by mutableStateOf(emptySet<String>())

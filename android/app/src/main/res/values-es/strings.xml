@@ -168,4 +168,5 @@
     <string name="menu_settings">Ajustes</string>
     <string name="settings_title">Ajustes</string>
     <string name="settings_protected_proposed">Lista propuesta (%1$d). Revísala y confírmala.</string>
+    <string name="settings_protected_confirmed">Lista confirmada (%1$d)</string>
 </resources>
