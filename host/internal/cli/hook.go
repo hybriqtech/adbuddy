@@ -48,7 +48,12 @@ func runHook(ctx context.Context, app *App, event string) {
 	}
 	payload, err := io.ReadAll(io.LimitReader(app.Stdin, claudecode.MaxHookInput+1))
 	if err != nil || len(payload) > claudecode.MaxHookInput {
-		return
+		if event != claudecode.EventPermissionRequest {
+			return
+		}
+		// Claude Code's dialog opens all the same: the daemon is told, with
+		// an empty payload it ignores, so that it holds the chat (V05).
+		payload = []byte("{}")
 	}
 	e, err := loadEnv(app)
 	if err != nil {

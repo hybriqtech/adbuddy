@@ -13,6 +13,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
@@ -615,5 +616,35 @@ func TestChatSendIsBusyWithADialogOnTheScreenPastTheAttention(t *testing.T) {
 	r.readError(t, "r_1", bridge.CodeBusy)
 	if said := r.pty(0).said(); said != "" {
 		t.Fatalf("something was typed into the dialog: %q", said)
+	}
+}
+
+// V05, round 1: a PermissionRequest the host cannot take (not JSON, too large,
+// not from the environment) still opens Claude Code's dialog on the terminal:
+// the chat is held as when the host leaves it there. Other events are not.
+func TestAPermissionRequestTheHostIgnoresHoldsTheChat(t *testing.T) {
+	setTiming(t, &attentionTTL, 0)
+	r := newAgentRig(t)
+	elsewhere := map[string]any{"hook_event_name": "PermissionRequest", "session_id": sid, "cwd": t.TempDir(), "tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}}
+	far, _ := json.Marshal(elsewhere)
+	for name, raw := range map[string][]byte{
+		"not json":      []byte("not json"),
+		"empty":         []byte("{}"),
+		"too large":     []byte(`{"session_id":"` + sid + `","x":"` + strings.Repeat("a", claudecode.MaxHookInput) + `"}`),
+		"another place": far,
+	} {
+		for _, ev := range []string{"Stop", "Notification"} {
+			r.l.hookCall(context.Background(), r.ws, ev, raw)
+			if why := r.l.agentBusy(); why != "" {
+				t.Fatalf("%s: %s held the chat", name, ev)
+			}
+		}
+		if out := r.l.hookCall(context.Background(), r.ws, "PermissionRequest", raw); out != nil {
+			t.Fatalf("%s: decided: %s", name, out)
+		}
+		if r.l.agentBusy() == "" {
+			t.Errorf("%s: not busy with the dialog on the terminal", name)
+		}
+		r.hook(t, "UserPromptSubmit", map[string]any{"prompt": "x"})
 	}
 }

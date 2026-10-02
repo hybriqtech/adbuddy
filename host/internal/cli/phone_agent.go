@@ -168,6 +168,7 @@ func (l *phoneLink) handleHook(ctx context.Context, ws string, req ipc.Request, 
 	}
 	raw, err := io.ReadAll(io.LimitReader(c.Stdin(), claudecode.MaxHookInput+1))
 	if err != nil {
+		l.ignoredHook(req.Argv[0])
 		return ipc.Exit{}
 	}
 	if out := l.hookCall(ctx, ws, req.Argv[0], raw); len(out) > 0 {
@@ -182,10 +183,12 @@ func (l *phoneLink) hookCall(ctx context.Context, ws, event string, raw []byte) 
 	in, err := claudecode.ParseHook(event, raw)
 	if err != nil {
 		fmt.Fprintln(l.log, l.lang.T("phone_agent.claude_code_hook_ignored", err))
+		l.ignoredHook(event)
 		return nil
 	}
 	if !sameTree(ws, in.Cwd) {
 		fmt.Fprintln(l.log, l.lang.T("phone_agent.claude_code_hook_ignored_it"))
+		l.ignoredHook(event)
 		return nil
 	}
 	switch in.Event {
@@ -211,6 +214,16 @@ func (l *phoneLink) hookCall(ctx context.Context, ws, event string, raw []byte) 
 		return l.permissionRequest(ctx, in)
 	}
 	return nil
+}
+
+// ignoredHook holds the chat for a PermissionRequest the host does not take:
+// Claude Code opens its dialog on the terminal all the same (V05, round 1).
+// It can only keep the chat from typing, which is the safe way to fail.
+func (l *phoneLink) ignoredHook(event string) {
+	if event == claudecode.EventPermissionRequest {
+		l.raiseAttention()
+		l.holdTerminal()
+	}
 }
 
 // sameTree reports whether cwd is the environment or lies under it.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
@@ -123,5 +124,31 @@ func TestHookFailsOpenOnAPanic(t *testing.T) {
 	code := mainContext(context.Background(), []string{"hook", "Stop"}, panicReader{}, &out, &errb)
 	if code != 0 || out.Len() != 0 {
 		t.Fatalf("exit %d, stdout %q", code, out.String())
+	}
+}
+
+// V05, round 1: a PermissionRequest whose payload is too large still tells the
+// daemon, with an empty payload, so that it holds the chat; other events with
+// a payload too large do not reach it.
+func TestHookTooLargeStillTellsAPermissionRequest(t *testing.T) {
+	data := isolate(t)
+	var mu sync.Mutex
+	var got []string
+	hookDaemon(t, data, func(req ipc.Request, in string) (string, ipc.Exit) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, strings.Join(req.Argv, " ")+" "+in)
+		return "", ipc.Exit{}
+	})
+	huge := strings.Repeat("a", claudecode.MaxHookInput+10)
+	for _, ev := range []string{"Stop", "PermissionRequest"} {
+		if out, _, code := runHookCmd(t, huge, ev); code != 0 || out != "" {
+			t.Fatalf("%s: exit %d, stdout %q", ev, code, out)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0] != "PermissionRequest {}" {
+		t.Fatalf("the daemon got %q", got)
 	}
 }
