@@ -82,7 +82,8 @@ object Markdown {
         return if (out.size > MAX_BLOCKS) out.subList(0, MAX_BLOCKS).toList() else out
     }
 
-    /** The inline spans of a text: `code`, **strong**, *em* and _em_, [text](url) and ![alt](url) (only its alt). No nesting. */
+    /** The inline spans of a text: `code`, **strong**, *em* and _em_, [text](url) and ![alt](url) (only its alt). No nesting.
+     * A linked image `[![alt](img)](url)` is shown as the link with the alt as its text; the image is never loaded. */
     internal fun inlines(s: String): List<Inline> {
         val out = ArrayList<Inline>()
         val text = StringBuilder()

@@ -112,6 +112,7 @@ class MarkdownTest {
             "images" to "![a](".repeat(n / 5),
             "linked images" to "[![a](b)](".repeat(n / 10),
             "linked images with no link" to "[![a](b)".repeat(n / 9),
+            "linked images that are links" to "[![a](b)](https://e.com/)".repeat(n / 25),
         )
         for ((name, text) in inputs) {
             val t0 = System.nanoTime()
@@ -138,6 +139,14 @@ class MarkdownTest {
         assertEquals(p(Inline.Text("the last paragraph")), b.last())
         val fence = Markdown.parse("$headings\nthe last paragraph\n```\ncode")
         assertEquals(Markdown.MAX_BLOCKS, fence.size)
+    }
+
+    /** V43: the exact edge, MAX_BLOCKS - 1 headings plus a last paragraph, fits without any cut. */
+    @Test fun exactlyMaxBlocksIsNotCut() {
+        val headings = (1 until Markdown.MAX_BLOCKS).joinToString("\n") { "# h$it" }
+        val b = Markdown.parse("$headings\nthe last paragraph")
+        assertEquals(Markdown.MAX_BLOCKS, b.size)
+        assertEquals(p(Inline.Text("the last paragraph")), b.last())
     }
 
     /**
