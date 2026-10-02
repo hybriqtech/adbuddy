@@ -29,3 +29,5 @@ Pendiente: reescribir el plan con esto y commitear; luego ejecutar T1 (Sonnet), 
 - Alternativas descartadas: token por sesión del agente (el agente no lo presenta), exigir TTY (se falsea con script); opción de modo estricto: confirmar cada attach en el móvil/terminal de serve (configurable, no por defecto).
 
 Task 1: complete — commits 6b76bb7 e3806ef 723120a 1ea7ea6; opus review ✅ (0 critical/important). Ruling: minors 1 (doctor journalWritable no mira Nlink>1/backups-link), 2 (OneDrive cloud reparse tags => ModeIrregular, validar a mano), 3 (residuo adb pull: symlink `original` plantado en la carpeta ya creada) — van a pendientes-m3-m5.md en T4 — son seguros (fallan cerrado) — cuesta nada si me equivoco. Minor 4/5 ignorados.
+
+Task 2: complete — commit 0e2276c; opus review ✅ (minors only, ignored).
