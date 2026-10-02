@@ -35,7 +35,9 @@ Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted
 
 Never point a Linux cell at a Windows runner. The steps that only run on Linux (gofmt, `-race`) would be skipped and the cell would be green without them.
 
-Every job that can land on a self-hosted runner refuses pull requests from forks.
+Every job whose variable is set refuses pull requests from forks. With no variables set, the workflows behave exactly as before, fork pull requests included, on GitHub-hosted runners.
+
+For `CI_HOST_MATRIX`, `"none"` and `[]` are not valid: they break the workflow. Delete the variable, or leave in the array the cells you want.
 
 ## 3. Setting up a Windows runner
 
@@ -63,12 +65,13 @@ Every job that can land on a self-hosted runner refuses pull requests from forks
    GOCACHE=C:/path/to/actions-runner/gocache
    ```
 
-5. Create `.path`. It REPLACES the PATH of the jobs, so generate it from your current PATH, putting the `bin` folder of Git for Windows before `C:\Windows\System32` (WSL installs a `bash.exe` there that would shadow Git Bash). In PowerShell:
+5. Create `.path`. It REPLACES the PATH of the jobs, so generate it from your current PATH, putting the `bin` folder of Git for Windows (the one that holds `bash.exe`) before `C:\Windows\System32` (WSL installs a `bash.exe` there that would shadow Git Bash). Run this in PowerShell from the runner folder; it checks that `bash.exe` exists, so adjust `$bin` if Git is installed elsewhere:
 
    ```powershell
-   $git = (Get-Command git).Source | Split-Path | Split-Path
-   $parts = @("$git\bin") + ($env:PATH -split ';' | Where-Object { $_ -and $_ -ne "$git\bin" })
-   $parts -join ';' | Set-Content -NoNewline -Encoding ascii .path
+   $bin = 'C:\Program Files\Git\bin'
+   if (-not (Test-Path "$bin\bash.exe")) { throw "bash.exe not found in $bin" }
+   $parts = @($bin) + ($env:PATH -split ';' | Where-Object { $_ -and $_ -ne $bin })
+   [System.IO.File]::WriteAllText("$PWD\.path", ($parts -join ';'), (New-Object System.Text.UTF8Encoding($false)))
    ```
 
 6. Run it as a foreground process, not as a service, so it only exists while you want it:
@@ -93,7 +96,7 @@ cd ~/actions-runner
 ./run.sh
 ```
 
-For `CI_RUNNER_SIGN` (and the Android jobs) also install an Android SDK and set `ANDROID_HOME` in the runner's `.env`.
+For `CI_RUNNER_SIGN` (and the Android jobs) also install an Android SDK and set `ANDROID_HOME` in the runner's `.env`. In the same `.env`, set `GRADLE_USER_HOME`, `GOMODCACHE` and `GOCACHE` to folders inside the runner folder, so CI never touches your real caches.
 
 ## 5. Switching
 
@@ -125,7 +128,9 @@ The real barriers are:
 - only branches of the repository itself are built;
 - "Run workflows from fork pull requests" is off in the repository settings.
 
-The fork guard in the workflows is only an extra: a pull request runs the workflow files of its own merge commit, so it can remove the guard.
+The fork guard in the workflows is only an extra, and it acts only when the job's variable is defined: a pull request runs the workflow files of its own merge commit, so it can remove the guard. The real barrier is the repository configuration.
+
+Bots and agents that open pull requests from branches of the repository itself pass the guard and run their code on the runner. There is no `dependabot.yml` today.
 
 Also:
 
