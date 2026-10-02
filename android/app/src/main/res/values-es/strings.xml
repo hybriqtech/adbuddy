@@ -132,7 +132,7 @@
     <string name="step_progress">Paso %1$d de %2$d</string>
     <string name="onboarding_skip">Ahora no</string>
     <string name="onboarding_done">Listo</string>
-    <string name="settings_protected_confirmed">Apps protegidas: %1$d</string>
+    <string name="protected_count">Apps protegidas: %1$d</string>
     <string name="protected_title">Apps protegidas</string>
     <string name="protected_intro">Elige las apps que el agente nunca debe leer ni tocar: banca, pagos, contraseñas, 2FA y las apps que reciben tus códigos. ADBuddy siempre está protegida.</string>
     <string name="protected_proposal">Esta lista es una propuesta hecha por nombre. Revísala y confírmala: cuando lo hagas, ADBuddy nunca la cambia por su cuenta.</string>
@@ -149,4 +149,18 @@
     <string name="protected_saved_sent">Enviado al PC.</string>
     <string name="protected_saved_later">Guardado. El PC la recibirá cuando se conecte.</string>
     <string name="protected_error">No se pudieron leer tus apps. No se ha cambiado nada; inténtalo de nuevo.</string>
+    <string name="access_title">Acceso a las notificaciones</string>
+    <string name="access_intro">Permite que el agente lea lo que dicen tus notificaciones, por ejemplo para ver un mensaje que acabas de recibir. Nunca lee las notificaciones de las apps protegidas ni las de ADBuddy, y no puede descartarlas ni pulsarlas. Es opcional.</string>
+    <string name="access_state_granted">Permitido</string>
+    <string name="access_state_confirm">Permitido en el sistema, sin confirmar aquí</string>
+    <string name="access_state_denied">No permitido</string>
+    <string name="access_state_unknown">Desconocido</string>
+    <string name="access_detail_granted">El agente puede leer tus notificaciones. Puedes quitárselo aquí o en los ajustes del sistema.</string>
+    <string name="access_detail_confirm">El sistema deja que ADBuddy lea tus notificaciones, pero el agente todavía no puede. Confirma aquí que quieres que lo haga. Solo tú puedes: el agente no puede pulsar este botón.</string>
+    <string name="access_detail_denied">El agente no puede leer tus notificaciones.</string>
+    <string name="access_detail_unknown">ADBuddy no sabe si el acceso está permitido, o está permitido pero no activo. Abre los ajustes del sistema y desactívalo y actívalo otra vez.</string>
+    <string name="access_confirm">Dejar que el agente lea mis notificaciones</string>
+    <string name="access_withdraw">Que el agente deje de leerlas</string>
+    <string name="access_open">Abrir los ajustes del sistema</string>
+    <string name="access_restricted_hint">Si el interruptor sale en gris, abre la Información de la app de ADBuddy, toca los tres puntos y elige \"Permitir ajustes restringidos\".</string>
 </resources>

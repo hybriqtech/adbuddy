@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -193,7 +194,7 @@ fun ProtectedAppsContent(
                     // Unknown (still loading) is not "0 apps": nothing is said until the list is there.
                     if (!loading && !error) {
                         Text(
-                            stringResource(R.string.settings_protected_confirmed, selectedCount),
+                            stringResource(R.string.protected_count, selectedCount),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -265,15 +266,15 @@ fun ProtectedAppsContent(
     }
 }
 
-/** The icon, "Step n of N" and the title that open a first-run step; shared with the notification access screen. */
+/** The icon (the lock unless the step brings its own), "Step n of N" and the title that open a first-run step; shared with the notification access screen. */
 @Composable
-fun StepHeader(step: OnboardingStep, @StringRes title: Int) {
+fun StepHeader(step: OnboardingStep, @StringRes title: Int, icon: ImageVector = Icons.Default.Lock) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(
             Modifier.size(56.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
         Text(
             stringResource(R.string.step_progress, step.number, OnboardingStep.total),

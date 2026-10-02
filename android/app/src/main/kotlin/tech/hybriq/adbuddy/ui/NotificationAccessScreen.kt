@@ -1,0 +1,207 @@
+package tech.hybriq.adbuddy.ui
+
+import androidx.activity.compose.BackHandler
+import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import tech.hybriq.adbuddy.R
+import tech.hybriq.adbuddy.listener.NotificationAccess
+import tech.hybriq.adbuddy.listener.NotificationAccess.Effective
+import tech.hybriq.adbuddy.listener.NotificationAccess.State
+import tech.hybriq.adbuddy.listener.NotificationAccessStatus
+import tech.hybriq.adbuddy.listener.NotificationConsent
+import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
+import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
+
+/**
+ * Whether ADBuddy may read notifications, the shortcut to the system's own screen where the user allows it,
+ * and the user's own confirmation (M5c): the first-run step (step != null) and Settings. The system's state
+ * has three values and an unknown one is never shown as allowed nor as denied: it starts unknown until the
+ * system answers. Allowed in the system is not enough for the agent: the person confirms here, with a tap
+ * that nothing else makes for them (NotificationConsent); if the system revokes the access, the mark goes too.
+ */
+@Composable
+fun NotificationAccessScreen(step: OnboardingStep?, onBack: () -> Unit, onDone: () -> Unit, onSkip: () -> Unit) {
+    val context = LocalContext.current
+    val consent = remember(context) { NotificationConsent.of(context) }
+    var confirmed by remember { mutableStateOf(consent.confirmed()) }
+    val state by remember(context) { NotificationAccessStatus.observe(context) }.collectAsStateWithLifecycle(initialValue = State.UNKNOWN)
+    // Observing never confirms; it only takes the mark away when the system says the access is gone.
+    LaunchedEffect(state) {
+        if (state == State.NOT_GRANTED && confirmed) {
+            consent.revoke()
+            confirmed = false
+        }
+    }
+    if (step == null) BackHandler(onBack = onBack) else BackHandler(enabled = step.previous() != null, onBack = onBack)
+    NotificationAccessContent(
+        step = step,
+        effective = NotificationAccess.effective(state, confirmed),
+        onOpen = { NotificationAccessStatus.openSystemSettings(context) },
+        onConfirm = {
+            if (state == State.GRANTED) {
+                consent.confirm()
+                confirmed = true
+            }
+        },
+        onWithdraw = {
+            consent.revoke()
+            confirmed = false
+        },
+        onBack = onBack,
+        onDone = onDone,
+        onSkip = onSkip,
+    )
+}
+
+/** The screen without state, so it has previews. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NotificationAccessContent(
+    step: OnboardingStep?,
+    effective: Effective,
+    onOpen: () -> Unit,
+    onConfirm: () -> Unit,
+    onWithdraw: () -> Unit,
+    onBack: () -> Unit,
+    onDone: () -> Unit,
+    onSkip: () -> Unit,
+) {
+    Scaffold(
+        topBar = {
+            if (step == null) {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.access_title)) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                        }
+                    },
+                )
+            }
+        },
+        bottomBar = {
+            if (step != null) {
+                Surface(tonalElevation = 3.dp) {
+                    Row(
+                        Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                    ) {
+                        if (effective != Effective.ON) OutlinedButton(onClick = onSkip) { Text(stringResource(R.string.onboarding_skip)) }
+                        Button(onClick = onDone) { Text(stringResource(R.string.onboarding_done)) }
+                    }
+                }
+            }
+        },
+    ) { inner ->
+        Column(
+            Modifier.fillMaxSize().padding(inner).verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (step != null) StepHeader(step, R.string.access_title, Icons.Default.Notifications)
+            Text(stringResource(R.string.access_intro), style = MaterialTheme.typography.bodyMedium)
+            StateCard(effective)
+            when (effective) {
+                Effective.NEEDS_CONFIRMATION -> Button(onClick = onConfirm) { Text(stringResource(R.string.access_confirm)) }
+                Effective.ON -> OutlinedButton(onClick = onWithdraw) { Text(stringResource(R.string.access_withdraw)) }
+                Effective.OFF, Effective.UNKNOWN -> Unit
+            }
+            FilledTonalButton(onClick = onOpen) { Text(stringResource(R.string.access_open)) }
+            if (effective == Effective.OFF || effective == Effective.UNKNOWN) {
+                Text(
+                    stringResource(R.string.access_restricted_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** The four states, each with its own icon and words: colour is never the only difference. */
+@Composable
+private fun StateCard(effective: Effective) {
+    val scheme = MaterialTheme.colorScheme
+    val (icon, container, content) = when (effective) {
+        Effective.ON -> Triple(Icons.Default.Check, scheme.primaryContainer, scheme.onPrimaryContainer)
+        Effective.NEEDS_CONFIRMATION -> Triple(Icons.Default.Info, scheme.secondaryContainer, scheme.onSecondaryContainer)
+        Effective.OFF -> Triple(Icons.Default.Close, scheme.surfaceVariant, scheme.onSurfaceVariant)
+        Effective.UNKNOWN -> Triple(Icons.Default.Warning, scheme.errorContainer, scheme.onErrorContainer)
+    }
+    // One announcement for the icon-less words: title and detail read together by a screen reader.
+    Surface(modifier = Modifier.semantics(mergeDescendants = true) {}, color = container, contentColor = content, shape = MaterialTheme.shapes.medium) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+            Icon(icon, contentDescription = null)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(stateTitle(effective)), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(stateDetail(effective)), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@StringRes
+internal fun stateTitle(effective: Effective): Int = when (effective) {
+    Effective.ON -> R.string.access_state_granted
+    Effective.NEEDS_CONFIRMATION -> R.string.access_state_confirm
+    Effective.OFF -> R.string.access_state_denied
+    Effective.UNKNOWN -> R.string.access_state_unknown
+}
+
+@StringRes
+private fun stateDetail(effective: Effective): Int = when (effective) {
+    Effective.ON -> R.string.access_detail_granted
+    Effective.NEEDS_CONFIRMATION -> R.string.access_detail_confirm
+    Effective.OFF -> R.string.access_detail_denied
+    Effective.UNKNOWN -> R.string.access_detail_unknown
+}
+
+@AdbuddyPreviews
+@Composable
+private fun NotificationAccessOnboardingPreview() {
+    AdbuddyTheme(dynamic = false) { NotificationAccessContent(OnboardingStep.NOTIFICATION_ACCESS, Effective.NEEDS_CONFIRMATION, {}, {}, {}, {}, {}, {}) }
+}
+
+@AdbuddyPreviews
+@Composable
+private fun NotificationAccessUnknownPreview() {
+    AdbuddyTheme(dynamic = false) { NotificationAccessContent(null, Effective.UNKNOWN, {}, {}, {}, {}, {}, {}) }
+}
