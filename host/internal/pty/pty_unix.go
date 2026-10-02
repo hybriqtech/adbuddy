@@ -39,6 +39,9 @@ func Start(o Options) (PTY, error) {
 	if err != nil {
 		return nil, err
 	}
+	// On Linux the master goes back to non-blocking mode under the poller, so
+	// that Kill's Close frees a Write blocked on a program that does not read.
+	f = pollableMaster(f)
 	p := &unixPTY{f: f, cmd: cmd, done: make(chan struct{})}
 	go p.watch()
 	return p, nil
@@ -86,7 +89,7 @@ func (p *unixPTY) Write(b []byte) (int, error) { return p.f.Write(b) }
 func (p *unixPTY) Pid() int                    { return p.cmd.Process.Pid }
 
 func (p *unixPTY) Resize(cols, rows int) error {
-	return cpty.Setsize(p.f, &cpty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	return p.setSize(cols, rows)
 }
 
 func (p *unixPTY) Wait(ctx context.Context) (int, error) {
