@@ -50,7 +50,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
   - tests de `Bridge` que faltan: `stop()` con peticiones pendientes, `request`/`send`/`sendFrame` entre `onOpen` y el welcome, mensajes y tramas de un socket viejo, y reentrada `onResult → request`. m3-bridge añade los de `stop()` con peticiones pendientes y del envío antes del welcome; quedan los del socket viejo (también el `takeIf` de `pending` por socket) y la reentrada;
   - **ningún reductor lanza una excepción, con ningún payload** (revisión del plan de m3-bridge), con su test: si lo hace dentro de `_state.updateAndGet`, se corta el socket, el host reenvía el mismo evento y la app entra en un bucle de reconexión. Vale para M3, M4 y M5.
 
-- **Lista de variables de entorno permitidas** para lanzar el agente (§5.1). En M1a, `host/internal/agent.Env` solo quita variables (`CLAUDECODE*`, `CLAUDE_CODE_*`, `CLAUDE_EFFORT`, `CLAUDE_PID`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT`, `ADBUDDY_SOURCE`). M3 debe pasar a una lista de permitidas: las de sistema, autenticación y proxy del usuario (`PATH`, `HOME`/`USERPROFILE`, `APPDATA`, `ANTHROPIC_*`, `HTTP(S)_PROXY`/`NO_PROXY`, `CLAUDE_CONFIG_DIR`…), verificando la lista en Windows, macOS y Linux.
+- **Lista de variables de entorno permitidas** para lanzar el agente (§5.1): **DESCARTADA por decisión de producto (V27, 2026-10-02).** El agente hereda el entorno de quien lanza el host sin filtrar, salvo lo que ADBuddy tiene que quitar o fijar. `host/internal/agent.Env` se queda como está: quita `CLAUDECODE*`, `CLAUDE_CODE_*`, `CLAUDE_EFFORT`, `CLAUDE_PID`, `AI_AGENT`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT` y `ADBUDDY_SOURCE`. La spec §5.1 lo dice desde la ola 2 H.
 - **Confianza previa de la carpeta del entorno** en Claude Code (§5.1, S3): averiguar dónde y con qué clave guarda Claude Code la confianza de una carpeta y preconfiar el entorno antes de lanzar el agente en el PTY; si no es posible, detectar el diálogo y elegir "Yes" de forma explícita (un Enter a ciegas elige "No, exit").
 
 - **HECHO en M3b:** la app muestra los `notice` del host (snackbar; `AdbuddyApp.notices`). Antes: **La app muestra los `notice` del host** (revisión final de M2): ignoraba; el de respuesta tardía ("That question was already answered or moved to the PC terminal.") y el de tipo no soportado deberían verse en la pantalla de inicio.
@@ -201,7 +201,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 
 Rama `fix/v1-diferidos` (plan `docs/superpowers/plans/2026-10-02-adbuddy-v1-diferidos.md`; triage y ledger en `.superpowers/sdd/2026-10-02-adbuddy-v1-diferidos/`, locales y no versionados). Cerrados en esta rama, con su marca HECHO en las secciones de arriba: V01 (undo), V06/V02/V03 (clasificador), V04/V05 (tarjetas y atención), V24 (transcript), V25 (Job object del PTY), V14/V26 (workspace), V15, V32, V16, V17, V30, V10/V12/V13, V28, V23, V41 (a y b), V37, V33 y V39 (solo el bridge). Cerrados sin entrada en este fichero: V10 (`uidump.Find` ya no da un toque en (0,0) sin bounds: `ErrNoTouchPoint`; cortar en `MaxDepth` sin coincidencia es `ErrTooDeep`, 8cedd68), V12 (`uiLink.Call` no envía con `ctx` cancelado y `ok:true` sin `result` es un error, 349e466), V13 (`protected.json` con `{}` o `null` no cuenta como lista conocida, 1123b69), V17 (`install.sh` exige curl con `--proto =https` y `--proto-redir =https`, d5e34cc) y V30 (acciones de CI fijadas por SHA en `android.yml`, `emulator.yml` y `host.yml`, 1a78e17).
 
-No son de esta rama y siguen donde estaban: V29 (IPC), V21, V42, V43, V11 y V38 (los toma otra rama), V07, V08, V09, V19, V20, V22, V31, V34, V35, V36, V40, V18, V27 (decisión de producto) y la parte `cli/phone.go` de V39.
+No son de esta rama y siguen donde estaban: V29 (IPC), V21, V42, V43, V11 y V38 (los toma otra rama), V07, V08, V09, V19, V20, V22, V31, V34, V35, V36, V40, V18, V27 (descartada por decisión de producto en la ola 2 H; ver M3) y la parte `cli/phone.go` de V39.
 
 ### Aplazados nuevos (los apuntan los informes de la rama)
 
@@ -242,6 +242,17 @@ No son de esta rama y siguen donde estaban: V29 (IPC), V21, V42, V43, V11 y V38 
 - **Tests y flakes:** `internal/ipc` `TestClientDisconnectIsNotErrClosed` (`ipc_test.go` ~:319-336) usa `time.Sleep(100ms)` antes de `cancel()` y el handler nunca llega a arrancar bajo carga; arreglo: cancelar tras cerrar un canal desde el handler (lo lleva la rama de V29, que tiene `ipc_test.go` modificado). Los tests Unix de V14, V26, V16 y V28 (FIFO, `/dev/zero`, symlinks) y `TestTranscriptLinksUnderAndAboveProjects` solo se compilan y pasan por `vet` en este PC: se ven pasar en la CI. V39 sin hacer (producción): `unsupported` convierte el tipo entero a `[]rune` antes de cortar, tope de 16 notices por conexión y `rid:""`.
 - **Textos nuevos sin catalogar (inglés, a propósito o por no contar para textlint):** "Too many downloads at once: wait for one to finish." (`phone_files.go`, clave sugerida `files.too_many_downloads`); `UIError` "the app answered without a result" (V12, sugerida `uilink.no_result`); errores de `uidump` "the element has no area to tap" y "the screen layout is too deep to search all of it" (V10, sugeridas `uidump.no_touch_point` y `uidump.too_deep`); las causas de `workspace` ("… is not a regular file; fix it or delete it", "… is larger than 1 MiB; fix it or delete it", "… is a link; …", "… is not a folder; …") y de `chooseAPK` ("… is not a regular file"), que M6c tampoco traduce; el aviso del Job object de V25.
 
+### Ola 2 H (V07, V20, diario): hecho y límites
+
+Rama `fix/v1-ola2-h`. Hecho: el diario abre y carga con `safeio` (`openAppend` y `Load`: fichero regular, sin enlaces ni FIFO; cierra el aplazado de `journal.go` de arriba), V20 (`doctor` en pausa desde el móvil no llama a adb y `serve` sale como aviso) y V07 (el servidor decide por el par del socket y el árbol del agente, no por la declaración de `ADBUDDY_SOURCE`). Límites honestos:
+
+- **V20 es coherencia, no frontera,** hasta que V07 sea fiable: un agente que salga de su árbol puede hacer lo mismo por otra vía.
+- **V07 depende del PID del par:** Windows `SIO_AF_UNIX_GETPEERPID`, Linux `getsid` y cadena de padres, macOS `LOCAL_PEERPID`. Los caminos de Linux y macOS solo están verificados en la CI. Sin el ioctl, o con un agente sin job, se vuelve a la declaración. No es garantía (spec §4.6): lo que el agente separa de su árbol no se ve (`setsid -f`, `systemd-run`, `tmux`, `at`/`cron`, `launchd`; WMI, `schtasks`, explorer/COM), y en Unix un PID intermedio reciclado mientras se recorre la cadena de padres.
+- **`doctor.journalWritable` no mira `Nlink>1` ni un enlace en `journal/backups`,** que `Writable` sí rechaza: `doctor` dice ok y la escritura falla (seguro, pero confuso).
+- **Residuo de la carpeta de backups:** `adb pull` escribe `journal/backups/<id>/original` por ruta, tras crear la carpeta; un symlink `original` plantado dentro de ella se sigue. Idea: hacer el pull a un temporal y moverlo con `root.Rename`, o comprobar después que es regular con un solo enlace.
+- **`ipc.Conn.peer` en Windows** conserva un valor de handle que `release()` ya cerró. Hoy nadie llama a `Peer.Same()` fuera del handler; `release` debería limpiar también `c.peer`.
+- **`adb push`** lee cualquier fichero del PC (aparte, M2).
+
 ### Validaciones manuales pendientes de la ola 1 (nadie las ha corrido)
 
 - **`dumpsys` en el emulador** (`scripts/emulator.sh`): repasar que ninguna forma de la lista blanca de lectura de `checkDumpsys` cambia estado, en particular `activity`, `window` y `procstats` (y `package`, `meminfo`, `batterystats`), y que lo habitual sigue 🟢. Ampliar la lista es añadir el caso al corpus y regrabar el oráculo.
@@ -249,6 +260,15 @@ No son de esta rama y siguen donde estaban: V29 (IPC), V21, V42, V43, V11 y V38 
 - **PC con política de empresa o sin permiso para crear un Job object:** que sin job salga el aviso de `warnf` y el agente arranque igual, y que con job, matar `serve` sin sus `defer` (Administrador de tareas) termine el árbol del agente, también los hijos con consola propia (solo probado en un PC de desarrollo sin política).
 - **CI de Linux y macOS del PR:** que pasen los tests Unix de V14, V26, V16, V28 y V24 (FIFO, `/dev/zero`, symlinks).
 - **Con Claude Code real:** que una pregunta dejada a la terminal retenga el chat del móvil hasta el Stop, y cómo queda tras negar con interrupción (sin Stop, hasta un prompt o `session.new`); y el nombre exacto de la notificación `elicitation_dialog`. Se suma a las validaciones de M4 de más arriba.
+
+- **Ola 2 H, en el PC y el móvil del usuario:**
+  - workspace dentro de OneDrive con Files-On-Demand: las etiquetas de nube (reparse tags) salen como `ModeIrregular` y podrían hacer que el diario se rechace en Windows;
+  - `attach` desde fuera del árbol del agente (otra terminal, terminal integrada de un IDE, ssh, consola elevada, WSL1; WSL2 no conecta con el AF_UNIX de Windows) tiene que funcionar;
+  - `SIO_AF_UNIX_GETPEERPID` en las versiones de Windows 10 y 11 soportadas;
+  - un agente real que vacía `ADBUDDY_SOURCE` e intenta `attach`, `new`, `stop` y `remote on` debe recibir `AGENT_SESSION`;
+  - un agente en pausa desde el móvil que ejecuta `adbuddy doctor`: no llama a adb y `serve` sale como aviso;
+  - la carpeta `journal` movida a otro disco con una junction: ahora se rechaza y `doctor` dice "is not a folder";
+  - macOS: `getsid` sobre un proceso de otra sesión (CI `host.yml`); si da `EPERM`, decide la cadena de padres.
 
 ## Más adelante (v1.1+)
 
