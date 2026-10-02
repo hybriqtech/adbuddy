@@ -71,6 +71,9 @@ var sensitiveKeys = [][2]string{
 	{"global", "device_provisioned"}, {"secure", "user_setup_complete"}, {"global", "secure_frp_mode"},
 	{"secure", "lockscreen.disabled"}, {"secure", "lock_screen_lock_after_timeout"},
 	{"secure", "lock_screen_allow_private_notifications"},
+	// Review round 1 of the task.
+	{"secure", "selected_spell_checker"}, {"secure", "accessibility_shortcut_target_service"},
+	{"secure", "accessibility_button_targets"},
 }
 
 // A1-2: every key is special whatever the way it is written, and a user rule
@@ -117,6 +120,8 @@ func TestHarmlessSettingsStayYellow(t *testing.T) {
 		{sh("settings put global adaptive_battery_management_enabled 1"), Yellow, "settings.put", "settings-put", false},
 		{sh("settings put global bugreport_in_power_menu 1"), Yellow, "settings.put", "settings-put", false},
 		{sh("settings put secure lock_screen_show_notifications 1"), Yellow, "settings.put", "settings-put", false},
+		{sh("settings put system show_password 0"), Yellow, "settings.put", "settings-put", false},
+		{sh("settings put secure spell_checker_enabled 0"), Yellow, "settings.put", "settings-put", false},
 		{sh("settings put global captive_portal_mode 1"), Yellow, "settings.put", "settings-put", false},
 		{sh("settings put secure location_changer 1"), Yellow, "settings.put", "settings-put", false},
 		{sh("settings get global http_proxy"), Green, "settings.read", "", false},
@@ -207,5 +212,111 @@ func TestOtherContentProvidersKeepTheirLevel(t *testing.T) {
 		{sh("content query --uri content://settings/global --where name=\"'sms_default_application'\""), Green, "android.content-query", "", false},
 		{sh("content delete --uri content://sms"), Red, "", "", false},
 		{sh("content update --uri content://x"), Red, "", "", false},
+	})
+}
+
+// Review round 1: PROJECT_MEDIA lets an app capture the screen without
+// Android's own consent dialog. Allowing it (allow, foreground or a numeric
+// mode other than ignore, deny and default; the op by name, android: name or
+// code 46) is special; denying it is an ordinary appops set.
+func TestProjectMediaIsSpecial(t *testing.T) {
+	c := mustNew(t, "")
+	u := mustNew(t, "rules:\n  - {id: u.appops, cmd: appops, level: green, anyArgs: true}\n")
+	for _, line := range []string{
+		"appops set com.x PROJECT_MEDIA allow",
+		"appops set com.x project_media allow",
+		"appops set com.x android:project_media allow",
+		"appops set com.x Android:Project_Media allow",
+		"appops set com.x PROJECT_MEDIA foreground",
+		"appops set com.x PROJECT_MEDIA 0",
+		"appops set com.x PROJECT_MEDIA 4",
+		"appops set com.x PROJECT_MEDIA ALLOW",
+		"appops set com.x 46 allow",
+		"appops set --user 0 com.x PROJECT_MEDIA allow",
+		"appops set --uid com.x PROJECT_MEDIA allow",
+		"appops set com.x PROJECT_MEDIA",
+		"cmd appops set com.x PROJECT_MEDIA allow",
+		"appops set com.x PROJECT_MEDIA $(echo allow)",
+	} {
+		for _, cl := range []*Classifier{c, u} {
+			r := cl.Classify(sh(line))
+			if r.Level != Red || !r.Special || r.Op != nil {
+				t.Errorf("%q: %v special=%v op=%v (%s: %s), want red special without op", line, r.Level, r.Special, r.Op, r.Primary.Rule, r.Primary.Reason)
+			}
+		}
+	}
+	r := c.Classify(sh("appops set com.x PROJECT_MEDIA allow"))
+	if why := r.Primary.Reason; !strings.Contains(why.EN, "record the screen") || why.ES == "" || why.EN == why.ES {
+		t.Errorf("reason %+v", why)
+	}
+	checkPlain(t, c, []tc{
+		{sh("appops set com.x PROJECT_MEDIA deny"), Yellow, "appops.set", "appops-set", false},
+		{sh("appops set com.x PROJECT_MEDIA ignore"), Yellow, "appops.set", "appops-set", false},
+		{sh("appops set com.x PROJECT_MEDIA default"), Yellow, "appops.set", "appops-set", false},
+		{sh("appops get com.x PROJECT_MEDIA"), Green, "appops.read", "", false},
+		{sh("appops set com.x CAMERA allow"), Yellow, "appops.set", "appops-set", false},
+		// Product decision (no capar): these stay yellow.
+		{sh("appops set com.x SYSTEM_ALERT_WINDOW allow"), Yellow, "appops.set", "appops-set", false},
+		{sh("appops set com.x MANAGE_EXTERNAL_STORAGE allow"), Yellow, "appops.set", "appops-set", false},
+	})
+}
+
+// Review round 1: the same keyboard, notification access, roles, device
+// admins and screen lock through their own commands are special.
+func TestKeyboardRoleAdminAndLockCommandsAreSpecial(t *testing.T) {
+	c := mustNew(t, "")
+	u := mustNew(t, `rules:
+  - {id: u.ime, cmd: ime, level: green, anyArgs: true}
+  - {id: u.cmd, cmd: cmd, level: green, anyArgs: true}
+  - {id: u.dpm, cmd: dpm, level: green, anyArgs: true}
+  - {id: u.lock, cmd: locksettings, level: green, anyArgs: true}
+`)
+	for _, line := range []string{
+		"ime enable com.evil/.Ime",
+		"ime set com.evil/.Ime",
+		"ime enable --user 0 com.evil/.Ime",
+		"ime SET com.evil/.Ime",
+		"ime $(echo set) com.evil/.Ime",
+		"cmd input_method enable com.evil/.Ime",
+		"cmd input_method set com.evil/.Ime",
+		"cmd -w input_method set com.evil/.Ime",
+		"cmd notification allow_listener com.evil/.Listener",
+		"cmd notification allow_assistant com.evil/.Assistant",
+		"cmd notification allow_dnd com.evil",
+		"cmd role add-role-holder android.app.role.SMS com.evil",
+		"cmd role add-role-holder --user 0 android.app.role.BROWSER com.evil",
+		"dpm set-active-admin com.evil/.Admin",
+		"dpm set-active-admin --user 0 com.evil/.Admin",
+		"dpm set-device-owner com.evil/.Admin",
+		"dpm set-profile-owner com.evil/.Admin",
+		"cmd device_policy set-active-admin com.evil/.Admin",
+		"locksettings set-disabled true",
+		"locksettings clear --old 1234",
+		"locksettings set-pin 1234",
+		"locksettings set-password hunter2",
+		"locksettings set-pattern 1234",
+		"cmd lock_settings set-disabled true",
+		"sh -c 'ime set com.evil/.Ime'",
+	} {
+		for _, cl := range []*Classifier{c, u} {
+			if r := cl.Classify(sh(line)); r.Level != Red || !r.Special {
+				t.Errorf("%q: %v special=%v (%s: %s), want red special", line, r.Level, r.Special, r.Primary.Rule, r.Primary.Reason)
+			}
+		}
+		r := c.Classify(sh(line))
+		if why := r.Primary.Reason; why.EN == "" || why.ES == "" || why.EN == why.ES {
+			t.Errorf("%q: reason %+v, want it in both languages", line, why)
+		}
+	}
+	checkPlain(t, c, []tc{
+		{sh("ime list -s"), Green, "android.ime-list", "", false},
+		{sh("cmd input_method list -s"), Red, "", "", false},
+		{sh("cmd notification disallow_listener com.x/.L"), Red, "", "", false},
+		{sh("cmd notification disallow_dnd com.x"), Red, "", "", false},
+		{sh("cmd role remove-role-holder android.app.role.SMS com.x"), Red, "", "", false},
+		{sh("cmd role get-role-holders android.app.role.SMS"), Red, "", "", false},
+		{sh("dpm list-owners"), Red, "", "", false},
+		{sh("locksettings get-disabled"), Red, "", "", false},
+		{sh("locksettings verify --old 1234"), Red, "", "", false},
 	})
 }

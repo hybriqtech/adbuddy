@@ -38,7 +38,7 @@ A few commands are **always red** and say so in the question, because they can c
 
 Some settings are always red too, because they weaken the phone's security even though one more command undoes them. Changing or deleting them with `settings put`, `settings delete`, `cmd settings` or `content` on the settings provider waits for you:
 
-- **What you type, fill in or say:** the keyboard (`default_input_method`, `enabled_input_methods`, `disabled_system_input_methods`), the autofill and passkey services (`autofill_service`, `credential_service`, `credential_service_primary`) and the assistant (`assistant`, `voice_interaction_service`, `voice_recognition_service`). An app chosen there sees your passwords.
+- **What you type, fill in or say:** the keyboard and the spell checker (`default_input_method`, `enabled_input_methods`, `disabled_system_input_methods`, `selected_spell_checker`), the autofill and passkey services (`autofill_service`, `credential_service`, `credential_service_primary`) and the assistant (`assistant`, `voice_interaction_service`, `voice_recognition_service`), and the accessibility service a shortcut or the accessibility button turns on (`accessibility_shortcut_target_service`, `accessibility_button_targets`). An app chosen there sees your passwords.
 - **Notifications and text messages:** `enabled_notification_listeners`, `enabled_notification_assistant`, `enabled_notification_policy_access_packages` and `sms_default_application`.
 - **Where the traffic goes:** the proxy (`http_proxy`, `global_http_proxy_host`, `global_http_proxy_port`, `global_http_proxy_exclusion_list`, `global_proxy_pac_url`), private DNS (`private_dns_mode`, `private_dns_specifier`), the captive portal check's addresses (`captive_portal_http_url`, `captive_portal_https_url`, `captive_portal_fallback_url`, `captive_portal_other_fallback_urls`, `captive_portal_server`) and the always-on VPN (`always_on_vpn_app`, `always_on_vpn_lockdown`).
 - **Location:** `location_mode` and `location_providers_allowed`.
@@ -46,7 +46,9 @@ Some settings are always red too, because they weaken the phone's security even 
 
 Other settings, such as `stay_on_while_plugged_in` or the animation scales, stay yellow.
 
-**Reading text messages is always red.** Login codes arrive by SMS, so `content query` or `content read` on the message providers waits for you: `content://sms`, `content://mms`, `content://mms-sms`, `content://sms-changes` and `content://telephony`, with any user, port, letter case or `%xx` escape in the address, plus any other provider whose name contains `sms` or starts with `mms`. Other content providers (contacts, call history, media) keep their level.
+The same goes for the commands that do it without `settings`: `ime enable` and `ime set` (and `cmd input_method`), `cmd notification allow_listener`, `allow_assistant` and `allow_dnd`, `cmd role add-role-holder`, `dpm set-active-admin`, `set-device-owner` and `set-profile-owner`, and `locksettings set-disabled`, `clear`, `set-pin`, `set-password` and `set-pattern`. So does `appops set <app> PROJECT_MEDIA allow` (or `foreground`), which lets an app record the screen without Android asking you; denying it stays yellow. Other app ops stay yellow, `SYSTEM_ALERT_WINDOW` (drawing over other apps) and `MANAGE_EXTERNAL_STORAGE` (all files) included.
+
+**Reading text messages is always red.** Login codes arrive by SMS, so `content query` or `content read` on the message providers waits for you: `content://sms`, `content://mms`, `content://mms-sms`, `content://sms-changes` and `content://telephony`, with any user, port, letter case or `%xx` escape in the address, plus any other provider whose name has a part that contains `sms` or starts with `mms`. Other content providers (contacts, call history, media) keep their level.
 
 ## The journal and undo
 

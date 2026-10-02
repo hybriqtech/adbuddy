@@ -160,7 +160,14 @@ var reasonsES = map[string]string{
 	"sets an always-on VPN, which carries all the traffic and can cut the connection":          "fija una VPN siempre activa, que lleva todo el tráfico y puede cortar la conexión",
 	"turns location on or changes how the phone finds where it is":                             "activa la ubicación o cambia cómo sabe el móvil dónde está",
 	"changes the phone's setup state, which can lock features or start the setup again":        "cambia el estado de la configuración inicial del móvil, lo que puede bloquear funciones o repetir la configuración",
-	"weakens the lock screen": "debilita la pantalla de bloqueo",
+	"weakens the lock screen":                             "debilita la pantalla de bloqueo",
+	"chooses the spell checker, which sees what you type": "elige el corrector ortográfico, que ve lo que escribes",
+	"chooses the accessibility service a shortcut turns on, which can read and control the screen": "elige el servicio de accesibilidad que activa un atajo, que puede leer y controlar la pantalla",
+	"turns on or chooses a keyboard, which sees everything you type, passwords included":           "activa o elige un teclado, que ve todo lo que escribes, contraseñas incluidas",
+	"gives an app a role, such as the default SMS app, browser or assistant":                       "da a una app un rol, como la app de SMS, el navegador o el asistente por defecto",
+	"makes an app a device administrator or owner, which can lock or wipe the phone":               "convierte una app en administradora o propietaria del dispositivo, que puede bloquear o borrar el móvil",
+	"changes or removes the screen lock":                                                           "cambia o quita el bloqueo de pantalla",
+	"lets the app record the screen without asking":                                                "deja que la app grabe la pantalla sin preguntar",
 
 	// vars.go
 	"assignment to an array or with +=":                                            "asignación a un array o con +=",

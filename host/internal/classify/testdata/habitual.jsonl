@@ -386,3 +386,17 @@
 {"sh":"content query --uri content://com.android.contacts/contacts","level":"green"}
 {"sh":"content query --uri content://call_log/calls","level":"green"}
 {"sh":"content query --uri content://media/external/images/media","level":"green"}
+# Allowing PROJECT_MEDIA lets an app capture the screen without Android's consent dialog; denying it stays an ordinary appops set. SYSTEM_ALERT_WINDOW and MANAGE_EXTERNAL_STORAGE stay yellow (product decision). Turning on a keyboard, notification access, a role, a device admin or changing the screen lock by their own commands is special, like the settings above (security review 2026-10-03, review round 1)
+{"sh":"appops set com.evil PROJECT_MEDIA allow","level":"red","special":true}
+{"sh":"appops set com.evil android:project_media foreground","level":"red","special":true}
+{"sh":"appops set com.x PROJECT_MEDIA deny","level":"yellow"}
+{"sh":"appops set com.x SYSTEM_ALERT_WINDOW allow","level":"yellow"}
+{"sh":"ime set com.evil/.Ime","level":"red","special":true}
+{"sh":"cmd input_method enable com.evil/.Ime","level":"red","special":true}
+{"sh":"cmd notification allow_listener com.evil/.Listener","level":"red","special":true}
+{"sh":"cmd role add-role-holder android.app.role.SMS com.evil","level":"red","special":true}
+{"sh":"dpm set-active-admin com.evil/.Admin","level":"red","special":true}
+{"sh":"locksettings set-disabled true","level":"red","special":true}
+{"sh":"ime list -s","level":"green"}
+{"sh":"settings put secure selected_spell_checker com.evil/.Spell","level":"red","special":true}
+{"sh":"settings put system show_password 0","level":"yellow"}

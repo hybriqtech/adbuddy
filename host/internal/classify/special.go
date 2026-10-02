@@ -28,17 +28,24 @@ var adbAlwaysRed = map[string]Text{
 // sensitiveSettings would cut the connection, disable ADBuddy's service or
 // weaken the phone's security. The value says why; an empty one gives the
 // generic reason. The keys are the names in AOSP's Settings.java (the value
-// of each constant, not its Java name), compared in lower case. Reversible is
-// not harmless: a keyboard or a proxy is undone with one more command, after
-// it has seen what you typed or your traffic (security review 2026-10-03,
-// A1-1 and A1-2). Left out on purpose: stay_on_while_plugged_in,
+// of each constant, not its Java name), compared in lower case; all of them
+// are there except package_verifier_enable, from older Android.
+// lockscreen.disabled is a hidden System setting there, but what keyguard
+// reads is the LockSettings key of the same name (locksettings set-disabled,
+// special too). Since Android 10 the role manager owns
+// sms_default_application and assistant, and writing them has no effect;
+// they stay for older Android and OEM builds that still read them.
+// Reversible is not harmless: a keyboard or a proxy is undone with one more
+// command, after it has seen what you typed or your traffic (security review
+// 2026-10-03, A1-1 and A1-2). It is still a denylist: any other setting is
+// yellow. Left out on purpose: stay_on_while_plugged_in,
 // bugreport_in_power_menu, captive_portal_mode and the other switches that
 // only turn a check on or off, lock_screen_show_notifications (what they
-// show is lock_screen_allow_private_notifications), mock_location (a no-op
-// since Android 6: mock locations are an app op now), and keys that are not
-// in Settings.java (allow_mock_location, unknown_sources, device_admin):
-// installing from unknown sources is an app op and device admins are dpm,
-// whose commands are red already.
+// show is lock_screen_allow_private_notifications), show_password,
+// mock_location (a no-op since Android 6: mock locations are an app op now),
+// and keys that are not in Settings.java (allow_mock_location,
+// unknown_sources, device_admin): installing from unknown sources is an app
+// op and device admins are dpm (special below).
 var sensitiveSettings = map[string]Text{
 	"adb_enabled":                    {},
 	"adb_wifi_enabled":               {},
@@ -96,6 +103,12 @@ var sensitiveSettings = map[string]Text{
 	"lockscreen.disabled":                     whyLock,
 	"lock_screen_lock_after_timeout":          whyLock,
 	"lock_screen_allow_private_notifications": whyLock,
+
+	// Review round 1: what you type, and the accessibility service a
+	// shortcut or the accessibility button turns on.
+	"selected_spell_checker":                whySpellChecker,
+	"accessibility_shortcut_target_service": whyA11yShortcut,
+	"accessibility_button_targets":          whyA11yShortcut,
 }
 
 var (
@@ -109,7 +122,69 @@ var (
 	whyLocation      = reason("turns location on or changes how the phone finds where it is")
 	whySetup         = reason("changes the phone's setup state, which can lock features or start the setup again")
 	whyLock          = reason("weakens the lock screen")
+	whySpellChecker  = reason("chooses the spell checker, which sees what you type")
+	whyA11yShortcut  = reason("chooses the accessibility service a shortcut turns on, which can read and control the screen")
 )
+
+// grant is a command whose subcommands hand an app what you type, the
+// notifications or a role, make it a device admin, or change the screen
+// lock: a user rule or "allow during the session" must not lower them.
+type grant struct {
+	subs []string
+	why  Text
+}
+
+var grants = map[string]grant{
+	"ime":          {[]string{"enable", "set"}, reason("turns on or chooses a keyboard, which sees everything you type, passwords included")},
+	"notification": {[]string{"allow_listener", "allow_assistant", "allow_dnd"}, whyNotifications},
+	"role":         {[]string{"add-role-holder"}, reason("gives an app a role, such as the default SMS app, browser or assistant")},
+	"dpm":          {[]string{"set-active-admin", "set-device-owner", "set-profile-owner"}, reason("makes an app a device administrator or owner, which can lock or wipe the phone")},
+	"locksettings": {[]string{"set-disabled", "clear", "set-pin", "set-password", "set-pattern"}, reason("changes or removes the screen lock")},
+}
+
+// grantServices maps cmd's service names to those commands: ime, dpm and
+// locksettings are scripts that run cmd input_method, cmd device_policy and
+// cmd lock_settings.
+var grantServices = map[string]string{
+	"input_method": "ime", "notification": "notification", "role": "role",
+	"device_policy": "dpm", "lock_settings": "locksettings",
+}
+
+// grantReason says why a command's subcommand (the word right after the
+// command or the service: these tools read it first) grants one of them. A
+// subcommand only known on the phone counts.
+func grantReason(cmd string, sub Word) Text {
+	g, ok := grants[cmd]
+	if ok && (sub.Dynamic || contains(g.subs, strings.ToLower(sub.Value))) {
+		return g.why
+	}
+	return Text{}
+}
+
+// grantsProjectMedia reports whether appops set allows PROJECT_MEDIA, with
+// which an app captures the screen without Android's consent dialog.
+// AppOpsService's shell takes the op as android:project_media, PROJECT_MEDIA
+// or its code (46), and the mode as a name or a number: anything but ignore,
+// deny or default (1, 2, 3), or no mode at all, counts.
+func grantsProjectMedia(ws []Word) bool {
+	sub, at := subAt(ws)
+	if strings.ToLower(sub) != "set" {
+		return false
+	}
+	for i := at + 1; i < len(ws); i++ {
+		op := strings.TrimPrefix(strings.ToLower(ws[i].Value), "android:")
+		if ws[i].Dynamic || (op != "project_media" && op != "46") {
+			continue
+		}
+		if i+1 >= len(ws) || ws[i+1].Dynamic {
+			return true
+		}
+		if !contains([]string{"ignore", "deny", "default", "1", "2", "3"}, ws[i+1].Value) {
+			return true
+		}
+	}
+	return false
+}
 
 // sensitiveSetting reports whether w names a sensitive setting, and why.
 func sensitiveSetting(w string) (Text, bool) {
@@ -305,7 +380,18 @@ func specialReason(scope string, ws []Word, level Level) Text {
 		if r := amSpecial(ws); !r.Empty() {
 			return r
 		}
+	case "ime", "dpm", "locksettings":
+		if len(ws) > 1 {
+			if why := grantReason(name, ws[1]); !why.Empty() {
+				return why
+			}
+		}
 	case "cmd":
+		if len(ws) > 2 {
+			if why := grantReason(grantServices[v[1]], ws[2]); !why.Empty() {
+				return why
+			}
+		}
 		if len(v) > 1 && (v[1] == "wifi" || v[1] == "connectivity") && level != Green {
 			return reason("may cut the Wi-Fi connection")
 		}
@@ -324,6 +410,9 @@ func specialReason(scope string, ws []Word, level Level) Text {
 		// The same report as adb bugreport, built on the phone.
 		return reason("the bug report includes what is on screen and the notifications")
 	case "appops":
+		if grantsProjectMedia(ws) {
+			return reason("lets the app record the screen without asking")
+		}
 		if sub, at := subAt(ws); sub == "set" {
 			if t, ok := firstTarget(ws, at+1); ok && !ws[t].Dynamic && !packageName(ws[t].Value) {
 				// AppOpsService takes a UID (or root, shell…) instead of a
