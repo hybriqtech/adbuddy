@@ -1,4 +1,6 @@
 name: host
+# Runners come from repository variables (docs/ci-self-hosted.md); with none
+# set, GitHub-hosted runners are used.
 
 on:
   pull_request:
@@ -12,20 +14,26 @@ permissions:
 
 jobs:
   test:
-    name: go test (${{ matrix.os }})
+    name: go test (${{ matrix.name }})
+    # Fork pull requests never reach a self-hosted runner.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        include: ${{ fromJSON(vars.CI_HOST_MATRIX || '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":"windows-latest"},{"name":"macos-latest","runner":"macos-latest"}]') }}
+    runs-on: ${{ matrix.runner }}
     defaults:
       run:
         working-directory: host
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: host/go.mod
+          cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: host/go.sum
       - name: gofmt
         if: runner.os == 'Linux'
