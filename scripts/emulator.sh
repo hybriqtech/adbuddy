@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Starts and stops the Android emulator the tests use: a real mksh for the
 # classifier's differential tests and a phone for the app's tests. It has its
-# own adb server (port 5039), so it never touches the one a real phone is on.
+# own adb server (port 5039 by default), so it never touches the one a real
+# phone is on. The AVD, the emulator port and the adb server port can be
+# overridden with ADBUDDY_EMU_AVD, ADBUDDY_EMU_PORT and ADBUDDY_EMU_ADB_PORT
+# (the CI job does, to coexist with an emulator started by hand).
 set -euo pipefail
 
-AVD=adbuddy-api37
+AVD="${ADBUDDY_EMU_AVD:-adbuddy-api37}"
 IMAGE="system-images;android-37.0;google_apis;x86_64"
-PORT=5580
+PORT="${ADBUDDY_EMU_PORT:-5580}"
 SERIAL="emulator-$PORT"
-export ANDROID_ADB_SERVER_PORT=5039
+export ANDROID_ADB_SERVER_PORT="${ADBUDDY_EMU_ADB_PORT:-5039}"
 
 usage() {
   echo "usage: $0 start|stop|env" >&2
