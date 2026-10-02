@@ -139,7 +139,22 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 
   Falta que el usuario haga lo de `docs/releasing.md`, "User actions".
 - **Hecho en M6b** (`docs/superpowers/plans/2026-10-01-adbuddy-m6b-skills.md`): las nueve skills (`host/internal/workspace/skills/`), su instalación en `.claude/skills/` y `.agents/skills/` con la marca `<!-- adbuddy:user -->`, `.gemini/settings.json` con `context.fileName`, la guarda de ejemplos (`skills_commands_test.go`) y `TestSkillsReadOnlyOnEmulator` con su paso de CI.
-- **Pendiente de M6 (publicación):** i18n EN/ES, README completo y donaciones; `adbuddy update` como comando propio.
+- **Hecho en M6d** (`docs/superpowers/plans/2026-10-02-adbuddy-m6d-docs.md`): `README.md` en inglés y `README.es.md`; las guías `docs/install.md`, `usage.md`, `safety.md`, `faq.md` y `troubleshooting.md`; las guías de preparación del móvil (`docs/setup/`, EN y ES) completadas; la portada `docs/index.md`; `host/README.md` reducido a nota para desarrolladores; el test de guarda de las guías (`host/internal/cli/docs_test.go`, `TestDocs*`); `.github/FUNDING.yml` con las claves comentadas (y el bloque "Support the project" de los README, comentado); la lista previa a hacer público (`docs/pre-public-checklist.md`) y el paso de revisión de la documentación en `docs/releasing.md`.
+- **Pendiente de M6 (publicación):** i18n EN/ES del producto (host y app; la lleva otra sesión); `adbuddy update` como comando propio. Lo de documentación y donaciones lo cierra M6d; lo que depende de cuentas o de la primera release está en `docs/pre-public-checklist.md`.
+- **Aplazados de las revisiones de M6d:**
+  - traducción al español de las guías nuevas (`install`, `usage`, `safety`, `faq`, `troubleshooting`): solo el README y la preparación del móvil están en español;
+  - capturas reales de `docs/setup/` (8 marcadores `pending.svg`, nombres propuestos en `docs/pre-public-checklist.md`);
+  - `SECURITY.md` o *private vulnerability reporting* de GitHub, y enlazarlo desde `docs/safety.md`;
+  - "Acerca de" de la app con los enlaces de donación (M5c), cuando existan las cuentas de GitHub Sponsors y Ko-fi;
+  - mantener `docs/troubleshooting.md` al día cuando cambien los códigos de error (el test de guarda no los comprueba: ver el paso 3 de "Cutting a release" en `docs/releasing.md`);
+  - **código:** `daemon/inverse.go` admite inversos `uninstall <pkg>` y `rm -f <ruta>`: una entrada de diario falsificada y firmada con `ipc.secret` (que el agente puede leer) haría que `adbuddy undo` actúe sin preguntar. Es de la misma clase que "agente decidido" (el shim no protege contra eso), pero queda anotado;
+  - **código:** `serve --help`, el último mensaje de `setup` y la antigua `host/README.md` decían "serve, luego run en otra terminal", pero `serve` arranca el agente él mismo (`serve --no-agent` + `run` es la alternativa): corregir `--help` y el mensaje de `setup`;
+  - **código:** `phone.go:148,170` y la app prometen "ejecuta `adbuddy setup` para actualizar la app", pero `setup` solo instala la app si falta o con `--apk`: cambiar el texto o hacer que `setup` actualice;
+  - la guarda de guías exige argumentos completos en `adbuddy type "<text>"` y `adbuddy setup --apk <file>` (convención): documentarlo junto a `docs_test.go`;
+  - `checkDocHTMLish` da el número de línea de la prosa y no del fichero;
+  - `docs/faq.md` ~29 ("nothing touches or reads the screen while a protected app is in front") y ~50 (título "never ask for my PIN"): matizar;
+  - `docs/install.md:210,219` usa `<phone-name>` y el resto de las guías `<phone name>`: unificar;
+  - Advanced Protection de Android: las guías hablan de ella, pero el código no la comprueba.
 - **Aplazados de las revisiones de M6b:**
   - la guarda de ejemplos deja sin comprobar un bloque ```adb que sigue a una valla de 4 backticks o con info string `adb{.x}` (guardar la longitud de la valla y marcar como error cualquier info string que empiece por `adb` y no sea exactamente `adb`/`adbuddy`);
   - `forbiddenRecipe` no detecta `rm -r` dentro de `$(...)` o tras `;` en un script entre comillas, ni `find ... -delete`, ni `pm uninstall` sin `--user` (el clasificador los da 🔴: tokenizar también por `;&|()$` y añadirlos);
