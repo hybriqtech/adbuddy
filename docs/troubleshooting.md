@@ -71,7 +71,7 @@ This is real output from a PC where ADBuddy was never set up (paths replaced; th
 · phone app: not checked: adb server down
 ✗ environment: <home>/ADBuddy/default: missing AGENTS.md, .adbuddy/bin/adb
     Run: adbuddy env init --dir <home>/ADBuddy/default
-Verdict: broken — fix the ✗ lines from the top.
+Verdict: broken — fix the ✗ lines first, from the top.
 ```
 
 The lines for a connected phone are not shown here: they are described above and in the symptoms below.
@@ -98,7 +98,7 @@ It prints one JSON object on stdout. The report is in `data`: `verdict`, the `ch
 adbuddy doctor --fix
 ```
 
-`--fix` does one thing: it restarts ADBuddy's private adb server, when the `adb server` check fails. It never does it while `adbuddy serve` is running, and it does not do it either when the ADBuddy socket does not answer, because a serve may be using the server. In both cases it says so on the `adb server` line. It then runs the checks again and lists what it fixed with a `↻` line. It changes nothing else, and the agent cannot run it (`AGENT_SESSION`).
+`--fix` does one thing: it restarts ADBuddy's private adb server, when the `adb server` check fails. It never does it while `adbuddy serve` is running, and it does not do it either when the ADBuddy socket does not answer, because a serve may be using the server. In both cases it says so on the `adb server` line. It then runs the checks again and lists what it fixed with a `↻` line. It changes nothing else, and it is refused when it runs from the agent's session (`AGENT_SESSION`, a check of the environment, not a barrier).
 
 ## Error codes
 
@@ -131,16 +131,16 @@ When a command fails, it prints `Error: <CODE> — <message>` and, when there is
 | `CONFIG_UNWRITABLE` | 78 (1 from `remote off`) | `config.toml` cannot be saved (`setup`, `connect`). From `adbuddy remote off`: port 5555 is closed but `remote_until` could not be cleared. | Check that the configuration folder is writable. From `remote off`: delete the `remote_until` line in `config.toml`. |
 | `CONNECT_FAILED` | 75 | `adbuddy connect <ip:port>` could not connect. | Check the IP address and port on the phone's Wireless debugging screen (the port changes every time wireless debugging is turned on) and that the phone and the PC can reach each other. |
 | `DAEMON_ERROR` | varies | Serve answered with an error that has no code of its own. The one seen is `unauthorized`: the secret the command read is not the one serve started with. | The host suggests nothing. Stop `adbuddy serve` and start it again. |
-| `DAEMON_NOT_RUNNING` | 1 | A command that needs serve found none. `adbuddy journal --session current` also says it. | Start `adbuddy serve` in another terminal. For the journal, pass `--session <id>` (ids start with `s_`). |
+| `DAEMON_NOT_RUNNING` | 1 | A command that needs serve found none. `adbuddy journal --session current` also says it. (The agent's `adb` says something else: see [The agent's `adb` says the host is not running](#the-agents-adb-says-the-host-is-not-running).) | Start `adbuddy serve` in another terminal. For the journal, pass `--session <id>` (ids start with `s_`). |
 | `DAEMON_UNREACHABLE` | 1 | The ADBuddy socket exists but does not answer. | Stop the other `adbuddy serve`, or delete the socket file the message names if none is running. From `adbuddy run`: restart serve. |
 | `DEVICE_NOT_FOUND` | 75 | No phone in state `device` on ADBuddy's adb server; or the saved address did not work; or the phone did not come back after `adb usb`. | See [The PC cannot find the phone](#the-pc-cannot-find-the-phone). |
-| `DEVICE_PORT_OPEN` | 1 | adb's network port on the phone is still open after `adb usb` (`serve` start, `remote off`). | Restart the phone (that closes a port opened with `adb tcpip`), turn Wireless debugging on again and run the command again. |
+| `DEVICE_PORT_OPEN` | 1 | adb's network port on the phone is still open after `adb usb` (`adbuddy serve` and `adbuddy setup`). | Restart the phone (that closes a port opened with `adb tcpip`), turn Wireless debugging on again and run the command again. |
 | `DEVICE_UNREADABLE` | 1 (75 when the phone did not answer in time) | The phone did not answer a read. | Unlock the phone and check that it is still connected. |
 | `DIRS_UNKNOWN` | 78 | ADBuddy cannot work out its configuration and data folders. | Set `ADBUDDY_CONFIG_DIR` and `ADBUDDY_DATA_DIR`. |
 | `DOCTOR_BROKEN` | 1 | `adbuddy doctor --json` found a failed check. | Follow the `run` and `guidance` of the failed checks, from the top. |
 | `EXECUTABLE_UNKNOWN` | 1 | The system could not tell where the `adbuddy` program is. | The host suggests nothing. Run it by its full path. |
 | `INTERNAL` | 1 | A failure the host did not expect. | The host suggests nothing. [Open an issue](#collect-information-for-an-issue) with the message. |
-| `INTERRUPTED` | 130 | You pressed Ctrl+C. | Nothing to do. |
+| `INTERRUPTED` | 130 (1 for a remote-mode request) | You pressed Ctrl+C. From `adbuddy remote`, serve can also say that the request was abandoned and the change may still run. | Nothing to do; for `remote`, check `adbuddy remote status`. |
 | `JOURNAL_UNREADABLE` | 1 | The journal could not be read (`adbuddy journal`, `adbuddy undo`). | The host suggests nothing. Check that the `journal` folder of the environment exists and is readable. |
 | `JOURNAL_UNWRITABLE` | 1 | `adbuddy undo` could not record what it did. | Check that the journal folder is writable. The changes listed as undone did happen. |
 | `MULTIPLE_DEVICES` | 1 | More than one phone is connected to ADBuddy's adb server. | Pass `--serial <serial>` to `serve`, or set `serial` in `config.toml`. |
@@ -168,24 +168,24 @@ When a command fails, it prints `Error: <CODE> — <message>` and, when there is
 | `SESSION_FAILED` | 1 | `adbuddy new` or `adbuddy stop` could not reach serve. | The host suggests nothing. Check that `adbuddy serve` is running. |
 | `SOCKET_FAILED` | 1 | `adbuddy serve` could not open or keep its local socket. | The host suggests nothing. Stop any other `adbuddy serve` and start it again. |
 | `TERMINAL_FAILED` | 1 | `adbuddy attach` could not set up your terminal. | The host suggests nothing. Try another terminal. |
-| `TOO_LARGE` | 1 | `adbuddy send <file>`: the file is over 200 MiB, or the caption is over 64 KiB. | Send something smaller. |
+| `TOO_LARGE` | 1 | `adbuddy send <file>`: the file is over 200 MiB. (A caption over 64 KiB is refused earlier, as `USAGE`.) | Send a smaller file. |
 | `TOOLS_CHECKSUM_MISMATCH` | 1 | The platform-tools `adbuddy setup` downloaded do not match Google's checksum. | Run `adbuddy setup` again later. If it keeps failing, pass `--adb <path to adb 37 or newer>` and report it at the project's issues. |
 | `TOOLS_DOWNLOAD_FAILED` | 75 | `adbuddy setup` could not download platform-tools. | Check the internet connection and run `adbuddy setup` again, or pass `--adb <path to adb 37 or newer>`. |
 | `UI_AMBIGUOUS` | 1 | `adbuddy tap` matched more than one element. | Use `--id <id>` or `--xy <x,y>` from `adbuddy screen`. |
-| `UI_BLOCKED` | 126 | A screen helper was refused: `Blocked by ADBuddy: …` with the reason (paused, a protected app in front, waiting for your answer, the journal cannot be written). | See [Blocked by ADBuddy](#blocked-by-adbuddy-waiting-for). |
+| `UI_BLOCKED` | 126 | A screen helper was refused: `Blocked by ADBuddy: …` with the reason (paused, a protected app in front, waiting for your answer, the journal cannot be written), or `stopped` when you or the agent ended it midway. | See [Blocked by ADBuddy while a question waits](#blocked-by-adbuddy-while-a-question-waits). |
 | `UI_FAILED` | 1 | A screen helper failed. The message says why, for example that the app answered something unreadable, or that the screenshot arrived incomplete. | For the screenshot, try again. Otherwise the host suggests nothing. |
 | `UI_NOT_FOUND` | 1 | No element on the screen matches. | Run `adbuddy screen` to see what is on the screen. |
 | `UI_PROTECTED` | 126 | The element belongs to ADBuddy or a protected app, or the app refused the action (for example typing into a password field). | Do this part on the phone yourself. |
 | `UI_TIMEOUT` | 75 | The ADBuddy app did not answer in time. The action may or may not have happened. | Run `adbuddy screen` to see whether it happened before trying again. |
-| `UI_UNAVAILABLE` | 75 | The screen helper needs the ADBuddy app, or its accessibility service. | Open the ADBuddy app on the phone. See [The accessibility service will not turn on](#the-accessibility-service-will-not-turn-on). |
+| `UI_UNAVAILABLE` | 75 | Typing Unicode (or a text with `%s`) without the app; or ADBuddy's accessibility service is on but the app is not connected; or the phone's accessibility state could not be read. | Open the ADBuddy app on the phone. See [The accessibility service will not turn on](#the-accessibility-service-will-not-turn-on). |
 | `UNCERTAIN_STATE` | 1 | `adbuddy undo` met a change that failed, was running when the host stopped, or whose place on the phone is taken again. | Check the phone: its inverse is not run automatically. |
 | `UNDO_FAILED` | 1 | Some inverses failed, or undo was stopped midway. | Check the phone and the journal. Failed inverses can be retried with `adbuddy undo <id>`. |
-| `UNKNOWN_AGENT` | 2 | `adbuddy new <agent>` with a name ADBuddy does not know. | Use `claude`, `codex`, `gemini` or `opencode`. |
+| `UNKNOWN_AGENT` | 1 | `adbuddy new <agent>` with a name ADBuddy does not know. | Use `claude`, `codex`, `gemini` or `opencode`. |
 | `UNKNOWN_KIND`, `UNKNOWN_REQUEST` | 1 | Serve does not know the request. This is most likely a different version of `adbuddy` running serve. | The host suggests nothing. Stop serve and start it again with the same build. |
 | `UNTRUSTED_ENTRY` | 1 | The journal entry was not written by ADBuddy. | Check the phone and undo it by hand if needed. |
 | `USAGE` | 2 | A wrong command, flag or argument. | Run `adbuddy --help`, or `--help` of that command. |
 | `WAITING_FOR_ANSWER` | 75 | `adbuddy undo` while a 🔴 question is open. | Answer it, in the ADBuddy app or the serve terminal, and run `adbuddy undo` again. |
-| `WORKSPACE_FAILED` | 1 | The agent's environment folder could not be made or refreshed. | See [WORKSPACE_FAILED](#workspace_failed). |
+| `WORKSPACE_FAILED` | 1 | The agent's environment folder could not be made or refreshed. | See [The environment folder cannot be made](#the-environment-folder-cannot-be-made). |
 | `WORKSPACE_MISMATCH` | 1 | `adbuddy run --workspace <folder>` names another folder than the one serve watches. | Run `adbuddy run` without `--workspace`, or stop serve and start it with `adbuddy serve --workspace <folder>`. |
 | `WRITE_FAILED` | 1 | `adbuddy screenshot` could not write the file. | The host suggests nothing. Check that the folder is writable, or pick another with `-o`. |
 | `WRONG_PHONE` | 1 | The phone at that address is not the one you set up. | Check the IP address and port on the phone you set up. For a phone found on the network: turn off Wireless debugging on your other devices and try again. |
@@ -213,7 +213,7 @@ Every time Wireless debugging is turned on again, the phone picks a new port. If
 3. Run `adbuddy connect <ip:port>` with them. It saves the address.
 4. Run `adbuddy serve` again.
 
-While serve runs, it also watches the phone: if it disappears, it tries the saved address, the local network and the phone's Tailscale address.
+While serve runs, it also watches the phone. If it disappears, serve may try the saved address, the local network and the phone's Tailscale address, and it only switches to a phone it can verify is the one you set up ([Use ADBuddy](usage.md#remote-mode)).
 
 ### "Wrong password" and `protocol fault` when pairing
 
@@ -245,9 +245,9 @@ When the agent runs something 🔴, ADBuddy holds the command until you answer. 
 
 The agent is told not to retry a denied command. See [Confirmations](safety.md#confirmations).
 
-### `Blocked by ADBuddy: waiting for…`
+### Blocked by ADBuddy while a question waits
 
-Only one 🔴 question is open at a time. While it waits, ADBuddy refuses the agent's other commands with:
+The message starts with `Blocked by ADBuddy: waiting for…`. Only one 🔴 question is open at a time. While it waits, ADBuddy refuses the agent's other commands with:
 
 ```text
 Blocked by ADBuddy: waiting for your answer to "<title>"
@@ -265,6 +265,16 @@ Other `Blocked by ADBuddy:` reasons exist, and the reason after the colon tells 
 | `only the active phone can be used (…)` | The command named another phone (with `-s`, or through `ANDROID_SERIAL`). Run it for the active phone. |
 | `the adb option … is not allowed` | ADBuddy only talks to the active phone through its own adb server. Run the command without that option. |
 
+### The agent's `adb` says the host is not running
+
+When the agent runs `adb` and `adbuddy serve` is not running, the shim prints:
+
+```text
+ADBuddy host not running (run: adbuddy serve)
+```
+
+Nothing reaches the phone. Start `adbuddy serve` in its own terminal and keep it open, then ask the agent to try again. If serve is running and you still see it, the shim and serve use different data folders: check that `ADBUDDY_DATA_DIR` is the same in both, and run `adbuddy doctor`. In the doctor, the `serve` line says whether it is running.
+
 ### The app does not connect
 
 The app is optional: without it, 🔴 questions appear in the `adbuddy serve` terminal and there is no chat on the phone. `adbuddy serve` says what happens with the app when it starts and afterwards. The line it prints tells what to do:
@@ -273,7 +283,7 @@ The app is optional: without it, 🔴 questions appear in the `adbuddy serve` te
 |---|---|
 | `The ADBuddy app is not on the phone` | Run `adbuddy setup`. Until there is a release, give it your own build: `adbuddy setup --apk <file>`. See [Build from source](install.md#build-from-source). |
 | `The ADBuddy app on the phone (…) is too old for this host` | Install a newer build with `adbuddy setup --apk <file>`: plain `adbuddy setup` does not replace an app that is already installed. |
-| `An app with the token connected, but it is not the app ADBuddy checked` | The app on the phone is not the one the host trusts. Install again the file you gave `--apk`. |
+| `An app with the token connected, but it is not the app ADBuddy checked` | The app on the phone is not the one the host trusts. Read the reason in brackets in the message. If you installed the app by hand, install it again with `adbuddy setup --apk <file>`. |
 | `Could not reach the phone app` | Open the ADBuddy app on the phone. The host tries again by itself. |
 | `Port … for the phone app's channel is in use` | Change `chat_port` in `config.toml` to a free port between 1024 and 65535, and start `adbuddy serve` again. |
 
@@ -281,14 +291,16 @@ Doctor's `phone app` line adds two cases. When the app is installed but without 
 
 ### The accessibility service will not turn on
 
-The screen helpers (`adbuddy screen`, `adbuddy tap`, and the others) and the protection of apps use the app's accessibility service. Without it they fail with `UI_UNAVAILABLE`.
+The screen helpers use the app's accessibility service when the app is connected. Without the app, or with the service off, they fall back to adb: `adbuddy screen` reads the screen with `uiautomator dump`, `adbuddy tap` uses `input tap` and `adbuddy type "<text>"` uses `input text`, which only does plain ASCII. So a service that is off does not stop them. `UI_UNAVAILABLE` comes in the cases of its row in the table: Unicode without the app, the service on with the app not connected, or the phone's accessibility state unreadable.
+
+The service still gives better reading of the screen. To turn it on:
 
 1. Run `adbuddy doctor`. If the `phone app` line says `accessibility service` is missing, run `adbuddy setup` and accept on the ADBuddy app's consent screen: with your accept, the PC turns the service on and keeps the accessibility services you already use.
 2. If you turn it on by hand in Android's **Accessibility** settings and the entry is greyed out, or a dialog says access was denied, Android is treating the app as a restricted setting. On the phones where this happens, open the app's page in **Settings → Apps** and look in its ⋮ menu for **Allow restricted settings**. The wording and the place vary by phone and Android version, so this is a pointer, not an exact path.
 
 ### Windows and the firewall
 
-Windows may ask about the firewall the first time adb runs. Allow adb (Android's debugging tool, which ADBuddy downloads) on **private networks**. If you said no, the phone may not be found. Open Windows Security, go to the firewall's list of allowed apps and allow it. The detail is in [Set up your phone](setup/#troubleshooting).
+Windows may ask about the firewall the first time adb runs. Allow adb (Android's debugging tool, which ADBuddy downloads) on **private networks**. If you said no, the phone may not be found: allow adb again in the firewall's list of allowed apps in Windows Security. [Set up your phone](setup/#troubleshooting) has the same advice.
 
 The app and the host talk over a local connection that adb carries, so the firewall matters for adb itself, not for the app's channel as such.
 
@@ -336,14 +348,14 @@ ADBuddy's private adb server needs a free port: 5038 by default. If another prog
 2. If `adbuddy serve` is not running, `adbuddy doctor --fix` restarts ADBuddy's own server.
 3. If something else must keep the port, change `adb_server_port` in `config.toml` (a number from 1 to 65535).
 
-### `WORKSPACE_FAILED`
+### The environment folder cannot be made
 
-The agent's environment is the folder `~/ADBuddy/<phone name>/`. `WORKSPACE_FAILED` means ADBuddy could not create or refresh it. The message has the system's reason, and the fix depends on where it happened:
+The agent's environment is the folder `~/ADBuddy/<phone name>/`. The code `WORKSPACE_FAILED` means ADBuddy could not create or refresh it. The message has the system's reason, and the fix depends on where it happened:
 
 - `adbuddy setup` and `adbuddy serve`: `Check that <folder> is writable.`
 - `adbuddy serve` when it cannot work out the folder's absolute path: `Pass --workspace with an absolute path.`
 - A path with characters the agent's hooks cannot carry: `Use another path: it cannot contain backslashes (on Linux and macOS), quotes, $, backticks or line breaks.`
-- `adbuddy run`: `Close other agents running in <folder> and try again.`
+- `adbuddy run`: `Close other agents running in <folder> and try again.` (when it cannot work out the path, `run` gives the code with no fix).
 - `adbuddy env init`: the host suggests nothing. Check that the folder is writable and that no program has its files open.
 
 To make the folder again, once the cause is fixed, run `adbuddy env init`, or `adbuddy env init --dir <folder>` for another one.
@@ -369,9 +381,9 @@ When you open an [issue](https://github.com/hybriqtech/adbuddy/issues), give eno
 
 **Read what you paste, and remove these first:**
 
-- The phone's **serial number**, which doctor prints on the `phone` line and `adbuddy serve` prints in its first line.
+- The phone's **serial number**, which doctor prints on the `phone` line and `adbuddy serve` prints in its `ADBuddy is serving <phone> (session s_…)` line.
 - **IP addresses and ports**, yours or the phone's.
-- **Paths with your user name**: doctor prints the configuration file and the environment folder. Replace the part with your name with `<home>`.
+- **Paths with your user name**: doctor prints the configuration file and the environment folder, and serve prints the `Journal:` path. Replace the part with your name with `<home>`.
 - **The journal**: commands and file names can hold personal data, such as app names, file names and what the agent read. Paste only the lines that matter, after you read them.
 - The **tokens and secrets**: the `ipc.secret` file in the data folder, and anything that looks like a key.
 
