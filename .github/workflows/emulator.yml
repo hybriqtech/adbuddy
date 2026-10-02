@@ -23,6 +23,12 @@ jobs:
     if: ${{ vars.CI_RUNNER_EMULATOR != '"none"' && (vars.CI_RUNNER_EMULATOR == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ${{ fromJSON(vars.CI_RUNNER_EMULATOR || '"ubuntu-latest"') }}
     timeout-minutes: 90
+    # Its own AVD, emulator port and adb server, so it never collides with an
+    # emulator started by hand with the script's defaults (just names).
+    env:
+      ADBUDDY_EMU_AVD: adbuddy-ci-api37
+      ADBUDDY_EMU_PORT: "5590"
+      ADBUDDY_EMU_ADB_PORT: "5049"
     defaults:
       run:
         shell: bash -e {0}
@@ -59,6 +65,8 @@ jobs:
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" emulator "system-images;android-37.0;google_apis;x86_64" > /dev/null
+      - name: Clear a leftover emulator of this job
+        run: scripts/emulator.sh stop
       - name: Start the emulator
         shell: bash # with pipefail: a failed start fails this step, not the next one
         run: scripts/emulator.sh start | sed "s/^export //; s/'//g" >> "$GITHUB_ENV"
@@ -77,17 +85,17 @@ jobs:
       - name: Emulator diagnostics
         if: failure() && runner.os == 'Linux'
         env:
-          ANDROID_ADB_SERVER_PORT: "5039"
+          ANDROID_ADB_SERVER_PORT: ${{ env.ADBUDDY_EMU_ADB_PORT }}
         run: |
           ADB="$ANDROID_HOME/platform-tools/adb"
           tail -n 200 /tmp/adbuddy-emulator.log || true
           env | grep -E "^(ANDROID|XDG|HOME)" | sort || true
-          find / -name "adbuddy-api37*" -not -path "/proc/*" 2>/dev/null | head || true
+          find / -name "$ADBUDDY_EMU_AVD*" -not -path "/proc/*" 2>/dev/null | head || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" list avd || true
           "$ANDROID_HOME/emulator/emulator" -list-avds || true
           "$ADB" devices -l || true
-          timeout 20 "$ADB" -s emulator-5580 shell getprop | grep -E "boot|init.svc.(surfaceflinger|zygote|system_server)" || true
-          timeout 30 "$ADB" -s emulator-5580 logcat -d -b crash,system | tail -n 150 || true
+          timeout 20 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" shell getprop | grep -E "boot|init.svc.(surfaceflinger|zygote|system_server)" || true
+          timeout 30 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" logcat -d -b crash,system | tail -n 150 || true
       - name: Stop the emulator
         if: always()
         run: scripts/emulator.sh stop

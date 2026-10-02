@@ -18,7 +18,7 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 | --- | --- | --- | --- |
 | `CI_HOST_MATRIX` | `host.yml` | the three hosted cells (`ubuntu-latest`, `windows-latest`, `macos-latest`) | A JSON array of cells `{"name": ..., "runner": ...}`. A Linux cell needs `gcc` (for `go test -race`); a Windows cell needs Git for Windows. Leave a cell out of the array to drop it. |
 | `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. |
-| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, the AVD `adbuddy-api37`, hardware acceleration; a Linux runner needs passwordless `sudo` or an accessible `/dev/kvm`. |
+| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, the AVD `adbuddy-ci-api37`, hardware acceleration; a Linux runner needs passwordless `sudo` or an accessible `/dev/kvm`. |
 | `CI_RUNNER_RELEASE` | `release-check.yml` (`scripts` and `goreleaser`) | `"ubuntu-latest"` | Linux with `shellcheck`. |
 | `CI_RUNNER_SIGN` | `release-check.yml` (`sign`) | `"ubuntu-latest"` | Linux with an Android SDK: `apksigner` and `zipalign` are Linux scripts here. |
 
@@ -137,7 +137,8 @@ Also:
 - Take the runners down (remove them in the repository settings and delete the runner folders) before making the repository public.
 - The workflows use `pull_request` and `push`, never `pull_request_target`, and these jobs have no secrets.
 - One job runs at a time per runner. Register a second runner in another folder to run jobs in parallel.
-- The emulator job uses and stops the AVD `adbuddy-api37` and the adb server on port 5039 of the runner's machine: do not use them by hand meanwhile.
+- The emulator job uses and stops the AVD `adbuddy-ci-api37` (emulator port 5590) and the adb server on port 5049 of the runner's machine: do not use them by hand meanwhile. It no longer uses the script's default AVD and ports, which can be used by hand at the same time.
+- Two emulators at once need about 5 GB of RAM each.
 - A Linux runner needs passwordless `sudo` or an already accessible `/dev/kvm` for the emulator job.
 
 ## 7. What is not covered locally
