@@ -30,7 +30,7 @@ func checkFind(ws []Word) checkResult {
 	for _, w := range ws[1:] {
 		switch w.Value {
 		case "-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls":
-			return red("find " + w.Value + " changes files or runs commands")
+			return red(reason("find {value} changes files or runs commands", "value", w.Value))
 		}
 	}
 	return ok()
@@ -44,12 +44,12 @@ func checkSed(ws []Word) checkResult {
 		v := ws[i].Value
 		switch {
 		case v == "-i" || strings.HasPrefix(v, "-i") || strings.HasPrefix(v, "--in-place"):
-			return red("sed -i edits files in place")
+			return red(reason("sed -i edits files in place"))
 		case v == "-f" || strings.HasPrefix(v, "--file"):
-			return red("sed script from a file")
+			return red(reason("sed script from a file"))
 		case v == "-e" || v == "--expression":
 			if i+1 >= len(ws) || ws[i+1].Dynamic {
-				return red("sed script only known on the phone")
+				return red(reason("sed script only known on the phone"))
 			}
 			scripts = append(scripts, ws[i+1].Value)
 			i++
@@ -57,23 +57,23 @@ func checkSed(ws []Word) checkResult {
 			scripts = append(scripts, strings.TrimPrefix(v, "--expression="))
 		case v == "-n" || v == "-E" || v == "-r" || v == "-s" || v == "-z" || v == "-u" || v == "--quiet" || v == "--silent":
 		case strings.HasPrefix(v, "-") && v != "-":
-			return red("unknown sed option " + v)
+			return red(reason("unknown sed option {v}", "v", v))
 		default:
 			if ws[i].Dynamic && len(scripts) == 0 && len(files) == 0 {
-				return red("sed script only known on the phone")
+				return red(reason("sed script only known on the phone"))
 			}
 			files = append(files, v)
 		}
 	}
 	if len(scripts) == 0 {
 		if len(files) == 0 {
-			return red("sed without script")
+			return red(reason("sed without script"))
 		}
 		scripts = files[:1]
 	}
 	for _, s := range scripts {
 		if !safeSed(s) {
-			return red("sed script that may write files or run commands")
+			return red(reason("sed script that may write files or run commands"))
 		}
 	}
 	return ok()
@@ -180,31 +180,31 @@ func checkAwk(ws []Word) checkResult {
 		v := ws[i].Value
 		switch {
 		case v == "-f":
-			return red("awk program from a file")
+			return red(reason("awk program from a file"))
 		case v == "-F" || v == "-v":
 			i++
 		case strings.HasPrefix(v, "-F") || strings.HasPrefix(v, "-v"):
 		case strings.HasPrefix(v, "-"):
-			return red("unknown awk option " + v)
+			return red(reason("unknown awk option {v}", "v", v))
 		default:
 			if ws[i].Dynamic {
-				return red("awk program only known on the phone")
+				return red(reason("awk program only known on the phone"))
 			}
 			for _, bad := range []string{"system", "getline", ">", "|", "close(", "fflush"} {
 				if strings.Contains(v, bad) {
-					return red("awk program that may run commands or write files")
+					return red(reason("awk program that may run commands or write files"))
 				}
 			}
 			return ok()
 		}
 	}
-	return red("awk without program")
+	return red(reason("awk without program"))
 }
 
 func checkSort(ws []Word) checkResult {
 	for _, w := range ws[1:] {
 		if w.Value == "-o" || strings.HasPrefix(w.Value, "--output") || (strings.HasPrefix(w.Value, "-o") && !strings.HasPrefix(w.Value, "--")) {
-			return red("sort -o writes a file")
+			return red(reason("sort -o writes a file"))
 		}
 	}
 	return ok()
@@ -218,7 +218,7 @@ func checkUniq(ws []Word) checkResult {
 		}
 	}
 	if n > 1 {
-		return red("uniq with an output file")
+		return red(reason("uniq with an output file"))
 	}
 	return ok()
 }
@@ -229,7 +229,7 @@ func checkDate(ws []Word) checkResult {
 		if strings.HasPrefix(v, "+") || v == "-u" || v == "--utc" || v == "-R" || v == "-I" {
 			continue
 		}
-		return red("date with arguments can change the clock")
+		return red(reason("date with arguments can change the clock"))
 	}
 	return ok()
 }
@@ -242,7 +242,7 @@ func checkDate(ws []Word) checkResult {
 // prints the text of every app's notifications: 🔴.
 func checkDumpsys(ws []Word) checkResult {
 	if revealsNotifications(values(ws)) {
-		return red("dumpsys notification text of every app")
+		return red(reason("dumpsys notification text of every app"))
 	}
 	if len(ws) < 3 {
 		return ok() // dumpsys alone, or only a service
@@ -250,13 +250,13 @@ func checkDumpsys(ws []Word) checkResult {
 	for _, w := range ws[2:] {
 		switch v := w.Value; {
 		case strings.HasPrefix(v, "--reset"), strings.HasPrefix(v, "--clear"):
-			return red("dumpsys option that clears data")
+			return red(reason("dumpsys option that clears data"))
 		default:
 			switch v {
 			case "set", "reset", "unplug", "enable", "disable", "clear", "put", "delete", "remove", "add",
 				"force", "force-idle", "force-inactive", "unforce", "step", "whitelist", "tempwhitelist",
 				"sys-whitelist", "except-idle-whitelist", "suspend", "kill", "stop", "start":
-				return red("dumpsys command that changes state")
+				return red(reason("dumpsys command that changes state"))
 			}
 		}
 	}
@@ -267,7 +267,7 @@ func checkIP(ws []Word) checkResult {
 	for _, w := range ws[1:] {
 		switch w.Value {
 		case "add", "del", "delete", "change", "replace", "set", "flush", "append", "prepend", "save", "restore", "exec", "up", "down":
-			return red("ip command that changes the network")
+			return red(reason("ip command that changes the network"))
 		}
 	}
 	return ok()
@@ -275,7 +275,7 @@ func checkIP(ws []Word) checkResult {
 
 func checkIfconfig(ws []Word) checkResult {
 	if len(ws) > 2 {
-		return red("ifconfig changing an interface")
+		return red(reason("ifconfig changing an interface"))
 	}
 	return ok()
 }
@@ -283,7 +283,7 @@ func checkIfconfig(ws []Word) checkResult {
 func checkHostname(ws []Word) checkResult {
 	for _, w := range ws[1:] {
 		if !contains([]string{"-s", "-d", "-f", "-i", "-I"}, w.Value) {
-			return red("hostname changing the name")
+			return red(reason("hostname changing the name"))
 		}
 	}
 	return ok()
@@ -292,7 +292,7 @@ func checkHostname(ws []Word) checkResult {
 func checkTee(ws []Word) checkResult {
 	for _, w := range ws[1:] {
 		if w.Value != "-a" && w.Value != "/dev/null" {
-			return red("tee writes files")
+			return red(reason("tee writes files"))
 		}
 	}
 	return ok()
@@ -301,7 +301,7 @@ func checkTee(ws []Word) checkResult {
 // checkNoExtraArgs allows only `<cmd> <sub>`: e.g. `wm size` reads, `wm size 1080x1920` writes.
 func checkNoExtraArgs(ws []Word) checkResult {
 	if len(ws) > 2 {
-		return red("changes the value instead of reading it")
+		return red(reason("changes the value instead of reading it"))
 	}
 	return ok()
 }
@@ -314,7 +314,7 @@ func newFile(pos []string) checkResult {
 	case len(pos) == 1 && strings.HasPrefix(pos[0], "/"):
 		return change(newOp("new-file", "path", pos[0]))
 	}
-	return red("writes to a relative path or several files")
+	return red(reason("writes to a relative path or several files"))
 }
 
 // screencap [-p] [-j] [-d ID] [FILE]
@@ -326,7 +326,7 @@ func checkScreencap(ws []Word) checkResult {
 			i++
 		case v == "-p" || v == "-j" || v == "-a":
 		case strings.HasPrefix(v, "-"):
-			return red("unknown screencap option")
+			return red(reason("unknown screencap option"))
 		default:
 			pos = append(pos, v)
 		}
@@ -338,7 +338,7 @@ func checkScreencap(ws []Word) checkResult {
 func checkUiautomatorDump(ws []Word) checkResult {
 	pos, user, good := positional(ws, 2, "--compressed")
 	if !good || user != "" {
-		return red("unknown uiautomator option")
+		return red(reason("unknown uiautomator option"))
 	}
 	return newFile(pos)
 }
@@ -352,7 +352,7 @@ func checkPrintf(ws []Word) checkResult {
 			break
 		}
 		if v == "-v" {
-			return red("printf -v writes to a shell variable")
+			return red(reason("printf -v writes to a shell variable"))
 		}
 		if !strings.HasPrefix(v, "-") {
 			break // the format string; the rest are arguments
@@ -372,10 +372,10 @@ func checkSet(ws []Word) checkResult {
 		on, flags := v[0] == '-', v[1:]
 		if strings.Contains(flags, "A") {
 			// set -A / +A assigns to an array variable, e.g. set -A PATH ….
-			return red("set " + v[:1] + "A assigns to a variable")
+			return red(reason("set {sign}A assigns to a variable", "sign", v[:1]))
 		}
 		if on && strings.Contains(flags, "B") {
-			return red("set -B turns brace expansion on")
+			return red(reason("set -B turns brace expansion on"))
 		}
 		k := strings.IndexByte(flags, 'o')
 		if k < 0 {
@@ -390,7 +390,7 @@ func checkSet(ws []Word) checkResult {
 			name = ws[i].Value
 		}
 		if (on && name == "braceexpand") || (!on && (name == "posix" || name == "sh")) {
-			return red("set " + v[:1] + "o " + name + " turns brace expansion on")
+			return red(reason("set {sign}o {name} turns brace expansion on", "sign", v[:1], "name", name))
 		}
 	}
 	return ok()

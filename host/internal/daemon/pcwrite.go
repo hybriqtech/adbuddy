@@ -10,57 +10,59 @@ import (
 )
 
 // checkPCWrites returns why adb pull or adb bugreport would write outside the
-// agent's environment or over its own files, or "" if every target stays
-// inside. The working directory is the agent's (the shim's), so it is never
-// trusted: it must itself be inside the environment. Paths are resolved
-// through links where they exist, and compared without case on Windows.
-func (d *Daemon) checkPCWrites(cwd string, ws []classify.PCWrite) string {
+// agent's environment or over its own files, or an empty Text if every target
+// stays inside. The working directory is the agent's (the shim's), so it is
+// never trusted: it must itself be inside the environment. Paths are resolved
+// through links where they exist, and compared without case on Windows. The
+// answer is the reason of the 🔴 question, in both languages.
+func (d *Daemon) checkPCWrites(cwd string, ws []classify.PCWrite) classify.Text {
 	for _, w := range ws {
-		if why := d.checkPCWrite(cwd, w); why != "" {
+		if why := d.checkPCWrite(cwd, w); !why.Empty() {
 			return why
 		}
 	}
-	return ""
+	return classify.Text{}
 }
 
-func (d *Daemon) checkPCWrite(cwd string, w classify.PCWrite) string {
-	if w.Reason != "" {
-		return w.Cmd + " " + w.Reason
+func (d *Daemon) checkPCWrite(cwd string, w classify.PCWrite) classify.Text {
+	same, cat := classify.Same, classify.Cat
+	if !w.Reason.Empty() {
+		return cat(same(w.Cmd+" "), w.Reason)
 	}
 	if d.o.Workspace == "" {
-		return w.Cmd + " writes on the PC and the agent environment is unknown"
+		return cat(same(w.Cmd), classify.Text{EN: " writes on the PC and the agent environment is unknown", ES: " escribe en el PC y no se conoce el entorno del agente"})
 	}
 	root, err := filepath.EvalSymlinks(d.o.Workspace)
 	if err != nil {
-		return w.Cmd + " writes on the PC and the agent environment cannot be read: " + err.Error()
+		return cat(same(w.Cmd), classify.Text{EN: " writes on the PC and the agent environment cannot be read: ", ES: " escribe en el PC y no se puede leer el entorno del agente: "}, same(err.Error()))
 	}
-	outside := w.Cmd + " writes outside the agent environment: "
-	own := w.Cmd + " writes over the agent environment's own files: "
+	outside := cat(same(w.Cmd), classify.Text{EN: " writes outside the agent environment: ", ES: " escribe fuera del entorno del agente: "})
+	own := cat(same(w.Cmd), classify.Text{EN: " writes over the agent environment's own files: ", ES: " escribe sobre los ficheros propios del entorno del agente: "})
 	if cwd == "" || !filepath.IsAbs(cwd) {
-		return outside + "(unknown working directory " + cwd + ")"
+		return cat(outside, classify.Text{EN: "(unknown working directory " + cwd + ")", ES: "(directorio de trabajo desconocido " + cwd + ")"})
 	}
 	// adb runs in cwd as sent, and Linux and macOS resolve "out/.." on disk
 	// (in the parent of out's target) while filepath.Clean just drops it.
 	if cwd != filepath.Clean(cwd) || hasDotDot(cwd) {
-		return outside + "(working directory not in clean form " + cwd + ")"
+		return cat(outside, classify.Text{EN: "(working directory not in clean form " + cwd + ")", ES: "(el directorio de trabajo no está en forma limpia: " + cwd + ")"})
 	}
 	for _, t := range append([]string{"."}, w.Targets...) {
 		p := filepath.Join(cwd, filepath.FromSlash(strings.ReplaceAll(t, `\`, "/")))
 		real, err := resolveLinks(p)
 		if err != nil {
-			return outside + p + " (" + err.Error() + ")"
+			return cat(outside, same(p+" ("+err.Error()+")"))
 		}
 		rel, inside := within(root, real)
 		switch {
 		case !inside:
-			return outside + p
+			return cat(outside, same(p))
 		case reparseBelow(root, rel):
-			return outside + p + " (through a junction or another link ADBuddy does not follow)"
+			return cat(outside, same(p), classify.Text{EN: " (through a junction or another link ADBuddy does not follow)", ES: " (a través de una unión (junction) o de otro enlace que ADBuddy no sigue)"})
 		case rel != "." && !classify.SafeLocalTarget(filepath.ToSlash(rel)):
-			return own + p
+			return cat(own, same(p))
 		}
 	}
-	return ""
+	return classify.Text{}
 }
 
 func hasDotDot(p string) bool {

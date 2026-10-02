@@ -55,23 +55,23 @@ func userOpt(ws []Word, i int) (user string, next int, valid bool) {
 func checkSettingsPut(ws []Word) checkResult {
 	user1, i, valid := userOpt(ws, 1)
 	if !valid || i >= len(ws) || !strings.EqualFold(ws[i].Value, "put") {
-		return red("settings put with --user in an unexpected place")
+		return red(reason("settings put with --user in an unexpected place"))
 	}
 	user2, i, valid := userOpt(ws, i+1)
 	if !valid || (user1 != "" && user2 != "") {
-		return red("settings put with --user in an unexpected place")
+		return red(reason("settings put with --user in an unexpected place"))
 	}
 	rest := values(ws[i:])
 	if len(rest) != 3 {
-		return red("settings put with extra or missing arguments")
+		return red(reason("settings put with extra or missing arguments"))
 	}
 	for _, v := range rest {
 		if strings.HasPrefix(v, "-") {
-			return red("settings put with options after the namespace")
+			return red(reason("settings put with options after the namespace"))
 		}
 	}
 	if rest[0] != "system" && rest[0] != "secure" && rest[0] != "global" {
-		return red("unknown settings namespace " + rest[0])
+		return red(reason("unknown settings namespace {arg}", "arg", rest[0]))
 	}
 	op := newOp("settings-put", "ns", rest[0], "key", rest[1], "value", rest[2])
 	if u := user1 + user2; u != "" {
@@ -85,7 +85,7 @@ func checkSettingsPut(ws []Word) checkResult {
 func checkPmDisable(ws []Word) checkResult {
 	user, i, valid := userOpt(ws, 2)
 	if !valid || len(ws) != i+1 || !packageName(ws[i].Value) {
-		return red("pm disable with unexpected arguments")
+		return red(reason("pm disable with unexpected arguments"))
 	}
 	op := newOp("pm-disable", "pkg", ws[i].Value)
 	if user != "" {
@@ -106,19 +106,19 @@ func checkPmUninstallUser(ws []Word) checkResult {
 			i++
 		case "--user":
 			if user != "" || i+1 >= len(ws) || !validUser(ws[i+1].Value) {
-				return red("pm uninstall for every user or with an unexpected --user")
+				return red(reason("pm uninstall for every user or with an unexpected --user"))
 			}
 			user = ws[i+1].Value
 			i += 2
 		default:
-			return red("pm uninstall with unexpected options")
+			return red(reason("pm uninstall with unexpected options"))
 		}
 	}
 	if len(ws) != i+1 || !packageName(ws[i].Value) {
-		return red("pm uninstall with unexpected arguments")
+		return red(reason("pm uninstall with unexpected arguments"))
 	}
 	if user == "" {
-		return red("uninstalls the app for every user")
+		return red(reason("uninstalls the app for every user"))
 	}
 	op := newOp("pm-uninstall-user", "pkg", ws[i].Value, "user", user)
 	if keep {
@@ -133,14 +133,14 @@ func checkAppopsSet(ws []Word) checkResult {
 	user, i, valid := userOpt(ws, 2)
 	rest := values(ws[i:])
 	if !valid || len(rest) != 3 {
-		return red("appops set with unexpected arguments")
+		return red(reason("appops set with unexpected arguments"))
 	}
 	if !packageName(rest[0]) {
-		return red("appops set on a UID changes every app that shares it")
+		return red(reason("appops set on a UID changes every app that shares it"))
 	}
 	for _, v := range rest[1:] {
 		if strings.HasPrefix(v, "-") {
-			return red("appops set with unexpected options")
+			return red(reason("appops set with unexpected options"))
 		}
 	}
 	op := newOp("appops-set", "pkg", rest[0], "op", rest[1], "mode", rest[2])
@@ -159,17 +159,17 @@ func checkDeviceidle(ws []Word) checkResult {
 	case len(rest) == 2 && rest[0] == "whitelist" && len(rest[1]) > 1 && (rest[1][0] == '+' || rest[1][0] == '-'):
 		return change(newOp("deviceidle", "sign", rest[1][:1], "pkg", rest[1][1:]))
 	}
-	return red("changes the battery optimisation state")
+	return red(reason("changes the battery optimisation state"))
 }
 
 // mv SRC DST with absolute paths and no options.
 func checkMv(ws []Word) checkResult {
 	pos, user, good := positional(ws, 1)
 	if !good || user != "" || len(pos) != 2 {
-		return red("mv with options or several sources")
+		return red(reason("mv with options or several sources"))
 	}
 	if !strings.HasPrefix(pos[0], "/") || !strings.HasPrefix(pos[1], "/") {
-		return red("mv with relative paths")
+		return red(reason("mv with relative paths"))
 	}
 	return change(newOp("mv", "src", pos[0], "dst", pos[1]))
 }
@@ -178,7 +178,7 @@ func checkMv(ws []Word) checkResult {
 func checkMkdir(ws []Word) checkResult {
 	pos, user, good := positional(ws, 1, "-p")
 	if !good || user != "" || len(pos) != 1 || !strings.HasPrefix(pos[0], "/") {
-		return red("mkdir with options, several folders or a relative path")
+		return red(reason("mkdir with options, several folders or a relative path"))
 	}
 	return change(newOp("mkdir", "path", pos[0]))
 }
@@ -192,7 +192,7 @@ func checkMonkey(ws []Word) checkResult {
 	if len(v) == 6 && v[1] == "-p" && v[3] == "-c" && v[5] == "1" {
 		return checkResult{level: Green, vars: map[string]string{"pkg": v[2]}}
 	}
-	return red("monkey sending random events")
+	return red(reason("monkey sending random events"))
 }
 
 // am start is a harmless interface action, except for intents that place a
@@ -202,7 +202,7 @@ func checkAmStart(ws []Word) checkResult {
 		u := strings.ToUpper(w.Value)
 		for _, bad := range []string{"ACTION.CALL", "CALL_PRIVILEGED", "CALL_EMERGENCY", "REBOOT", "SHUTDOWN", "MASTER_CLEAR", "FACTORY_RESET", "ACTION.DELETE", "UNINSTALL_PACKAGE"} {
 			if strings.Contains(u, bad) {
-				return red("the intent " + w.Value + " can call, restart, wipe or uninstall")
+				return red(reason("the intent {value} can call, restart, wipe or uninstall", "value", w.Value))
 			}
 		}
 	}

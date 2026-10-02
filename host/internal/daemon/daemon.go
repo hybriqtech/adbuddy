@@ -445,11 +445,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 
 	e.Level, e.Rule, e.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
-	level, reason := res.Level, ""
+	level, reason := res.Level, classify.Text{} // reason: why the PC or the phone raised it, for the detail of the question
 	if len(res.PCWrites) > 0 {
 		// pull and bugreport write on the PC from the agent's working
 		// directory, which the classifier does not know.
-		if why := d.checkPCWrites(req.Cwd, res.PCWrites); why != "" {
+		if why := d.checkPCWrites(req.Cwd, res.PCWrites); !why.Empty() {
 			level, reason = classify.Red, why
 			e.Level = level.String()
 		}
@@ -469,9 +469,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 		prep = precheck.Prepare(ctx, d.o.ADB, res.Op, level, precheck.Env{Cwd: req.Cwd, BackupDir: d.o.Journal.BackupDir(e.ID)})
 		level = prep.Level
-		if prep.Reason != "" {
-			reason = strings.TrimPrefix(reason+"; "+prep.Reason, "; ")
-		}
+		reason = classify.Join(reason, prep.Reason)
 		e.Level = level.String()
 		if prep.Inverse != nil {
 			e.Inverse = &journal.Inverse{Argv: prep.Inverse}
@@ -481,15 +479,15 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 
 	if level == classify.Red {
 		detail := res.Detail(d.o.Lang)
-		if reason != "" {
-			detail = strings.TrimSpace(detail + "\n" + classify.Printable(reason))
+		if !reason.Empty() {
+			detail = strings.TrimSpace(detail + "\n" + classify.Printable(reason.In(d.o.Lang)))
 		}
 		// Key lets the phone allow the same rule with the same arguments from
 		// the same folder for the rest of the session. A 🔴 that comes from
 		// the state of the phone or the PC (a precheck, a write on the PC)
 		// may be fine now and not next time: no key, so it is always asked.
 		key := ""
-		if reason == "" {
+		if reason.Empty() {
 			key = e.Rule + "\x00" + req.Cwd + "\x00" + strings.Join(req.Argv, "\x00")
 		}
 		qctx, withdraw := context.WithCancelCause(ctx)

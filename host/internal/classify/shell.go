@@ -42,8 +42,8 @@ var textUnsupported = Text{
 }
 
 // unsupported records shell the evaluator does not list.
-func (e *evaluator) unsupported(reason string, n syntax.Node) {
-	e.out = append(e.out, unanalysable("shell.unsupported", reason, []string{nodeText(n)}, textUnsupported))
+func (e *evaluator) unsupported(why Text, n syntax.Node) {
+	e.out = append(e.out, unanalysable("shell.unsupported", why, []string{nodeText(n)}, textUnsupported))
 }
 
 // classifyScript parses a shell command line and classifies every simple
@@ -51,11 +51,11 @@ func (e *evaluator) unsupported(reason string, n syntax.Node) {
 // loops and here-documents.
 func (c *Classifier) classifyScript(src string, sc scope) []Finding {
 	if sc.depth > maxDepth {
-		return []Finding{unanalysable("shell.depth", "too many nested shells", []string{src}, textParse)}
+		return []Finding{unanalysable("shell.depth", reason("too many nested shells"), []string{src}, textParse)}
 	}
 	file, err := newParser().Parse(strings.NewReader(src), "")
 	if err != nil {
-		return []Finding{unanalysable("shell.parse", "cannot parse: "+err.Error(), []string{src}, textParse)}
+		return []Finding{unanalysable("shell.parse", reason("cannot parse: {err}", "err", err.Error()), []string{src}, textParse)}
 	}
 	e := &evaluator{c: c, sc: sc}
 	e.numeric, e.unproven = numericVars(file)
@@ -72,7 +72,7 @@ func (e *evaluator) stmts(list []*syntax.Stmt) {
 func (e *evaluator) stmt(s *syntax.Stmt) {
 	// `cmd &` (at the end or in the middle) and mksh's `cmd |&`.
 	if s.Background || s.Coprocess || s.Disown {
-		e.out = append(e.out, backgroundFinding("runs in the background", []string{nodeText(s)}))
+		e.out = append(e.out, backgroundFinding(reason("runs in the background"), []string{nodeText(s)}))
 	}
 	for _, r := range s.Redirs {
 		e.redirect(r)
@@ -87,7 +87,7 @@ func (e *evaluator) stmt(s *syntax.Stmt) {
 			e.stmt(cmd.X)
 			e.stmt(cmd.Y)
 		default:
-			e.unsupported("shell operator "+cmd.Op.String(), s)
+			e.unsupported(reason("shell operator {op}", "op", cmd.Op.String()), s)
 		}
 	case *syntax.IfClause:
 		for c := cmd; c != nil; c = c.Else {
@@ -105,14 +105,14 @@ func (e *evaluator) stmt(s *syntax.Stmt) {
 		e.stmts(cmd.Stmts)
 	case *syntax.TimeClause:
 		if cmd.PosixFormat {
-			e.unsupported("time with options", s)
+			e.unsupported(reason("time with options"), s)
 		} else if cmd.Stmt != nil {
 			e.stmt(cmd.Stmt)
 		}
 	default:
 		// case, select, functions, [[ ]], (( )), let, typeset and the other
 		// declarations, and whatever the parser learns next.
-		e.unsupported("shell construct", s)
+		e.unsupported(reason("shell construct"), s)
 	}
 }
 
@@ -123,7 +123,7 @@ func (e *evaluator) forClause(f *syntax.ForClause, s *syntax.Stmt) {
 	if !ok || f.Select || !wi.InPos.IsValid() {
 		// select, a C-style loop, or `for x; do`, which reads the positional
 		// parameters.
-		e.unsupported("shell construct", s)
+		e.unsupported(reason("shell construct"), s)
 		return
 	}
 	if !ownName(wi.Name.Value) {
@@ -158,7 +158,7 @@ func (e *evaluator) call(ce *syntax.CallExpr) {
 // write: 🔴, not special.
 func (e *evaluator) redirect(r *syntax.Redirect) {
 	if r.N != nil && !isDigits(r.N.Value) {
-		e.unsupported("redirection of a named descriptor", r)
+		e.unsupported(reason("redirection of a named descriptor"), r)
 		return
 	}
 	switch r.Op {
@@ -168,13 +168,13 @@ func (e *evaluator) redirect(r *syntax.Redirect) {
 		if !w.Dynamic && w.Value == "/dev/null" {
 			return
 		}
-		e.out = append(e.out, redFinding("shell.redirect", "writes to "+w.Value, []string{r.Op.String(), w.Value}, textRedirect))
+		e.out = append(e.out, redFinding("shell.redirect", reason("writes to {value}", "value", w.Value), []string{r.Op.String(), w.Value}, textRedirect))
 	case syntax.DplOut, syntax.DplIn:
 		w := e.word(r.Word)
 		if !w.Dynamic && (w.Value == "-" || isDigits(w.Value)) {
 			return
 		}
-		e.out = append(e.out, redFinding("shell.redirect", "writes to "+w.Value, []string{r.Op.String(), w.Value}, textRedirect))
+		e.out = append(e.out, redFinding("shell.redirect", reason("writes to {value}", "value", w.Value), []string{r.Op.String(), w.Value}, textRedirect))
 	case syntax.RdrIn, syntax.WordHdoc:
 		e.word(r.Word)
 	case syntax.Hdoc, syntax.DashHdoc:
@@ -184,7 +184,7 @@ func (e *evaluator) redirect(r *syntax.Redirect) {
 			e.parts(r.Hdoc.Parts, true)
 		}
 	default:
-		e.unsupported("redirection "+r.Op.String(), r)
+		e.unsupported(reason("redirection {op}", "op", r.Op.String()), r)
 	}
 }
 

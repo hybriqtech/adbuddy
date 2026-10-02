@@ -28,7 +28,7 @@ func TestPullAndBugreportReportTheirPCTargets(t *testing.T) {
 			t.Errorf("%q: PCWrites %+v, want %+v", tc.argv, r.PCWrites, tc.want)
 		}
 	}
-	if r := c.Classify([]string{"pull", "/sdcard/x", "../x"}); len(r.PCWrites) != 1 || r.PCWrites[0].Reason == "" {
+	if r := c.Classify([]string{"pull", "/sdcard/x", "../x"}); len(r.PCWrites) != 1 || r.PCWrites[0].Reason.Empty() {
 		t.Errorf("unsafe target without a reason: %+v", r.PCWrites)
 	}
 }
@@ -36,7 +36,7 @@ func TestPullAndBugreportReportTheirPCTargets(t *testing.T) {
 func TestUserRuleCannotHidePullTargets(t *testing.T) {
 	c := mustNew(t, "rules:\n  - {id: u.pull, scope: adb, cmd: pull, level: green}\n")
 	r := c.Classify([]string{"pull", "/sdcard/x", "../../x"})
-	if len(r.PCWrites) != 1 || r.PCWrites[0].Reason == "" {
+	if len(r.PCWrites) != 1 || r.PCWrites[0].Reason.Empty() {
 		t.Fatalf("user rule hid the unsafe target: level %v, %+v", r.Level, r.PCWrites)
 	}
 }

@@ -81,7 +81,7 @@ func TestSettingsPutMissingValueDeletes(t *testing.T) {
 func TestPhoneErrorRaisesToRed(t *testing.T) {
 	dev := &fakeDevice{fail: map[string]bool{"settings get global k": true}}
 	p := Prepare(context.Background(), dev, op("settings-put", "ns", "global", "key", "k", "value", "1"), classify.Yellow, Env{})
-	if p.Level != classify.Red || p.Inverse != nil || !strings.Contains(p.Reason, "could not check") {
+	if p.Level != classify.Red || p.Inverse != nil || !strings.Contains(p.Reason.EN, "could not check") {
 		t.Fatalf("got %+v", p)
 	}
 }

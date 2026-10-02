@@ -9,14 +9,14 @@ import (
 // change it recognised (if any) and extra title placeholders.
 type checkResult struct {
 	level  Level
-	reason string
+	reason Text
 	op     *Op
 	vars   map[string]string
 }
 
-func ok() checkResult               { return checkResult{level: Green} }
-func red(reason string) checkResult { return checkResult{level: Red, reason: reason} }
-func change(op *Op) checkResult     { return checkResult{level: Yellow, op: op, vars: op.Args} }
+func ok() checkResult           { return checkResult{level: Green} }
+func red(why Text) checkResult  { return checkResult{level: Red, reason: why} }
+func change(op *Op) checkResult { return checkResult{level: Yellow, op: op, vars: op.Args} }
 func newOp(kind string, kv ...string) *Op {
 	args := map[string]string{}
 	for i := 0; i+1 < len(kv); i += 2 {
@@ -116,7 +116,7 @@ func checkLogcat(ws []Word) checkResult {
 					i++
 				}
 			default:
-				return red("logcat option " + v + " may change the logs or write files")
+				return red(reason("logcat option {v} may change the logs or write files", "v", v))
 			}
 		default:
 			// A cluster of short options, e.g. -d, -dv time, -vtime.
@@ -131,7 +131,7 @@ func checkLogcat(ws []Word) checkResult {
 					}
 					break
 				}
-				return red("logcat option " + v + " may change the logs or write files")
+				return red(reason("logcat option {v} may change the logs or write files", "v", v))
 			}
 		}
 	}
@@ -143,17 +143,17 @@ func checkListOnly(ws []Word) checkResult {
 	if len(ws) == 2 && ws[1].Value == "--list" {
 		return ok()
 	}
-	return red("creates or removes a port redirection")
+	return red(reason("creates or removes a port redirection"))
 }
 
 // adb install / install-multiple [-r] [-t] [-l] [--streaming|--no-streaming|--no-incremental] APK…
 func checkInstall(ws []Word) checkResult {
 	pos, user, good := positional(ws, 1, "-r", "-t", "-l", "--streaming", "--no-streaming", "--no-incremental")
 	if !good || user != "" || len(pos) == 0 {
-		return red("install options that ADBuddy cannot undo")
+		return red(reason("install options that ADBuddy cannot undo"))
 	}
 	if ws[0].Value == "install" && len(pos) != 1 {
-		return red("install with several files")
+		return red(reason("install with several files"))
 	}
 	return change(newOp("adb-install", "apk", pos[0]))
 }
@@ -162,10 +162,10 @@ func checkInstall(ws []Word) checkResult {
 func checkPush(ws []Word) checkResult {
 	pos, user, good := positional(ws, 1)
 	if !good || user != "" || len(pos) != 2 {
-		return red("push with options or several files")
+		return red(reason("push with options or several files"))
 	}
 	if !strings.HasPrefix(pos[1], "/") {
-		return red("push to a relative path")
+		return red(reason("push to a relative path"))
 	}
 	return change(newOp("adb-push", "local", pos[0], "remote", pos[1]))
 }
@@ -251,21 +251,21 @@ func remoteBase(remote string) (string, bool) {
 // inside the environment and away from its control files. The daemon checks
 // the same targets against the agent's working directory (Result.PCWrites).
 func checkPullTarget(ws []Word) checkResult {
-	if _, reason := pcTargets(ws); reason != "" {
-		return red(reason)
+	if _, why := pcTargets(ws); !why.Empty() {
+		return red(why)
 	}
 	return ok()
 }
 
 // pcTargets lists where pull or bugreport writes, relative to the working
 // directory, and why that is unsafe (empty if it looks safe).
-func pcTargets(ws []Word) (targets []string, reason string) {
+func pcTargets(ws []Word) (targets []string, why Text) {
 	var pos []string
 	for _, w := range ws[1:] {
 		switch v := w.Value; {
 		case v == "-a":
 		case strings.HasPrefix(v, "-"):
-			return nil, "unknown option " + v
+			return nil, reason("unknown option {v}", "v", v)
 		default:
 			pos = append(pos, v)
 		}
@@ -280,7 +280,7 @@ func pcTargets(ws []Word) (targets []string, reason string) {
 	case ws[0].Value == "pull" && (len(pos) == 1 || len(pos) == 2):
 		base, named := remoteBase(pos[0])
 		if !named {
-			return nil, "pulls a folder's contents without a folder name"
+			return nil, reason("pulls a folder's contents without a folder name")
 		}
 		targets = []string{base}
 		if len(pos) == 2 {
@@ -288,12 +288,12 @@ func pcTargets(ws []Word) (targets []string, reason string) {
 			targets = []string{pos[1], path.Join(strings.ReplaceAll(pos[1], `\`, "/"), base)}
 		}
 	default:
-		return nil, "several sources or targets"
+		return nil, reason("several sources or targets")
 	}
 	for _, t := range targets {
 		if !SafeLocalTarget(t) {
-			return targets, "writes outside the environment or over its own files: " + t
+			return targets, reason("writes outside the environment or over its own files: {t}", "t", t)
 		}
 	}
-	return targets, ""
+	return targets, Text{}
 }

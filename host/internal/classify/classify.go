@@ -24,7 +24,7 @@ type Finding struct {
 	Rule    string   `json:"rule"`
 	Level   Level    `json:"level"`
 	Title   Text     `json:"title"`
-	Reason  string   `json:"reason,omitempty"`
+	Reason  Text     `json:"reason,omitempty"`
 	Special bool     `json:"special,omitempty"` // always 🔴: may cut the connection or affect ADBuddy
 	UI      bool     `json:"ui,omitempty"`
 	Op      *Op      `json:"op,omitempty"`
@@ -39,7 +39,7 @@ type Finding struct {
 type PCWrite struct {
 	Cmd     string   `json:"cmd"`               // "pull" or "bugreport"
 	Targets []string `json:"targets,omitempty"` // relative to the working directory; the directory itself is always written
-	Reason  string   `json:"reason,omitempty"`  // why the targets are unsafe or unknown; empty if they look safe
+	Reason  Text     `json:"reason,omitempty"`  // why the targets are unsafe or unknown; empty if they look safe
 }
 
 // Result is the verdict for a whole adb command: the highest level wins.
@@ -65,8 +65,8 @@ func (r Result) Detail(lang string) string {
 			continue
 		}
 		line := f.Title.In(lang)
-		if f.Reason != "" {
-			line += " (" + Printable(f.Reason) + ")"
+		if !f.Reason.Empty() {
+			line += " (" + Printable(f.Reason.In(lang)) + ")"
 		}
 		if !seen[line] {
 			seen[line] = true
@@ -114,7 +114,7 @@ func namesTheApp(r Result, argv []string) Result {
 		return r
 	}
 	r.Special = true
-	r.Findings = append(r.Findings, redFinding("adbuddy.mention", "names the ADBuddy app", argv, textMentionsApp))
+	r.Findings = append(r.Findings, redFinding("adbuddy.mention", reason("names the ADBuddy app"), argv, textMentionsApp))
 	r.Findings[len(r.Findings)-1].Special = true
 	return r
 }
@@ -163,14 +163,14 @@ func (c *Classifier) classifyAdb(argv []string) []Finding {
 // first argument as is and every other one single-quoted (adb's escape_arg).
 func (c *Classifier) classifyExecOut(args []string) []Finding {
 	if len(args) == 0 {
-		return []Finding{redFinding("shell.interactive", "exec-out without a command", args, textInteractive)}
+		return []Finding{redFinding("shell.interactive", reason("exec-out without a command"), args, textInteractive)}
 	}
 	line := args[0]
 	for _, a := range args[1:] {
 		line += " " + adbEscapeArg(a)
 	}
 	if strings.TrimSpace(line) == "" {
-		return []Finding{redFinding("shell.interactive", "exec-out without a command", args, textInteractive)}
+		return []Finding{redFinding("shell.interactive", reason("exec-out without a command"), args, textInteractive)}
 	}
 	return c.classifyScript(line, scope{})
 }
@@ -193,7 +193,7 @@ func (c *Classifier) classifyShellCommand(args []string, options bool) []Finding
 		case "-e":
 			i += 2
 		default:
-			return []Finding{redFinding("shell.option", "unknown adb shell option "+args[i], args, textUnknown)}
+			return []Finding{redFinding("shell.option", reason("unknown adb shell option {arg}", "arg", args[i]), args, textUnknown)}
 		}
 	}
 	if i > len(args) {
@@ -201,7 +201,7 @@ func (c *Classifier) classifyShellCommand(args []string, options bool) []Finding
 	}
 	line := strings.Join(args[i:], " ")
 	if strings.TrimSpace(line) == "" {
-		return []Finding{redFinding("shell.interactive", "interactive shell: the commands would come from stdin", args, textInteractive)}
+		return []Finding{redFinding("shell.interactive", reason("interactive shell: the commands would come from stdin"), args, textInteractive)}
 	}
 	return c.classifyScript(line, scope{})
 }
@@ -224,7 +224,7 @@ func aggregate(fs []Finding) Result {
 		for _, f := range fs {
 			words = append(words, f.Words...)
 		}
-		fs = append([]Finding{redFinding("multi-change", "several changes in one command: run them one by one to be able to undo them", words, textMultiChange)}, fs...)
+		fs = append([]Finding{redFinding("multi-change", reason("several changes in one command: run them one by one to be able to undo them"), words, textMultiChange)}, fs...)
 		ops = nil
 	}
 	r := Result{Findings: fs, Primary: fs[0]}
@@ -367,7 +367,7 @@ var (
 	textMentionsApp  = Text{EN: "Name the ADBuddy app in a command: {cmd}", ES: "Nombrar la app ADBuddy en un comando: {cmd}"}
 )
 
-func redFinding(rule, reason string, words []string, title Text) Finding {
+func redFinding(rule string, reason Text, words []string, title Text) Finding {
 	vars := baseVars(lits(words))
 	return Finding{Rule: rule, Level: Red, Reason: reason, Title: render(title, vars), Words: words}
 }
@@ -384,11 +384,11 @@ func (c *Classifier) evalRule(scope string, ws []Word) Finding {
 	b := c.evalWith(ruleSet{builtin: c.rules.builtin}, scope, ws)
 	switch {
 	case b.Special:
-		f.Level, f.Special, f.Op, f.Reason = Red, true, nil, joinReason(b.Reason, f.Reason)
+		f.Level, f.Special, f.Op, f.Reason = Red, true, nil, Join(b.Reason, f.Reason)
 		setIdentity(scope, ws, &f)
 	case f.Level < Red && b.Level != Green && hasDynamic(ws):
 		f.Level, f.Special, f.Op = Red, true, nil
-		f.Reason = joinReason("arguments only known on the phone could name ADBuddy or a critical app", f.Reason)
+		f.Reason = Join(reason("arguments only known on the phone could name ADBuddy or a critical app"), f.Reason)
 	}
 	return f
 }
@@ -402,13 +402,6 @@ func hasDynamic(ws []Word) bool {
 	return false
 }
 
-func joinReason(a, b string) string {
-	if b == "" {
-		return a
-	}
-	return a + "; " + b
-}
-
 // evalWith evaluates one command with a rule set.
 func (c *Classifier) evalWith(rs ruleSet, scope string, ws []Word) Finding {
 	vals := values(ws)
@@ -418,7 +411,7 @@ func (c *Classifier) evalWith(rs ruleSet, scope string, ws []Word) Finding {
 	}
 	r, ok := rs.find(scope, name, subOf(ws))
 	if !ok {
-		f := redFinding("unknown", "unknown command", vals, textUnknown)
+		f := redFinding("unknown", reason("unknown command"), vals, textUnknown)
 		applySpecial(scope, ws, &f)
 		return f
 	}
@@ -427,7 +420,7 @@ func (c *Classifier) evalWith(rs ruleSet, scope string, ws []Word) Finding {
 	if !r.AnyArgs {
 		for _, w := range ws[1:] {
 			if w.Dynamic {
-				f.Level, f.Reason = Red, "arguments only known on the phone"
+				f.Level, f.Reason = Red, reason("arguments only known on the phone")
 				f.Title = render(textDynamic, vars)
 				applySpecial(scope, ws, &f)
 				return f
@@ -437,7 +430,7 @@ func (c *Classifier) evalWith(rs ruleSet, scope string, ws []Word) Finding {
 	if r.Check != "" && r.AnyArgs && hasDynamic(ws[1:]) {
 		// Checks look for dangerous words; a word only known on the phone
 		// could be one of them.
-		f.Level, f.Reason = Red, "arguments only known on the phone"
+		f.Level, f.Reason = Red, reason("arguments only known on the phone")
 		f.Title = render(textDynamic, vars)
 		applySpecial(scope, ws, &f)
 		return f

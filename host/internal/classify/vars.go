@@ -21,7 +21,7 @@ func ownName(name string) bool { return ownNameRE.MatchString(name) }
 // nameFinding is for an assignment, in any form, to a name that is not the
 // script's own.
 func nameFinding(name string) Finding {
-	return unanalysable("shell.assign", "sets "+name+", a variable that is not the script's own (lower-case names only)", []string{name}, textAssign)
+	return unanalysable("shell.assign", reason("sets {name}, a variable that is not the script's own (lower-case names only)", "name", name), []string{name}, textAssign)
 }
 
 // commandEnv are the only variables a command may get in its environment
@@ -36,7 +36,7 @@ var commandEnv = map[string]bool{
 func (e *evaluator) assign(a *syntax.Assign) {
 	if a.Name == nil || a.Index != nil || a.Array != nil || a.Append || a.Naked {
 		// a[i]=…, a=(…), a+=… and whatever else the parser reads here.
-		e.unsupported("assignment to an array or with +=", a)
+		e.unsupported(reason("assignment to an array or with +="), a)
 		return
 	}
 	if !ownName(a.Name.Value) {
@@ -50,7 +50,7 @@ func (e *evaluator) assign(a *syntax.Assign) {
 // envAssign checks `NAME=value command`.
 func (e *evaluator) envAssign(a *syntax.Assign) {
 	if a.Name == nil || a.Index != nil || a.Array != nil || a.Append || a.Naked {
-		e.unsupported("assignment to an array or with +=", a)
+		e.unsupported(reason("assignment to an array or with +="), a)
 		return
 	}
 	var v Word
@@ -58,7 +58,7 @@ func (e *evaluator) envAssign(a *syntax.Assign) {
 		v = e.word(a.Value)
 	}
 	if !commandEnv[a.Name.Value] || v.Dynamic {
-		e.out = append(e.out, unanalysable("shell.assign", "sets "+a.Name.Value+" in the environment of a command", []string{a.Name.Value}, textAssign))
+		e.out = append(e.out, unanalysable("shell.assign", reason("sets {value} in the environment of a command", "value", a.Name.Value), []string{a.Name.Value}, textAssign))
 	}
 }
 

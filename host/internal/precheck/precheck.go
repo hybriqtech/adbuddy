@@ -35,7 +35,7 @@ type Env struct {
 // Prepared is the outcome of the prechecks.
 type Prepared struct {
 	Level   classify.Level // may be raised to Red
-	Reason  string         // why it was raised
+	Reason  classify.Text  // why it was raised, in both languages (the detail of the question)
 	Inverse []string       // adb argv that undoes the change; nil when none
 	Backups []string       // files saved under Env.BackupDir
 	// After, when set, computes the inverse once the command has run
@@ -76,7 +76,7 @@ func Prepare(ctx context.Context, dev Device, op *classify.Op, level classify.Le
 		err = fmt.Errorf("unknown change %q", op.Kind)
 	}
 	if err != nil {
-		return Prepared{Level: classify.Red, Reason: "could not check the phone before the change: " + err.Error()}
+		return Prepared{Level: classify.Red, Reason: classify.Cat(classify.Text{EN: "could not check the phone before the change: ", ES: "no se pudo comprobar el móvil antes del cambio: "}, classify.Same(err.Error()))}
 	}
 	return p
 }
@@ -137,7 +137,7 @@ func pmUninstallUser(ctx context.Context, dev Device, a map[string]string, p *Pr
 			return nil
 		}
 	}
-	p.Level, p.Reason = classify.Red, "not a system app: uninstalling it cannot be undone"
+	p.Level, p.Reason = classify.Red, classify.Text{EN: "not a system app: uninstalling it cannot be undone", ES: "no es una app del sistema: desinstalarla no se puede deshacer"}
 	return nil
 }
 
@@ -238,7 +238,7 @@ func mv(ctx context.Context, dev Device, a map[string]string, p *Prepared) error
 		return err
 	}
 	if k != "none" {
-		p.Level, p.Reason = classify.Red, "the destination already exists and would be overwritten or merged"
+		p.Level, p.Reason = classify.Red, classify.Text{EN: "the destination already exists and would be overwritten or merged", ES: "el destino ya existe y se sobrescribiría o se mezclaría"}
 		return nil
 	}
 	p.Inverse = shellArgv("mv", a["dst"], a["src"])
@@ -262,7 +262,7 @@ func newFile(ctx context.Context, dev Device, a map[string]string, p *Prepared) 
 		return err
 	}
 	if k != "none" {
-		p.Level, p.Reason = classify.Red, "would overwrite an existing file"
+		p.Level, p.Reason = classify.Red, classify.Text{EN: "would overwrite an existing file", ES: "sobrescribiría un fichero existente"}
 		return nil
 	}
 	p.Inverse = shellArgv("rm", "-f", a["path"])
@@ -318,7 +318,7 @@ func push(ctx context.Context, dev Device, a map[string]string, env Env, p *Prep
 		return err
 	}
 	if st.IsDir() {
-		p.Level, p.Reason = classify.Red, "pushing a folder cannot be undone file by file"
+		p.Level, p.Reason = classify.Red, classify.Text{EN: "pushing a folder cannot be undone file by file", ES: "enviar una carpeta no se puede deshacer fichero a fichero"}
 		return nil
 	}
 	target := a["remote"]
@@ -332,12 +332,12 @@ func push(ctx context.Context, dev Device, a map[string]string, env Env, p *Prep
 			return err
 		}
 	} else if strings.HasSuffix(target, "/") {
-		p.Level, p.Reason = classify.Red, "the destination folder does not exist"
+		p.Level, p.Reason = classify.Red, classify.Text{EN: "the destination folder does not exist", ES: "la carpeta de destino no existe"}
 		return nil
 	}
 	switch k {
 	case "dir":
-		p.Level, p.Reason = classify.Red, "the destination is a folder"
+		p.Level, p.Reason = classify.Red, classify.Text{EN: "the destination is a folder", ES: "el destino es una carpeta"}
 	case "none":
 		p.Inverse = shellArgv("rm", "-f", target)
 	case "file":

@@ -12,7 +12,7 @@ import "strings"
 // admittedBuiltins are the builtins and aliases a script may use. A nil
 // grammar takes any word the evaluator admits; the wrappers (command,
 // builtin, exec, nohup) are read by unwrap.
-var admittedBuiltins = map[string]func(e *evaluator, ws []Word) string{
+var admittedBuiltins = map[string]func(e *evaluator, ws []Word) Text{
 	"echo": nil, "true": nil, "false": nil, ":": nil, "cd": nil, "pwd": nil,
 	"command": nil, "builtin": nil, "exec": nil, "nohup": nil,
 	"[":        nil, // checked by testFindings
@@ -56,52 +56,52 @@ func (e *evaluator) builtin(ws []Word) []Finding {
 		if grammar == nil {
 			return nil
 		}
-		if why := grammar(e, ws); why != "" {
+		if why := grammar(e, ws); !why.Empty() {
 			return []Finding{unanalysable("shell.builtin", why, vals, textUnsupported)}
 		}
 		return nil
 	}
 	if otherBuiltins[name] {
-		return []Finding{unanalysable("shell.builtin", name+" is a shell builtin ADBuddy does not analyse", vals, textUnsupported)}
+		return []Finding{unanalysable("shell.builtin", reason("{name} is a shell builtin ADBuddy does not analyse", "name", name), vals, textUnsupported)}
 	}
 	return nil
 }
 
 // readGrammar is `read [-r] name…`, with names of the script's own. Without
 // a name read sets REPLY.
-func readGrammar(_ *evaluator, ws []Word) string {
+func readGrammar(_ *evaluator, ws []Word) Text {
 	args := ws[1:]
 	if len(args) > 0 && !args[0].Dynamic && args[0].Value == "-r" {
 		args = args[1:]
 	}
 	if len(args) == 0 {
-		return "read without a variable name"
+		return reason("read without a variable name")
 	}
 	for _, a := range args {
 		if a.Dynamic || !ownName(a.Value) {
-			return "read into a variable that is not the script's own (lower-case names only)"
+			return reason("read into a variable that is not the script's own (lower-case names only)")
 		}
 	}
-	return ""
+	return Text{}
 }
 
 // countGrammar is exit, break and continue: no argument, a number or $?.
-func countGrammar(e *evaluator, ws []Word) string {
+func countGrammar(e *evaluator, ws []Word) Text {
 	switch {
 	case len(ws) == 1:
-		return ""
+		return Text{}
 	case len(ws) == 2 && !ws[1].Dynamic && isDigits(ws[1].Value):
-		return ""
+		return Text{}
 	case len(ws) == 2 && testKind(ws[1], e.numeric) == testNumber:
-		return ""
+		return Text{}
 	}
-	return ws[0].Value + " with an argument that is not a number"
+	return reason("{value} with an argument that is not a number", "value", ws[0].Value)
 }
 
 // printfGrammar refuses -v, which stores the output in a shell variable, and
 // an option only known on the phone, which may be -v. On the phone printf is
 // a program, not a builtin; a build of mksh with its own printf would take it.
-func printfGrammar(_ *evaluator, ws []Word) string {
+func printfGrammar(_ *evaluator, ws []Word) Text {
 	// Only the options before the format count: the first word that is
 	// not one ends them.
 	for _, a := range ws[1:] {
@@ -109,20 +109,20 @@ func printfGrammar(_ *evaluator, ws []Word) string {
 			break
 		}
 		if a.Value == "-v" {
-			return "printf -v writes to a shell variable"
+			return reason("printf -v writes to a shell variable")
 		}
 	}
-	return ""
+	return Text{}
 }
 
 // staticGrammar takes only static words.
-func staticGrammar(_ *evaluator, ws []Word) string {
+func staticGrammar(_ *evaluator, ws []Word) Text {
 	for _, a := range ws[1:] {
 		if a.Dynamic {
-			return ws[0].Value + " with an argument only known on the phone"
+			return reason("{value} with an argument only known on the phone", "value", ws[0].Value)
 		}
 	}
-	return ""
+	return Text{}
 }
 
 // setOptions are the options of set a script may turn on or off: they
@@ -137,23 +137,23 @@ var (
 
 // setGrammar is `set` with those options only: no positional parameters, no
 // -A (an array) and nothing that changes how words expand.
-func setGrammar(_ *evaluator, ws []Word) string {
+func setGrammar(_ *evaluator, ws []Word) Text {
 	for i := 1; i < len(ws); i++ {
 		a := ws[i]
 		if a.Dynamic || len(a.Value) < 2 || (a.Value[0] != '-' && a.Value[0] != '+') {
-			return "set with positional parameters or an argument only known on the phone"
+			return reason("set with positional parameters or an argument only known on the phone")
 		}
 		flags := a.Value[1:]
 		if flags == "o" {
 			if i+1 >= len(ws) || ws[i+1].Dynamic || !setNames[ws[i+1].Value] {
-				return "set -o with an option ADBuddy does not admit"
+				return reason("set -o with an option ADBuddy does not admit")
 			}
 			i++
 			continue
 		}
 		if strings.Trim(flags, setLetters) != "" {
-			return "set " + a.Value + " is not an option ADBuddy admits"
+			return reason("set {value} is not an option ADBuddy admits", "value", a.Value)
 		}
 	}
-	return ""
+	return Text{}
 }

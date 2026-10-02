@@ -23,7 +23,7 @@ var textArith = Text{
 }
 
 func arithFinding(what string) Finding {
-	return unanalysable("shell.script", "arithmetic on a value not proven to be a number", []string{what}, textArith)
+	return unanalysable("shell.script", reason("arithmetic on a value not proven to be a number"), []string{what}, textArith)
 }
 
 // arithOK reports an arithmetic expansion that can only see numbers.
@@ -148,13 +148,13 @@ var (
 // neighbours that cannot reach a variable the script sets to something that
 // is not a number (see inert).
 func (e *evaluator) testFindings(ws []Word) []Finding {
-	bad := func(why string) []Finding {
+	bad := func(why Text) []Finding {
 		return []Finding{unanalysable("shell.script", why, values(ws), textArith)}
 	}
 	args := ws[1:]
 	if ws[0].Value == "[" {
 		if len(args) == 0 || args[len(args)-1].Dynamic || args[len(args)-1].Value != "]" {
-			return bad("[ without a closing ]")
+			return bad(reason("[ without a closing ]"))
 		}
 		args = args[:len(args)-1]
 	}
@@ -162,15 +162,15 @@ func (e *evaluator) testFindings(ws []Word) []Finding {
 	for i, w := range args {
 		kinds[i] = testKind(w, e.numeric)
 		if kinds[i] == testUnread {
-			return bad("a word of test that may split into operators on the phone")
+			return bad(reason("a word of test that may split into operators on the phone"))
 		}
 		if kinds[i] == testLiteral && (w.Value == "-v" || w.Value == "-o" && !testJoins(args, i)) {
-			return bad("test " + w.Value + " reads a shell variable or option")
+			return bad(reason("test {value} reads a shell variable or option", "value", w.Value))
 		}
 	}
 	p := &testParser{args: args, kinds: kinds}
 	if !p.expr() || p.pos != len(args) {
-		return bad("a test expression ADBuddy cannot read")
+		return bad(reason("a test expression ADBuddy cannot read"))
 	}
 	for i := range args {
 		if kinds[i] != testData || i == 0 || i == len(args)-1 {
@@ -178,7 +178,7 @@ func (e *evaluator) testFindings(ws []Word) []Finding {
 		}
 		for _, j := range []int{i - 1, i + 1} {
 			if !e.inert(args[j], kinds[j]) {
-				return bad("a word of test only known on the phone could be an integer operator")
+				return bad(reason("a word of test only known on the phone could be an integer operator"))
 			}
 		}
 	}

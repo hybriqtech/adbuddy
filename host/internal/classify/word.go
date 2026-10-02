@@ -25,11 +25,11 @@ func (e *evaluator) parts(parts []syntax.WordPart, quoted bool) {
 			// in the word of ${x:-…}, and there mksh takes them as text and
 			// expands what they hold: echo "${x:-'$(reboot)'}" runs reboot.
 			if quoted {
-				e.unsupported("quotes inside an expansion in double quotes", p)
+				e.unsupported(reason("quotes inside an expansion in double quotes"), p)
 			}
 		case *syntax.DblQuoted:
 			if quoted {
-				e.unsupported("quotes inside an expansion in double quotes", p)
+				e.unsupported(reason("quotes inside an expansion in double quotes"), p)
 				continue
 			}
 			e.parts(p.Parts, true)
@@ -37,7 +37,7 @@ func (e *evaluator) parts(parts []syntax.WordPart, quoted bool) {
 			e.param(p, quoted)
 		case *syntax.CmdSubst:
 			if p.TempFile || p.ReplyVar {
-				e.unsupported("mksh ${ …;} substitution", p)
+				e.unsupported(reason("mksh ${ …;} substitution"), p)
 				continue
 			}
 			e.stmts(p.Stmts)
@@ -47,7 +47,7 @@ func (e *evaluator) parts(parts []syntax.WordPart, quoted bool) {
 			}
 		default:
 			// <(…), extended globs and whatever the parser learns next.
-			e.unsupported("shell expansion", part)
+			e.unsupported(reason("shell expansion"), part)
 		}
 	}
 }
@@ -68,20 +68,20 @@ var paramOps = map[syntax.ParExpOperator]bool{
 func (e *evaluator) param(p *syntax.ParamExp, quoted bool) {
 	if p.Param == nil || p.Excl || p.Width || p.Flags != nil || p.NestedParam != nil || p.Index != nil ||
 		len(p.Modifiers) > 0 || p.Slice != nil || p.Repl != nil || p.Names != 0 {
-		e.unsupported("parameter expansion", p)
+		e.unsupported(reason("parameter expansion"), p)
 		return
 	}
 	name := p.Param.Value
 	if !nameRE.MatchString(name) && !(name == "?" || name == "#") {
 		// $1, $@, $*, $$, $!, $-…
-		e.unsupported("parameter $"+name, p)
+		e.unsupported(reason("parameter ${name}", "name", name), p)
 		return
 	}
 	if p.Exp == nil {
 		return
 	}
 	if !paramOps[p.Exp.Op] {
-		e.unsupported("parameter expansion ${"+name+p.Exp.Op.String()+"…}", p)
+		e.unsupported(reason("parameter expansion ${{name}{op}…}", "name", name, "op", p.Exp.Op.String()), p)
 		return
 	}
 	if p.Exp.Word != nil {

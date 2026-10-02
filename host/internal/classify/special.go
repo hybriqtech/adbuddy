@@ -13,16 +13,16 @@ const ADBuddyPackage = "tech.hybriq.adbuddy"
 
 // adbAlwaysRed are adb commands that cut the connection or change how the
 // phone listens; remote mode belongs to the host, not the agent.
-var adbAlwaysRed = map[string]string{
-	"kill-server":       "stops the adb server",
-	"disconnect":        "disconnects the phone",
-	"usb":               "restarts adbd",
-	"tcpip":             "opens a network port on the phone",
-	"reconnect":         "drops the connection",
-	"root":              "restarts adbd",
-	"unroot":            "restarts adbd",
-	"reboot":            "restarts the phone",
-	"reboot-bootloader": "restarts the phone",
+var adbAlwaysRed = map[string]Text{
+	"kill-server":       reason("stops the adb server"),
+	"disconnect":        reason("disconnects the phone"),
+	"usb":               reason("restarts adbd"),
+	"tcpip":             reason("opens a network port on the phone"),
+	"reconnect":         reason("drops the connection"),
+	"root":              reason("restarts adbd"),
+	"unroot":            reason("restarts adbd"),
+	"reboot":            reason("restarts the phone"),
+	"reboot-bootloader": reason("restarts the phone"),
 }
 
 // sensitiveSettings would cut the connection, disable ADBuddy's service or
@@ -36,16 +36,12 @@ var sensitiveSettings = map[string]bool{
 }
 
 func applySpecial(scope string, ws []Word, f *Finding) {
-	if reason := specialReason(scope, ws, f.Level); reason != "" {
+	if why := specialReason(scope, ws, f.Level); !why.Empty() {
 		f.Level = Red
 		f.Special = true
 		f.Op = nil
 		setIdentity(scope, ws, f)
-		if f.Reason == "" {
-			f.Reason = reason
-		} else {
-			f.Reason = reason + "; " + f.Reason
-		}
+		f.Reason = Join(why, f.Reason)
 	}
 }
 
@@ -86,7 +82,7 @@ func revealsNotifications(v []string) bool {
 	return false
 }
 
-func specialReason(scope string, ws []Word, level Level) string {
+func specialReason(scope string, ws []Word, level Level) Text {
 	v := values(ws)
 	name := v[0]
 	if scope == "adb" {
@@ -95,45 +91,45 @@ func specialReason(scope string, ws []Word, level Level) string {
 		}
 		switch {
 		case strings.HasPrefix(name, "reboot"):
-			return "restarts the phone"
+			return reason("restarts the phone")
 		case name == "remount":
-			return "may restart the phone"
+			return reason("may restart the phone")
 		case name == "bugreport":
 			// The report includes dumpsys activity (view tree and texts of
 			// what is on screen) and notification.
-			return "the bug report includes what is on screen and the notifications"
+			return reason("the bug report includes what is on screen and the notifications")
 		case name == "reverse" && !(len(v) == 2 && v[1] == "--list"):
-			return "may change ADBuddy's chat tunnel"
+			return reason("may change ADBuddy's chat tunnel")
 		case level != Green && mentionsADBuddy(v):
-			return "affects the ADBuddy app"
+			return reason("affects the ADBuddy app")
 		}
-		return ""
+		return Text{}
 	}
 	switch name {
 	case "settings":
 		verb := strings.ToLower(subOf(ws)) // settings compares verbs ignoring case
 		if verb == "reset" {
-			return "resets settings, including the connection ones"
+			return reason("resets settings, including the connection ones")
 		}
 		if verb == "put" || verb == "delete" {
 			for i, w := range v[2:] {
 				if sensitiveSettings[w] {
-					return "setting " + w + " affects the connection, ADBuddy or the phone's security"
+					return reason("setting {key} affects the connection, ADBuddy or the phone's security", "key", w)
 				}
 				if ws[2+i].Dynamic {
 					// On the phone it may split or expand into a sensitive key.
-					return "a setting only known on the phone could affect the connection, ADBuddy or the phone's security"
+					return reason("a setting only known on the phone could affect the connection, ADBuddy or the phone's security")
 				}
 			}
 		}
 	case "svc":
 		if len(v) > 1 && (v[1] == "wifi" || v[1] == "power" || (v[1] == "usb" && len(v) > 2 && strings.HasPrefix(v[2], "set"))) {
-			return "may cut the connection or turn the phone off"
+			return reason("may cut the connection or turn the phone off")
 		}
 	case "ip", "ifconfig":
 		for _, w := range v[1:] {
 			if w == "down" || w == "del" || w == "delete" || w == "flush" || w == "set" {
-				return "may cut the network"
+				return reason("may cut the network")
 			}
 		}
 	case "content":
@@ -142,51 +138,51 @@ func specialReason(scope string, ws []Word, level Level) string {
 		// Uri.getAuthority() decodes %xx, so compare the decoded words.
 		all := strings.ToLower(percentDecode(strings.Join(v, " ")))
 		if strings.Contains(all, ADBuddyPackage) {
-			return "talks to the ADBuddy app's own channel or files"
+			return reason("talks to the ADBuddy app's own channel or files")
 		}
 		if hasDynamic(ws[1:]) {
 			// $(…), $VAR, a loop variable or xargs' stdin: on the phone it
 			// may become ADBuddy's authority.
-			return "arguments only known on the phone could point at the ADBuddy app's own channel"
+			return reason("arguments only known on the phone could point at the ADBuddy app's own channel")
 		}
 		if level != Green && strings.Contains(all, "settings") {
-			return "changes system settings directly, including the connection ones"
+			return reason("changes system settings directly, including the connection ones")
 		}
 	case "am":
-		if r := amSpecial(ws); r != "" {
+		if r := amSpecial(ws); !r.Empty() {
 			return r
 		}
 	case "cmd":
 		if len(v) > 1 && (v[1] == "wifi" || v[1] == "connectivity") && level != Green {
-			return "may cut the Wi-Fi connection"
+			return reason("may cut the Wi-Fi connection")
 		}
 	case "screenrecord":
-		return "records what is on screen"
+		return reason("records what is on screen")
 	case "dumpsys":
 		if revealsNotifications(v) {
-			return "prints the text of every app's notifications, codes included"
+			return reason("prints the text of every app's notifications, codes included")
 		}
 	case "reboot", "stop", "start":
-		return "may restart the phone or adbd"
+		return reason("may restart the phone or adbd")
 	case "setprop":
 		if len(v) > 1 && (strings.HasPrefix(v[1], "service.adb") || strings.HasPrefix(v[1], "persist.adb") ||
 			strings.HasPrefix(v[1], "ctl.") || strings.Contains(v[1], "usb")) {
-			return "changes how adbd runs"
+			return reason("changes how adbd runs")
 		}
 	}
 	if level != Green && mentionsADBuddy(v) {
-		return "affects the ADBuddy app"
+		return reason("affects the ADBuddy app")
 	}
 	if level != Green && touchesCriticalApp(name, ws, v) {
-		return "affects an app the phone needs to stay connected or to start"
+		return reason("affects an app the phone needs to stay connected or to start")
 	}
 	if level != Green && resetsEveryApp(name, v) {
-		return "resets the permissions, battery exemptions or app ops of every app, ADBuddy's included"
+		return reason("resets the permissions, battery exemptions or app ops of every app, ADBuddy's included")
 	}
 	if level != Green && (name == "pm" || name == "appops" || name == "am" || (name == "dumpsys" && len(v) > 1 && v[1] == "deviceidle")) && hasDynamic(ws[1:]) {
-		return "arguments only known on the phone could name ADBuddy or a critical app"
+		return reason("arguments only known on the phone could name ADBuddy or a critical app")
 	}
-	return ""
+	return Text{}
 }
 
 // amMemory are am subcommands that read or change an app's memory (in a
@@ -213,22 +209,22 @@ func amStartMemoryOption(v string) bool {
 	return false
 }
 
-func amSpecial(ws []Word) string {
+func amSpecial(ws []Word) Text {
 	sub, at := subAt(ws)
 	if amMemory[sub] {
-		return "reads or changes an app's memory"
+		return reason("reads or changes an app's memory")
 	}
 	for _, w := range ws[1:] {
 		if amStartMemoryOption(w.Value) {
-			return "reads or changes the memory of the app it opens"
+			return reason("reads or changes the memory of the app it opens")
 		}
 	}
 	if sub == "instrument" && !instrumentWaits(ws[at+1:]) {
 		// It returns at once and the instrumentation, which can drive the
 		// screen, keeps running.
-		return "am instrument without -w keeps running after it returns"
+		return reason("am instrument without -w keeps running after it returns")
 	}
-	return ""
+	return Text{}
 }
 
 // instrumentValues are the am instrument options that take values. A few
