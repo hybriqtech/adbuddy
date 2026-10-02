@@ -406,6 +406,7 @@ func mergeGeminiSettings(path string) (changed, created bool, err error) {
 	default:
 		return false, false, fmt.Errorf("%s: \"context.fileName\" is not a string or a list", path)
 	}
+	var kept []any // empty names count as none
 	for _, n := range names {
 		s, ok := n.(string)
 		if !ok {
@@ -414,7 +415,11 @@ func mergeGeminiSettings(path string) (changed, created bool, err error) {
 		if s == "AGENTS.md" {
 			return false, false, nil
 		}
+		if s != "" {
+			kept = append(kept, n)
+		}
 	}
+	names = kept
 	if len(names) == 0 {
 		// Gemini replaces its default (GEMINI.md) with what fileName lists:
 		// without a list of the user's own, keep GEMINI.md loading.

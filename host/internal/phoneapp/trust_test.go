@@ -409,6 +409,13 @@ func TestDefiniteFailureForgetsTheLastGoodAnswer(t *testing.T) {
 	if _, err := vr.Verify(context.Background(), f); !errors.Is(err, ErrNoTrustedApp) || errors.Is(err, ErrSigner) {
 		t.Fatalf("transient: %v", err)
 	}
+	// The good answer survived: the good app, back in place, is still the same.
+	installed(f, testPath, signedBy(ours), 1)
+	if err := vr.Same(context.Background(), f); err != nil {
+		t.Fatalf("Same after a transient failure: %v", err)
+	}
+	installed(f, testPath, other1, 1)
+	delete(f.answers, key)
 	// Definitive: it is signed by someone else.
 	installed(f, testPath, other1, 1)
 	if _, err := vr.Verify(context.Background(), f); !errors.Is(err, ErrSigner) {

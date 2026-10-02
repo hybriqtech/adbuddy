@@ -47,6 +47,8 @@ func TestGeminiSettingsKeepWhatTheUserHas(t *testing.T) {
 		"already there": {`{"context":{"fileName":["AGENTS.md","B.md"]}}`, []any{"AGENTS.md", "B.md"}},
 		"empty context": {`{"context":{}}`, []any{"GEMINI.md", "AGENTS.md"}},
 		"empty list":    {`{"context":{"fileName":[]}}`, []any{"GEMINI.md", "AGENTS.md"}},
+		"empty string":  {`{"context":{"fileName":""}}`, []any{"GEMINI.md", "AGENTS.md"}},
+		"empty entries": {`{"context":{"fileName":["","A.md"]}}`, []any{"A.md", "AGENTS.md"}},
 		"no context":    {`{"model":"x"}`, []any{"GEMINI.md", "AGENTS.md"}},
 	}
 	for name, c := range cases {
