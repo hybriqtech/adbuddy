@@ -35,3 +35,5 @@ Task 2: complete — commit 0e2276c; opus review ✅ (minors only, ignored).
 Task 3a: complete — commit 30e7311 (implementer report OK). Ruling: no per-subtask review for 3a/3b; one opus review of T3 (3a+3b+3c) acts as T3 task review AND final branch review (supervisor asked for economy; T1/T2 already reviewed) — cost if wrong: one extra fix round. Concern to carry: Windows Peer copy keeps released handle value; Peer.Same valid only inside the synchronous handler — reviewer must check 3b/3c callers.
 
 Task 3b: complete — commit b49b1b6. Carry: T3c must not pass pid<=0 to InAgentTree; Linux/macOS paths only verified in CI.
+
+Task 3c: complete — commit 8657b15. Open: Windows Conn.peer copy keeps released handle (nobody calls Same() outside handler) -> pendientes.
