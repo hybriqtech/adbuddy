@@ -28,6 +28,9 @@ class AgentNotificationListener : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        // The system unbinds the listener when the access is revoked: the user's mark goes at once, without waiting
+        // for the gate or the screen to look (ListenerIsReadOnlyTest keeps this call here).
+        NotificationGate.onUnbound { NotificationConsent.of(this).revoke() }
         if (current === this) {
             current = null
             _connected.value = false
@@ -35,6 +38,7 @@ class AgentNotificationListener : NotificationListenerService() {
     }
 
     override fun onDestroy() {
+        NotificationGate.onUnbound { NotificationConsent.of(this).revoke() }
         if (current === this) {
             current = null
             _connected.value = false

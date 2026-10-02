@@ -258,4 +258,27 @@ class ListenerIsReadOnlyTest {
         assertTrue(users.toString(), allowed.containsAll(users))
         assertTrue(users.toString(), "NotificationReport.kt" in users)
     }
+
+    /** The body, braces included, of `override fun name(...) {...}` in [src] (already without comments and strings). */
+    private fun body(src: String, name: String): String {
+        val at = src.indexOf("override fun $name(")
+        assertTrue("no override of $name", at >= 0)
+        val open = src.indexOf('{', at)
+        var depth = 0
+        for (i in open until src.length) {
+            if (src[i] == '{') depth++
+            if (src[i] == '}' && --depth == 0) return src.substring(open, i + 1)
+        }
+        error("$name is not closed")
+    }
+
+    @Test fun theListenerClearsTheUsersMarkWhenTheSystemUnbindsIt() {
+        // Revoking the access unbinds the service: the mark goes at once, even if nobody is looking (the gate and the
+        // screen only see the revoke when asked, and the agent could turn the switch back on before that).
+        val src = code(File(dir, "AgentNotificationListener.kt"))
+        val call = Regex("NotificationGate\\.onUnbound\\s*\\{[^}]*NotificationConsent\\.of\\(this\\)\\.revoke\\(\\)[^}]*}")
+        for (name in listOf("onListenerDisconnected", "onDestroy")) {
+            assertTrue("$name does not clear the mark", call.containsMatchIn(body(src, name)))
+        }
+    }
 }
