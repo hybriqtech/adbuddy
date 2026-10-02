@@ -19,6 +19,13 @@ on:
 permissions:
   contents: read
 
+# A new push to the same branch cancels the run in progress: two runs would
+# share the emulator port and RAM of the runner. Cancelling still runs the steps
+# with if: always(), so the emulator is stopped.
+concurrency:
+  group: emulator-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   mksh:
     name: oracle against the emulator's mksh
@@ -150,6 +157,20 @@ jobs:
           "$ADB" devices -l || true
           timeout 20 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" shell getprop | grep -E "boot|init.svc.(surfaceflinger|zygote|system_server)" || true
           timeout 30 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" logcat -d -b crash,system | tail -n 150 || true
+      # The same on Windows, with the job's own adb server (never 5037). The log
+      # is the last emulator started (android-37 or android-34); the AVD of this
+      # step's env is always the job's, so the running one is asked for.
+      - name: Emulator diagnostics (Windows)
+        if: failure() && runner.os == 'Windows'
+        shell: bash
+        env:
+          ANDROID_ADB_SERVER_PORT: ${{ env.ADBUDDY_EMU_ADB_PORT }}
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb.exe"
+          tail -n 200 "${TMPDIR:-/tmp}/adbuddy-emulator.log" || true
+          echo "job AVD: $ADBUDDY_EMU_AVD; running AVD:"
+          timeout 20 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" emu avd name || true
+          "$ADB" devices -l || true
       - name: Stop the emulator
         if: always()
         run: scripts/emulator.sh stop
