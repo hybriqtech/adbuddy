@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -573,5 +576,120 @@ func TestSecretIsNeverSeenHalfWritten(t *testing.T) {
 	}
 	if left, _ := filepath.Glob(filepath.Join(dir, "ipc.secret.*.tmp")); len(left) != 0 {
 		t.Fatalf("temporary files left: %q", left)
+	}
+}
+
+// sizeReader records the largest buffer it is asked to fill: what ReadFrame
+// has reserved by then, measured without looking at the whole heap.
+type sizeReader struct {
+	r   io.Reader
+	max int
+}
+
+func (s *sizeReader) Read(p []byte) (int, error) {
+	s.max = max(s.max, len(p))
+	return s.r.Read(p)
+}
+
+// V29: a header that announces a whole frame does not make ReadFrame reserve
+// it before the bytes arrive: what it holds grows with what was read.
+func TestReadFrameGrowsWithWhatArrives(t *testing.T) {
+	hdr := []byte{FrameRequest, 0, 0, 0, 0}
+	binary.BigEndian.PutUint32(hdr[1:], MaxFrame)
+	r := &sizeReader{r: io.MultiReader(bytes.NewReader(hdr), strings.NewReader("only this"))}
+	_, _, err := ReadFrame(r)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("err %v", err)
+	}
+	if r.max > 64<<10 {
+		t.Fatalf("asked to fill %d bytes at once, for 9 that arrived", r.max)
+	}
+	// A whole frame, larger than the first chunk, still comes back whole.
+	var buf bytes.Buffer
+	want := bytes.Repeat([]byte("0123456789"), 30_000)
+	if err := WriteFrame(&buf, FrameStdout, want); err != nil {
+		t.Fatal(err)
+	}
+	typ, p, err := ReadFrame(&buf)
+	if err != nil || typ != FrameStdout || !bytes.Equal(p, want) {
+		t.Fatalf("%c %d bytes %v", typ, len(p), err)
+	}
+}
+
+// V29: at most maxPreauth connections wait to authenticate at once; one more
+// is closed right away, and the slots free up when those connections go.
+func TestUnauthenticatedConnectionsAreBounded(t *testing.T) {
+	dir := shortDir(t)
+	startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit { return Exit{} })
+	var idle []net.Conn
+	t.Cleanup(func() {
+		for _, c := range idle {
+			c.Close()
+		}
+	})
+	for range maxPreauth {
+		c, err := net.Dial("unix", SocketPath(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		idle = append(idle, c)
+	}
+	extra, err := net.Dial("unix", SocketPath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer extra.Close()
+	_ = extra.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, err = extra.Read(make([]byte, 1))
+	var ne net.Error
+	if err == nil || errors.As(err, &ne) && ne.Timeout() {
+		t.Fatalf("the connection over the limit was kept: %v", err)
+	}
+	for _, c := range idle {
+		c.Close()
+	}
+	idle = nil
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		exit, err := Call(context.Background(), dir, Request{Kind: KindPing}, nil, io.Discard, io.Discard, nil)
+		if err == nil && exit.Code == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("not served again: %+v %v", exit, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// A refused request keeps its slot only until its client is gone: more
+	// refusals in a row than there are slots, and a real request is served.
+	bad, err := json.Marshal(Request{Secret: strings.Repeat("0", 64), Kind: KindPing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range maxPreauth + 8 {
+		c, err := net.Dial("unix", SocketPath(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+		if err := WriteFrame(c, FrameRequest, bad); err != nil {
+			t.Fatalf("refusal %d: %v", i, err)
+		}
+		typ, p, err := ReadFrame(c)
+		c.Close()
+		if err != nil || typ != FrameExit || !strings.Contains(string(p), "unauthorized") {
+			t.Fatalf("refusal %d: %c %q %v", i, typ, p, err)
+		}
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		exit, err := Call(context.Background(), dir, Request{Kind: KindPing}, nil, io.Discard, io.Discard, nil)
+		if err == nil && exit.Code == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("not served after the refusals: %+v %v", exit, err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -246,19 +247,36 @@ func WriteFrame(w io.Writer, typ byte, payload []byte) error {
 	return nil
 }
 
+// frameChunk is the most ReadFrame reserves before the bytes arrive. Past it
+// the buffer doubles only with what has been read, so a header that announces
+// MaxFrame (from a client that has not authenticated yet) costs nothing until
+// the payload really comes.
+const frameChunk = 64 << 10
+
 // ReadFrame reads one frame.
 func ReadFrame(r io.Reader) (byte, []byte, error) {
 	var hdr [5]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return 0, nil, err
 	}
-	n := binary.BigEndian.Uint32(hdr[1:])
+	n := int(binary.BigEndian.Uint32(hdr[1:]))
 	if n > MaxFrame {
 		return 0, nil, fmt.Errorf("frame of %d bytes exceeds %d", n, MaxFrame)
 	}
-	payload := make([]byte, n)
+	payload := make([]byte, min(n, frameChunk))
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return 0, nil, err
+	}
+	for len(payload) < n {
+		start := len(payload)
+		more := min(n-start, start)
+		payload = slices.Grow(payload, more)[:start+more]
+		if _, err := io.ReadFull(r, payload[start:]); err != nil {
+			if errors.Is(err, io.EOF) {
+				err = io.ErrUnexpectedEOF // part of the frame came
+			}
+			return 0, nil, err
+		}
 	}
 	return hdr[0], payload, nil
 }
