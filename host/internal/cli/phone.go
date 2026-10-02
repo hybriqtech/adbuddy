@@ -65,6 +65,7 @@ type phoneLink struct {
 	sess     session.Info     // the agent's session, as shown on the phone
 	activity string           // the agent's last adb command as the journal describes it (session.state.activity)
 	manager  *session.Manager // nil until serve starts the session
+	typer    *session.Typer   // the phone's typing into manager (onTermInput, onInterrupt)
 	chat     chatState        // phone_chat.go
 	term     termState        // phone_term.go
 	files    filesState       // phone_files.go
@@ -394,7 +395,7 @@ func (l *phoneLink) sessionInfo(i session.Info) {
 // useSession gives the chat area the agent's session.
 func (l *phoneLink) useSession(m *session.Manager) {
 	l.mu.Lock()
-	l.manager = m
+	l.manager, l.typer = m, m.NewTyper()
 	l.mu.Unlock()
 	l.subscribeTerm(m) // phone_term.go
 }

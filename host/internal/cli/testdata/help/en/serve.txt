@@ -1,6 +1,7 @@
 Run the ADBuddy host in this terminal. It classifies every adb command the agent
 runs, journals it, shows it here and asks you before anything irreversible.
-Keep it open and start the agent in another terminal with `adbuddy run`.
+It also starts the agent; `--no-agent` runs only the host, and you start the agent
+yourself in another terminal with `adbuddy run`.
 
 Usage:
   adbuddy serve [flags]

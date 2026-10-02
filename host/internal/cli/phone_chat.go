@@ -338,11 +338,19 @@ func (l *phoneLink) onChatSend(m bridge.Message) {
 		l.fail(m, bridge.CodeBusy, why)
 		return
 	}
-	if err := mgr.Paste(text); err != nil {
+	// The writer asks agentBusy again, and the screen, right before the
+	// text and before its Enter: a question may come while it waits.
+	if err := mgr.Paste(text, l.agentBusy); err != nil {
 		release()
-		if errors.Is(err, session.ErrNoAgent) {
+		var be *session.BusyError
+		switch {
+		case errors.As(err, &be):
+			l.fail(m, bridge.CodeBusy, be.Why)
+		case errors.Is(err, session.ErrBusy):
+			l.fail(m, bridge.CodeBusy, "The agent is not reading its input. Try again in a moment.")
+		case errors.Is(err, session.ErrNoAgent):
 			l.fail(m, bridge.CodeNoAgent, "The agent is not running. Start a new conversation.")
-		} else {
+		default:
 			l.fail(m, bridge.CodeFailed, "Could not type the message into the agent.")
 		}
 		return
@@ -401,7 +409,21 @@ func (l *phoneLink) onSessionStop(m bridge.Message) {
 
 // onInterrupt types ESC, which interrupts the agent.
 func (l *phoneLink) onInterrupt(bridge.Message) {
-	if mgr := l.session(); mgr != nil {
-		_ = mgr.Input([]byte{0x1b})
+	l.typeKeys([]byte{0x1b})
+}
+
+// typeKeys types what the phone sends (terminal.input, the interrupt's ESC)
+// without waiting for the agent's terminal (V08): when the agent is not
+// reading, the keys are dropped and the person is told once for each run of
+// drops (session.Typer).
+func (l *phoneLink) typeKeys(p []byte) {
+	l.mu.Lock()
+	ty := l.typer
+	l.mu.Unlock()
+	if ty == nil {
+		return
+	}
+	if err := ty.Input(p); errors.Is(err, session.ErrDropped) {
+		l.publishEvent(bridge.TypeNotice, bridge.Notice{Level: "info", Text: l.lang.T("notice.typing_dropped")})
 	}
 }

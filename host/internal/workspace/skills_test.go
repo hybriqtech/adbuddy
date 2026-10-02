@@ -116,3 +116,17 @@ func TestSkillsContainNothingPrivateOrUnsafe(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// V31: the guard also blocks for a notification or a window it cannot read, not
+// only for a protected app; the home-screen skill must say so, with the words
+// the guard itself uses (daemon.screenProtectedReason).
+func TestHomeScreenSkillSaysTheScreenCanBeProtectedForOtherReasons(t *testing.T) {
+	b, err := fs.ReadFile(Skills(), "home-screen/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "something on the screen is protected (a protected app, a notification or a window ADBuddy cannot read"
+	if !strings.Contains(string(b), want) {
+		t.Errorf("home-screen/SKILL.md lacks %q", want)
+	}
+}

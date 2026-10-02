@@ -46,7 +46,17 @@ type sentText struct {
 	at   time.Time
 }
 
-const keepSent = 16
+const (
+	keepSent = 16 // how many chat.send texts are kept: the oldest leave first
+	// sentTTL is how long a chat.send text may wait for its prompt to show in
+	// the transcript: Claude Code can be slow to write it (a long turn that
+	// queues it), and a prompt that was late came out again as typed in the
+	// terminal.
+	sentTTL = 10 * time.Minute
+)
+
+// agentNow is the clock of sentText, a variable for the tests.
+var agentNow = time.Now
 
 // adapter is the state of the Claude Code adapter for the current
 // conversation.
@@ -65,6 +75,7 @@ type adapter struct {
 	held        bool      // a question was left to Claude Code's dialog on the terminal: until Stop, a prompt or the end (V05)
 	perms       map[string]*pendingPerm
 	order       []string
+	unbound     []unboundTool // tool uses of the transcript no card is tied to (phone_perm.go)
 	lastPerm    time.Time
 	cfgDir      string // Claude Code's configuration directory; "" = the user's
 	// pollMu serializes reads of the transcript (the loop and a Stop's).
@@ -108,6 +119,7 @@ func (l *phoneLink) adapterConversation(conv string, stopped bool) {
 	a.cancel, a.tail = nil, nil
 	a.active, a.degraded, a.hookState = false, false, ""
 	a.lastText, a.fallbacks, a.attention, a.droppedSeen, a.held = "", nil, time.Time{}, 0, false
+	a.unbound, a.sent = nil, nil
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -137,25 +149,36 @@ func (l *phoneLink) noteSent(text string) {
 	a := &l.adapter
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.sent = append(a.sent, sentText{claudecode.Normalize(text), time.Now()})
+	a.sent = append(a.sent, sentText{claudecode.Normalize(text), agentNow()})
 	if len(a.sent) > keepSent {
 		a.sent = a.sent[len(a.sent)-keepSent:]
 	}
 }
 
 // wasSent reports whether a prompt of the transcript is a recent chat.send
-// (the prompt may carry the attachments' lines after the text).
+// (the prompt may carry the attachments' lines after the text). The text is
+// forgotten when it matches: one chat.send is one prompt, so the same words
+// typed in the terminal later are shown.
 func (l *phoneLink) wasSent(prompt string) bool {
 	a := &l.adapter
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	now := agentNow()
 	p := claudecode.Normalize(prompt)
+	live := a.sent[:0:0]
+	found := false
 	for _, s := range a.sent {
-		if s.text != "" && time.Since(s.at) < 2*time.Minute && strings.HasPrefix(p, s.text) {
-			return true
+		if now.Sub(s.at) >= sentTTL {
+			continue // too old: it never will show
 		}
+		if !found && s.text != "" && strings.HasPrefix(p, s.text) {
+			found = true // consumed
+			continue
+		}
+		live = append(live, s)
 	}
-	return false
+	a.sent = live
+	return found
 }
 
 // handleHook answers an `adbuddy hook <event>` (spec M4 §3.3): the payload is
@@ -331,6 +354,7 @@ func (l *phoneLink) onSessionEnd() {
 	cancel := a.cancel
 	a.cancel, a.tail = nil, nil
 	a.active, a.hookState, a.attention, a.held = false, "", time.Time{}, false
+	a.unbound = nil
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -458,10 +482,12 @@ func (l *phoneLink) apply(e claudecode.Event) {
 			of = "a_" + e.MessageOf // the same namespace as the message it hangs from
 		}
 		l.publishEvent(bridge.TypeToolActivity, bridge.ToolActivity{ID: e.ToolID, MessageID: of, Summary: e.Summary, Status: e.Status})
-		if e.Status != "running" {
+		if e.Status == "running" {
+			l.toolStarted(e.ToolID, e.ToolKey)
+		} else {
 			// The tool that asked ended: it was answered on the terminal
 			// (spec M4 §5.2).
-			l.resolvePermsOf(e.Tool, e.Summary)
+			l.toolEnded(e.ToolID)
 		}
 	}
 }

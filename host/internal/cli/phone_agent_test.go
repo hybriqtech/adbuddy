@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -373,4 +374,49 @@ func TestAdapterDegradesOnAGarbageVersionWithoutCopyingIt(t *testing.T) {
 		t.Fatalf("notice %s", n.Payload)
 	}
 	r.viewIs(t, "terminal")
+}
+
+func TestWasSentExpiresInTenMinutesIsBoundedAndIsConsumed(t *testing.T) {
+	r := newAgentRig(t)
+	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	setTiming(t, &agentNow, func() time.Time { return now })
+	l := r.l
+
+	l.noteSent("arregla el test")
+	now = now.Add(5 * time.Minute)
+	if !l.wasSent("arregla  el test\n\nAdjuntos:\n- inbox/a.png") {
+		t.Fatal("a prompt of 5 minutes ago was not known")
+	}
+	if l.wasSent("arregla el test") {
+		t.Fatal("one chat.send hid two prompts: it was not consumed on matching")
+	}
+
+	l.noteSent("otra cosa")
+	now = now.Add(sentTTL + time.Minute)
+	if l.wasSent("otra cosa") {
+		t.Fatal("a prompt older than sentTTL was taken for the phone's")
+	}
+	if sentTTL != 10*time.Minute {
+		t.Fatalf("sentTTL %v", sentTTL)
+	}
+
+	for i := 0; i < keepSent+10; i++ {
+		l.noteSent(fmt.Sprintf("texto %d", i))
+	}
+	a := &l.adapter
+	a.mu.Lock()
+	n := len(a.sent)
+	a.mu.Unlock()
+	if n != keepSent {
+		t.Fatalf("%d kept, want %d", n, keepSent)
+	}
+	if l.wasSent("texto 0") || !l.wasSent(fmt.Sprintf("texto %d", keepSent+9)) {
+		t.Fatal("the oldest ones are the ones that leave")
+	}
+
+	l.noteSent("pendiente")
+	l.adapterConversation("another", false)
+	if l.wasSent("pendiente") {
+		t.Fatal("the sent texts survived the change of conversation")
+	}
 }

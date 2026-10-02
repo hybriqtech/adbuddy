@@ -59,6 +59,12 @@ func (m *Manager) ServeAttach(ctx context.Context, c *ipc.Conn, id string) ipc.E
 	})
 	defer cancel()
 
+	// What the terminal types waits for room in the agent's queue: the
+	// person at the PC is never dropped (Typer.Wait). It stops waiting when
+	// this attach ends.
+	typeCtx, stopTyping := context.WithCancel(ctx)
+	defer stopTyping()
+	typer := m.NewTyper()
 	stdinDone := make(chan struct{})
 	go func() {
 		defer close(stdinDone)
@@ -66,7 +72,7 @@ func (m *Manager) ServeAttach(ctx context.Context, c *ipc.Conn, id string) ipc.E
 		for {
 			n, err := c.Stdin().Read(buf)
 			if n > 0 {
-				_ = m.Input(buf[:n]) // without an agent, typing goes nowhere
+				_ = typer.Wait(typeCtx, buf[:n]) // without an agent, typing goes nowhere
 			}
 			if err != nil {
 				return

@@ -23,7 +23,7 @@
     <string name="status_connecting">Conectando con el PC…</string>
     <string name="status_waiting">Esperando al PC (ejecuta adbuddy serve)</string>
     <string name="status_paused">En pausa: el agente no puede usar el móvil</string>
-    <string name="status_update_app">Esta app es demasiado antigua para el ADBuddy de tu PC: ejecuta adbuddy setup en el PC para actualizarla</string>
+    <string name="status_update_app">Esta app es demasiado antigua para el ADBuddy de tu PC: instala una compilación más reciente con adbuddy setup --apk &lt;fichero&gt; en el PC (setup a secas no reemplaza una app instalada)</string>
     <string name="status_update_host">El ADBuddy de tu PC es demasiado antiguo para esta app: actualízalo en el PC</string>
     <string name="status_cut">Acceso adb cortado</string>
 

@@ -78,10 +78,9 @@ func TestStaleReplyUsesTheLanguage(t *testing.T) {
 
 // The permission card names the tool in the language of the PC (the verb of
 // ToolSummaryIn), and the host closes the card when the transcript shows the
-// end of the tool that asked by comparing that summary with the one the
-// transcript's parser writes (resolvePermsOf). Both are written with the same
-// language (l.lang), so the card still closes with the PC in Spanish; if one
-// side kept English the card would stay open and the test would fail.
+// end of the tool use tied to it (by name and input, not by that summary, so
+// the language does not matter to the tie): the card closes with the PC in
+// Spanish as in English.
 func TestPermissionCardSummaryAndTranscriptAgreeInTheLanguage(t *testing.T) {
 	for _, c := range []struct {
 		lang    i18n.Lang

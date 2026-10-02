@@ -168,6 +168,18 @@ class ConfirmUiTest {
         assertEquals(listOf("adb shell reboot", "x"), ConfirmUi.lines(q("j_1"), special = "never shown", footer = "x"))
     }
 
+    @Test fun theNotificationsCommandAndDetailStartWithALeftToRightMarkButTheLabelsDoNot() {
+        val r = ConfirmRequest(
+            id = "j_1", title = "Restart", detail = "Reboots the phone.", rawCommand = "א reboot",
+            expiresAt = "2026-09-30T10:01:00Z", special = true,
+        )
+        assertEquals(
+            listOf("‎Reboots the phone.", "⚠ May cut the link.", "‎א reboot", "Expires at 10:01"),
+            ConfirmUi.lines(r, special = "May cut the link.", footer = "Expires at 10:01", ltr = true),
+        )
+        assertEquals(listOf("‎א reboot", "x"), ConfirmUi.lines(r.copy(detail = "", special = false), special = "", footer = "x", ltr = true))
+    }
+
     @Test fun aLongCommandIsCut() {
         val r = q("j_1").copy(rawCommand = "adb shell " + "a".repeat(1_000))
         val cmd = ConfirmUi.lines(r, special = "", footer = "x", maxCommand = 50)[0]

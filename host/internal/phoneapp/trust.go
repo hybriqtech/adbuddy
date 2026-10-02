@@ -34,7 +34,7 @@ var (
 	ErrNoTrustedApp = errors.New("the ADBuddy app on the phone is not trusted, so it gets no token or permissions " +
 		"(run `adbuddy setup`, or `adbuddy setup --apk <file>` for a development build)")
 	// ErrAppTooOld means the app is older than MinAppVersionCode.
-	ErrAppTooOld = errors.New("the ADBuddy app on the phone is too old for this host (run `adbuddy setup` to update it)")
+	ErrAppTooOld = errors.New("the ADBuddy app on the phone is too old for this host (install a newer build with `adbuddy setup --apk <file>`; plain `adbuddy setup` does not replace an installed app)")
 )
 
 // pullTimeout bounds reading the installed APK (some MB over Wi-Fi).

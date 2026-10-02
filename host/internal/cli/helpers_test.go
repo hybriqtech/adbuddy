@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
@@ -295,5 +298,109 @@ func TestScreenshotDefaultsAreTheDaemons(t *testing.T) {
 	// An explicit 0 is still wrong.
 	if _, _, code := runHelper(t, "screenshot", "--scale", "0"); code != ExitUsage {
 		t.Fatalf("--scale 0: %d", code)
+	}
+}
+
+// V34: without -o two screenshots of the same instant do not overwrite each
+// other; the name has milliseconds and, if it still exists, -2, -3 before the
+// extension.
+func TestScreenshotDefaultNameNeverOverwrites(t *testing.T) {
+	old := now
+	now = func() time.Time { return time.Date(2026, 10, 2, 13, 4, 5, 678_000_000, time.UTC) }
+	t.Cleanup(func() { now = old })
+	n := 0
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		n++
+		img := []byte(fmt.Sprintf("\x89PNG shot %d", n))
+		_, _ = c.Stdout().Write(img)
+		_ = c.Data(daemon.ScreenshotResult{Format: "png", Bytes: len(img)})
+		return ipc.Exit{}
+	})
+	t.Chdir(t.TempDir())
+	var paths []string
+	for i := 0; i < 3; i++ {
+		out, errOut, code := runHelper(t, "screenshot", "--json")
+		if code != 0 {
+			t.Fatalf("exit %d %q %q", code, out, errOut)
+		}
+		var r struct {
+			Data struct {
+				Path   string `json:"path"`
+				Format string `json:"format"`
+				Bytes  int    `json:"bytes"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(out), &r); err != nil || r.Data.Bytes == 0 || r.Data.Format != "png" {
+			t.Fatalf("json %q: %v", out, err)
+		}
+		paths = append(paths, r.Data.Path)
+	}
+	want := []string{
+		filepath.Join("screenshots", "20261002-130405.678.png"),
+		filepath.Join("screenshots", "20261002-130405.678-2.png"),
+		filepath.Join("screenshots", "20261002-130405.678-3.png"),
+	}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Fatalf("paths %q, want %q", paths, want)
+		}
+		got, err := os.ReadFile(paths[i])
+		if wantData := fmt.Sprintf("\x89PNG shot %d", i+1); err != nil || string(got) != wantData {
+			t.Fatalf("%s holds %q (%v), want %q", paths[i], got, err, wantData)
+		}
+	}
+}
+
+func TestScreenshotDefaultNameFollowsTheFormat(t *testing.T) {
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_, _ = c.Stdout().Write([]byte("jpg"))
+		_ = c.Data(daemon.ScreenshotResult{Format: "jpeg", Bytes: 3})
+		return ipc.Exit{}
+	})
+	t.Chdir(t.TempDir())
+	out, _, code := runHelper(t, "screenshot")
+	if code != 0 || !strings.HasSuffix(strings.TrimSpace(out), ".jpg") {
+		t.Fatalf("exit %d %q", code, out)
+	}
+}
+
+// A failed write leaves no half file behind.
+func TestScreenshotWriteFailureRemovesTheFile(t *testing.T) {
+	old := screenshotWrite
+	screenshotWrite = func(f *os.File, b []byte) error {
+		_, _ = f.Write(b[:1])
+		return errors.New("disk full")
+	}
+	t.Cleanup(func() { screenshotWrite = old })
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_, _ = c.Stdout().Write([]byte("png!"))
+		_ = c.Data(daemon.ScreenshotResult{Format: "png", Bytes: 4})
+		return ipc.Exit{}
+	})
+	t.Chdir(t.TempDir())
+	if _, errOut, code := runHelper(t, "screenshot"); code != ExitFailure || !strings.Contains(errOut, "disk full") {
+		t.Fatalf("exit %d %q", code, errOut)
+	}
+	if left, _ := filepath.Glob(filepath.Join("screenshots", "*")); len(left) != 0 {
+		t.Fatalf("left behind: %q", left)
+	}
+}
+
+// With an explicit -o the file is overwritten, as before.
+func TestScreenshotExplicitOutputOverwrites(t *testing.T) {
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_, _ = c.Stdout().Write([]byte("new"))
+		_ = c.Data(daemon.ScreenshotResult{Format: "png", Bytes: 3})
+		return ipc.Exit{}
+	})
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("s.png", []byte("old old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := runHelper(t, "screenshot", "-o", "s.png"); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if got, _ := os.ReadFile("s.png"); string(got) != "new" {
+		t.Fatalf("holds %q", got)
 	}
 }

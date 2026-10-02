@@ -76,7 +76,7 @@ object ConfirmNotifier {
         val r = p.request
         val footer = footer(context, p.status, localExpires)
         // The rule first, the agent's command after it and cut: it never pushes the rule out of sight.
-        val lines = ConfirmUi.lines(r, context.getString(R.string.confirm_special), footer)
+        val lines = ConfirmUi.lines(r, context.getString(R.string.confirm_special), footer, ltr = true)
         val open = PendingIntent.getActivity(context, 0,
             Intent(context, MainActivity::class.java).setData(uri("open", r.id)).putExtra(MainActivity.EXTRA_CONFIRM, r.id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

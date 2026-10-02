@@ -297,6 +297,7 @@ func TestPermissionIsNotAskedWhenTheCardCannotShowIt(t *testing.T) {
 		"escape":        {"echo \x1b[2J", "do it"},
 		"zero width":    {"echo a\u200bb", "do it"},
 		"bidi in title": {"ls", "harmless \u202e"},
+		"private use":   {"echo a\ue000b", "do it"}, // V18
 	} {
 		p := r.payload("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": c.cmd, "description": c.desc}})
 		got := make(chan []byte, 1)
@@ -646,5 +647,179 @@ func TestAPermissionRequestTheHostIgnoresHoldsTheChat(t *testing.T) {
 			t.Errorf("%s: not busy with the dialog on the terminal", name)
 		}
 		r.hook(t, "UserPromptSubmit", map[string]any{"prompt": "x"})
+	}
+}
+
+// bashIn is the input of the Bash calls of these tests: same description, so
+// that only the command tells them apart.
+func bashIn(cmd string) map[string]any {
+	return map[string]any{"command": cmd, "description": "do it"}
+}
+
+// pending lists the ids of the questions the phone has.
+func (r *agentRig) pending(t *testing.T) []string {
+	t.Helper()
+	var ids []string
+	for _, p := range r.l.snapshot().Permissions {
+		ids = append(ids, p.ID)
+	}
+	return ids
+}
+
+func (r *agentRig) stillPending(t *testing.T, want ...string) {
+	t.Helper()
+	time.Sleep(150 * time.Millisecond) // the poll's interval is 15 ms
+	got := r.pending(t)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("pending %v, want %v", got, want)
+	}
+}
+
+func TestPermissionOfTwoToolsWithTheSameDescriptionOnlyEndsWithItsOwn(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	r.append(t, atool("u1", "msg_1", "toolu_a", "Bash", bashIn("touch a")), atool("u2", "msg_2", "toolu_b", "Bash", bashIn("touch b")))
+	reqA, outA := r.ask(t, "touch a")
+	reqB, outB := r.ask(t, "touch b")
+	r.append(t, aresult("u3", "toolu_b", false))
+	if pr := r.resolved(t); pr.ID != reqB.ID || pr.By != "terminal" {
+		t.Fatalf("%+v", pr)
+	}
+	wait(t, outB)
+	r.stillPending(t, reqA.ID) // the end of the other command does not take A's question away
+	r.append(t, aresult("u4", "toolu_a", false))
+	if pr := r.resolved(t); pr.ID != reqA.ID {
+		t.Fatalf("%+v", pr)
+	}
+	wait(t, outA)
+}
+
+func TestPermissionOfTwoIdenticalToolsEndsOneByOneInOrder(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	r.append(t, atool("u1", "msg_1", "toolu_a", "Bash", bashIn("touch x")), atool("u2", "msg_2", "toolu_b", "Bash", bashIn("touch x")))
+	reqA, outA := r.ask(t, "touch x")
+	reqB, outB := r.ask(t, "touch x")
+	r.append(t, aresult("u3", "toolu_a", false))
+	if pr := r.resolved(t); pr.ID != reqA.ID {
+		t.Fatalf("the first card is the first tool's: %+v", pr)
+	}
+	wait(t, outA)
+	r.stillPending(t, reqB.ID)
+	r.append(t, aresult("u4", "toolu_b", true))
+	if pr := r.resolved(t); pr.ID != reqB.ID {
+		t.Fatalf("%+v", pr)
+	}
+	wait(t, outB)
+}
+
+// The same tool use seen again as running (a re-read) while it is tied to a
+// card is not kept for the next card with its key: that card is left with no
+// tie, and the tool's end takes away only the first.
+func TestPermissionTiedToolUseSeenAgainIsNotKeptForAnotherCard(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	r.append(t, atool("u1", "msg_1", "toolu_a", "Bash", bashIn("touch x")))
+	reqA, outA := r.ask(t, "touch x")
+	a := &r.l.adapter
+	var key string
+	waitUntil(t, "the card is tied to the tool use", func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		for _, p := range a.perms {
+			if p.toolID == "toolu_a" {
+				key = p.key
+			}
+		}
+		return key != ""
+	})
+	r.l.toolStarted("toolu_a", key)
+	a.mu.Lock()
+	n := len(a.unbound)
+	a.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d tool uses kept, want none: the id is tied already", n)
+	}
+	reqB, outB := r.ask(t, "touch x")
+	a.mu.Lock()
+	tied := a.perms[reqB.ID].toolID
+	a.mu.Unlock()
+	if tied != "" {
+		t.Fatalf("the second card was tied to %q", tied)
+	}
+	r.append(t, aresult("u2", "toolu_a", false))
+	if pr := r.resolved(t); pr.ID != reqA.ID {
+		t.Fatalf("%+v", pr)
+	}
+	wait(t, outA)
+	r.stillPending(t, reqB.ID)
+	r.l.resolveAllPerms("agent")
+	wait(t, outB)
+}
+
+func TestPermissionCardBeforeTheToolUseIsTiedToo(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	reqA, outA := r.ask(t, "touch a")
+	reqB, outB := r.ask(t, "touch b")
+	// The tool uses reach the transcript after the cards, in the other order.
+	r.append(t, atool("u1", "msg_1", "toolu_b", "Bash", bashIn("touch b")), atool("u2", "msg_2", "toolu_a", "Bash", bashIn("touch a")),
+		atool("u3", "msg_3", "toolu_r", "Read", map[string]any{"file_path": "/a/b.go"}), aresult("u4", "toolu_r", false))
+	r.stillPending(t, reqA.ID, reqB.ID)
+	r.append(t, aresult("u5", "toolu_a", false))
+	if pr := r.resolved(t); pr.ID != reqA.ID {
+		t.Fatalf("%+v", pr)
+	}
+	wait(t, outA)
+	r.stillPending(t, reqB.ID)
+	r.append(t, aresult("u6", "toolu_b", false))
+	if pr := r.resolved(t); pr.ID != reqB.ID {
+		t.Fatalf("%+v", pr)
+	}
+	wait(t, outB)
+}
+
+func TestPermissionWithNoToolUseToTieIsNeverTakenAwayByATranscript(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	req, out := r.ask(t, "touch a")
+	// A tool whose use was never seen ends, and another with another input.
+	r.append(t, aresult("u1", "toolu_unseen", false), atool("u2", "msg_1", "toolu_o", "Bash", bashIn("touch other")), aresult("u3", "toolu_o", false))
+	r.stillPending(t, req.ID)
+	r.l.resolveAllPerms("agent")
+	wait(t, out)
+}
+
+func TestPermissionTiesAreForgottenWithTheConversation(t *testing.T) {
+	r := newAgentRig(t)
+	r.hook(t, "SessionStart", map[string]any{"source": "startup"})
+	r.append(t, atool("u1", "msg_1", "toolu_a", "Bash", bashIn("touch a")))
+	waitUntil(t, "the tool use is kept", func() bool {
+		a := &r.l.adapter
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return len(a.unbound) == 1
+	})
+	r.l.adapterConversation("another", false)
+	a := &r.l.adapter
+	a.mu.Lock()
+	n := len(a.unbound)
+	a.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("%d tool uses kept after the conversation changed", n)
+	}
+}
+
+func TestPermissionUnboundToolUsesAreBounded(t *testing.T) {
+	r := newAgentRig(t)
+	for i := 0; i < maxUnbound+20; i++ {
+		r.l.apply(claudecode.Event{Kind: claudecode.KindTool, ToolID: "toolu_" + string(rune('a'+i%26)) + strings.Repeat("x", i/26), Status: "running", ToolKey: "k"})
+	}
+	a := &r.l.adapter
+	a.mu.Lock()
+	n := len(a.unbound)
+	a.mu.Unlock()
+	if n != maxUnbound {
+		t.Fatalf("%d kept, want %d", n, maxUnbound)
 	}
 }

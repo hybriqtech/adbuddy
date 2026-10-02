@@ -133,13 +133,19 @@ func fullDetail(tool string, raw json.RawMessage) string {
 
 // shownRune is false for what the person cannot be trusted to see as it is: a
 // control (but the newline and the tab), a format character (bidi, zero width),
-// a separator that is not the ASCII space, or what is not valid text.
+// a separator that is not the ASCII space, or what is not valid text; and what
+// has no glyph the card can draw as it is: private use (Co), unassigned (Cn,
+// which covers noncharacters), surrogates (Cs) and the object replacement
+// character U+FFFC (V18). Only what Go's unicode tables call graphic is shown.
+// Fail safe by design: an emoji newer than Go's unicode tables is Cn and a
+// variation selector 16 is Mn, so text with them goes to the terminal.
 func shownRune(r rune) bool {
 	switch {
 	case r == '\n' || r == '\t' || r == ' ':
 		return true
-	case r == utf8.RuneError, unicode.IsControl(r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Z, r),
-		unicode.Is(unicode.Mn, r), unicode.Is(unicode.Me, r):
+	case r == utf8.RuneError, r == 0xfffc, unicode.IsControl(r), unicode.Is(unicode.Cf, r), unicode.Is(unicode.Z, r),
+		unicode.Is(unicode.Mn, r), unicode.Is(unicode.Me, r), unicode.Is(unicode.Co, r),
+		!unicode.IsGraphic(r) && !unicode.IsSpace(r):
 		return false
 	case r == 0x3164, r == 0x115f, r == 0x1160, r == 0xffa0, r == 0x2800, r == 0x034f: // fillers that draw nothing
 		return false
