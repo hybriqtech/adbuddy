@@ -33,6 +33,17 @@ gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-loca
 
 Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`. The same goes for `CI_RUNNER_EMULATOR`.
 
+Example with both runners (Windows and the Linux runner of section 4):
+
+```sh
+gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":["self-hosted","linux","adbuddy-local"]},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-local"]'
+gh variable set CI_RUNNER_RELEASE --body '["self-hosted","linux","adbuddy-local"]'
+gh variable set CI_RUNNER_SIGN --body '["self-hosted","linux","adbuddy-local"]'
+```
+
+The emulator stays on the Windows runner (`CI_RUNNER_EMULATOR`): it has the AVD and the hardware acceleration of Windows, and the WSL2 runner has no KVM.
+
 Never point a Linux cell at a Windows runner. The steps that only run on Linux (gofmt, `-race`) would be skipped and the cell would be green without them.
 
 Every job whose variable is set refuses pull requests from forks. With no variables set, the workflows behave exactly as before, fork pull requests included, on GitHub-hosted runners.
@@ -80,23 +91,111 @@ For `CI_HOST_MATRIX`, `"none"` and `[]` are not valid: they break the workflow. 
    run.cmd
    ```
 
+   To start it with a clean environment, relaunch it from Git Bash with `env -i` and pass only what Windows tools need. Pass `OS=Windows_NT` too: some tools detect Windows from `$OS` (`scripts/emulator.sh` also detects it with `uname`, but others do not). Pass `SYSTEMROOT`, `USERPROFILE`, `LOCALAPPDATA`, `APPDATA`, `TEMP`, `TMP`, `HOME` and `COMSPEC` as well, copying their values from your session:
+
+   ```sh
+   env -i OS=Windows_NT SYSTEMROOT="$SYSTEMROOT" USERPROFILE="$USERPROFILE" LOCALAPPDATA="$LOCALAPPDATA" APPDATA="$APPDATA" TEMP="$TEMP" TMP="$TMP" HOME="$HOME" COMSPEC="$COMSPEC" PATH="$PATH" ./run.cmd
+   ```
+
 ## 4. Setting up a Linux runner (WSL2 Ubuntu)
 
-Install the tools the jobs need (`gcc` comes with `build-essential` and is required by `go test -race`):
+This is the procedure that was tested. The Linux runner lives in a WSL2 Ubuntu distribution that cannot see your Windows files or run Windows programs.
 
-```sh
-sudo apt install -y build-essential git curl unzip zip shellcheck
-```
+1. In PowerShell as administrator, install the distribution. The first time it may ask for a reboot (Virtual Machine Platform):
 
-Then download and configure the runner as above, with the `linux-x64` package, in `~/actions-runner`, and the labels `self-hosted,linux,adbuddy-local`:
+   ```powershell
+   wsl --install -d Ubuntu --no-launch
+   ```
 
-```sh
-cd ~/actions-runner
-./config.sh --url https://github.com/OWNER/REPO --token TOKEN --labels self-hosted,linux,adbuddy-local
-./run.sh
-```
+2. Limit the VM. RAM is the scarce resource of the PC (one emulator uses about 5 GB). Create `%USERPROFILE%\.wslconfig`:
 
-For `CI_RUNNER_SIGN` (and the Android jobs) also install an Android SDK and set `ANDROID_HOME` in the runner's `.env`. In the same `.env`, set `GRADLE_USER_HOME`, `GOMODCACHE` and `GOCACHE` to folders inside the runner folder, so CI never touches your real caches.
+   ```ini
+   [wsl2]
+   memory=8GB
+   processors=6
+   swap=2GB
+   ```
+
+3. Isolate the runner. As root in Ubuntu (`wsl -d Ubuntu -u root`), create the user and write `/etc/wsl.conf`:
+
+   ```sh
+   adduser --disabled-password --gecos '' runner
+   cat > /etc/wsl.conf <<'EOF'
+   [automount]
+   enabled=false
+
+   [interop]
+   enabled=false
+   appendWindowsPath=false
+
+   [user]
+   default=runner
+   EOF
+   ```
+
+   Then apply it from PowerShell with `wsl -t Ubuntu`. Now the runner does not see `/mnt/c` and cannot run Windows programs: it has no access to your adb key, SSH keys or `gh` token.
+
+4. Install the packages as root (`gcc` comes with `build-essential` and is required by `go test -race`):
+
+   ```sh
+   apt update
+   apt install -y build-essential git curl unzip zip shellcheck openjdk-17-jdk-headless
+   ```
+
+5. As `runner`, install Go and the Android SDK, always checking the checksum before unpacking:
+
+   - Go: the version in `host/go.mod`, from go.dev. Get the SHA-256 of the `linux-amd64` archive from `https://go.dev/dl/?mode=json`, check it with `sha256sum -c`, and unpack it so that `~/tools/go` holds the toolchain.
+   - Android SDK: download the command-line tools listed in `https://dl.google.com/android/repository/repository2-3.xml`, check the SHA-1 listed there with `sha1sum -c`, and unpack them as `~/android-sdk/cmdline-tools/latest`. Then install the packages (accepting the SDK licenses is part of it):
+
+     ```sh
+     export ANDROID_HOME=~/android-sdk
+     yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+     "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+     ```
+
+6. Install the runner as `runner`: download the `linux-x64` package of `actions/runner` into `~/actions-runner`, check the SHA-256 of the release notes, and unpack it. As root, run `./bin/installdependencies.sh` in that folder.
+
+7. Register it. The registration token must go only through the stdin of the script: never in argv and never in a file. From PowerShell, send a first line that sets the variable, followed by the script, to `bash -s` (with `-c` the stdin does not arrive). If the token comes from `gh.exe`, trim the trailing `
+`:
+
+   ```sh
+   TOKEN=$(gh api -X POST repos/OWNER/REPO/actions/runners/registration-token --jq .token | tr -d '
+')
+   {
+     printf "RT='%s'
+" "$TOKEN"
+     cat <<'EOF'
+   cd ~/actions-runner
+   ./config.sh --unattended --url https://github.com/OWNER/REPO --token "$RT" --labels self-hosted,linux,adbuddy-local
+   EOF
+   } | wsl.exe -d Ubuntu -u runner -- bash -s
+   ```
+
+8. Configure the jobs' environment. In `~/actions-runner/.env`, with the caches inside the runner folder (the runner does not expand `~`, so generate the file with the real paths):
+
+   ```sh
+   cd ~/actions-runner
+   cat > .env <<EOF
+   ANDROID_HOME=$HOME/android-sdk
+   ANDROID_SDK_ROOT=$HOME/android-sdk
+   JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+   GOTOOLCHAIN=local
+   GRADLE_USER_HOME=$PWD/gradle
+   GOMODCACHE=$PWD/gomod
+   GOCACHE=$PWD/gocache
+   EOF
+   printf '%s' "$HOME/tools/go/bin" > .path
+   ```
+
+   `.path` REPLACES the PATH of the jobs, so keep in it everything the jobs need: add the system folders (`/usr/local/bin:/usr/bin:/bin`) after the Go `bin` folder.
+
+9. Start it as a foreground process with a clean environment, from PowerShell:
+
+   ```powershell
+   wsl.exe -d Ubuntu -u runner --exec sh -c 'cd ~/actions-runner && exec env -i HOME="$HOME" USER=runner LOGNAME=runner LANG=C.UTF-8 PATH=/usr/local/bin:/usr/bin:/bin ./run.sh'
+   ```
+
+   That `wsl.exe` process keeps the VM alive. It is not a service and it does not survive a reboot: start it again after one.
 
 ## 5. Switching
 
@@ -143,5 +242,5 @@ Also:
 
 ## 7. What is not covered locally
 
-- macOS: the macOS cell is left out of `CI_HOST_MATRIX`, so macOS is not tested while the variable is set that way.
+- macOS: the macOS cell is left out of `CI_HOST_MATRIX`, so macOS is not tested locally while the variable is set that way.
 - `release.yml` always runs on GitHub-hosted runners.
