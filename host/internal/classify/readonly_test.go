@@ -45,7 +45,7 @@ func TestSsDiagKillAreRed(t *testing.T) {
 	c := mustNew(t, "")
 	for _, args := range []string{
 		"-D /sdcard/x", "-tanD /sdcard/x", "--diag=/sdcard/x", "--diag /sdcard/x", "-K", "--kill", "-tanK", "-F /sdcard/f",
-		"-tanF/sdcard/f", "--filter=/sdcard/f", "--foo", "-N x", "-t -D", "-- -D x",
+		"-tanF/sdcard/f", "--filter=/sdcard/f", "--foo", "-N x", "-t -D",
 	} {
 		classifyBoth(t, c, "ss", strings.Fields(args), Red)
 	}

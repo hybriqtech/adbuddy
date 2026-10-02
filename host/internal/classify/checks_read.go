@@ -12,6 +12,8 @@ func init() {
 		"awk":              checkAwk,
 		"sort":             checkSort,
 		"uniq":             checkUniq,
+		"pgrep":            checkPgrep,
+		"ss":               checkSs,
 		"date":             checkDate,
 		"dumpsys":          checkDumpsys,
 		"ip":               checkIP,
@@ -418,6 +420,47 @@ func dumpsysActivity(args []string) bool {
 		}
 	}
 	return true
+}
+
+// toybox pgrep (confirmed with pgrep --help in the emulator): -L SIGNAL sends
+// the signal to what it finds ("pgrep -L 9 -x sleep" killed the sleep), so L is
+// 🔴 whatever the way it is written. The other options only select or print.
+// It has no long options.
+var pgrepOptions = getoptSpec{flags: "aclfnovx", values: "dLGgPstUu", strict: true}
+
+func checkPgrep(ws []Word) checkResult {
+	r := pgrepOptions.parse(ws[1:])
+	if r.bad != "" {
+		return red(reason("pgrep option {v} may send a signal", "v", r.bad))
+	}
+	if _, l := r.seen['L']; l {
+		return red(reason("pgrep -L sends a signal to the processes"))
+	}
+	return ok()
+}
+
+// ss (iproute2, confirmed with ss --help in the emulator): -D FILE (--diag)
+// writes a file, -K (--kill) closes sockets, -F FILE reads the filter from a
+// file and -N switches namespace. They are not listed, so they are unknown
+// and 🔴; so is -E, which never ends. -A and -f take a value.
+var ssOptions = getoptSpec{
+	flags:  "hVnrlaoempisbZz460tSudwxH",
+	values: "Af",
+	longFlags: map[string]bool{
+		"--help": true, "--version": true, "--numeric": true, "--resolve": true, "--all": true, "--listening": true,
+		"--options": true, "--extended": true, "--memory": true, "--processes": true, "--info": true, "--summary": true,
+		"--bpf": true, "--context": true, "--contexts": true, "--ipv4": true, "--ipv6": true, "--packet": true,
+		"--tcp": true, "--sctp": true, "--udp": true, "--dccp": true, "--raw": true, "--unix": true, "--no-header": true,
+	},
+	longValues: map[string]bool{"--query": true, "--socket": true, "--family": true},
+	strict:     true,
+}
+
+func checkSs(ws []Word) checkResult {
+	if r := ssOptions.parse(ws[1:]); r.bad != "" {
+		return red(reason("ss option {v} may write a file or close sockets", "v", r.bad))
+	}
+	return ok()
 }
 
 func checkIP(ws []Word) checkResult {
