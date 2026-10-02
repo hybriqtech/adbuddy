@@ -277,7 +277,9 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			fmt.Fprintf(s.Stderr(), "✗ %s: %s\n", classify.Printable(e.Description), classify.Printable(item.Error))
 			continue
 		}
+		level, rule := "yellow", "undo" // what the journal says: 🔴 only when the user was asked
 		if ires := d.o.Classifier.Classify(e.Inverse.Argv); ires.Level == classify.Red {
+			level, rule = ires.Level.String(), "undo-confirmed"
 			// Not asked while this undo is itself in flight: the question
 			// waits for the changes in flight, this one included.
 			release()
@@ -350,7 +352,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		now := d.o.Now().UTC()
 		u := journal.Entry{
 			ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUndo,
-			Argv: e.Inverse.Argv, Level: "yellow", Rule: "undo", Description: undoPrefix(d.o.Lang) + e.Description, Undoes: e.ID,
+			Argv: e.Inverse.Argv, Level: level, Rule: rule, Description: undoPrefix(d.o.Lang) + e.Description, Undoes: e.ID,
 		}
 		item.UndoID = u.ID
 		// The mark goes first, outside the agent's reach: if the host dies

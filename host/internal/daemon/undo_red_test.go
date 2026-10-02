@@ -281,3 +281,40 @@ func TestUndoSessionStaysInFlightAfterADeniedInverse(t *testing.T) {
 		t.Fatal("left in flight")
 	}
 }
+
+// The journal says what really happened: an inverse the user confirmed was 🔴,
+// one that ran unasked was 🟡.
+func TestUndoJournalsTheRealLevelOfTheInverse(t *testing.T) {
+	undoEntry := func(e *env) journal.Entry {
+		t.Helper()
+		all, _, _ := e.store.Load()
+		for _, j := range all {
+			if j.Source == journal.SourceUndo {
+				return j
+			}
+		}
+		t.Fatalf("no undo entry in %+v", all)
+		return journal.Entry{}
+	}
+	t.Run("confirmed red", func(t *testing.T) {
+		e := newEnv(t)
+		e.conf.decision = confirm.Allow
+		e.forge(t, "j_f1", putArgv, "shell", "settings", "delete", "global", "a")
+		if _, exit, _ := e.undoLast(t); exit.Code != 0 {
+			t.Fatalf("%+v", exit)
+		}
+		if u := undoEntry(e); u.Level != "red" || u.Rule != "undo-confirmed" {
+			t.Fatalf("level %q rule %q", u.Level, u.Rule)
+		}
+	})
+	t.Run("unasked yellow", func(t *testing.T) {
+		e := newEnv(t)
+		e.forge(t, "j_f1", putArgv, "shell", "settings", "put", "global", "a", "1")
+		if _, exit, _ := e.undoLast(t); exit.Code != 0 {
+			t.Fatalf("%+v", exit)
+		}
+		if u := undoEntry(e); u.Level != "yellow" || u.Rule != "undo" {
+			t.Fatalf("level %q rule %q", u.Level, u.Rule)
+		}
+	})
+}
