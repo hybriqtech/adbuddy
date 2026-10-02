@@ -282,18 +282,31 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			// waits for the changes in flight, this one included.
 			release()
 			release = func() {}
+			// What the person reads comes from the classifier, never from the
+			// journal: the agent can forge its records.
 			detail := "Undoing a change from the journal needs a command that asks for confirmation.\n" + classify.Printable(ires.Detail(d.o.Lang))
 			decision, askErr := d.AskUser(ctx, confirm.Request{
-				ID: e.ID, Title: undoPrefix(d.o.Lang) + e.Description, Detail: detail,
+				ID: journal.NewID("j_", d.o.Now().UTC()), Title: ires.Description(d.o.Lang), Detail: detail,
 				RawCommand: classify.DisplayCommand(e.Inverse.Argv), Special: ires.Special,
 			}, 0)
 			if errors.Is(askErr, ErrAskPaused) {
 				_ = s.Data(res)
 				return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
 			}
+			if errors.Is(askErr, ErrAskBusy) { // never asked: not a denial
+				_ = s.Data(res)
+				return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: askErr.Error()}
+			}
 			if ctx.Err() != nil {
 				break // the client left, or serve stopped, while asking
 			}
+			// Back in flight, whatever the answer, while the loop goes on.
+			r, other := d.admit(undoPrefix(d.o.Lang)+req.Target, true)
+			if other != "" {
+				_ = s.Data(res)
+				return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: other}
+			}
+			release = r
 			why := ""
 			switch {
 			case askErr != nil:
@@ -311,12 +324,11 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 				denied++
 				continue
 			}
-			r, other := d.admit(undoPrefix(d.o.Lang)+req.Target, true)
-			if other != "" {
+			// Paused while it was asked (an Allow may come after the pause).
+			if d.o.Paused() {
 				_ = s.Data(res)
-				return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: other}
+				return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
 			}
-			release = r
 		}
 		if src, ok := moveBackTarget(e.Inverse.Argv); ok {
 			// Something may have been created where the file was: moving it

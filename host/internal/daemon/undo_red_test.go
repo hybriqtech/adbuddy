@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 
@@ -15,10 +16,15 @@ import (
 // that read ipc.secret could: the signature proves nothing about the inverse.
 func (e *env) forge(t *testing.T, id string, argv []string, inverse ...string) journal.Entry {
 	t.Helper()
+	return e.forgeDesc(t, id, "forged "+id, argv, inverse...)
+}
+
+func (e *env) forgeDesc(t *testing.T, id, desc string, argv []string, inverse ...string) journal.Entry {
+	t.Helper()
 	code := 0
 	j := journal.Entry{
 		ID: id, TS: e.d.o.Now().UTC(), Session: "s_1", Serial: "dev1", Source: journal.SourceAgent,
-		Argv: argv, Level: "yellow", Rule: "r", Description: "forged " + id, Status: journal.StatusOK, ExitCode: &code,
+		Argv: argv, Level: "yellow", Rule: "r", Description: desc, Status: journal.StatusOK, ExitCode: &code,
 		Inverse: &journal.Inverse{Argv: inverse},
 	}
 	if err := e.store.Append(j); err != nil {
@@ -143,5 +149,106 @@ func TestInverseFitsTheKind(t *testing.T) {
 		if got := inverseFitsKind(tc.kind, tc.inv); got != tc.ok {
 			t.Errorf("%q %q: got %v", tc.kind, tc.inv, got)
 		}
+	}
+}
+
+// What the person reads comes from the classifier: the journal is forgeable.
+func TestUndoQuestionTextComesFromTheClassifier(t *testing.T) {
+	e := newEnv(t)
+	e.forgeDesc(t, "j_f1", "Restore screen brightness", putArgv, "shell", "settings", "delete", "global", "a")
+	e.undoLast(t)
+	if len(e.conf.asked) != 1 {
+		t.Fatalf("asked %d", len(e.conf.asked))
+	}
+	r := e.conf.asked[0]
+	if strings.Contains(r.Title, "brightness") || strings.Contains(r.Detail, "brightness") || r.Title == "" || r.Key != "" || r.ID == "j_f1" || r.ID == "" {
+		t.Fatalf("%+v", r)
+	}
+	e = newEnv(t)
+	e.forgeDesc(t, "j_f2", "Restore screen brightness", putArgv, "shell", "settings", "put", "global", "a", "1")
+	e.forgeDesc(t, "j_f3", "Restore screen brightness", []string{"install", "/x/a.apk"}, "uninstall", "com.whatsapp")
+	e.undoLast(t)
+	if len(e.conf.asked) != 1 || strings.Contains(e.conf.asked[0].Title+e.conf.asked[0].Detail, "brightness") {
+		t.Fatalf("%+v", e.conf.asked)
+	}
+}
+
+func TestUndoPassesSpecialToTheQuestion(t *testing.T) {
+	e := newEnv(t)
+	e.forge(t, "j_f1", putArgv, "shell", "settings", "put", "global", "adb_wifi_enabled", "0")
+	e.undoLast(t)
+	if len(e.conf.asked) != 1 || !e.conf.asked[0].Special {
+		t.Fatalf("%+v", e.conf.asked)
+	}
+}
+
+type pauseOnAskConfirmer struct{ pause func() }
+
+func (c pauseOnAskConfirmer) Confirm(context.Context, confirm.Request) confirm.Decision {
+	c.pause()
+	return confirm.Allow
+}
+
+func TestUndoPausedWhileAskedRunsNothing(t *testing.T) {
+	e := newEnv(t)
+	paused := false
+	e.d.o.Paused = func() bool { return paused }
+	e.d.o.Confirmer = pauseOnAskConfirmer{func() { paused = true }}
+	e.forge(t, "j_f1", putArgv, "shell", "settings", "delete", "global", "a")
+	_, exit, _ := e.undoLast(t)
+	if exit.ErrorCode != "PAUSED" || e.ranContains("settings delete") {
+		t.Fatalf("%+v ran %q", exit, e.adb.ran())
+	}
+}
+
+// Another question that took the door between the checks: not a denial.
+func TestUndoBusyIsNotADenial(t *testing.T) {
+	e := newEnv(t)
+	calls := 0
+	e.d.o.Paused = func() bool {
+		calls++
+		if calls == 3 { // the loop's check, with the undo already admitted
+			e.d.ask(&question{title: "Other question"})
+		}
+		return false
+	}
+	e.forge(t, "j_f1", putArgv, "shell", "settings", "delete", "global", "a")
+	_, exit, _ := e.undoLast(t)
+	if exit.ErrorCode != "WAITING_FOR_ANSWER" || !strings.Contains(exit.Error, "another question is open") || len(e.conf.asked) != 0 || e.ranContains("settings delete") {
+		t.Fatalf("%+v asked %d ran %q", exit, len(e.conf.asked), e.adb.ran())
+	}
+}
+
+type flightADB struct {
+	*fakeADB
+	d      *Daemon
+	flying []bool
+}
+
+func (a *flightADB) Run(ctx context.Context, dir string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	a.d.askMu.Lock()
+	a.flying = append(a.flying, len(a.d.inFlight) > 0)
+	a.d.askMu.Unlock()
+	return a.fakeADB.Run(ctx, dir, args, stdin, stdout, stderr)
+}
+
+// A 🔴 denied in the middle of an undo does not take the undo out of the
+// changes in flight for the entries that follow.
+func TestUndoSessionStaysInFlightAfterADeniedInverse(t *testing.T) {
+	e := newEnv(t)
+	e.conf.decision = confirm.Deny
+	fa := &flightADB{fakeADB: e.adb, d: e.d}
+	e.d.o.ADB = fa
+	e.forge(t, "j_f1", putArgv, "shell", "settings", "put", "global", "b", "1") // 🟡, runs second
+	e.forge(t, "j_f2", putArgv, "shell", "settings", "delete", "global", "a")   // 🔴, asked first
+	s := &stream{}
+	exit := e.d.Handle(context.Background(), ipc.Request{Kind: ipc.KindUndo, Target: "session"}, s)
+	var res UndoResult
+	json.Unmarshal(s.data[0], &res)
+	if exit.Code != 0 || len(res.Undone) != 1 || len(res.Skipped) != 1 || len(fa.flying) != 1 || !fa.flying[0] {
+		t.Fatalf("%+v %+v flying %v", exit, res, fa.flying)
+	}
+	if len(e.d.inFlight) != 0 {
+		t.Fatal("left in flight")
 	}
 }
