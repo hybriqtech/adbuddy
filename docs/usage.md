@@ -33,7 +33,7 @@ Press Ctrl+C to stop.
 Agent: claude, in this host. Connect a terminal with `adbuddy attach` (Ctrl+] to detach), or chat from the phone.
 ```
 
-**Why a terminal for the host?** `adbuddy serve` is the guard: it classifies, journals and asks. It has to run outside the agent, so the agent cannot start its own host and answer its own questions. It refuses to start from the agent's session (`AGENT_SESSION`). That is why you keep one terminal for the host and talk to the agent from another place: the phone, or a second terminal.
+**Why a terminal for the host?** `adbuddy serve` is the guard: it classifies, journals and asks. It has to run outside the agent, so the agent does not start its own host and answer its own questions. It refuses to start when the agent runs it (`AGENT_SESSION`), a check against mistakes rather than a barrier. That is why you keep one terminal for the host and talk to the agent from another place: the phone, or a second terminal.
 
 If the phone is not found, serve stops with `DEVICE_NOT_FOUND`: see [Troubleshooting](troubleshooting.md).
 
@@ -153,7 +153,7 @@ adbuddy undo <id>
 
 Undo runs the inverse the journal recorded and does not ask again. It prints one line per entry: `undone`, `failed` or `skipped`. It needs `adbuddy serve` running, and it does not run while the agent is paused.
 
-**What has no undo.** ADBuddy records an inverse for the changes it understands: a setting changed, an app disabled or uninstalled for the user, a permission set, a battery exemption, a file or folder moved or created, a file pushed (a replaced file is restored from a backup) and a new app installed. It has none for:
+**What has no undo.** ADBuddy records an inverse for the changes it understands: a setting changed, an app disabled or uninstalled for the user, an app operation mode set with `appops`, a battery exemption, a file or folder moved or created, a file pushed (a replaced file is restored from a backup) and a new app installed. It has none for:
 
 - red commands: deleting files, clearing an app's data, rebooting, deleting settings and anything ADBuddy does not understand;
 - an app update (an install over an existing app);

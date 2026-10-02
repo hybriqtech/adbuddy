@@ -309,7 +309,7 @@ scan:
 			endWord()
 			stop = true
 		case r == '[':
-			if j := strings.IndexAny(string(rs[i+1:]), "[]"); j >= 0 && rs[i+1+j] == ']' {
+			if j := slices.IndexFunc(rs[i+1:], func(c rune) bool { return c == '[' || c == ']' }); j >= 0 && rs[i+1+j] == ']' {
 				endWord()
 				i += j + 1
 			} else {
@@ -571,6 +571,9 @@ func TestDocsGuardCatches(t *testing.T) {
 		{"connect marker", "docs/page.md", sh("adbuddy connect <new ip:port>"), false},
 		{"setup apk marker", "docs/page.md", sh("adbuddy setup --apk <your build>"), false},
 		{"run optional", "docs/page.md", sh("adbuddy run [agent]"), false},
+		{"marker with a non-ASCII character inline (no panic)", "docs/page.md", inline("adbuddy screen [ … ]"), false},
+		{"marker with an accent inline", "docs/page.md", inline("adbuddy screen [é]"), false},
+		{"marker with a non-ASCII character in a block", "docs/page.md", sh("adbuddy screen [ … ]", "adbuddy screen [é]"), false},
 		{"undo optional inline", "docs/page.md", inline("adbuddy undo [last|session|<id>]"), false},
 		{"pipe to jq", "docs/page.md", sh("adbuddy doctor --json | jq ."), false},
 		{"root help", "docs/page.md", sh("adbuddy --help"), false},

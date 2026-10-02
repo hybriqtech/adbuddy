@@ -18,11 +18,11 @@ ADBuddy supports Claude Code, Codex, Gemini CLI and OpenCode, and recommends Cla
 
 ## What does the agent see on my phone?
 
-What adb lets it read: the apps installed, settings, files in shared storage and what is on the screen (the text of its elements, and screenshots). Reading is green, so it does not ask you. ADBuddy's screen helpers never carry the text of password fields, and nothing touches or reads the screen while a protected app is in front. What it reads goes into its conversation, and so to its model provider. See [Safety](safety.md#the-three-levels) and [What ADBuddy does not guarantee](safety.md#what-adbuddy-does-not-guarantee).
+What adb lets it read: the apps installed, settings, files in shared storage, the phone's logs, what is on the screen (the text of its elements, and screenshots) and, through content providers, what the phone's shell may read, such as contacts and call history (it depends on the phone). Reading is green, so it does not ask you. ADBuddy's screen helpers never carry the text of password fields, and nothing touches or reads the screen while a protected app is in front. What it reads goes into its conversation, and so to its model provider. See [Safety](safety.md#the-three-levels) and [What ADBuddy does not guarantee](safety.md#what-adbuddy-does-not-guarantee).
 
 ## Can it delete my photos?
 
-Deleting is a red command (`rm`), so it waits for your answer, and you can say no. If you allow it, it is done: ADBuddy cannot undo a delete. Moving a photo to another folder is yellow: it runs and is journaled with its undo. Keep a backup of what matters, and read each red question before you allow it. See [Safety](safety.md#the-three-levels) and [Confirmations](safety.md#confirmations).
+Deleting is a red command (`rm`), so it waits for your answer, and you can say no. If you allow it, it is done: ADBuddy cannot undo a delete. Moving a photo to a new path is yellow: it runs and is journaled with its undo; moving it into a folder that already exists asks for confirmation. The agent can also delete through an app's screen with taps, and taps are not confirmed. Keep a backup of what matters, and read each red question before you allow it. See [Safety](safety.md#the-three-levels) and [Confirmations](safety.md#confirmations).
 
 ## How do I undo something?
 
@@ -34,11 +34,11 @@ Yes, with a little more work. Tailscale gives the PC and the phone addresses tha
 
 ## What if I lose my phone or my PC?
 
-If you lose the PC, turn off Wireless debugging on the phone, or tap **Cut access** in the app, and forget the PC under **Paired devices** in Developer options. If you lose the phone, ADBuddy adds no other way in: lock it and erase it with your phone's own tools. Either way, the journal lists the commands the agent ran, on the PC. See [Pause and cut access](usage.md#pause-and-cut-access) and [Uninstall](install.md#uninstall).
+If you lose the PC, tap **Cut access** in the app, or turn off both USB debugging and Wireless debugging (turning off only Wireless debugging does not close port 5555). If remote mode was on, restart the phone. Then use **Revoke USB debugging authorizations**, forget the PC under **Paired devices** and remove it from your Tailscale network. If you lose the phone, ADBuddy adds no other way in: lock it and erase it with your phone's own tools. The journal on the PC lists what the agent ran. See [Pause and cut access](usage.md#pause-and-cut-access) and [Uninstall](install.md#uninstall).
 
 ## Why does it never ask for my PIN?
 
-Because it never needs it. ADBuddy does not type into password fields, the agent's instructions forbid asking for a PIN or a password, and Android asks for its own when it must. To allow a red command from the phone, you unlock the phone yourself. See [Safety](safety.md#protected-apps-and-the-screen).
+Because it never needs it. ADBuddy's helpers do not type into password fields when the app is connected, the agent's instructions forbid asking for a PIN or a password, and Android asks for its own when it must. To allow a red command from the phone, you unlock the phone yourself. See [Safety](safety.md#protected-apps-and-the-screen).
 
 ## How much does it cost?
 
@@ -46,7 +46,7 @@ ADBuddy is free and open source, under the Apache-2.0 licence. The agent you use
 
 ## Is it safe?
 
-It lowers the risk of letting an agent drive your phone: it ranks every command, journals changes with their undo, asks you before anything irreversible and has a Pause and a Cut access button. It does not make it risk-free. It protects against mistakes and prompt injection, not against an agent determined to find another adb, and the real guarantee is **Cut access**. Read [Safety](safety.md), including the part about what it does not guarantee.
+It lowers the risk of letting an agent drive your phone: it ranks every command, journals changes with their undo, asks you before the adb commands it knows are irreversible (taps and typing are not asked about) and has a Pause and a Cut access button. It does not make it risk-free. It protects against mistakes and prompt injection, not against an agent determined to find another adb, and the real guarantee is **Cut access**. Read [Safety](safety.md), including the part about what it does not guarantee.
 
 ## Does it collect telemetry?
 

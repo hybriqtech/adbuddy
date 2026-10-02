@@ -16,7 +16,7 @@ ADBuddy puts a **shim** between the agent and the phone. A shim is a small stand
 
 The shim only forwards the command to `adbuddy serve` over a local connection. `adbuddy serve` classifies it, journals it, asks you if needed, runs the real adb and sends the output back. If `adbuddy serve` is not running, the shim prints `ADBuddy host not running (run: adbuddy serve)` and nothing reaches the phone.
 
-`adbuddy serve` also refuses to start from the agent's own session, so the agent cannot start a host of its own and answer its own questions.
+`adbuddy serve` also refuses to start when the agent runs it (`AGENT_SESSION`), so the agent does not start a host of its own by mistake and answer its own questions. It is a check against mistakes, not a barrier: see [What ADBuddy does not guarantee](#what-adbuddy-does-not-guarantee).
 
 ## The three levels
 
@@ -30,15 +30,15 @@ Every command gets one level. For `adb shell`, ADBuddy parses the shell line and
 
 Three points matter:
 
-- **Green is not asked about.** The agent can read a lot without asking you: the apps installed, settings, files in shared storage, what is on the screen. What it reads goes to the agent (see [What ADBuddy does not guarantee](#what-adbuddy-does-not-guarantee)).
-- **Yellow can become red.** Before a change, ADBuddy reads the phone. If it cannot read the state it needs, or the change would overwrite something (a `mv` onto a file that exists, a `pm uninstall --user 0` of an app that is not a system app), the command is red.
-- **Unknown is red.** A command with no rule, or a shell line ADBuddy does not fully understand, is red. The shell evaluator accepts only a short list of constructs (simple commands, pipes, `;`, `&&`, `||`, `if`, `for`, `while`, `[ ]` tests, `$(…)` and the script's own lower-case variables); anything else waits for you every time.
+- **Green is not asked about.** The agent can read a lot without asking you: the apps installed, settings, files in shared storage, what is on the screen, the phone's logs and, through content providers, whatever the phone's shell is allowed to read (contacts and call history, for example; what you get depends on the phone). What it reads goes to the agent (see [What ADBuddy does not guarantee](#what-adbuddy-does-not-guarantee)).
+- **Yellow can become red.** Before a change, ADBuddy reads the phone. If it cannot read the state it needs, or the change would overwrite something (a `mv` onto a path that exists, a file or a folder, a `pm uninstall --user 0` of an app that is not a system app), the command is red.
+- **Unknown is red.** A command with no rule, or a shell line ADBuddy does not fully understand, is red. The shell evaluator accepts only a short list of constructs (such as simple commands, pipes, `;`, `&&`, `||`, `if`, `for`, `while`, `[ ]` tests, `$(…)` and the script's own lower-case variables); anything else waits for you every time.
 
 A few commands are **always red** and say so in the question, because they can cut the connection or affect ADBuddy: Wi-Fi and airplane mode, `settings` that touch debugging or accessibility, `adb kill-server`, `adb disconnect`, `adb usb`, `adb tcpip`, reboots, and anything that uninstalls, disables, clears, force-stops or revokes permissions of the ADBuddy app itself. They are fixed in the code: your own `rules.yaml` cannot lower them. The same goes for reading the full text of every app's notifications (`dumpsys … --noredact`), `adb bugreport` and `screenrecord`.
 
 ## The journal and undo
 
-Every command is written to the journal in the environment (`<environment>/journal`). A 🟡 or 🔴 command is written **before** it runs, with its undo, so the undo is on disk even if the host stops halfway. If the journal cannot be written, ADBuddy blocks every 🟡 and 🔴 command: no record, no change. Each entry carries a signature made with a key ADBuddy keeps in its data folder; `adbuddy journal` marks an entry that does not verify as `not written by ADBuddy`, and `adbuddy undo` will not run it.
+Every command is written to the journal in the environment (`<environment>/journal`). A 🟡 or 🔴 command is written **before** it runs, so the record is on disk even if the host stops halfway; its undo is written with it, except for a new app install, whose undo is worked out right after it runs. If the journal cannot be written, ADBuddy blocks every 🟡 and 🔴 command: no record, no change. Each entry carries a signature made with a key ADBuddy keeps in its data folder; `adbuddy journal` marks an entry that does not verify as `not written by ADBuddy`, and `adbuddy undo` will not run it.
 
 ```sh
 adbuddy journal
@@ -59,9 +59,9 @@ adbuddy undo <id>
 
 ## Confirmations
 
-A red command waits, and so does the agent. The question says what the command does in plain words, taken from ADBuddy's rules, **not from the agent**, and shows the raw command.
+A red command waits, and so does the agent. The question says what the command does in plain words, taken from the rule's template, with the command's arguments filled in, **not written by the agent**, and shows the raw command.
 
-- **App connected:** the question is a notification on the phone with **Allow**, **Deny** and, for most commands, **Allow during the session**. The app also shows it as a dialog when it is open. **Allow during the session** covers only the same rule with the same arguments, and is never offered for the always-red commands above. **To allow, the phone must be unlocked**; Deny always works.
+- **App connected:** the question is a notification on the phone with **Allow**, **Deny** and, for most commands, **Allow during the session**. The app also shows it as a dialog when it is open. **Allow during the session** covers only the same rule with the same arguments from the same folder, and is never offered for the always-red commands above, nor when the red comes from the state of the phone or a write on the PC. **To allow, the phone must be unlocked**; Deny always works.
 - **No app connected:** the question is in the `adbuddy serve` terminal. You type a two-digit code to allow it; anything else denies it.
 - **Nobody to ask** (for example `adbuddy serve --confirm deny`): the command is refused with `Denied: nobody could confirm: <title>`.
 
@@ -71,21 +71,21 @@ The instructions in the environment tell the agent not to retry a denied command
 
 ## Protected apps and the screen
 
-The agent can read and act on the screen with `adbuddy screen`, `adbuddy tap`, `adbuddy type "<text>"`, `adbuddy foreground` and `adbuddy screenshot`, and with raw `input`, `am start` and `screencap`. Some apps are **protected**: while one is in front, nothing touches or reads the screen, and the agent gets `Blocked by ADBuddy: … is a protected app`. It also cannot open a protected app (`am start`, `monkey`). ADBuddy itself is always protected.
+The agent can read and act on the screen with `adbuddy screen`, `adbuddy tap`, `adbuddy type "<text>"`, `adbuddy foreground` and `adbuddy screenshot`, and with raw `input`, `am start` and `screencap`. Some apps are **protected**: while one is in front, nothing touches or reads the screen, and the agent gets `Blocked by ADBuddy: … is a protected app`. ADBuddy refuses an `am start` or `monkey` that names a protected app. A link or a tap on an app's icon can still open one; once it is in front, nothing touches or reads the screen. ADBuddy itself is always protected.
 
-- **Which apps.** The ADBuddy app proposes the list **by name**: apps in the launcher whose package or label looks like banking, payments, wallets, crypto, passwords or 2FA. It is a guess. It can miss an app, and it can flag one that is harmless. **You cannot edit the list yet**; the screen to do it is not available.
+- **Which apps.** The ADBuddy app proposes the list **by name**: apps in the launcher whose package or label looks like banking, payments, wallets, crypto, passwords or 2FA. It is a guess. It can miss an app, and it can flag one that is harmless. Without the app, or until the app has sent its list, **only ADBuddy itself is protected**. **You cannot edit the list yet**; the screen to do it is not available.
 - **The guard fails closed.** If ADBuddy cannot tell which app is in front, it does not touch or read the screen. It also blocks while the notification shade is open, because a 2FA code can be on it. A command that touches or reads the screen must run alone, one key at a time, so it cannot open an app and then act in it after the guard looked.
-- **Password fields.** `adbuddy type "<text>"` never types into a password field, and the screen dump never carries a password field's text. ADBuddy never asks for your PIN or password, and the agent's instructions forbid it too.
+- **Password fields.** The screen dump never carries a password field's text. With the app connected, `adbuddy type "<text>"` refuses password fields. Without the app, and with a raw `input text`, ADBuddy cannot tell which field has the focus. ADBuddy never asks for your PIN or password, and the agent's instructions forbid it too.
 
 While the agent uses the screen, the phone shows a frame and a pill, **Agent using the screen · Pause**.
 
 ## Pause and Cut access
 
-Two buttons in the phone's app work without the PC.
+Two buttons in the phone's app. **Cut access** works on the phone itself, without the PC; **Pause** asks the host to stop, so it only works while the app is connected to it.
 
-**Pause** stops the agent's use of the phone and keeps the connection. While paused, ADBuddy refuses new adb commands, the screen helpers and `adbuddy undo`, and withdraws open questions. The agent keeps running, and it is told `paused from the phone`. It is in the chat's ⋮ menu, in the conversation notification and in the pill on the screen. **Resume** continues.
+**Pause** asks the host to stop the agent's use of the phone (only while the app is connected to the host) and keeps the connection. While paused, ADBuddy refuses new adb commands, the screen helpers and `adbuddy undo`, and withdraws open questions. The agent keeps running, and it is told `paused from the phone`. It is in the chat's ⋮ menu, in the conversation notification and in the pill on the screen. **Resume** continues.
 
-**Cut access** turns off Wireless debugging and USB debugging on the phone itself, with a permission `adbuddy setup` gives the app. It does not depend on the PC. It is in the ⋮ menu and in the conversation notification, and the notification button needs no unlock. **Restore access** puts back what was set before. See [Pause and cut access](usage.md#pause-and-cut-access) for the details. If the app cannot cut, it says so and offers Developer options, where you can turn the two switches off by hand.
+**Cut access** turns off Wireless debugging and USB debugging on the phone itself, with a permission `adbuddy setup` gives the app. It does not depend on the PC. It is in the ⋮ menu and in the conversation notification, and the notification button needs no unlock. **Restore access** puts back what was set before; if remote mode was on, its port 5555 opens again until the PC connects or the phone restarts. See [Pause and cut access](usage.md#pause-and-cut-access) for the details. If the app cannot cut, it says so and offers Developer options, where you can turn the two switches off by hand.
 
 ## Can you trust the app?
 
@@ -110,7 +110,7 @@ What the host connects to on the internet, in the code:
 - `dl.google.com`, during `adbuddy setup`, to download Google's Android platform-tools (checked against Google's checksum).
 - `github.com`, to download the phone app from a release, when a release is published and the host pins its certificate. It does nothing today.
 
-Everything else is on your network: the phone and the PC talk over Wireless debugging, and the app and the host over the local channel. The app asks for the `INTERNET` permission only for that channel, and its network configuration refuses plain-text traffic except to `127.0.0.1`.
+Everything else stays between your devices: the phone and the PC talk over Wireless debugging (over Tailscale's network if you use it for remote access), and the app and the host over the local channel. The app asks for the `INTERNET` permission only for that channel, and its network configuration refuses plain-text traffic except to `127.0.0.1`.
 
 **The agent is separate.** Your coding agent talks to its own provider, under its own terms. ADBuddy does not control that.
 
@@ -118,11 +118,12 @@ Everything else is on your network: the phone and the PC talk over Wireless debu
 
 ADBuddy lowers the risk of letting an agent drive your phone. It does not make it safe. Know these limits.
 
-- **The shim protects against mistakes and prompt injection. It does not protect against an agent determined to find another adb.** The shim works because the agent's `PATH` finds it first and because the real adb is outside the environment. An agent that runs another adb program, starts its own adb server, or talks to the phone's debugging port directly goes around ADBuddy: nothing is classified, journaled or asked. The instructions tell the agent not to do that, but an instruction is not a barrier. **The real guarantee is Cut access** in the app: with debugging off, the PC cannot reach the phone at all.
+- **The shim protects against mistakes and prompt injection. It does not protect against an agent determined to find another adb.** The shim works because the agent's `PATH` finds it first and because the real adb is outside the environment. An agent that runs another adb program, starts its own adb server (ADBuddy's own one, on port 5038, included), or talks to the phone's debugging port directly goes around ADBuddy: nothing is classified, journaled or asked. The instructions tell the agent not to do that, but an instruction is not a barrier. **The real guarantee is Cut access** in the app: with debugging off, the PC cannot reach the phone at all.
+- **The agent runs as you on the PC.** It can also read and change ADBuddy's own settings and data (`rules.yaml`, the key that signs the journal). The journal's signature catches entries other tools wrote, not a determined agent.
 - **Remote mode opens port 5555.** `adbuddy remote on` opens adb's network port 5555 on every network the phone joins, public Wi-Fi included, for 12 hours or until you turn it off. Android still asks for your PC's key, but anyone who can reach the port can try to connect. Only a running `adbuddy serve` closes it at the end of the 12 hours. Turn it on only when you need it. See [Remote mode](usage.md#remote-mode).
 - **The classifier is not a vault.** It is a whitelist, checked against a large set of test commands, and anything it does not recognise is red. But the command runs in the phone's own shell, and a mistake in how ADBuddy reads a shell line could rank a dangerous command lower than it deserves. A red you allow runs with the phone's full shell rights. Read the question before you allow it.
 - **Protected apps are a guess today.** The list comes from names, you cannot edit it yet, and an app that is not on it is not protected. Do not rely on it for an app that matters; keep such apps closed while the agent works, or pause it.
-- **Android's Advanced Protection mode may stop ADBuddy.** Where your phone offers that mode, it can restrict debugging, accessibility services and installs from outside the store. ADBuddy has no check for it today, so if setup or the screen helpers fail with it on, that is a reason to look at.
+- **Android's Advanced Protection mode may stop ADBuddy.** Where your phone offers that mode, it may restrict debugging, accessibility services and installs from outside the store. ADBuddy has no check for it today, so if setup or the screen helpers fail with it on, that is a reason to look at.
 - **What the agent reads goes to its provider.** Screen text, notifications, files and command output that the agent reads go into its conversation, and from there to the company that runs its model. Keep what you do not want shared off the screen, or behind a protected app, while the agent works.
 - **Yellow actions on the screen run without asking and have no undo.** Taps and typing are not confirmed one by one. Stay near the phone, or pause the agent, while it works on something important.
 
