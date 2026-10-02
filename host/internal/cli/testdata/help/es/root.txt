@@ -14,27 +14,28 @@ Uso:
   adbuddy [command]
 
 Comandos disponibles:
-  attach      Conecta esta terminal a la sesión del agente en adbuddy serve (Ctrl+] para desconectar)
-  completion  Genera el script de autocompletado para la shell indicada
-  connect     Conecta con el móvil por dirección IP y puerto (Tailscale u otra red sin mDNS)
-  doctor      Comprueba que ADBuddy, adb, el móvil y la app están listos, y explica cómo arreglar lo que no lo esté
-  env         Gestiona el entorno del agente
-  foreground  Enseña la app y la actividad que están en primer plano en el móvil
-  help        Ayuda sobre cualquier comando
-  journal     Enseña el diario de comandos adb y sus inversos
-  new         Empieza una conversación nueva en adbuddy serve, con otro agente si se indica
-  remote      Abre el puerto de red 5555 de adb durante 12 horas (modo remoto), lo cierra, o enseña su estado
-  run         Arranca un agente de código en el entorno de ADBuddy
-  screen      Lista lo que hay en la pantalla del móvil: ids, textos y dónde tocar
-  screenshot  Guarda una captura del móvil, reducida
-  send        Envía un fichero del entorno al móvil del usuario (para el agente)
-  serve       Ejecuta el host de ADBuddy: diario en vivo y confirmaciones de los comandos adb del agente
-  setup       Configura ADBuddy: consigue adb, empareja el móvil por Wi-Fi y prepara el entorno del agente
-  stop        Para el agente que ejecuta adbuddy serve (serve sigue en marcha)
-  tap         Toca un elemento de la pantalla del móvil por su texto, su id o un punto
-  type        Escribe texto en el campo con foco del móvil (sustituye lo que tenga el campo)
-  undo        Deshace cambios del diario ejecutando sus inversos
-  version     Muestra la versión de ADBuddy
+  attach        Conecta esta terminal a la sesión del agente en adbuddy serve (Ctrl+] para desconectar)
+  completion    Genera el script de autocompletado para la shell indicada
+  connect       Conecta con el móvil por dirección IP y puerto (Tailscale u otra red sin mDNS)
+  doctor        Comprueba que ADBuddy, adb, el móvil y la app están listos, y explica cómo arreglar lo que no lo esté
+  env           Gestiona el entorno del agente
+  foreground    Enseña la app y la actividad que están en primer plano en el móvil
+  help          Ayuda sobre cualquier comando
+  journal       Enseña el diario de comandos adb y sus inversos
+  new           Empieza una conversación nueva en adbuddy serve, con otro agente si se indica
+  notifications Lista las notificaciones actuales del móvil (las apps protegidas no muestran texto)
+  remote        Abre el puerto de red 5555 de adb durante 12 horas (modo remoto), lo cierra, o enseña su estado
+  run           Arranca un agente de código en el entorno de ADBuddy
+  screen        Lista lo que hay en la pantalla del móvil: ids, textos y dónde tocar
+  screenshot    Guarda una captura del móvil, reducida
+  send          Envía un fichero del entorno al móvil del usuario (para el agente)
+  serve         Ejecuta el host de ADBuddy: diario en vivo y confirmaciones de los comandos adb del agente
+  setup         Configura ADBuddy: consigue adb, empareja el móvil por Wi-Fi y prepara el entorno del agente
+  stop          Para el agente que ejecuta adbuddy serve (serve sigue en marcha)
+  tap           Toca un elemento de la pantalla del móvil por su texto, su id o un punto
+  type          Escribe texto en el campo con foco del móvil (sustituye lo que tenga el campo)
+  undo          Deshace cambios del diario ejecutando sus inversos
+  version       Muestra la versión de ADBuddy
 
 Opciones:
   -h, --help      ayuda de adbuddy

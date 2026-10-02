@@ -39,6 +39,10 @@ var exemptions = map[string]map[string]string{
 		"error": "the commands of the agent (screen, tap, type, foreground, screenshot) answer in English always (M6c spec section 3)",
 		"print": "the same: what screen, tap, type, foreground and screenshot print is read by the agent",
 	},
+	"helpers_notifications.go": {
+		"error": "adbuddy notifications is for the agent: its errors are English always (M6c spec section 3)",
+		"print": "what adbuddy notifications prints is read by the agent, and is data from the phone",
+	},
 	"send.go": {
 		"error": "adbuddy send is for the agent: its errors are English always (M6c spec section 3)",
 	},

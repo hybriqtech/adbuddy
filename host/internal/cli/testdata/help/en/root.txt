@@ -14,27 +14,28 @@ Usage:
   adbuddy [command]
 
 Available Commands:
-  attach      Connect this terminal to the agent's session in adbuddy serve (Ctrl+] to detach)
-  completion  Generate the autocompletion script for the specified shell
-  connect     Connect to the phone by IP address and port (Tailscale or another network without mDNS)
-  doctor      Check that ADBuddy, adb, the phone and the app are ready, and say how to fix what is not
-  env         Manage the agent environment
-  foreground  Show the app and activity in the phone's foreground
-  help        Help about any command
-  journal     Show the journal of adb commands and their inverses
-  new         Start a new conversation in adbuddy serve, with another agent if given
-  remote      Open adb's network port 5555 for 12 hours (remote mode), close it, or see its state
-  run         Start a coding agent in the ADBuddy environment
-  screen      List what is on the phone's screen: ids, texts and where to tap
-  screenshot  Save a screenshot of the phone, scaled down
-  send        Send a file of the environment to the user's phone (for the agent)
-  serve       Run the ADBuddy host: live journal and confirmations for the agent's adb commands
-  setup       Set up ADBuddy: get adb, pair the phone over Wi-Fi and prepare the agent environment
-  stop        Stop the agent that adbuddy serve runs (serve keeps running)
-  tap         Tap an element of the phone's screen by its text, its id or a point
-  type        Type text in the focused field of the phone (it replaces what the field has)
-  undo        Undo journaled changes by running their inverses
-  version     Print the ADBuddy version
+  attach        Connect this terminal to the agent's session in adbuddy serve (Ctrl+] to detach)
+  completion    Generate the autocompletion script for the specified shell
+  connect       Connect to the phone by IP address and port (Tailscale or another network without mDNS)
+  doctor        Check that ADBuddy, adb, the phone and the app are ready, and say how to fix what is not
+  env           Manage the agent environment
+  foreground    Show the app and activity in the phone's foreground
+  help          Help about any command
+  journal       Show the journal of adb commands and their inverses
+  new           Start a new conversation in adbuddy serve, with another agent if given
+  notifications List the phone's current notifications (protected apps show no text)
+  remote        Open adb's network port 5555 for 12 hours (remote mode), close it, or see its state
+  run           Start a coding agent in the ADBuddy environment
+  screen        List what is on the phone's screen: ids, texts and where to tap
+  screenshot    Save a screenshot of the phone, scaled down
+  send          Send a file of the environment to the user's phone (for the agent)
+  serve         Run the ADBuddy host: live journal and confirmations for the agent's adb commands
+  setup         Set up ADBuddy: get adb, pair the phone over Wi-Fi and prepare the agent environment
+  stop          Stop the agent that adbuddy serve runs (serve keeps running)
+  tap           Tap an element of the phone's screen by its text, its id or a point
+  type          Type text in the focused field of the phone (it replaces what the field has)
+  undo          Undo journaled changes by running their inverses
+  version       Print the ADBuddy version
 
 Flags:
   -h, --help      help for adbuddy
