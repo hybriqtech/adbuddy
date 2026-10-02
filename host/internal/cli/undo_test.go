@@ -92,7 +92,7 @@ func TestUndoDeniedHasAFix(t *testing.T) {
 		data := isolate(t)
 		t.Setenv("ADBUDDY_LANG", c.lang)
 		fakeDaemon(t, data, nil, ipc.Exit{Code: daemon.ExitDenied, ErrorCode: "UNDO_DENIED", Error: reason})
-		if _, errOut, code := run(t, "undo"); code == 0 || !strings.Contains(errOut, "UNDO_DENIED") || !strings.Contains(errOut, reason) || !strings.Contains(errOut, c.fix) {
+		if _, errOut, code := run(t, "undo"); code != ExitFailure || !strings.Contains(errOut, "UNDO_DENIED") || !strings.Contains(errOut, reason) || !strings.Contains(errOut, c.fix) {
 			t.Fatalf("%s: exit %d, stderr %q", c.lang, code, errOut)
 		}
 	}
