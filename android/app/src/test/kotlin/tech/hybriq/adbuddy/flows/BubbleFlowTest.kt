@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import org.junit.After
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -62,6 +63,12 @@ class BubbleFlowTest {
         compose.onNodeWithContentDescription(text(R.string.action_back)).performClick()
     }
 
+    /** The system's back (gesture or button), not the bar's arrow. */
+    private fun systemBack() {
+        compose.activityRule.scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+    }
+
     @Test fun theBubbleNeverShowsTheFirstRunSteps() {
         compose.onNodeWithContentDescription(text(R.string.action_menu)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.step_progress, 1, 2)).assertDoesNotExist()
@@ -83,6 +90,18 @@ class BubbleFlowTest {
         back()
         back()
         compose.onNodeWithContentDescription(text(R.string.action_menu)).assertIsDisplayed()
+        // Nothing along the way started another activity (MainActivity and its first-run steps).
+        assertNull(shadowOf(app).nextStartedActivity)
+    }
+
+    @Test fun theSystemBackAlsoLeavesTheProtectedAppsForSettings() {
+        openSettings()
+        compose.onNodeWithText(text(R.string.protected_title)).performClick()
+        compose.onNodeWithText(text(R.string.protected_intro)).assertIsDisplayed()
+        systemBack()
+        compose.onNode(hasText(text(R.string.settings_title)) and isHeading()).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.protected_intro)).assertDoesNotExist()
+        assertNull(shadowOf(app).nextStartedActivity)
     }
 
     private val component get() = ComponentName(app, AgentNotificationListener::class.java)
@@ -115,6 +134,8 @@ class BubbleFlowTest {
         allowInTheSystemAndOpenTheAccess()
         // Revoked in the system after the screen drew the button, before the tap (only the system's own answer changes,
         // so nothing repaints the screen): the click reads the system again and must not set the mark.
+        // Simulating only the API (setNotificationListenerAccessGranted) is on purpose: the setting
+        // enabled_notification_listeners still says yes, so the two sources disagree and the state is UNKNOWN.
         shadowOf(app.getSystemService(NotificationManager::class.java)).setNotificationListenerAccessGranted(component, false)
         compose.onNodeWithText(text(R.string.access_confirm)).performScrollTo().performClick()
         // The click found the system no longer saying "allowed" and read the state again: the two sources now disagree.
