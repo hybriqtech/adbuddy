@@ -392,3 +392,31 @@ I/TestRunner( 6213): run finished: 1 tests, 0 failed, 0 ignored
 (i) sale ~1 s tras el corte; (ii) vuelve solo a ~17 s; (iii) cumple. Tras Reactivar el modo tcpip sigue (`service.adb.tcp.port=5555`), como dice la spec §4.6 (hasta `adb usb`). `adb -s emulator-5600 usb` (21:22:36, "restarting in USB mode"), registro 60 s: `21:22:34 device / 21:22:36 gone / 21:22:37 device / last 21:23:37 device`; después `service.adb.tcp.port=0`, `adb_enabled=1`, y 5555 sigue en LISTEN (adbd, transporte del emulador).
 
 Salvedad: en el emulador, `listening before the cut: true` / `listening after the cut: false` salen igual con y sin modo tcpip (R3 sin tcpip dio lo mismo), porque el 5555 del invitado es también el transporte del emulador. Esas líneas prueban que el corte cierra adbd, no que cierre el modo tcpip en particular.
+
+### Paso 8 repetido limpio (S6 y S7), porque el S7 de tras R1 lo interrumpió el vigilante de RAM
+
+S6: registro 30 s y corte sin restauración.
+
+```
+$ guard: emulator-5600	device;
+$ (21:24:09) EMU; "$ADB" -s "$S" shell 'settings put global adb_enabled 0'   rc=0
+21:24:07 device
+21:24:09 gone
+21:24:10 offline
+last: 21:24:39 offline
+$ (21:24:40) EMU; scripts/emulator.sh stop   rc=0
+$ (espera SIN-EMULADOR, 21:24:46) solo `emulator -kill 14248 -sleep 20` (sale solo); ningún qemu `-port 5600`; la CI no tenía emulador; RAM libre 19.22 GB
+```
+
+(iv) se cumple otra vez, sin `Stop-Process`.
+
+S7: CI-LIBRE `0`, SIN-EMULADOR vacío, RAM libre 20.09 GB. `scripts/emulator.sh start` 21:25:13 con registro de 720 s:
+
+```
+21:25:15 gone
+21:25:20 offline          (y así hasta el final del registro)
+log del emulador: "INFO | Boot completed in 17671 ms"
+start: 21:35:20 rc=124 "the emulator did not finish booting in 10 minutes"
+```
+
+El sistema arranca en 18 s (según el emulador) pero `emulator-5600` queda `offline` los 10 min: `adb_enabled=0` sigue en los datos del AVD (`-no-snapshot` no lo borra) y adbd no acepta al servidor. (v) **no se cumple**: un test de Cortar acceso que falle a medias deja el AVD sin adb en el siguiente arranque, y el script no lo distingue de un emulador que no arranca (sale con 124). Parada 21:35:28 (`stop` rc 0; a las 21:35:30 ningún qemu `-port 5600`, solo el vigilante `-kill`).
