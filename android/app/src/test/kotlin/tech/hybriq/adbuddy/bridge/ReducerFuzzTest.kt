@@ -6,7 +6,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import org.junit.Assert.fail
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -104,35 +104,57 @@ class ReducerFuzzTest {
         return Message(v = 1, seq = seq, rid = if (rnd.nextBoolean()) null else "r1", type = type, ts = "x", payload = payload)
     }
 
-    private fun check(seed: Long, i: Int, what: String, m: Message?, f: () -> Unit) {
+    /** Keeps the cause, so the failure shows the reducer's own line; the message has seed, step and the payload. */
+    private fun assertNoThrow(seed: Long, i: Int, what: String, type: String?, payload: Any?, f: () -> Unit) {
         try {
             f()
         } catch (e: Throwable) {
-            fail("seed $seed, step $i, $what threw $e with ${m?.type} ${m?.payload.toString().take(500)}")
+            throw AssertionError("seed $seed, step $i, $what threw $e with $type ${payload.toString().take(500)}", e)
         }
     }
 
     @Test fun noReducerThrowsWithAnyPayload() {
         val welcome = Message(v = 1, type = Protocol.WELCOME, ts = "x", payload = template(Protocol.WELCOME))
+        var steps = 0
+        var readableSnapshots = 0
+        var validChat = 0
+        var validChatSnapshots = 0
         for (seed in seeds) {
             val g = Gen(seed, keys)
             var s = BridgeState().apply(welcome)
             for (i in 0 until 5_000) {
+                steps++
                 val m = g.message()
+                if (m.type == Protocol.CHAT_MESSAGE && Protocol.payload<ChatMessage>(m) != null) validChat++
                 // Through the state, as the channel does.
-                check(seed, i, "BridgeState.apply", m) { s = s.apply(m) }
+                assertNoThrow(seed, i, "BridgeState.apply", m.type, m.payload) { s = s.apply(m) }
                 // And each reducer directly: an event of its own types, any readable snapshot, every reset.
                 for (r in BridgeState.REDUCERS) {
                     val type = r.types.random(g.rnd)
                     val own = m.copy(type = type, payload = if (type in templates) g.mutate(template(type)) else g.element(3))
-                    check(seed, i, "${r::class.simpleName}.event", own) { r.event(s, own) }
-                    val snap = Protocol.payload<Snapshot>(Message(v = 1, type = Protocol.SNAPSHOT, payload = g.snapshot()))
-                    if (snap != null) check(seed, i, "${r::class.simpleName}.snapshot", m) { r.snapshot(s, snap) }
-                    for (why in Reset.entries) check(seed, i, "${r::class.simpleName}.reset($why)", null) { r.reset(s, why) }
+                    assertNoThrow(seed, i, "${r::class.simpleName}.event", own.type, own.payload) { r.event(s, own) }
+                    val snapPayload = g.snapshot()
+                    val snap = Protocol.payload<Snapshot>(Message(v = 1, type = Protocol.SNAPSHOT, payload = snapPayload))
+                    if (snap != null) {
+                        readableSnapshots++
+                        if (snap.chat.any { Protocol.payload<ChatMessage>(Message(v = 1, type = Protocol.CHAT_MESSAGE, payload = it)) != null }) validChatSnapshots++
+                        assertNoThrow(seed, i, "${r::class.simpleName}.snapshot", Protocol.SNAPSHOT, snapPayload) { r.snapshot(s, snap) }
+                    }
+                    for (why in Reset.entries) assertNoThrow(seed, i, "${r::class.simpleName}.reset($why)", null, null) { r.reset(s, why) }
                 }
-                check(seed, i, "disconnected", null) { s = s.disconnected() }
-                if (i % 50 == 0) check(seed, i, "welcome", welcome) { s = s.apply(welcome) } // out of INCOMPATIBLE now and then
+                assertNoThrow(seed, i, "disconnected", null, null) { s = s.disconnected() }
+                if (i % 50 == 0) assertNoThrow(seed, i, "welcome", welcome.type, welcome.payload) { s = s.apply(welcome) } // out of INCOMPATIBLE now and then
             }
         }
+        // Guards: a degenerate generator (everything undecodable) would leave the test green without testing anything.
+        assertTrue("readable snapshots: $readableSnapshots of ${steps * BridgeState.REDUCERS.size}", readableSnapshots >= MIN_READABLE)
+        assertTrue("snapshots with chat: $validChatSnapshots", validChatSnapshots >= MIN_CHAT_SNAPSHOTS)
+        assertTrue("chat messages that decode: $validChat of $steps", validChat >= MIN_CHAT)
+    }
+
+    private companion object {
+        const val MIN_READABLE = 3_000 // measured 6673
+        const val MIN_CHAT_SNAPSHOTS = 100 // measured 246
+        const val MIN_CHAT = 15 // measured 36
     }
 }
