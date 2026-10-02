@@ -1,6 +1,7 @@
 // Package pathguard decides whether a path stays inside a folder once links
-// are followed. It is the logic of the daemon's checks of adb pull (pcwrite.go),
-// for the code that does not live in the daemon.
+// are followed. It is the one guard of the daemon's checks of adb pull and
+// adb bugreport (daemon/pcwrite.go) and of adbuddy send (cli/send.go): a
+// change here changes both.
 package pathguard
 
 import (
