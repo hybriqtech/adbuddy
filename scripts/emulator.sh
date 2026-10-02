@@ -14,7 +14,8 @@
 #
 # Exit codes:
 #   1    the SDK or its packages are missing
-#   2    incorrect usage
+#   2    incorrect usage, or ADBUDDY_EMU_ADB_PORT invalid (empty, not a number, outside
+#        1024-65535, or 5037/5038: the adb servers of the user and of ADBuddy)
 #   3    the emulator's adb server sees another device (or none: it fails closed)
 #   4    the emulator is not stable: system_server or surfaceflinger restarted
 #   124  the emulator did not boot in 10 minutes
@@ -30,7 +31,18 @@ AVD="${ADBUDDY_EMU_AVD:-adbuddy-api37}"
 IMAGE="${ADBUDDY_EMU_IMAGE:-system-images;android-37.0;google_apis;x86_64}"
 PORT="${ADBUDDY_EMU_PORT:-5580}"
 SERIAL="emulator-$PORT"
-export ANDROID_ADB_SERVER_PORT="${ADBUDDY_EMU_ADB_PORT:-5039}"
+# The adb server of the script must not be the user's (5037) or ADBuddy's
+# (5038), and must be a plain port number: anything else exits with 2.
+ADB_PORT="${ADBUDDY_EMU_ADB_PORT-5039}"
+if [[ ! "$ADB_PORT" =~ ^[0-9]{1,5}$ ]] || ((10#$ADB_PORT < 1024 || 10#$ADB_PORT > 65535)) ||
+  ((10#$ADB_PORT == 5037 || 10#$ADB_PORT == 5038)); then
+  echo "ADBUDDY_EMU_ADB_PORT='$ADB_PORT' is not valid: it must be a port in 1024-65535 other than 5037 (the user's adb server) and 5038 (ADBuddy's)" >&2
+  exit 2
+fi
+# adb gives these two priority over the port and they would point at another
+# server (the user's): the script must only talk to its own.
+unset ADB_SERVER_SOCKET ANDROID_ADB_SERVER_ADDRESS
+export ANDROID_ADB_SERVER_PORT="$((10#$ADB_PORT))"
 
 usage() {
   echo "usage: $0 start|stop|env" >&2
