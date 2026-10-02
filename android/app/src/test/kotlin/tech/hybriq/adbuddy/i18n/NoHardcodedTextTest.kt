@@ -107,11 +107,11 @@ object HardcodedText {
     /** Calls whose literal arguments are text a person sees. */
     private val sinkCalls = listOf(
         "Text", "setContentTitle", "setContentText", "setSubText", "setTicker", "Toast.makeText", "NotificationChannel",
-        "setName", "setLabel", "addAction", "Action.Builder", "AlertDialog", "Snackbar.make",
+        "setName", "setLabel", "addAction", "Action.Builder", "AlertDialog", "Snackbar.make", "bigText", "setDescription",
     )
 
     /** Named arguments (or assignments) whose literal value is text a person sees. */
-    private val sinkNames = listOf("text", "contentDescription", "label", "title", "placeholder", "subtitle", "hint")
+    private val sinkNames = listOf("text", "contentDescription", "label", "title", "placeholder", "subtitle", "hint", "message", "stateDescription")
 
     /** Where phrases (two words or more) are looked for too: the files that build what a person sees. */
     val phrasePaths = listOf("ui/", "notify/", "confirm/", "control/", "files/", "AdbuddyApp.kt", "MainActivity.kt", "ChatBubbleActivity.kt", "bridge/BridgeService.kt", "a11y/Overlay.kt")
@@ -119,7 +119,7 @@ object HardcodedText {
     private val phrase = Regex("\\p{L}{2,}\\s+\\p{L}{2,}")
     private val hasLetter = Regex("\\p{L}")
     private val previewAnnotation = Regex("@\\w*Preview\\w*")
-    private val skipTokens = listOf("Log.", "throw ", "require(", "check(", "error(", "assert(")
+    private val skipTokens = Regex("""(?<![\w.])(Log\.|throw |require\(|check\(|error\(|assert\()""")
 
     /** Matches the paren that closes the one at [open] in the skeleton, or -1. */
     private fun close(sk: String, open: Int): Int {
@@ -207,9 +207,19 @@ object HardcodedText {
         fun skipped(l: Literal, at: Int): Boolean {
             if (previews.any { at in it }) return true
             if ("$file|${l.text.trim()}" in exceptions || "$file|*" in exceptions) return true
-            // The literal's line and the two before it (a statement that goes on over several lines).
-            val window = (maxOf(0, l.line - 3)..minOf(lines.size - 1, l.line - 1)).joinToString(" ") { lines[it] }
-            return skipTokens.any { window.contains(it) }
+            // Only the literal's own statement: its line and the ones before it that it goes on from, so a Toast after a Log is not skipped.
+            var first = l.line - 1
+            while (first > 0 && l.line - first < 8) {
+                val prev = lines[first - 1].trimEnd()
+                val goesOn = prev.endsWith("(") || prev.endsWith(",") || prev.endsWith("+") || prev.endsWith("=") || prev.endsWith("&&") ||
+                    prev.endsWith("||") || prev.endsWith("?:") || prev.endsWith("->") || prev.endsWith(".") ||
+                    lines[first].trimStart().startsWith(".") || lines[first].trimStart().startsWith("?:") ||
+                    (prev.endsWith("{") && skipTokens.containsMatchIn(prev)) // the lambda of a require(x) { "…" }
+                if (!goesOn) break
+                first--
+            }
+            val statement = (first..minOf(lines.size - 1, l.line - 1)).joinToString(" ") { lines[it] }
+            return skipTokens.containsMatchIn(statement)
         }
 
         val found = LinkedHashMap<Int, Finding>()
@@ -243,7 +253,7 @@ object HardcodedText {
 }
 
 class NoHardcodedTextTest {
-    private val root = File(System.getProperty("adbuddy.kotlinDir"))
+    private val root = File(System.getProperty("adbuddy.kotlinDir") ?: error("adbuddy.kotlinDir is not set"))
 
     /** `file|text` per line: a literal that is not for a person, with why. `file|*` exempts the whole file. */
     private fun exceptions(): Set<String> {
@@ -270,7 +280,7 @@ class NoHardcodedTextTest {
         val stale = exceptions().filter { e ->
             val (file, text) = e.split("|", limit = 2)
             val src = sources[file] ?: return@filter true
-            text != "*" && !src.contains(text)
+            text != "*" && Lexer.lex(src).literals.none { it.text.trim() == text }
         }
         assertTrue("i18n-exceptions.txt lists literals that are no longer in the code: $stale", stale.isEmpty())
     }
@@ -293,6 +303,20 @@ class NoHardcodedTextTest {
             /* Text("Hello") */ }"""))
         assertEquals(emptyList<String>(), scan("""val a = "no phrase here_but_one_word""", "bridge/Y.kt"))
         assertEquals(emptyList<String>(), scan("""fun a() { Log.w(TAG, "could not go to the foreground") }"""))
+        // A Log, check or error on the line before does not hide the text of the next statement.
+        assertEquals(listOf("Hi"), scan("""fun a() {
+            Log.d(TAG, x)
+            Toast.makeText(c, "Hi", 1).show() }""", "bridge/X.kt"))
+        assertEquals(listOf("Hi"), scan("""fun a() {
+            check(x)
+            val n = b.setContentTitle("Hi") }"""))
+        assertEquals(emptyList<String>(), scan("""fun a() {
+            Log.d(
+              TAG,
+              "two words")
+            }""", "notify/X.kt"))
+        assertEquals(listOf("Big text"), scan("""fun a() = b.bigText("Big text")"""))
+        assertEquals(listOf("Said"), scan("""fun a() = Foo(message = "Said")"""))
         assertEquals(emptyList<String>(), scan("""fun a() { throw IllegalStateException("not ready yet") }"""))
         assertEquals(emptyList<String>(), scan("""fun a() { require(x) { "must not be empty" } }"""))
         assertEquals(emptyList<String>(), scan("""@Preview @Composable private fun P() { Text("Hello there") ; Foo(text = "Hi") }

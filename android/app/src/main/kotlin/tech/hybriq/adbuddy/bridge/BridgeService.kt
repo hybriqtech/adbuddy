@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.LocaleList
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -43,9 +44,11 @@ class BridgeService : LifecycleService() {
     private var lastId: String? = null
     private var lastTs = 0L
     private val main = Handler(Looper.getMainLooper())
+    private var locales: LocaleList? = null
 
     override fun onCreate() {
         super.onCreate()
+        locales = resources.configuration.locales
         val first = ConversationView.of(BridgeState(), CutAccess.isCut(contentResolver))
         foreground = goForeground(conversationNotification(first))
         if (!foreground) {
@@ -135,10 +138,14 @@ class BridgeService : LifecycleService() {
      */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        // Only a change of language needs the questions painted again: a dismissed one must not come back (with
+        // its sound) because of a rotation or a font size.
+        val languageChanged = newConfig.locales != locales
+        locales = newConfig.locales
         if (foreground) {
             shown?.let { post(it) }
             // The pending questions are painted by differences (sync): they are painted again by hand.
-            ConfirmNotifier.repaint(this, (application as AdbuddyApp).bridge.state.value)
+            if (languageChanged) ConfirmNotifier.repaint(this, (application as AdbuddyApp).bridge.state.value)
         }
     }
 

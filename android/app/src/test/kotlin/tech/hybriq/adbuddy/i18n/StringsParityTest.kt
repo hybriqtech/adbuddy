@@ -114,7 +114,7 @@ class StringsParityTest {
     @Test fun theLockScreenTextsTakeNoArgumentsInAnyLanguage() {
         for (dir in listOf("values", "values-es")) {
             val strings = res(dir)
-            for (name in listOf("notif_public_connected", "notif_done_title")) {
+            for (name in listOf("notif_public_connected", "notif_done_title", "notif_working", "notif_waiting", "notif_stopped", "notif_asking")) {
                 val s = strings[name]
                 assertTrue("$dir: $name is missing", s != null)
                 for ((quantity, text) in s!!.texts) {
