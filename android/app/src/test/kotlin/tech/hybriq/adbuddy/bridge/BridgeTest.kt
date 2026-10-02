@@ -3,11 +3,13 @@ package tech.hybriq.adbuddy.bridge
 import java.net.Proxy
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.JsonObject
 import mockwebserver3.MockResponse
@@ -46,10 +48,13 @@ class BridgeTest {
         val frames = LinkedBlockingQueue<ByteString>()
         @Volatile var ws: WebSocket? = null
 
+        /** Does not answer the app's close: the socket stays readable on the app's side and the host can still write. */
+        @Volatile var holdClose = false
+
         override fun onOpen(webSocket: WebSocket, response: Response) { ws = webSocket; opened.countDown() }
         override fun onMessage(webSocket: WebSocket, text: String) { received.add(text) }
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) { frames.add(bytes) }
-        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(1000, null) }
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { if (!holdClose) webSocket.close(1000, null) }
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { gone.countDown() }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { gone.countDown() }
 
@@ -460,6 +465,78 @@ class BridgeTest {
         hosts[0].next()
         hosts[0].ws!!.close(1000, "restart")
         assertEquals(null, failed.get(5, TimeUnit.SECONDS))
+        assertEquals("the app connects again", Protocol.HELLO, hosts[1].next().type)
+        bridge.stop()
+    }
+
+    /**
+     * V42: what an old socket still delivers after a new link replaced it changes nothing: not the state, not a
+     * listener, not the request that waits on it, which fails with null when its connection ends. The old loop is
+     * held on a one-thread dispatcher, and the host does not answer the app's close: the old socket stays open
+     * while the host writes on it.
+     */
+    @Test fun anOldSocketIsIgnoredAfterANewLink() {
+        val single = Executors.newSingleThreadExecutor()
+        val held = CoroutineScope(SupervisorJob() + single.asCoroutineDispatcher())
+        val gate = CountDownLatch(1)
+        try {
+            val bridge = Bridge(held, "0.3.0", fast) { _, _ -> }
+            val errors = LinkedBlockingQueue<Message>()
+            bridge.listen(Protocol.ERROR) { errors.add(it) }
+            hosts[0].holdClose = true
+            bridge.start(link())
+            connect(bridge, hosts[0])
+            val result = CompletableFuture<Message?>()
+            val rid = bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { result.complete(it) }
+            assertEquals(rid, hosts[0].next().rid)
+
+            single.execute { gate.await() } // the old loop cannot end its connection until the gate opens
+            bridge.start(link(tokenB))
+            hosts[0].send("""{"v":1,"seq":7,"type":"session.state","ts":"x","payload":{"state":"working"}}""")
+            hosts[0].send("""{"v":1,"rid":"$rid","type":"error","ts":"x","payload":{"code":"failed","text":"x"}}""")
+            Thread.sleep(300)
+            assertEquals("the old socket did not change the state", "idle", bridge.state.value.sessionState.state)
+            assertEquals(0L, bridge.state.value.lastSeq)
+            assertEquals("no listener heard the old socket", null, errors.poll(100, TimeUnit.MILLISECONDS))
+            assertFalse("the old socket did not answer the request", result.isDone)
+
+            gate.countDown()
+            assertEquals("its connection ended: the request fails", null, result.get(5, TimeUnit.SECONDS))
+            assertEquals(tokenB, connect(bridge, hosts[1]).token)
+            bridge.stop()
+        } finally {
+            gate.countDown()
+            hosts[0].ws?.close(1000, null) // it read the app's close and waits to send its own: MockWebServer would wait for it
+            held.cancel()
+            single.shutdownNow()
+        }
+    }
+
+    /**
+     * V42: onResult runs outside the lock, so it may send another request at once: from an answer (it goes out on
+     * the same socket) and from a connection that ended (nothing to send it on: null, and the loop goes on).
+     */
+    @Test fun onResultMaySendAnotherRequest() {
+        val bridge = Bridge(scope, "0.3.0", fast) { _, _ -> }
+        bridge.start(link())
+        connect(bridge, hosts[0])
+        val inner = CompletableFuture<String?>()
+        val first = bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) {
+            inner.complete(bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { })
+        }
+        assertEquals(first, hosts[0].next().rid)
+        hosts[0].send("""{"v":1,"rid":"$first","type":"error","ts":"x","payload":{"code":"failed","text":"x"}}""")
+        val second = inner.get(5, TimeUnit.SECONDS)
+        assertNotNull("the request sent from onResult went out", second)
+        assertEquals(second, hosts[0].next().rid)
+
+        val fromFailure = CompletableFuture<String?>()
+        assertNotNull(bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { m ->
+            if (m == null) fromFailure.complete(bridge.request(Protocol.CAPTURE_REQUEST, JsonObject(emptyMap())) { })
+        })
+        hosts[0].next()
+        hosts[0].ws!!.close(1000, "restart")
+        assertEquals("no socket to send it on", null, fromFailure.get(5, TimeUnit.SECONDS))
         assertEquals("the app connects again", Protocol.HELLO, hosts[1].next().type)
         bridge.stop()
     }
