@@ -86,6 +86,11 @@ func newUILink(file string, log io.Writer) *uiLink {
 		tell(log, "uilink.the_saved_list_of_protected", file, classify.Printable(err.Error()))
 		return u
 	}
+	// {} or null carry no list (an empty one is "protectedApps": []): not known,
+	// so Protected says there is none.
+	if p.ProtectedApps == nil {
+		return u
+	}
 	u.setProtected(p.ProtectedApps)
 	return u
 }

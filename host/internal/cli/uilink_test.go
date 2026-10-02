@@ -259,3 +259,28 @@ func TestUILinkProtectedApps(t *testing.T) {
 		t.Fatalf("damaged file: %q", log.String())
 	}
 }
+
+// A saved file with no list ({} or null) is not a known list: Protected says
+// there is none. An explicit empty list is a list (V13).
+func TestUILinkSavedFileWithoutListIsNotKnown(t *testing.T) {
+	for _, body := range []string{`{}`, `null`, `{"protectedApps":null}`, `{"updated":"2026-01-01T00:00:00Z"}`} {
+		file := filepath.Join(t.TempDir(), "protected.json")
+		if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var log syncBuffer
+		u := newUILink(file, &log)
+		if u.Protected("com.example.bank") || !strings.Contains(log.String(), "only ADBuddy itself is protected") {
+			t.Errorf("%s: counted as a known list; log %q", body, log.String())
+		}
+	}
+	file := filepath.Join(t.TempDir(), "protected.json")
+	if err := os.WriteFile(file, []byte(`{"protectedApps": []}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var log syncBuffer
+	u := newUILink(file, &log)
+	if u.Protected("com.example.bank") || strings.Contains(log.String(), "only ADBuddy") {
+		t.Fatalf("an explicit empty list must count as known; log %q", log.String())
+	}
+}
