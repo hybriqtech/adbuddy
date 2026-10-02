@@ -285,3 +285,19 @@ emulator -kill 24616 -sleep 20                             (vigilante del propio
 ```
 
 El qemu de 5600 desaparece en ≤5 s sin `Stop-Process`: (iv) se cumple (`emu kill` va por la consola del emulador, no por adbd).
+
+### S7 (paso 8, tras R1): no arranca con adb — (v) no se cumple
+
+RAM libre esperada hasta >= 12 GB (13.92 GB a las 20:47:22), ningún qemu `-port 5600`. `scripts/emulator.sh start` 20:47:33 con registro de 720 s en paralelo:
+
+```
+20:47:35 gone
+20:47:42 offline
+20:50:49 gone        (el vigilante de RAM lo mató: 20:50:47 RAM libre 5.75 GB < 6 GB, `emu kill` → "OK: killing emulator, bye bye")
+start: 20:57:40 rc=124 "the emulator did not finish booting in 10 minutes"
+log del emulador (/tmp/adbuddy-emulator.log): "INFO | Boot completed in 97416 ms"   (≈20:49:10)
+```
+
+El emulador terminó de arrancar (lo dice su propio log, por su canal y no por adb) y `emulator-5600` siguió `offline` en el servidor 5060 durante ~1.5 min más, hasta que lo paró el vigilante de RAM: adbd no acepta al servidor. Lectura: `adb_enabled=0` quedó en los datos del AVD y la restauración programada de R1 no llegó a correr (murió con el grupo de adbd, como prevé el paso 6). No se pudo leer el valor (sin adb); la recuperación borra los datos. La bajada de RAM coincide con el arranque de un emulador nuevo de la CI (qemu `-port 5590` creado a las 20:53:21 con 7.6 GB de working set... el anterior se apagó entre medias) y con el arranque del mío: no es un bucle de reinicios.
+
+Tras el corte: ningún qemu `-port 5600` (solo el de la CI, sin tocar). Siguiente: "Recuperación del AVD de desarrollo" sobre `adbuddy-dev34` (y ningún otro AVD), arranque y ADB-ON.
