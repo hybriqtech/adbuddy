@@ -132,6 +132,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 	l.ui.deviceInfo = l.remote.onDeviceInfo
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
 	l.conf.StaleText = l.lang.T("notice.stale_reply")
+	l.conf.RTLNote = l.lang.T("confirm.rtl_escaped")
 	if trust := phoneapp.LoadTrust(releaseCert, e.dirs.Data); trust.DevAPK != "" {
 		fmt.Fprintln(app.Stderr, app.T("phone.adbuddy_trusts_a_development_build", trust.DevAPK, phoneapp.DevTrustPath(e.dirs.Data)))
 	}
@@ -200,6 +201,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 	})
 	l.conf = bridge.NewConfirmer(l.srv, fallback)
 	l.conf.StaleText = l.lang.T("notice.stale_reply")
+	l.conf.RTLNote = l.lang.T("confirm.rtl_escaped")
 	l.remote.setServer(l.srv)
 	l.setAreas(l.confirmArea(), l.chatArea(), l.agentArea(), l.uiArea(), l.remote.area())
 	l.conf.Notify = func(title string, moved bool) {
