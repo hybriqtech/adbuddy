@@ -34,6 +34,16 @@ var (
 	// statSize is the size a file was measured at, a variable so that a test
 	// can tell the copy's own limit from the measurement's.
 	statSize = func(fi os.FileInfo) int64 { return fi.Size() }
+	// outboxQuota is what outbox/ may weigh (V22): the copies adbuddy send
+	// leaves there and the files the agent writes there itself. The same
+	// 2 GiB as inbox/ (spec M3 §6), ten copies of the biggest file.
+	outboxQuota int64 = 2 << 30
+	// quotaPassed runs in copyToOutbox once a send passed the quota check,
+	// before its copy: a hook for the tests.
+	quotaPassed = func() {}
+	// readOutbox lists outbox/ to measure it: a variable so that a test can
+	// make the listing fail.
+	readOutbox = os.ReadDir
 )
 
 func newSendCmd(app *App) *cobra.Command {
@@ -115,30 +125,11 @@ func (l *phoneLink) sendFile(ws string, req ipc.Request) (string, ipc.Exit) {
 	}
 
 	name := safeName(filepath.Base(path))
-	outbox, exit := ensureOutbox(ws)
+	cp, exit := l.copyToOutbox(ws, name, path, src, fi)
 	if exit.Code != 0 {
 		return "", exit
 	}
-	ext := filepath.Ext(name)
-	stem := filesNow().Format("20060102-150405") + "-" + strings.TrimSuffix(name, ext)
-	dst, final, err := createExclusive(outbox, stem, ext)
-	if err != nil {
-		return "", sendFail(1, "SEND_FAILED", "could not save the file in outbox/")
-	}
-	dstPath := filepath.Join(outbox, final)
-	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(dst, h), io.LimitReader(src, maxSendSize+1))
-	if cerr := dst.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil && n > maxSendSize {
-		os.Remove(dstPath)
-		return "", sendFail(1, "TOO_LARGE", "%s is too large: at most %d MiB", filepath.Base(path), maxSendSize>>20)
-	}
-	if err != nil {
-		os.Remove(dstPath)
-		return "", sendFail(1, "SEND_FAILED", "could not copy the file")
-	}
+	final, dstPath, n := cp.name, cp.path, cp.size
 	// The thumbnail and the type open the copy by name: outbox/ must still be
 	// a plain folder.
 	if _, exit := ensureOutbox(ws); exit.Code != 0 {
@@ -151,7 +142,7 @@ func (l *phoneLink) sendFile(ws string, req ipc.Request) (string, ipc.Exit) {
 	}
 	att := bridge.Attachment{
 		ID: bridge.FrameID(idb).String(), Name: name, MIME: mimeOf(name, dstPath), Size: n,
-		SHA256: hex.EncodeToString(h.Sum(nil)), Thumb: thumbnailOf(dstPath),
+		SHA256: cp.sha256, Thumb: thumbnailOf(dstPath),
 	}
 	l.chat.attachments.put(att, "outbox/"+final)
 
@@ -172,6 +163,90 @@ func (l *phoneLink) sendFile(ws string, req ipc.Request) (string, ipc.Exit) {
 		msg = fmt.Sprintf("Saved %s (%d bytes) for the phone: the app is not connected, it will get it when it connects.", name, n)
 	}
 	return msg, ipc.Exit{}
+}
+
+// outboxCopy is the copy of a file that adbuddy send left in outbox/.
+type outboxCopy struct {
+	name   string // in outbox/
+	path   string // outbox/name, absolute
+	size   int64
+	sha256 string // hex
+}
+
+// copyToOutbox copies src (the file at path, measured as fi) into outbox/ of
+// ws under a new name made from name, within the quota of outbox/ (V22).
+// Sends take turns here, from the check to the end of the copy (sendMu): two
+// at once could both fit in the room that only one of them has. The turn is
+// not held while the session or the bridge server are called.
+func (l *phoneLink) copyToOutbox(ws, name, path string, src *os.File, fi os.FileInfo) (outboxCopy, ipc.Exit) {
+	l.files.sendMu.Lock()
+	defer l.files.sendMu.Unlock()
+	outbox, exit := ensureOutbox(ws)
+	if exit.Code != 0 {
+		return outboxCopy{}, exit
+	}
+	used, err := outboxUsed(outbox)
+	if err != nil {
+		return outboxCopy{}, sendFail(1, "SEND_FAILED", "could not measure the outbox folder")
+	}
+	if used+statSize(fi) > outboxQuota {
+		return outboxCopy{}, outboxFull()
+	}
+	quotaPassed()
+	ext := filepath.Ext(name)
+	stem := filesNow().Format("20060102-150405") + "-" + strings.TrimSuffix(name, ext)
+	dst, final, err := createExclusive(outbox, stem, ext)
+	if err != nil {
+		return outboxCopy{}, sendFail(1, "SEND_FAILED", "could not save the file in outbox/")
+	}
+	dstPath := filepath.Join(outbox, final)
+	h := sha256.New()
+	n, err := io.Copy(io.MultiWriter(dst, h), io.LimitReader(src, maxSendSize+1))
+	if cerr := dst.Close(); err == nil {
+		err = cerr
+	}
+	switch {
+	case err != nil:
+		os.Remove(dstPath)
+		return outboxCopy{}, sendFail(1, "SEND_FAILED", "could not copy the file")
+	case n > maxSendSize:
+		os.Remove(dstPath)
+		return outboxCopy{}, sendFail(1, "TOO_LARGE", "%s is too large: at most %d MiB", filepath.Base(path), maxSendSize>>20)
+	}
+	used, err = outboxUsed(outbox) // it may have grown after it was measured
+	switch {
+	case err != nil:
+		os.Remove(dstPath)
+		return outboxCopy{}, sendFail(1, "SEND_FAILED", "could not measure the outbox folder")
+	case used > outboxQuota:
+		os.Remove(dstPath)
+		return outboxCopy{}, outboxFull()
+	}
+	return outboxCopy{name: final, path: dstPath, size: n, sha256: hex.EncodeToString(h.Sum(nil))}, ipc.Exit{}
+}
+
+// outboxUsed is what outbox/ weighs for its quota: the regular files at its
+// top, where adbuddy send leaves its copies. The agent's own files there
+// count too; its subfolders are its own, like the rest of the environment.
+// A folder that cannot be listed is an error, not an empty one: the quota
+// fails closed.
+func outboxUsed(outbox string) (int64, error) {
+	var total int64
+	entries, err := readOutbox(outbox)
+	if err != nil {
+		return 0, err
+	}
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+			total += info.Size()
+		}
+	}
+	return total, nil
+}
+
+// outboxFull is the answer to a send that does not fit in outbox/.
+func outboxFull() ipc.Exit {
+	return sendFail(1, "TOO_LARGE", "the outbox folder is full (at most %d MiB): delete from it the files the phone already has", outboxQuota>>20)
 }
 
 // openInEnvironment opens the regular file at path if it is inside the
