@@ -86,6 +86,7 @@ fun ChatHeader(
     onPause: (Boolean) -> Unit,
     onToggleCut: () -> Unit,
     onActivity: () -> Unit,
+    onSettings: () -> Unit,
     onNewConversation: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -150,6 +151,7 @@ fun ChatHeader(
                         onClick = { menu = false; onToggleCut() },
                     )
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_activity)) }, onClick = { menu = false; onActivity() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.menu_settings)) }, onClick = { menu = false; onSettings() })
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.menu_new_conversation)) },
                         onClick = { menu = false; onNewConversation() },
@@ -394,7 +396,7 @@ private fun ChatHeaderPreview() {
     AdbuddyTheme(dynamic = false) {
         ChatHeader(
             BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), cut = false, terminalShown = true,
-            onToggleTerminal = {}, onPause = {}, onToggleCut = {}, onActivity = {}, onNewConversation = {},
+            onToggleTerminal = {}, onPause = {}, onToggleCut = {}, onActivity = {}, onSettings = {}, onNewConversation = {},
         )
     }
 }

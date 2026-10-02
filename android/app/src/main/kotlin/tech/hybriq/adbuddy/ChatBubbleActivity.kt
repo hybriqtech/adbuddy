@@ -10,7 +10,7 @@ import androidx.compose.runtime.setValue
 import tech.hybriq.adbuddy.ui.ChatRoot
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 
-/** The chat inside a bubble (Bubbles API, spec M3 section 7.4). Opens no consent screen: that is MainActivity's. */
+/** The chat inside a bubble (Bubbles API, spec M3 section 7.4). Opens no consent screen nor first-run steps: those are MainActivity's. */
 class ChatBubbleActivity : ComponentActivity() {
     /** Questions whose dialog the person closed: without this, a closed 🔴 dialog would come straight back. */
     private var closed by mutableStateOf(emptySet<String>())
@@ -21,7 +21,7 @@ class ChatBubbleActivity : ComponentActivity() {
         // A rotation keeps the questions the person closed (MainActivity does the same).
         closed = savedInstanceState?.getStringArrayList(STATE_CLOSED)?.toSet() ?: emptySet()
         val app = application as AdbuddyApp
-        setContent { AdbuddyTheme { ChatRoot(app, focusConfirm = null, closed = closed, onClose = { closed = closed + it }) } }
+        setContent { AdbuddyTheme { ChatRoot(app, focusConfirm = null, closed = closed, firstRun = false, onClose = { closed = closed + it }) } }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -34,9 +35,13 @@ import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.DownloadState
 import tech.hybriq.adbuddy.files.FileIntents
 
-/** The app's main screen: the chat, the activity panel, and the red questions over both. */
+/**
+ * The app's screens: the first-run steps until they are done (only when firstRun: the chat bubble passes
+ * false and never shows them), then the chat, the activity panel and Settings (with the protected apps and
+ * the notification access under it), and the red questions over all of them.
+ */
 @Composable
-fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, onClose: (String) -> Unit) {
+fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, onClose: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by app.bridge.state.collectAsStateWithLifecycle()
@@ -47,7 +52,9 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, onClos
     val cut by remember(context) { CutAccess.observe(context) }
         .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context.contentResolver))
     val snackbar = remember { SnackbarHostState() }
-    var showActivity by rememberSaveable { mutableStateOf(false) }
+    val onboarding = remember(context) { Onboarding.of(context) }
+    var step by rememberSaveable { mutableStateOf<OnboardingStep?>(OnboardingStep.initial(firstRun, onboarding.done())) }
+    var route by rememberSaveable { mutableStateOf(Route.CHAT) }
     val attachFailed = stringResource(R.string.attach_failed)
     val cutFailed = stringResource(R.string.cut_failed)
     val restoreFailed = stringResource(R.string.restore_failed)
@@ -68,7 +75,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, onClos
     // Images the agent sends download by themselves (up to the limit of the mode); the rest waits for a tap.
     val downloadsNow by rememberUpdatedState(downloads)
     // Unknown remote mode (null) counts as remote: the tighter limit, never a false "off".
-    val remoteMode = state.remote?.enabled != false
+    val remoteMode = RemoteUi.treatAsRemote(state.remote)
     LaunchedEffect(state.chat.messages, remoteMode) {
         for (m in state.chat.messages) {
             if (m.role != "assistant") continue
@@ -110,17 +117,37 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, onClos
                     if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
                 }
             },
-            openActivity = { showActivity = true },
+            openActivity = { route = Route.ACTIVITY },
+            openSettings = { route = Route.SETTINGS },
             newConversation = app.chat::newConversation,
         )
     }
 
-    if (showActivity) {
-        BackHandler { showActivity = false }
-        ActivityScreen(state, onBack = { showActivity = false })
+    val back = { route = route.parent ?: Route.CHAT }
+    val first = step
+    if (first != null) {
+        val finish = { onboarding.finish(); step = null }
+        when (first) {
+            OnboardingStep.PROTECTED_APPS ->
+                ProtectedAppsScreen(app, first, onBack = { step = first.previous() }, onDone = { step = first.next() }, onSkip = { step = first.next() })
+            OnboardingStep.NOTIFICATION_ACCESS ->
+                NotificationAccessScreen(first, onBack = { step = first.previous() }, onDone = finish, onSkip = finish)
+        }
     } else {
-        ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now) {
-            RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
+        when (route) {
+            Route.CHAT -> ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now) {
+                RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
+            }
+            Route.ACTIVITY -> {
+                BackHandler(onBack = back)
+                ActivityScreen(state, onBack = back)
+            }
+            Route.SETTINGS -> {
+                BackHandler(onBack = back)
+                SettingsScreen(app, state, onOpen = { route = it }, onBack = back, onMessage = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() })
+            }
+            Route.PROTECTED_APPS -> ProtectedAppsScreen(app, null, onBack = back, onDone = back, onSkip = back)
+            Route.NOTIFICATION_ACCESS -> NotificationAccessScreen(null, onBack = back, onDone = back, onSkip = back)
         }
     }
     // After both screens, so a question shows wherever the person is.

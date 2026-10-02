@@ -60,10 +60,11 @@ class ChatActions(
     val pause: (Boolean) -> Unit,
     val toggleCut: () -> Unit,
     val openActivity: () -> Unit,
+    val openSettings: () -> Unit,
     val newConversation: () -> Unit,
 ) {
     companion object {
-        val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+        val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
     }
 }
 
@@ -101,7 +102,8 @@ fun ChatScreen(
         topBar = {
             ChatHeader(
                 state, cut, terminalShown, onToggleTerminal = { terminalShown = !terminalShown }, onPause = actions.pause,
-                onToggleCut = actions.toggleCut, onActivity = actions.openActivity, onNewConversation = { askNew = true },
+                onToggleCut = actions.toggleCut, onActivity = actions.openActivity, onSettings = actions.openSettings,
+                onNewConversation = { askNew = true },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
