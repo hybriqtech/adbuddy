@@ -119,6 +119,14 @@ Un commit por punto; cada punto sale de la sección M4 de `pendientes-m3-m5.md`.
 6. **J2.6 `TestParserCapsAMessageBeforeJoining` débil:** la aserción comprueba el tope exacto y que el mensaje se corta en el límite y no más allá.
 7. **J2.7 `NotebookEdit`.** #19 ya hace que `CardSafe` mire `notebook_path`: se reduce a un test (entrada con `notebook_path` y otro campo de ruta) e inspección estática de que `notebook_path` es el único campo de ruta; si el test pasa sin cambios de código, solo el test.
 
+## Validaciones manuales pendientes (ola 2 M/K/J; nadie las ha corrido)
+
+- **K1 (V08), carga real del PTY:** con un agente real que no lee su stdin (p. ej. `sleep` en primer plano sin leer, o Claude Code bloqueado) y entrada del móvil o de `chat.send`, en ConPTY (Windows) y en Unix: el lector del canal sigue atendiendo `confirm.response`, `session.stop` y el ping; el aviso `notice.typing_dropped` se ve una vez por episodio en la app.
+- **K1, `Kill` desatascando el `Write` en Windows:** en este PC conhost se traga 4 MiB sin que el `Write` bloquee, así que `TestStopEndsWithARealAgentThatDoesNotRead` hace `t.Skip`; comprobar en la CI de Linux que se ejecuta de verdad (y que `Stop` termina), y a mano en Windows con un agente que sí deje de leer.
+- **K1 con #19 en `main`:** volver a comprobar que el `guard` (`agentBusy`, `Busy`) no depende de un lock que se tome con `chat.mu` retenido mientras se espera a un `Paste`.
+- **J2.3:** `/compact` real en Claude Code: el resumen no aparece como mensaje de la persona (el parser solo se probó con un registro sintético).
+- **J2.1:** `Edit`, `Write` y otras herramientas: la entrada canónica del hook coincide con la del `tool_use` del transcript (solo hay muestra grabada de `Bash`).
+
 ## Orden y límites
 
 M1..M4 (Sonnet, `adbuddy-reviewer` por tarea) → K1 (Sonnet con revisión opus; si BLOCKED o ronda 4-5, `adbuddy-implementer-opus`) → J1, J2 (Sonnet, revisión opus) → V (cierre). Un implementador a la vez. M1 y M3 y M4 tocan ficheros distintos de K1/J (`workspace`, `cli/serve,setup,run,phone,envcmd,appsetup`, `android/…/strings.xml`); K1 y J2.2 tocan ambos `phone_chat.go`/`phone_agent.go`: van secuenciales.
