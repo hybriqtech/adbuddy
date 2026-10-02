@@ -251,6 +251,18 @@ class ConfirmUiTest {
         assertNull(ConfirmUi.why(q("j_1").copy(special = true), ConfirmUi.Status.EXPIRED))
     }
 
+    // B2: the cut never splits a character outside the BMP (two UTF-16 units) in two.
+    @Test fun theCutDoesNotSplitASurrogatePair() {
+        val emoji = String(Character.toChars(0x1F600))
+        for (max in listOf(ConfirmUi.MAX_COMMAND, ConfirmUi.DIALOG_MAX_COMMAND)) {
+            val r = q("j_1").copy(rawCommand = "a".repeat(max - 2) + emoji + "b".repeat(10))
+            val s = ConfirmUi.shown(r, maxCommand = max)
+            val kept = s.command.removeSuffix("…")
+            assertFalse("$max", Character.isHighSurrogate(kept.last()))
+            assertEquals("$max", r.rawCommand.length, kept.length + s.hidden)
+        }
+    }
+
     // --- what the notification itself may allow ---
 
     // A4-2/A4-3: a special question, or a command the notification cuts, is

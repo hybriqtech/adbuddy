@@ -118,9 +118,10 @@ object ConfirmUi {
     fun shown(r: ConfirmRequest, maxDetail: Int = Int.MAX_VALUE, maxCommand: Int = DIALOG_MAX_COMMAND): Shown {
         val all = if (r.detail.isEmpty()) emptyList() else r.detail.split('\n')
         val detail = all.take(maxDetail)
-        val cut = r.rawCommand.length > maxCommand
-        val command = if (cut) r.rawCommand.take(maxCommand - 1) + "…" else r.rawCommand
-        return Shown(r.special, detail, all.size - detail.size, command, if (cut) r.rawCommand.length - (maxCommand - 1) else 0)
+        if (r.rawCommand.length <= maxCommand) return Shown(r.special, detail, all.size - detail.size, r.rawCommand, 0)
+        // Cut by characters, not UTF-16 units: half a surrogate pair would show as garbage (B2).
+        val kept = r.rawCommand.take(maxCommand - 1).let { if (it.isNotEmpty() && it.last().isHighSurrogate()) it.dropLast(1) else it }
+        return Shown(r.special, detail, all.size - detail.size, "$kept…", r.rawCommand.length - kept.length)
     }
 
     /**
