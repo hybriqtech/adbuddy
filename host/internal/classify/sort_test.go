@@ -57,7 +57,7 @@ func TestSortReadingFormsStayGreen(t *testing.T) {
 
 func TestUniqPositionalsAndDoubleDash(t *testing.T) {
 	c := mustNew(t, "")
-	for _, args := range []string{"-- -x /sdcard/y", "-c in out", "in out", "-f 1 in out", "-f1 in out"} {
+	for _, args := range []string{"-- -x /sdcard/y", "-c in out", "-f a b", "-s x in", "-w1x in", "in out", "-f 1 in out", "-f1 in out"} {
 		classifyBoth(t, c, "uniq", strings.Fields(args), Red)
 	}
 	for _, args := range []string{"-f1 in", "-f 1 in", "-c in", "", "-- -x", "-s 2 -w 3 in", "-d"} {

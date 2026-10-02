@@ -89,16 +89,6 @@ func indexOf(ws []Word, s string) int {
 	return -1
 }
 
-// logcat options that only read. logcat uses getopt_long, which also accepts
-// unambiguous abbreviations of long options (--cl = --clear), so only these
-// exact spellings are 🟢; any other option is 🔴.
-var (
-	logcatShortFlags  = "dsLgSDB" // no value
-	logcatShortValues = "vbtTem"  // take a value
-	logcatLongFlags   = map[string]bool{"--dividers": true, "--last": true, "--statistics": true, "--binary": true}
-	logcatLongValues  = map[string]bool{"--buffer": true, "--format": true, "--max-count": true, "--pid": true, "--regex": true, "--uid": true}
-)
-
 // getoptSpec describes the options of a command that parses its arguments
 // with getopt, so that a check reads them the way the command does.
 //

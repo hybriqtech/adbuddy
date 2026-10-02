@@ -52,3 +52,7 @@ Dos tareas en serie sobre el mismo árbol (Sonnet `adbuddy-implementer`; si BLOC
 ## Riesgo si me equivoco
 
 Un 🔴 de más en una forma rara (`sort -to`, `ip a`) cuesta una confirmación al usuario. Un `sort -o`, `pgrep -L` o `ss -D` que se escape cuesta un fichero vaciado o un proceso muerto en el móvil sin pedir permiso: por eso las largas van por lista blanca, el valor que empieza por `-` es 🔴 y la duda se resuelve a 🔴.
+
+## Resultado de la tarea 2 (barrido cerrado, comprobado en el emulador toybox 0.8.13-android)
+
+Huecos reales reproducidos antes del arreglo: `pgrep -L 9 -x sleep` mató el `sleep` propio; `ss -D /data/local/tmp/p1-ss -t` creó el fichero. Arreglados con `check: pgrep` y `check: ss` (ayudante getopt), y `checkIP` con lista blanca. Resto de utilidades 🟢: ninguna escribe ni mata (`--help` y prueba con un segundo argumento: ls, cat, stat, du, df, readlink, realpath, md5sum/sha1sum/sha256sum, cmp, diff, head, tail, wc, cut, tr, grep, strings, od, base64, seq, expr, file, xxd [máx. 1 fichero], ps, top, pidof, free, vmstat, uptime, uname, id, printenv, getprop, netstat, ping, builtins). Detalle por utilidad en `.superpowers/sdd/2026-10-03-sort-output/task-2-report.md`. Sin validaciones manuales pendientes de este hueco. Nota: `ping -f` (flood) sigue 🟢: no escribe ni mata, y necesita root.

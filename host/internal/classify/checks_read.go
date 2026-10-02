@@ -231,6 +231,14 @@ func checkUniq(ws []Word) checkResult {
 	if r.bad != "" {
 		return red(reason("uniq option {v} may write a file", "v", r.bad))
 	}
+	// toybox rejects a value that is not a number ("uniq: not integer: a",
+	// checked in the emulator) before it acts, but a value that is not one is
+	// not trusted either.
+	for _, c := range "fsw" {
+		if v, set := r.seen[byte(c)]; set && !isDigits(v) {
+			return red(reason("uniq option {v} may write a file", "v", "-"+string(c)+v))
+		}
+	}
 	if len(r.pos) > 1 {
 		return red(reason("uniq with an output file"))
 	}
