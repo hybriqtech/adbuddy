@@ -17,6 +17,21 @@ go build -o adbuddy ./cmd/adbuddy      # adbuddy.exe on Windows
 
 A build from source pins no signing certificate for the phone app, so `adbuddy setup` does not download it: install your own build with `adbuddy setup --apk <file>`. Releases are built by the pipeline described in `docs/releasing.md`.
 
+## Languages
+
+ADBuddy speaks English and Spanish. The language of the host is, in this order: the environment variable `ADBUDDY_LANG`, `language` in `config.toml`, `LC_ALL`, `LC_MESSAGES` or `LANG`, the interface language of Windows, and English. Anything else is English. The phone app follows the language of the phone; the PC and the phone may differ.
+
+What is read by a program or by the agent is **always English**: the output with `--json`, with `ADBUDDY_SOURCE=agent` (the commands the agent uses: `screen`, `tap`, `type`, `foreground`, `screenshot`, `send`, `hook`), the error codes, the journal's `reason`, the shim's "Blocked by ADBuddy" messages and the `text` of the phone protocol's errors. What decides a 🔴 confirmation (the command, its level, the special mark, the two-digit code) is never translated.
+
+Adding a message:
+
+- Add the key to `internal/i18n/catalog/en.toml` and to `es.toml` (explicit positions, `%[1]s`, so that Spanish may reorder), and use it with `app.T("key", args…)`, `NewErrorT(code, "key", "fixKey", args…)` or `tell(app.Log(), "key", args…)`. A piece of a sentence that is itself translated is an `i18n.Msg` (`i18n.M("key", args…)`).
+- A reason of a confirmation (`internal/classify`) is `reason("English with {markers}", "marker", value…)` and its Spanish goes in `reasons_es.go`: a plain `string` does not compile.
+- Run `go test ./internal/i18n/... ./internal/cli/...`: it fails if a key is in one catalog and not in the other, if a key is used and does not exist (or exists and nothing uses it), and if a literal with a phrase appears in `internal/cli` (`internal/cli/testdata/textlint.txt` is the count of what is left and only goes down; it is empty today).
+- The tests that exist run in English (`ADBUDDY_LANG=en` in their `TestMain`); a test in Spanish uses `i18ntest.Lang(t, i18n.ES)` and `i18ntest.NoEnglish`.
+
+Style of the Spanish: tuteo, «móvil», «PC», «agente», «diario», «depuración inalámbrica», «emparejar», «ficheros»; commands, flags and keys are never translated.
+
 ## Tests
 
 ```sh

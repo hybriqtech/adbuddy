@@ -110,6 +110,14 @@ The composables (`MarkdownText`, `PermissionCard`, `ToolStripView`) have no test
 they are validated by hand on a device (see "M4" in
 `docs/superpowers/plans/pendientes-m3-m5.md`).
 
+## Languages
+
+The app is in English and Spanish and follows the language of the phone (on Android 13 and later you can also set it for ADBuddy alone in the system settings, Apps, ADBuddy, Language). Every string is in `res/values/strings.xml` and `res/values-es/strings.xml`, in the same commit, with positional markers (`%1$s`) and `<plurals>` where a number is shown; no composable, notification or `contentDescription` has a literal text.
+
+`./gradlew :app:testDebugUnitTest` checks it: `StringsParityTest` (same keys, same markers and plurals in both files, escaping, a string for every `ErrorCode`) and `NoHardcodedTextTest` (a literal text in Kotlin fails; the few that are on purpose are in `src/test/resources/i18n-exceptions.txt`, with their reason). `lintDebug` fails on a missing translation. `LocalesTest` (`connectedDebugAndroidTest`, on the emulator) checks the language itself.
+
+An error of the host is shown by its `code` (`ErrorText`), not by its English `text`.
+
 ## How it talks to the host
 
 - The host writes a random 256-bit token, the port and the PC's name to the

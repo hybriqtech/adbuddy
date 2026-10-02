@@ -246,3 +246,22 @@ De las revisiones de la app (Sonnet y opus):
 - **Herramientas atascadas en `running`:** si el transcript no trae el `tool_result` (herramienta interrumpida), el chip se queda en `running` hasta la sesión siguiente. Un tope de tiempo o un `Stop` que las cierre.
 - **`Notification` y `Stop` sin transcript:** con el transcript degradado, solo `Stop` trae el último mensaje y `Notification` no se muestra; falta decidir qué ve la persona en ese caso.
 - **Conflación de `connected` en `ChatController`** (ronda C): una tarjeta puede quedar en "contestando" hasta `permission.resolved` o los 600 s del host en el caso raro de una reconexión rápida.
+
+## M6c · Idiomas (en/es)
+
+Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (registro): `docs/superpowers/plans/2026-10-02-adbuddy-m6c-i18n.md`. Las revisiones y rulings viven en el ledger local de la sesión (no versionado); lo esencial está copiado en el plan (registro) y aquí.
+
+### Validaciones manuales pendientes (nadie las ha corrido en un móvil ni en el PC del usuario)
+
+- **Las de la spec §10:** Pixel con Android 17 en español (onboarding, chat, actividad, tarjetas de permiso y de confirmación 🔴, consentimiento, errores forzados, textos largos sin cortar); idioma por app desde los ajustes del sistema, sin reiniciar el proceso (pantallas, notificación fija y canales); notificaciones con la pantalla bloqueada y desbloqueada, hora en 24 horas; plurales (1 y 2 permisos esperando); PC con Windows en español **sin** `language` ni `LANG` (`doctor`, `setup`, `serve`, una pregunta 🔴; acentos y `ñ` en Windows Terminal y en `cmd.exe`); PC y móvil en idiomas distintos; una pregunta 🔴 con razón en el móvil y en la terminal, en español.
+- **`LocalesTest` en el emulador:** `emulator.yml` solo ejecuta el oráculo del clasificador, no los `androidTest`; `android.yml` solo los compila. `scripts/emulator.sh start` y `gradle :app:connectedDebugAndroidTest` con el emulador arrancado.
+- **El castellano de lo de M5c** (`protected_*`, `access_*`, `onboarding_*`, `settings_*`), cuando esté en `main`: lo revisa V y lo corrige solo en texto.
+
+### Decisiones y límites (spec §12)
+
+- El host escribe en el idioma del PC y la app en el del móvil; el idioma no viaja por el protocolo. Si la mezcla molesta, `hello.lang` opcional y render por conexión (aditivo, v1.1).
+- Solo `en` y `es`. Añadir otro: un fichero de catálogo en el host (más `reasons_es.go` como patrón para las razones) y un `values-xx` en la app, y relajar los tests de paridad. Una plataforma de traducción sería cosa del usuario.
+- Sin selector de idioma propio en Android 11-12 (solo el del sistema) ni fila «Idioma» en Ajustes: `LanguageSettings` está listo y la pone M5c.
+- **Se quedan en inglés a propósito:** las causas de paquetes internos y del sistema que una frase traducida cita (`adb`, `pairing`, `platformtools`, `phoneapp`, `workspace` y sus consejos), el texto de `ipc.Exit.Error` (también los motivos de `REMOTE_DENIED`), el `text` de los `ErrorReply`, los errores de cobra («unknown command»…) y `completion <shell>`, el texto de las skills, `AGENTS.md` y las plantillas, `agent.InstallHint`, la palabra de estado del diario en `adbuddy journal` (host; la de la pantalla de actividad de la app sí se traduce), y lo que el agente lee. Si alguno molesta: pasarlo a `failf`/`Msg` como `doctor` o `remoteTextIn`, sin tocar el inglés.
+- `mgr.Busy()` y el reconocimiento de diálogos de Claude Code no se tocan (ruling 16): están en el idioma de esa herramienta.
+- **`AGENTS.md` (M6b) y `adbuddy doctor`:** manda al agente buscar las líneas `Run:` y `Guidance:`, que solo están garantizadas en inglés con `ADBUDDY_SOURCE=agent`; un agente que ejecute `doctor` sin esa variable en un PC en español vería «Ejecuta:» / «Qué hacer:». Recomendación (pendiente del ok del supervisor, es texto de M6b): que `AGENTS.md` mande usar `adbuddy doctor --json`, cuyas claves `run` y `guidance` no se traducen.
