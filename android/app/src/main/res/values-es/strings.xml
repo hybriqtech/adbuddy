@@ -17,7 +17,7 @@
     <string name="notif_done_title">Listo</string>
     <string name="notif_done_default">El agente ha terminado</string>
     <string name="notif_capture_failed">No se pudo hacer la captura</string>
-    <string name="notif_cut_failed">No se pudo cortar el acceso ADB</string>
+    <string name="notif_cut_failed">No se pudo cortar el acceso adb</string>
     <string name="channel_confirm">Confirmaciones</string>
     <string name="status_connected">Conectado a %1$s</string>
     <string name="status_connecting">Conectando con el PC…</string>
@@ -74,7 +74,7 @@
     <string name="chat_send">Enviar</string>
     <string name="chat_attach">Adjuntar</string>
     <string name="chat_photo">Foto</string>
-    <string name="chat_file">Archivo</string>
+    <string name="chat_file">Fichero</string>
     <string name="chat_capture">Captura de pantalla</string>
     <string name="chat_terminal_show">Mostrar la terminal</string>
     <string name="chat_terminal_hide">Ocultar la terminal</string>
@@ -105,7 +105,7 @@
     <string name="new_conversation_title">¿Empezar una conversación nueva?</string>
     <string name="new_conversation_body">El agente empieza de nuevo sin recordar esta. Esta conversación se queda en el PC.</string>
     <string name="new_conversation_confirm">Empezar</string>
-    <string name="attach_failed">No se ha podido añadir el archivo</string>
+    <string name="attach_failed">No se ha podido añadir el fichero</string>
     <string name="draft_failed">Falló la subida: toca para reintentar</string>
     <string name="link_open_title">¿Abrir %1$s?</string>
     <string name="link_open">Abrir</string>
