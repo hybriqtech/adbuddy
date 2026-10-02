@@ -6,14 +6,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.app.NotificationCompat
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.MainActivity
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.Decision
+import tech.hybriq.adbuddy.ui.Formats
 
 /**
  * Shows each pending 🔴 question as a high-priority notification (spec §4.5)
@@ -51,7 +50,7 @@ object ConfirmNotifier {
     /** The last line of a question: when it expires (in the phone's time) or why it has no buttons. */
     fun footer(context: Context, status: ConfirmUi.Status, localExpires: Long?): String = when (status) {
         ConfirmUi.Status.OPEN -> localExpires?.let {
-            context.getString(R.string.confirm_expires, DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(it)))
+            context.getString(R.string.confirm_expires, Formats.time(it, FormatStyle.MEDIUM))
         } ?: ""
         ConfirmUi.Status.SENDING -> context.getString(R.string.confirm_sending)
         ConfirmUi.Status.OFFLINE -> context.getString(R.string.confirm_offline)

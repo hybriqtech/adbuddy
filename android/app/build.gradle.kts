@@ -36,6 +36,11 @@ android {
         compose = true
     }
 
+    // Compose and Material bring strings in dozens of languages the app does not offer (it has two: spec v1 section 6).
+    androidResources {
+        localeFilters += listOf("en", "es")
+    }
+
     // The i18n controls of the platform, as a second net behind StringsParityTest and NoHardcodedTextTest.
     // `error +=` raises them to errors and leaves every other check as it was (checkOnly would switch the rest off).
     lint {

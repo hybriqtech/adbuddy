@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -272,7 +273,7 @@ fun AttachmentCard(a: Attachment, state: DownloadState?, onTap: () -> Unit) {
             }
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(a.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(sizeText(a.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(android.text.format.Formatter.formatShortFileSize(LocalContext.current, a.size), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 when (state) {
                     null -> Text(stringResource(R.string.file_tap_download), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     is DownloadState.Running -> {
@@ -291,12 +292,6 @@ fun AttachmentCard(a: Attachment, state: DownloadState?, onTap: () -> Unit) {
             }
         }
     }
-}
-
-private fun sizeText(n: Long): String = when {
-    n >= 1024L * 1024 -> "%.1f MB".format(n / 1048576.0)
-    n >= 1024 -> "%d KB".format(n / 1024)
-    else -> "$n B"
 }
 
 @Composable

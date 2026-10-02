@@ -21,16 +21,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Bridge
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.ErrorReply
+import tech.hybriq.adbuddy.bridge.ErrorText
 import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.bridge.RemoteState
 import tech.hybriq.adbuddy.confirm.HostClock
@@ -58,6 +59,7 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
         RemoteUi.msUntilClosing(if (view.kind == Kind.ON) view.expiresAt else null, clock.now())?.let { delay(it); tick++ }
     }
     val failed = stringResource(R.string.remote_failed)
+    val resources = LocalResources.current
 
     fun send(enabled: Boolean) {
         pending = true
@@ -65,7 +67,7 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
             pending = false
             when {
                 reply == null -> mark = UnknownMark(latest.remote) // the tunnel dropped (adbd restarts): unknown, not off
-                reply.type == Protocol.ERROR -> onMessage(Protocol.payload<ErrorReply>(reply)?.let { it.text.ifEmpty { it.code } }?.ifEmpty { null } ?: failed)
+                reply.type == Protocol.ERROR -> onMessage(Protocol.payload<ErrorReply>(reply)?.let { ErrorText.text({ id -> resources.getString(id) }, it) } ?: failed)
             }
         }
         if (sent == null) {
@@ -123,8 +125,6 @@ private fun detail(v: RemoteUi.RemoteView, clock: HostClock): String = when (v.k
     Kind.DISCONNECTED -> stringResource(R.string.remote_disconnected)
 }
 
-private val TIME = DateTimeFormatter.ofPattern("HH:mm")
-
 /** expiresAt is in the host's clock; HostClock moves it to the phone's before it is shown as local time. */
 private fun localTime(hostInstant: Instant, clock: HostClock): String =
-    TIME.format(Instant.ofEpochMilli(clock.toLocal(hostInstant.toEpochMilli())).atZone(ZoneId.systemDefault()))
+    Formats.time(clock.toLocal(hostInstant.toEpochMilli()), FormatStyle.SHORT)

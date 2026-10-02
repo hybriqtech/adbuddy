@@ -63,6 +63,8 @@ object StringsCheck {
     /** The same text in both languages on purpose (a name, a symbol, a word that is the same). Each one says why. */
     val sameInBoth = mapOf(
         "perm_deny" to "\"No\" is the same word in both languages",
+        "activity_entry" to "a status and an adb command line: the command is not translated",
+        "activity_inverse" to "an adb command line: not translated",
     )
 
     fun problems(en: Map<String, Res>, es: Map<String, Res>): List<String> {
@@ -120,6 +122,16 @@ class StringsParityTest {
                 }
             }
         }
+    }
+
+    @Test fun everyErrorCodeHasItsTextAndThereIsAnUnknownOne() {
+        val en = res("values")
+        val codes = tech.hybriq.adbuddy.bridge.ErrorCode::class.java.declaredFields
+            .filter { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.type == String::class.java }
+            .map { it.get(null) as String }
+        assertTrue("ErrorCode changed shape: $codes", codes.size >= 12)
+        val missing = (codes + "unknown").map { "error_$it" }.filter { it !in en }
+        assertTrue("strings.xml needs: $missing (ErrorText.resFor maps each code of the protocol to its own string)", missing.isEmpty())
     }
 
     @Test fun theCheckSeesWhatItShould() {

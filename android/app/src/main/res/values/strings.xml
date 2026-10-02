@@ -171,4 +171,27 @@
     <string name="settings_title">Settings</string>
     <string name="settings_protected_proposed">Proposed list (%1$d). Review it and confirm.</string>
     <string name="settings_protected_confirmed">Confirmed list (%1$d)</string>
+    <string name="activity_status_running">running</string>
+    <string name="activity_status_ok">done</string>
+    <string name="activity_status_error">failed</string>
+    <string name="activity_status_denied">denied</string>
+    <string name="activity_status_blocked">blocked</string>
+    <string name="activity_status_timeout">expired</string>
+    <string name="activity_entry">%1$s · adb %2$s</string>
+    <string name="activity_inverse">↩ adb %1$s</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_hint">Choose the language of ADBuddy for this app only</string>
+    <string name="error_unsupported">The PC does not support this yet</string>
+    <string name="error_invalid">The request was not valid</string>
+    <string name="error_not_found">The PC could not find it</string>
+    <string name="error_no_agent">The agent is not running on the PC</string>
+    <string name="error_busy">The agent is busy: try again in a moment</string>
+    <string name="error_too_large">That is too large to send</string>
+    <string name="error_checksum">The file arrived damaged: try again</string>
+    <string name="error_failed">The PC could not do it</string>
+    <string name="error_unavailable">That is not available on the PC</string>
+    <string name="error_protected">That is protected: the agent cannot use it</string>
+    <string name="error_expired">That request expired</string>
+    <string name="error_ambiguous">More than one thing matches: say which</string>
+    <string name="error_unknown">The PC reported an error</string>
 </resources>

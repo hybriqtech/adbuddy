@@ -1,5 +1,3 @@
-# Literals of the app's code that are not text for a person, or that wait for their fix.
+# Literals of the app code that are not text for a person, or that wait for their fix.
 # One per line:  file (from tech/hybriq/adbuddy/) | the literal | why
 # `file | *` exempts a whole file. NoHardcodedTextTest fails when a line here matches nothing any more.
-ui/ActivityScreen.kt | · adb | the journal line shows a raw status word: fixed in task A2 (activity_entry), then this line goes
-ui/ActivityScreen.kt | ↩ adb | the inverse of a journal entry: fixed in task A2 (activity_inverse), then this line goes

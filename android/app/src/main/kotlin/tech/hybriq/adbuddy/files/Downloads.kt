@@ -15,6 +15,8 @@ import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.Channel
 import tech.hybriq.adbuddy.bridge.Chunk
 import tech.hybriq.adbuddy.bridge.ErrorReply
+import tech.hybriq.adbuddy.bridge.ErrorText
+import tech.hybriq.adbuddy.bridge.ErrorTexts
 import tech.hybriq.adbuddy.bridge.FileCancel
 import tech.hybriq.adbuddy.bridge.Frame
 import tech.hybriq.adbuddy.bridge.FileGet
@@ -42,6 +44,8 @@ class Downloads(
     private val cache: FileCache,
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    /** How the host refusals read on screen (ErrorText). */
+    private val errorText: ErrorTexts = ErrorText.plain,
 ) {
     private class Active(val a: Attachment, var written: Long, val retried: Boolean)
 
@@ -112,7 +116,7 @@ class Downloads(
         val part = cache.partFile(act.a)
         when {
             m == null -> fail(act, "", keep = true)
-            m.type == Protocol.ERROR -> fail(act, Protocol.payload<ErrorReply>(m)?.let { it.text.ifEmpty { it.code } } ?: "", keep = false)
+            m.type == Protocol.ERROR -> fail(act, Protocol.payload<ErrorReply>(m)?.let(errorText) ?: "", keep = false)
             else -> {
                 // The scope has no exception handler: an unreadable file must fail the download, not end the process.
                 val ok = try {

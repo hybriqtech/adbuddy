@@ -14,6 +14,8 @@ import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.Channel
 import tech.hybriq.adbuddy.bridge.ChatSend
 import tech.hybriq.adbuddy.bridge.ErrorReply
+import tech.hybriq.adbuddy.bridge.ErrorText
+import tech.hybriq.adbuddy.bridge.ErrorTexts
 import tech.hybriq.adbuddy.bridge.Message
 import tech.hybriq.adbuddy.bridge.PermissionReply
 import tech.hybriq.adbuddy.bridge.PermissionRequest
@@ -37,6 +39,8 @@ class ChatController(
     /** With a scope, a lost connection frees the answered cards (the answer may never have arrived). */
     scope: CoroutineScope? = null,
     clock: () -> Long = { System.nanoTime() / 1_000_000 },
+    /** How the host's refusals read on screen (ErrorText); the tests' default is the host's own text. */
+    private val errorText: ErrorTexts = ErrorText.plain,
     private val newId: () -> String = { "c" + UUID.randomUUID().toString().replace("-", "") },
 ) {
     private val _outgoing = MutableStateFlow<List<Outgoing>>(emptyList())
@@ -85,7 +89,7 @@ class ChatController(
     fun newConversation() {
         val payload = Protocol.json.encodeToJsonElement(SessionNew.serializer(), SessionNew())
         channel.request(Protocol.SESSION_NEW, payload) { m ->
-            if (m != null && m.type == Protocol.ERROR) Protocol.payload<ErrorReply>(m)?.let { _errors.tryEmit(it.text.ifEmpty { it.code }) }
+            if (m != null && m.type == Protocol.ERROR) Protocol.payload<ErrorReply>(m)?.let { _errors.tryEmit(errorText(it)) }
         }
     }
 
@@ -133,7 +137,7 @@ class ChatController(
             m == null -> set(id, SendStatus.FAILED) // the connection ended first
             m.type == Protocol.ERROR -> {
                 set(id, SendStatus.FAILED)
-                Protocol.payload<ErrorReply>(m)?.let { _errors.tryEmit(it.text.ifEmpty { it.code }) }
+                Protocol.payload<ErrorReply>(m)?.let { _errors.tryEmit(errorText(it)) }
             }
             else -> discard(id) // the host's own chat.message is already in the state
         }

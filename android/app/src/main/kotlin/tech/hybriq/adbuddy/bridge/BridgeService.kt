@@ -5,6 +5,7 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Handler
@@ -126,6 +127,15 @@ class BridgeService : LifecycleService() {
             else -> BridgePrefs(this).link?.let { app.bridge.start(it) } ?: stopSelf()
         }
         return START_STICKY
+    }
+
+    /**
+     * A change of language (the system's, or the app's own on Android 13 and later) repaints the persistent
+     * notification, whose text was built in the language of the moment. The channels are AdbuddyApp's.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (foreground) shown?.let { post(it) }
     }
 
     override fun onDestroy() {

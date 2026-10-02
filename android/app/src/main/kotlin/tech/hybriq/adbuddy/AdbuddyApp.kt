@@ -1,6 +1,7 @@
 package tech.hybriq.adbuddy
 
 import android.app.Application
+import android.content.res.Configuration
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.net.Uri
@@ -17,6 +18,8 @@ import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.bridge.Bridge
 import tech.hybriq.adbuddy.bridge.BridgeChannel
 import tech.hybriq.adbuddy.bridge.Channel
+import tech.hybriq.adbuddy.bridge.ErrorText
+import tech.hybriq.adbuddy.bridge.ErrorTexts
 import tech.hybriq.adbuddy.bridge.Notice
 import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.chat.ChatController
@@ -70,6 +73,9 @@ class AdbuddyApp : Application() {
     /** The host's clock, which the questions' expiry is written in. */
     val clock = HostClock()
 
+    /** What the person reads of a refusal of the host: the app's own text for its code, in the language in force (ErrorText). */
+    val errorTexts: ErrorTexts = { ErrorText.text({ id -> getString(id) }, it) }
+
     private var deviceInfo: DeviceInfoSender? = null
 
     override fun onCreate() {
@@ -79,13 +85,28 @@ class AdbuddyApp : Application() {
         deviceInfo = DeviceInfoSender(this).also { it.start() }
         channel = BridgeChannel(bridge, scope)
         channel.listen(Protocol.NOTICE) { m -> Protocol.payload<Notice>(m)?.text?.takeIf { it.isNotEmpty() }?.let(_notices::tryEmit) }
-        chat = ChatController(channel, scope)
+        chat = ChatController(channel, scope, errorText = errorTexts)
         UriSource.clearCache(this)
-        captures = Captures(channel)
-        drafts = Drafts(scope, Uploader(channel), captures)
-        downloads = Downloads(channel, FileCache(File(cacheDir, "downloads")), scope)
+        captures = Captures(channel, errorTexts)
+        drafts = Drafts(scope, Uploader(channel), captures, errorTexts)
+        downloads = Downloads(channel, FileCache(File(cacheDir, "downloads")), scope, errorText = errorTexts)
         terminal = TerminalFeed(channel)
         scope.launch { channel.connected.collect { terminal.onConnectedChanged(it) } }
+        createNotificationChannels()
+    }
+
+    /**
+     * The channels carry their name in the language of the moment they are created; creating one that exists only
+     * updates its name. So they are created again when the language changes (the system language or, on Android 13
+     * and later, the app's own), which reaches here without the process restarting. BridgeService repaints its own
+     * notification by itself (its onConfigurationChanged).
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        createNotificationChannels()
+    }
+
+    private fun createNotificationChannels() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.deleteNotificationChannel(LEGACY_STATUS)
         nm.createNotificationChannel(NotificationChannel(CHANNEL_CONVERSATION, getString(R.string.channel_conversation), NotificationManager.IMPORTANCE_LOW).apply { setAllowBubbles(true) })
@@ -110,7 +131,7 @@ class AdbuddyApp : Application() {
                 drafts.bind(key, UriSource.copy(this@AdbuddyApp, uri))
             } catch (e: UploadFailed) {
                 drafts.remove(key)
-                onFailed(e.text)
+                onFailed(e.display(errorTexts))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) { // a provider that fails (Drive offline, permission revoked) must not end the process

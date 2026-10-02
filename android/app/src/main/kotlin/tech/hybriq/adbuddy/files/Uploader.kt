@@ -17,6 +17,7 @@ import tech.hybriq.adbuddy.bridge.AttachReady
 import tech.hybriq.adbuddy.bridge.Channel
 import tech.hybriq.adbuddy.bridge.ErrorCode
 import tech.hybriq.adbuddy.bridge.ErrorReply
+import tech.hybriq.adbuddy.bridge.ErrorTexts
 import tech.hybriq.adbuddy.bridge.Frame
 import tech.hybriq.adbuddy.bridge.Message
 import tech.hybriq.adbuddy.bridge.Protocol
@@ -34,8 +35,15 @@ interface UploadSource : AutoCloseable {
     override fun close() {}
 }
 
-/** The upload cannot go on. code: a protocol error code, or "connection" after repeated losses; text: the host's, maybe empty. */
-class UploadFailed(val code: String, val text: String) : Exception("$code: $text")
+/** The upload cannot go on. code: a protocol error code, or CONNECTION after repeated losses; text: the host's, maybe empty. */
+class UploadFailed(val code: String, val text: String) : Exception("$code: $text") {
+    /** What the person reads: the app's own text for the code (ErrorText), or "" after repeated losses, which the screen words by itself. */
+    fun display(errorText: ErrorTexts): String = if (code == CONNECTION) "" else errorText(ErrorReply(code, text))
+
+    companion object {
+        const val CONNECTION = "connection"
+    }
+}
 
 /**
  * Uploads one file (protocol spec §6.1): attach.begin, binary frames from the
@@ -60,7 +68,7 @@ class Uploader(
                 is Round.Done -> return r.attachment
                 is Round.Retry -> {
                     failures = if (r.progressed) 1 else failures + 1
-                    if (failures > MAX_FAILURES) throw UploadFailed("connection", "")
+                    if (failures > MAX_FAILURES) throw UploadFailed(UploadFailed.CONNECTION, "")
                     pause(RETRY_MS)
                 }
             }

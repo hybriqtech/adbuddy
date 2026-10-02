@@ -16,6 +16,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import tech.hybriq.adbuddy.bridge.Attachment
+import tech.hybriq.adbuddy.bridge.ErrorText
+import tech.hybriq.adbuddy.bridge.ErrorTexts
 
 enum class DraftStatus { UPLOADING, DONE, FAILED }
 
@@ -41,6 +43,8 @@ class Drafts(
     private val scope: CoroutineScope,
     private val uploader: Uploader,
     private val captures: Captures,
+    /** How the host refusals read on screen (UploadFailed.display); the tests' default is the host's own text. */
+    private val errorText: ErrorTexts = ErrorText.hostText,
     private val newKey: () -> String = { UUID.randomUUID().toString() },
 ) {
     private val _items = MutableStateFlow<List<Draft>>(emptyList())
@@ -139,7 +143,7 @@ class Drafts(
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: UploadFailed) {
-                    fail(key, e.text)
+                    fail(key, e.display(errorText))
                 } catch (e: Exception) { // the scope has no handler: an uncaught one would end the process
                     fail(key, "")
                 }

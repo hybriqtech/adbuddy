@@ -76,13 +76,13 @@ private fun EntryRow(e: JournalEntry) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(e.description, style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    "${e.status} · adb ${e.argv.joinToString(" ")}",
+                    stringResource(R.string.activity_entry, statusText(e.status), e.argv.joinToString(" ")),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 e.inverse?.takeIf { e.undoneBy == null }?.let {
                     Text(
-                        "↩ adb ${it.argv.joinToString(" ")}",
+                        stringResource(R.string.activity_inverse, it.argv.joinToString(" ")),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -90,6 +90,18 @@ private fun EntryRow(e: JournalEntry) {
             }
         }
     }
+}
+
+/** The journal's status word (running, ok, error, denied, blocked, timeout) in the language in force; one this app does not know shows as it came. */
+@Composable
+private fun statusText(status: String): String = when (status) {
+    "running" -> stringResource(R.string.activity_status_running)
+    "ok" -> stringResource(R.string.activity_status_ok)
+    "error" -> stringResource(R.string.activity_status_error)
+    "denied" -> stringResource(R.string.activity_status_denied)
+    "blocked" -> stringResource(R.string.activity_status_blocked)
+    "timeout" -> stringResource(R.string.activity_status_timeout)
+    else -> status
 }
 
 private fun levelIcon(level: String) = when (level) {
