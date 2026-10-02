@@ -1,0 +1,364 @@
+# Inventario de las validaciones manuales pendientes
+
+> Encargo del supervisor (f3): el usuario no quiere QA manual. Una fila por cada validación pendiente de los planes, con si se puede automatizar en **nuestro** emulador, cómo, y si no, por qué exactamente y cuál es el paso mínimo del usuario. Solo documentación: no se ha arrancado el emulador ni adb para escribirlo. Base: `origin/main` en 80d6b86, rama `docs/validaciones-manuales`.
+
+## Fuentes y alcance
+
+- Las secciones "Validaciones manuales pendientes" de `docs/superpowers/plans/*.md`: M1b (1-5), M2 (1-10), M3.0 (ninguna), M3a, M3b (1-10), M4 (remite a pendientes), M5a (1-10), M5b (11-21), M5c (22-35), M6a (1-6), M6b, M6c (1-9), v1 diferidos, diferidos B (36-41), diferidos L (42-43), ola 2 H, ola 2 M, pty-kill y tests-ui-jvm (1-3).
+- `pendientes-m3-m5.md`: M4 (y la spec M4 §11), ola 1, ola 2 H, la revisión de seguridad (PROJECT_MEDIA), A4 (tarjetas) y bidi-host.
+- **Lo que aún no está en `main`:** el texto "Automatizada en M2.5b" del plan de M2, las secciones "Validaciones que solo se pueden hacer en el Pixel" y "Validaciones ampliadas aún no hechas" de `pendientes-m3-m5.md` y el ledger de M2.5b (`.superpowers/sdd/2026-10-03-adbuddy-m2.5b-app-emulador/progress.md`) solo existen en la rama `feat/m2.5b-app-emulador` (1c35794, PR abierto, sin integrar a 80d6b86). Aquí se citan desde esa rama. "Hecha (M2.5b)" quiere decir "hecha en esa rama".
+- `docs/safety.md` no tiene validaciones pendientes. Las specs (M3 §11, M4 §11, M5 §6, M6b §6, M6c §10, M2.5 §7) repiten lo que dicen los planes: no añaden filas. La única excepción es la spec M4 §11, que entra en las filas M4-a y M4-b.
+- Las filas repetidas, que son la misma comprobación escrita en dos planes, se marcan con "=" y no se cuentan: M3a-c a M3a-g (= M3b-1 a M3b-6), M5c-35 (= M5b-18), UIJ-3 (= M5c-27/34), PTY-b (= O2M-a) y las de ola 2 H copiadas en pendientes.
+
+## Resumen
+
+**129 validaciones distintas**, sin contar las 4 filas repetidas. En el emulador propio:
+
+- **33 son Sí.** Tres ya están hechas del todo: M2-1, M5b-20 y M6c-8.
+- **44 son Parcial.** De ellas, 15 tienen ya una parte hecha (M2-2, 3, 6 y 10 en Android 14; la lógica de M5b-11 a 17, 19 y 21; M5c-27 y 34 en la JVM). Lo que les falta casi siempre es Android 17.
+- **52 son No.** 45 no dependen del móvil: son del PC o de la CI, y las corre un agente sin el usuario. 2 son revisiones de código o de texto (M6c-9 y O2M-c). Solo 5 necesitan de verdad a la persona, su cuenta o una red real: M1b-1, M5b-15, M5c-31, M6a-4 y M6a-6.
+
+Leyenda:
+- **Emulador:**
+  - **Sí:** todo lo que pide la validación se puede comprobar en el emulador propio, o en la JVM si lo indica.
+  - **Parcial:** una parte se comprueba en el emulador y otra necesita el Pixel o algo que no hay.
+  - **No:** no se puede en el emulador. "No (PC)" y "No (CI)" son validaciones que no dependen del móvil.
+  - "hecha" indica que un test ya la cubre.
+- **El emulador propio** es el AVD `adbuddy-dev34`: imagen `system-images;android-34;google_apis;x86_64` rev 14, consola 5600 (siempre ≥ 5600), servidor adb propio 5060, `ADB_MDNS=0`, `ADBUDDY_EMU_STABLE_SECS=120`. Los instrumentados se lanzan por `am instrument` desde `host/internal/emutest`, nunca con `connected*`: UTP habla con el servidor 5037, el del móvil. Los tests usan el adb del emulador directamente, sin pasar por el shim.
+- **Valor:**
+  - **alto:** confirmaciones 🔴, guarda, consentimiento o fuga de códigos;
+  - **medio:** una función que el usuario nota;
+  - **bajo:** aspecto o una cifra informativa.
+- **Orden:**
+  - T1-T8: la tarea del plan de automatización que la cubre (al final);
+  - Pixel o Usuario: entra en la checklist del usuario;
+  - PC o CI: la corre un agente sin móvil;
+  - Hecha: ya está;
+  - fuera del tope: automatizable, pero no entra en las 8 tareas.
+
+## Datos medidos (ledger de M2.5b) y datos por medir
+
+**Medido en el emulador propio** (rama `feat/m2.5b-app-emulador`, `progress.md`, apartados S1-S7, T2 y T3; 2026-10-02):
+
+- **android-37.0 no sirve para la app.** La imagen `google_apis` rev 6 con el emulador 37.2.12 hace abortar a `surfaceflinger` cada 5-10 s (`Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma`, hilo `RegionSampling`, en `mapper.ranchu.so`). Pasa con `swiftshader_indirect`, con `swangle_indirect` (que en Windows es el mismo SwiftShader) y con `host` (RTX 5080). El oráculo lo esquiva porque solo usa el shell.
+- **android-34 aguanta.** Tras `sys.boot_completed`, los pid de `system_server` y `surfaceflinger` no cambian en 120 s y el buffer `crash` está vacío.
+- **Cortar acceso y Reactivar** desde la app (R3): el emulador sale de `device` unos 2 s después del corte y vuelve solo a los ~17 s, sin `reconnect`. `adb_enabled` termina en 1.
+- **Un corte que nadie deshace sobrevive al reinicio.** `adb_enabled=0` sigue en los datos del AVD (S7, `-no-snapshot` no lo borra) y hay que borrar `userdata-qemu.img` y `.qcow2`. De rebote, esto demuestra que **un `stop` y un `start` del AVD conservan sus datos**: un reinicio con datos sirve para la M5c-29.
+- **El modo tcpip.** Tras `adb tcpip 5555`, el emulador vuelve como `emulator-5600` en ~2 s con `service.adb.tcp.port=5555`. `adb usb` lo devuelve en ~1 s con `service.adb.tcp.port=0`. adbd escucha **siempre** en 5555 porque es el transporte del emulador: los tests de tcpip tienen que mirar `service.adb.tcp.port`, no el socket.
+- **Otros datos de la imagen:**
+  - `su 0` funciona (userdebug, `context=u:r:su:s0`);
+  - `pm grant … WRITE_SECURE_SETTINGS` funciona;
+  - una app con targetSdk 37 se instala en API 34;
+  - la app lee `adb_wifi_enabled` sin `SecurityException`;
+  - `dumpsys activity services <pkg>` dice `isForeground=true`.
+
+**Por medir** (lo mide la T1 antes de escribir tests; nada de esto se ha comprobado):
+
+1. `cmd notification allow_listener tech.hybriq.adbuddy/tech.hybriq.adbuddy.listener.AgentNotificationListener` (y `disallow_listener`) enlaza el listener aunque sea `exported="false"`. Se ve en `dumpsys notification`, en "Live notification listeners".
+2. Qué estilos admite `cmd notification post` (`-S bigtext`, `-S messaging`) y si rellena `tickerText`.
+3. Si la imagen `google_apis` 34 trae `com.google.android.apps.messaging`, `com.google.android.gm` y `com.google.android.gms`, y quién tiene el rol SMS (`cmd role get-role-holders android.app.role.SMS`).
+4. Si existe `cmd role set-bypassing-role-qualification` en la API 34, y qué hace `cmd role add-role-holder android.app.role.SMS <pkg>` con un paquete que no cumple el rol.
+5. `pm list features` incluye `android.software.managed_users`, y `pm create-user --profileOf 0 --managed adbuddy-work` crea el perfil. Limpieza: `pm remove-user`.
+6. `appops get tech.hybriq.adbuddy ACCESS_RESTRICTED_SETTINGS` tras `adb install`: si una instalación por adb queda restringida en la API 34.
+7. Bloqueo con PIN: `locksettings set-pin 1111`, `input keyevent KEYCODE_SLEEP`/`KEYCODE_WAKEUP`, el bouncer con `input text 1111`. Limpieza: `locksettings clear --old 1111`.
+8. Burbujas: `settings get global notification_bubbles`, y si la notificación de conversación de ADBuddy ofrece abrirla como burbuja en la API 34.
+9. Reinicio: `adb reboot` (o `emulator.sh stop` y `start`) vuelve a `device` y el listener se reenlaza solo. Tras `am force-stop`, ¿se reenlaza o espera a que se abra la app?
+10. Idioma: `cmd locale set-app-locales tech.hybriq.adbuddy --locales en`, y el idioma del sistema a `es-ES`.
+11. Pantalla partida en la API 34: `am start --windowingMode` o la orden equivalente de `cmd activity`.
+12. Depuración inalámbrica en el emulador: `getprop service.adb.tls.port` con `adb_wifi_enabled=1`. Opcional: hay que comprobar antes que no cambia el transporte del emulador.
+
+## Defectos del encargo (explicados, no rodeados)
+
+- **"Automatizada en M2.5b" no está en `main`.** Está en `feat/m2.5b-app-emulador`, con el PR abierto. Si ese PR cambia antes de integrarse, hay que revisar las filas M2-1, 2, 3, 6 y 10 y la M6c-8.
+- **"ADBuddy como app de SMS por defecto" no responde a la 33.** La 33(a) pregunta qué devuelve `Telephony.Sms.getDefaultSmsPackage` cuando **otra** app es la de SMS por defecto. Además, ADBuddy no declara los componentes del rol SMS, así que no lo cumple. Para probarlo hace falta una app de pruebas que tenga el rol (T7). La 24 no tiene que ver con el rol SMS: trata los ajustes restringidos del acceso a notificaciones.
+- **La M5b-17 (a) y (b) se reclasifica.** test/m5b-auto las daba por "solo en el Pixel (D)", pero en la API 34 se pueden probar con el servicio de accesibilidad vinculado y una app de pruebas propia (T7). El Pixel solo confirma Android 17.
+
+## Tablas
+
+### M1b · Instalación y conexión (1-5)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M1b-1 | `adbuddy setup` real con el QR de "Emparejar con código QR" | No | — | Hacen falta la cámara del Pixel y el emparejamiento TLS real. Paso: escanear el QR una vez, que es la propia instalación. | medio | Pixel |
+| M1b-2 | `setup --code` con dirección y código | Parcial | Por medir (T1-12): "Emparejar con código" en la Depuración inalámbrica del emulador, leído con `uiautomator dump`. Con `ADB_MDNS=0`, la dirección se da a mano. | Los menús reales de Android 17. Paso: si el QR falla, emparejar por código. | medio | Pixel |
+| M1b-3 | El QR se escanea en Windows Terminal y en Git Bash (mintty), con tema claro y oscuro | No (PC) | Un test de host que decodifique el QR del texto impreso cubre la codificación, no la fuente de la terminal. | Depende de la fuente de cada terminal y de la cámara. Paso: junto con M1b-1, en las dos terminales. | bajo | Pixel |
+| M1b-4 | La descarga real de platform-tools 37.0.1 pasa el SHA-1 y `serve` arranca con ese adb | No (CI) | Un test de host con red, opcional y activado por variable, en la CI. | Necesita red, no el móvil. | medio | CI |
+| M1b-5 | Los textos de la guía coinciden con los menús de Android 17 en inglés y en español | Parcial | `uiautomator dump` de las opciones de desarrollador en la API 34, en `en` y `es`. | Android 17 y sus capturas, solo en el Pixel. Paso: las capturas, al publicar la guía. | bajo | Pixel |
+
+### M2 · App base (1-10)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M2-1 | `TokenProvider` instrumentado | Sí, hecha (M2.5b) | `TokenProviderTest` por `am instrument` desde `TestInstrumentedSuite`, y `TestTheShellUserIsAnswered` | — | alto | Hecha |
+| M2-2 | `content write` por stdin en Android 11-17 | Parcial, hecha en la API 34 | `TestTheHandshakeOnStdinReachesTheApp` | La imagen 37 entra en bucle y la 11-13 no está instalada. Paso: ninguno aparte; el primer `serve` en el Pixel lo demuestra, porque sin handshake no hay canal. | alto | Hecha, y Pixel (implícita) |
+| M2-3 | El proveedor arranca el servicio en primer plano | Parcial, hecha en la API 34 | `TestTheServiceIsInTheForegroundAfterTheHandshake` | Las restricciones de servicios en primer plano cambian en 15-17. Paso: implícito, en el primer `serve` con la app en segundo plano. | alto | Hecha, y Pixel (implícita) |
+| M2-4 | Accesibilidad por adb en un Android 13-15 de otro fabricante, con otro servicio ya activo | Parcial | T7: el servicio de la app de pruebas se activa antes, y se comprueba que `enabled_accessibility_services` lo conserva tras `setup`. | No hay imagen de otro fabricante. Paso: opcional, con un móvil de otra marca. | medio | T7 / opcional |
+| M2-5 | Con el móvil bloqueado, Permitir desde la notificación pide desbloquear y Rechazar no | Parcial | T4: PIN (T1-7), `cmd statusbar expand-notifications`, `uiautomator dump` e `input tap` sobre cada botón. El arnés (T3) ve si llega `confirm.response`. | Android 17 y la biometría real. Paso: con el Pixel bloqueado, Rechazar y Permitir una pregunta de prueba. | alto | T4 + Pixel |
+| M2-6 | Cortar acceso y Reactivar, con y sin tcpip | Parcial, hecha en local en la API 34 | `TestCutAccessAndReactivate` con `ADBUDDY_EMULATOR_CUT=1`. La CI no la corre: un corte sin deshacer deja el AVD sin adb (S7). | Faltan la depuración inalámbrica real y ver que el puerto tcpip queda cerrado; en el emulador, el 5555 es su transporte. Paso: Cortar y Reactivar una vez en el Pixel. | alto | Hecha + Pixel |
+| M2-7 | Extremo a extremo: `setup --apk`, `serve`, una 🔴 y Permitir | Parcial | T3 y T4 cubren el canal, la pregunta y la respuesta con un agente falso. | El agente real (ruling de M2.5b: cuesta mucho y demuestra poco más). Paso: implícito, en el uso real. | medio | T3/T4 |
+| M2-8 | Permitir tras desbloquear desde el bouncer | Parcial | T4: tocar Permitir bloqueado, teclear el PIN en el bouncer (`input text` y `KEYCODE_ENTER`) y comprobar que llega `allow` con `isDeviceLocked` ya en falso. | Android 17 y la biometría. Paso: junto con M2-5. | alto | T4 + Pixel |
+| M2-9 | La confirmación no llega a relojes ni espejos (`setLocalOnly`) | Parcial | T4: `dumpsys notification --noredact` muestra el flag `LOCAL_ONLY` de la pregunta. | Un reloj Wear o Phone Link reales. Paso: opcional, si el usuario tiene uno. | medio | T4 / opcional |
+| M2-10 | El `ContentObserver` de `adb_wifi_enabled` recibe los cambios | Parcial, hecha en la API 34 | `AdbWifiObserverTest` | Que una app con targetSdk 37 pueda leer el ajuste en Android 17. Paso: junto con M2-6. | medio | Hecha + Pixel |
+
+### M3a · Host del chat
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M3a-a | `adbuddy serve` lanza Claude Code | No (PC) | En el PC con `ADBUDDY_REAL_CLAUDE=1` y una configuración temporal (como en M4). | Claude Code real; no toca el móvil. | medio | PC |
+| M3a-b | `adbuddy attach` y Ctrl+], con dos terminales a la vez | No (PC) | Test de `cli` con dos clientes IPC. | Terminales reales. | bajo | PC |
+| M3a-c a g | Chat, terminal, ficheros, captura y reconexión | = M3b-1 a 6 | — | — | — | — |
+| M3a-f | `adbuddy send` desde Claude Code | No (PC) | `ADBUDDY_REAL_CLAUDE=1`; la mitad del móvil va en M3b-3. | Claude Code real. | bajo | PC |
+| M3a-h | `/exit` llega a `stopped` aunque un nieto con `setsid` tenga abierto el esclavo (Linux y macOS) | No (CI) | `internal/pty` en `host.yml` | No es del móvil. | medio | CI |
+| M3a-i | Los tests solo de Unix pasan en la CI de Linux y de macOS | No (CI) | `host.yml` | — | medio | CI |
+| M3a-j | `--continue` sin conversación previa en Windows: cuánto tarda en fallar y el reintento | No (PC) | `ADBUDDY_REAL_CLAUDE=1` | Claude Code real. | bajo | PC |
+
+### M3b · App del chat (1-10)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M3b-1 | Un mensaje multilínea con Unicode llega como uno solo; cortar el canal deja "No enviado" y Reintentar no duplica | Sí | T3: el arnés recibe un solo `chat.send`. El texto se escribe con `input text` (ASCII) o con el portapapeles (Unicode, por medir). El corte se hace parando el listener del arnés. | — | medio | T3 |
+| M3b-2 | Terminal: colores, repintado, teclas rápidas, giro, vuelta tras perder la conexión, scroll y el enlace que pide confirmar el dominio | Parcial | T3: WebView real; giro con `settings put system user_rotation 1`; teclas con `uiautomator dump` e `input tap`; el diálogo del dominio se ve en el volcado. | El juicio visual de los colores. Paso: mirar la terminal en la pasada visual. | medio | T3 + Pixel |
+| M3b-3 | Ficheros: ida a `inbox/` con hash, 100 MiB que se cortan y siguen, `send` de vuelta, abrir y compartir, caché ≤ 500 MiB | Sí | T3: el arnés hace de host; el corte se hace parando el listener; la caché se mide con `run-as tech.hybriq.adbuddy du` (build de debug). Por medir cómo se elige el fichero (Photo Picker con UiAutomator). | — | medio | T3 |
+| M3b-4 | Captura desde el botón y desde la notificación; con Cortar acceso, el texto del host | Parcial | T3: el botón y la acción por UiAutomator; el arnés contesta. | Un corte real deja el AVD sin adb (S7): el caso "cortado" se simula con la respuesta del host. | bajo | T3 |
+| M3b-5 | Notificación: "Trabajando…", responder bloqueado, Enviar captura, Pausar, Cortar acceso sin desbloquear, burbuja, "Listo" a los ≥ 10 s y silenciar el canal | Parcial | T4 para el bloqueo; T3 para las acciones con UiAutomator; canales con `dumpsys notification`; burbuja por medir (T1-8). | La burbuja de Android 17. Paso: abrirla una vez en el Pixel. | alto | T4 + Pixel |
+| M3b-6 | Reconexión con la app en segundo plano y con el servicio recién reiniciado | Sí | T3: `am kill` en segundo plano, `am force-stop` y otro handshake; el canal vuelve. | — | medio | T3 |
+| M3b-7 | Diseño en claro, oscuro y letra grande, color dinámico en 17, paleta propia en 11, barras y teclado | Parcial | JVM (Roborazzi) de las pantallas que faltan: chat, terminal, actividad y consentimiento. En la API 34: `cmd uimode night yes` y `settings put system font_scale 2.0`; insets y teclado con `uiautomator dump`. | Android 17, y Android 11 sin imagen. Paso: la pasada visual. | bajo | Pixel (la JVM, fuera del tope) |
+| M3b-8 | Nada de M2 se debilita: la 🔴 en el chat y en la notificación, Pausar y Cortar; con la burbuja sobre otra app y una 🔴, `input tap` y `uiautomator dump` del agente quedan bloqueados | Parcial | T5: burbuja sobre Ajustes y la guarda del host (`Resumed()`, `guardedOnScreen`) contra el `dumpsys` del emulador, con la accesibilidad encendida (`settings put secure enabled_accessibility_services`) y apagada. T4: la 🔴. | El formato de `dumpsys` de Android 17. Paso: la pasada de solo lectura. | alto | T5 + T4 |
+| M3b-9 | Con el diálogo de confianza de Claude Code en pantalla, `chat.send` da "busy" | No (PC) | `ADBUDDY_REAL_CLAUDE=1` en una carpeta nueva. | Claude Code real. | medio | PC |
+| M3b-10 | Sin internet, la WebView de la terminal sigue y nada pide red | Sí | T3: `svc wifi disable` y `svc data disable`; el adb del emulador no va por esa red. | — | bajo | T3 |
+
+### M4 · Adaptador de Claude Code (pendientes "M4" y spec §11)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M4-a | `Notification` y sus tipos; permisos de Edit, Write, WebFetch y MCP; deny con `message`; `/clear`, `/compact` y `--resume`; prompts con `/` y `!` | No (PC) | `ADBUDDY_REAL_CLAUDE=1`, grabando en `claudecode/testdata`. | Claude Code real. La vista en el móvil va con el arnés T3. | medio | PC |
+| M4-b | Si se responde en la terminal, ¿llega siempre el cierre del hook o el fin de la herramienta, y cuánto tarda? | No (PC) | Igual que M4-a. | Claude Code real. | alto | PC |
+| M4-c | Detalle largo de la tarjeta: Sí y "Sí, siempre" inactivos hasta el final, con letra grande, giro y teclado; No siempre disponible | Sí (JVM) | T4: Robolectric con Compose ui-test (la infraestructura de tests-ui-jvm): `PermissionCard` con `font_scale` 2 y los calificadores de giro. | — | alto | T4 |
+| M4-d | El aviso de permiso es silencioso (canal LOW) y en el bloqueo no muestra texto | Parcial | T4: `dumpsys notification` (importancia y `publicVersion`). | El aspecto. Paso: la pasada visual. | medio | T4 |
+
+### M5a · Ayudas (1-10)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M5a-1 | `screen` tarda menos de 500 ms | Parcial | T3 y T5: medirlo en el emulador como guarda de regresión. | La cifra que vale es la del Pixel en su Wi-Fi. Paso: un `adbuddy screen` cronometrado. | bajo | Pixel |
+| M5a-2 | `type "¿Qué tal? 👋"` en un campo de texto | Sí | T3: accesibilidad activada por `settings`; se escribe en la búsqueda de Ajustes y se lee con `uiautomator dump`. | — | medio | T3 |
+| M5a-3 | Superposición: aspecto, la píldora pausa, la marca y que no intercepta toques | Parcial | T5: un `input tap` atraviesa la superposición (se ve en el volcado de la app de debajo), y la píldora manda `pause` al arnés. | El aspecto. Paso: la pasada visual. | medio | T5 |
+| M5a-4 | Con una app de banca delante, `input tap`, `screencap`, `screen` y `tap` se bloquean | Parcial | T7: una app de pruebas con nombre de banca, que la heurística propone; la guarda del host se prueba contra el emulador. | Una app de banca real (FLAG_SECURE, detección de emulador). Paso: abrir su app de banca y pedir un `adbuddy screen`; debe responder Blocked. | alto | T7 + Pixel |
+| M5a-5 | Respaldo: sin accesibilidad usa `uiautomator`; con ella y la app desconectada, `UI_UNAVAILABLE` | Sí | T5: servicio apagado y encendido por `settings`, sin arnés conectado. | — | medio | T5 |
+| M5a-6 | `dumpsys activity activities` en 11, 13-15 de otro fabricante y 17 | Parcial | T5: la muestra real de la API 34 va a `uidump/testdata`. | 11 y 13 sin imagen, otros fabricantes y 17. Paso: la pasada de solo lectura. | alto | T5 + Pixel |
+| M5a-7 | Ventanas: diálogo, teclado y pantalla partida; `tap --xy` sobre la barra con una 🔴 pendiente da `protected` | Sí | T5: diálogo y teclado en Ajustes; la pantalla partida, por medir (T1-11); la 🔴 con el arnés. | — | alto | T5 |
+| M5a-8 | Marco: dos `tap --xy` seguidos no dan `protected`; un `tap` por texto con `ACTION_CLICK` fallido toca; el marco no sale en `getWindows()` | Sí | T5: un instrumentado consulta `getWindows()` con la superposición visible. | — | medio | T5 |
+| M5a-9 | `ServiceOn` y `Asleep` contra salidas reales | Sí | T5: `settings get secure enabled_accessibility_services` y `dumpsys power` con la pantalla apagada (`input keyevent 26`), encendida, bloqueada y en Doze (`dumpsys deviceidle force-idle`), a testdata. | El formato de 17. Paso: la pasada de solo lectura. | alto | T5 |
+| M5a-10 | Notificaciones de apps protegidas en la persiana o en heads-up dentro de `screen` y `screenshot` (límite; decidir en la spec §4.3) | Parcial | T7: un heads-up de la app de pruebas protegida y `screen`; ¿salen sus nodos de `com.android.systemui`? | La decisión es de producto. Sin paso del usuario: decide el coordinador con la medida. | medio | T7 |
+
+### M5b · Modo remoto (11-21)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M5b-11 | `getprop service.adb.tls.port` da el puerto vigente en Android 17 | Parcial, lógica hecha (`TestReadTLSPortParses`) | Por medir en el emulador (T1-12). | El valor real en Android 17. Paso: la pasada de solo lectura. | bajo | Pixel |
+| M5b-12 | `tcpip 5555` por Tailscale con solo datos; `remote on` y `off`; caducidad | Parcial, lógica hecha (adb falso) | T8: `remote.New(adb.Runner{Serial: emu})`, `Enable` y `Disable`, leyendo `service.adb.tcp.port` (medido en S5). | Tailscale con datos móviles. Paso: fuera de casa o con el Wi-Fi apagado, `remote on`, y `serve` reconecta. | medio | T8 + Pixel |
+| M5b-13 | Segundos que tarda en verse el estado tras `adb tcpip`; "desconocido" nunca se muestra como "apagado" | Parcial, lógica hecha (`BridgeStateTest`) | T8: medido con el arnés. | La cifra del Pixel, informativa. Sin paso. | bajo | T8 |
+| M5b-14 | La persiana y los ajustes rápidos dan `NotificationShade`; la pantalla de bloqueo; persianas de otros fabricantes | Parcial, lógica hecha | T5: `cmd statusbar expand-notifications` y `expand-settings`, el bloqueo con PIN, `dumpsys window` a testdata, `ParseFocus`/`IsShade`; `input keyevent 4` la cierra. Es la T4 (C) de test/m5b-auto. | El formato de 17 y otros fabricantes. Paso: la pasada de solo lectura con la persiana bajada. | alto | T5 + Pixel |
+| M5b-15 | Pasar de la Wi-Fi a datos en mitad de una sesión | No, cota hecha (`TestWatchPhoneSwitchBudget`, 68 s) | — | Un cambio real de red con Tailscale. Paso: junto con M5b-12, apagar el Wi-Fi con `serve` en marcha. | medio | Pixel |
+| M5b-16 | `NetworkCallback` de la VPN | Parcial, lógica hecha (`IpReporterTest`) | T7: un `VpnService` en la app de pruebas, con `appops set <pkg> ACTIVATE_VPN allow` (por medir). | Tailscale real. Paso: junto con M5b-12. | bajo | T7 / Pixel |
+| M5b-17 | Heads-up (bloquea el respaldo por adb): muestra de `dumpsys window windows`; (a) evento sin `Notification`; (b) actualización con el mismo id; (c) "tiempo para actuar" | Parcial, ventana de 8 s hecha (`NotificationWindowTest`) | T5: la muestra con `cmd notification post`, con y sin notificación (las ventanas fijas de systemui). T7: (a) y (b) con la app de pruebas y el servicio vinculado. (c): `settings put secure accessibility_interactive_ui_timeout_ms 20000` y medir. | Android 17. Paso: la pasada de solo lectura con una notificación de prueba. | alto | T5/T7 + Pixel |
+| M5b-18 | `--reveal` equivale a `--noredact`; el `dumpsys notification` redactado deja ver 8 caracteres del `tickerText` | Sí | T2: una notificación propia con `setTicker` de más de 16 caracteres (instrumentado) y `dumpsys notification` desde el shell, comparando `--reveal` con `--noredact`. | — | alto | T2 |
+| M5b-19 | Overlay real: marco y píldora; sin permiso, `click` responde FAILED | Parcial, lógica hecha | T5: `appops set tech.hybriq.adbuddy SYSTEM_ALERT_WINDOW deny` y `click` responde FAILED en el arnés; los toques atraviesan la superposición. | El aspecto. Paso: la pasada visual. | medio | T5 |
+| M5b-20 | El host republica `remote.state` al hacer `attach` | Sí, hecha | `TestAttachPublishesRemoteStateThroughTheLink` | — | medio | Hecha |
+| M5b-21 | `unknownSince` y CLOSING: el tick de la tarjeta | Sí (JVM), parte hecha (`RemoteUiTest`) | Compose con `mainClock` en Robolectric para el tick de `RemoteCard`. | — | bajo | fuera del tope |
+
+### M5c · Notificaciones (22-35)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M5c-22 | El listener (`exported="false"`) enlaza; los estados de la pantalla; al revocar, `UI_UNAVAILABLE` | Sí | T6: `cmd notification allow_listener` y `disallow_listener` (T1-1); el instrumentado espera a `AgentNotificationListener.connected` y lee por `NotificationGate.read`, la misma cadena que `UiHelpers.kt:61` y `UiExecutor.kt:157`. | — | alto | T6 |
+| M5c-23 | ¿Se lee `enabled_notification_listeners` en 17? ¿`null` o vacío? Permitido sin enlazar da "Desconocido" | Parcial | T6: la lectura en la API 34, con y sin listener, y con el proceso muerto. | Android 17. Paso: ver la pantalla de acceso en la pasada visual. | medio | T6 + Pixel |
+| M5c-24 | Ajuste restringido (instalada por adb): el interruptor sale en gris; el atajo abre la entrada de ADBuddy; el aviso | Parcial | T1-6: `appops get … ACCESS_RESTRICTED_SETTINGS`. T6: `am start -a android.settings.NOTIFICATION_LISTENER_DETAIL_SETTINGS` con el componente; `dumpsys activity` y `uiautomator dump` (¿el interruptor está `enabled`?). | Android 15-17 endurecen los ajustes restringidos. Paso: activar el acceso desde el onboarding en el Pixel (el uso normal). | medio | T6 + Pixel |
+| M5c-25 | Mensajes, Gmail y GMS protegidos antes de confirmar; su notificación sale vacía; su heads-up y su primer plano se bloquean | Parcial | T7: los receptores, si la imagen los trae (T1-3), o si no una app de pruebas con un paquete de `CODE_RECEIVERS`. La lista del `device.info` del arnés (T3) es lo que sería `protected.json`. La guarda del host se prueba con la app delante. | La lista con las apps reales del Pixel. Paso: mirar `protected.json` en la pasada de solo lectura. | alto | T7 |
+| M5c-26 | Contenido: SECRET sale vacía; BigText entera; `MessagingStyle` sin `EXTRA_TEXT`; `ongoing` y `postedAt`; con más de 50, `truncated`; la pregunta 🔴 sale sin texto | Sí | T6: `cmd notification post -S bigtext` y `-S messaging` (T1-2), más notificaciones propias del instrumentado (`VISIBILITY_SECRET`, `ongoing`, 51 a la vez), leídas por `AgentNotificationListener.read()` y `NotificationReport.build`. | — | alto | T6 |
+| M5c-27 | Lo que queda de las pantallas tras la JVM: color dinámico, Android 17, insets y gestos, giro, la lista en el PC; el título al 200 % en español | Parcial, JVM hecha (tests-ui-jvm) | En la API 34: gestos (`cmd overlay enable com.android.internal.systemui.navbar.gestural`), giro e insets; la lista en el PC con el arnés. | Android 17 y el hallazgo del título. Paso: la pasada visual, incluido el título. | bajo | Pixel |
+| M5c-28 | Sin pulsar "Dejar que el agente lea", `NotConfirmed`; revocar y volver a permitir vuelve a pedirlo; `tap` sobre el botón de ADBuddy da `protected`; `input tap` con ADBuddy delante se bloquea | Sí | T6: los estados del gate. T5: `adbuddy tap` y `adb shell input tap` contra el emulador con ADBuddy delante. | — | alto | T6 + T5 |
+| M5c-29 | El listener sigue enlazado en segundo plano, tras `kill` y tras reiniciar | Sí | T6 (emutest): `am kill` y `am force-stop` (T1-9), y reinicio del AVD con sus datos (que se conservan, S7). `dumpsys notification` muestra el listener. | — | medio | T6 |
+| M5c-30 | Perfil de trabajo o segundo usuario: sale vacía; oculta de la pantalla de bloqueo: vacía; PRIVATE y SECRET; el `Ranking` de 17; `hasSensitiveContent` | Parcial | T7: `pm create-user --profileOf 0 --managed` (T1-5) y la app de pruebas dentro del perfil; `VISIBILITY_PRIVATE` y canal oculto (por medir si se respeta `setLockscreenVisibility`). | El `Ranking` de Android 17. `hasSensitiveContent` se responde leyendo el SDK, no con una prueba. | alto | T7 |
+| M5c-31 | ¿Los reenviadores (KDE Connect, acompañantes de reloj, historiales) sacan notificaciones protegidas con su propio paquete? | No | — | Depende de apps de terceros concretas, y es un límite documentado (§3.5) con decisión de producto pendiente. Paso: opcional, si usa alguno, mirarlo una vez. | medio | Usuario (opcional) |
+| M5c-32 | Revocar borra la marca aunque nadie mire: (a) con la app viva; (b) con la app muerta | Sí | T6 (emutest): un instrumentado confirma; el host hace `disallow_listener` y `allow_listener`; otro `am instrument` lee el gate y espera `NotConfirmed`. En (b), con `am force-stop` entre medias. | — | alto | T6 |
+| M5c-33 | (a) `getDefaultSmsPackage` con otra app de SMS por defecto; (b) un receptor instalado después del arranque | Sí (por medir el rol) | T7: una app de pruebas con los componentes del rol SMS, o `set-bypassing-role-qualification` (T1-4), y `cmd role add-role-holder android.app.role.SMS <pkg>`; ADBuddy llama a `ProtectedApps.defaultSms`. (b): instalar el receptor de prueba después del arranque. | ADBuddy como app de SMS no responde a la pregunta. | alto | T7 |
+| M5c-34 | Lo que queda de la burbuja tras la JVM: `tap`, `input tap` y la guarda, y la Bubbles API real | Parcial, JVM hecha (`BubbleFlowTest`) | T5: la burbuja expandida sobre Ajustes (T1-8) y la guarda con `dumpsys`. | La burbuja real de Android 17. Paso: junto con M3b-5. | alto | T5 + Pixel |
+| M5c-35 | El ticker en el `dumpsys notification` redactado | = M5b-18 | T2 | — | alto | T2 |
+
+### M6a · Releases (1-6)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M6a-1 | `release-check.yml` en la CI (R8, nombre del APK, `META-INF`, Signing Block) | No (CI) | En Actions, con el PR. | — | medio | CI |
+| M6a-2 | La app de release (R8) funciona: la serialización con kotlinx | Sí | T8: el APK de `release-check` firmado con una clave de prueba solo para el emulador (nunca la de release), instalado en la API 34; el arnés (T3) comprueba el saludo y los mensajes. | — | alto | T8 |
+| M6a-3 | Lo que la spec da por hecho de Android: APK de ataque, salidas de `pm path`/`stat`/`base64`, `install -r`, `base.apk` idéntico, autoridad duplicada | Parcial | T8: todo en la API 34. | Las API 30 y 33 piden imágenes no instaladas (decide el usuario), y la última es la 37 rota. | alto | T8 |
+| M6a-4 | Acciones del usuario: clave, environment, secretos, ruleset, PR con `SigningCertSHA256`, primera etiqueta | No | — | La cuenta de GitHub y el keystore son del usuario y el agente no los toca nunca. Paso: `docs/releasing.md`, "User actions". | alto | Usuario |
+| M6a-5 | `gh release upload` a un borrador por nombre de etiqueta | No (CI) | En la primera release o en un fork. | — | bajo | CI |
+| M6a-6 | La app de debug del usuario tras M6a | No | — | Es un aviso, no una prueba. Paso: `adbuddy setup --apk <APK>` una vez. | bajo | Usuario |
+
+### M6b · Skills
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M6b-a | `claude`, `codex`, `gemini` y `opencode` listan las nueve skills; Gemini carga `AGENTS.md` | No (PC) | En el PC con las CLIs instaladas, solo lectura. | — | bajo | PC |
+| M6b-b | Pasada de solo lectura de `device-profile`, `permissions-audit`, `storage-cleanup` y `debloat` | Parcial | En el emulador, las órdenes de ejemplo de cada skill por el shim: nivel y salida. | El perfil real del Pixel. Paso: la pasada de solo lectura. | medio | Pixel |
+| M6b-c | Un cambio real y deshecho con `battery` (animaciones) y `organize-files` | Sí | `settings put global animator_duration_scale 0.5` por el shim, `adbuddy undo` y comprobar el valor; una carpeta de prueba en `/sdcard`. | — | medio | fuera del tope |
+| M6b-d | `home-screen` en el lanzador del Pixel (`input swipe`, `draganddrop`, `motionevent`) | Parcial | Launcher3 de la API 34. | El lanzador del Pixel es otro. Paso: opcional. | bajo | Usuario (opcional) |
+| M6b-e | `build-utility-apk` de principio a fin sin SDK | No (PC) | Un PC o contenedor limpio. | — | bajo | PC |
+| M6b-f | `adbuddy env init` agrupa bien en Windows y en Linux | No (CI) | Test de host en las dos CI. | — | bajo | CI |
+| M6b-g | Un script de `adb shell` desde PowerShell 5.1 y desde Codex | No (PC) | En el PC. | — | medio | PC |
+| M6b-h | Gemini CLI con la confianza de carpetas, y `save_memory` | No (PC) | En el PC. | — | bajo | PC |
+| M6b-i | Una unión `mklink /J` se rechaza en una instalación real | No (PC) | Test de host en Windows (este PC). | — | medio | PC |
+
+### M6c · Idiomas (1-9)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| M6c-1 | Pixel en español: todas las pantallas, tarjetas y errores forzados | Parcial | El emulador en `es-ES` (T1-10) y `uiautomator dump`: ni claves ni inglés. La JVM ya pinta M5c en español. | Android 17. Paso: la pasada visual. | medio | Pixel |
+| M6c-2 | Idioma por app (13+) sin reiniciar, incluidos los canales | Sí | `cmd locale set-app-locales tech.hybriq.adbuddy --locales en` y `dumpsys notification` para los nombres de los canales. | — | bajo | fuera del tope |
+| M6c-3 | Notificaciones con el móvil bloqueado y desbloqueado; hora en 24 h | Parcial | T4: la versión pública en la pantalla de bloqueo, vista con `dumpsys notification` y `uiautomator dump`. | — | medio | T4 |
+| M6c-4 | Plurales (1 y 2 esperando) | Sí (JVM) | `getQuantityString` en Robolectric, en español. | — | bajo | fuera del tope |
+| M6c-5 | Windows en español sin `language` ni `LANG`; acentos en Windows Terminal y en `cmd.exe` | No (PC) | En el PC (`Get-UICulture`). | Windows en español. | bajo | PC |
+| M6c-6 | El PC y el móvil en idiomas distintos | Parcial | T3: emulador en español y host en inglés. | Si la mezcla molesta lo decide el usuario. | bajo | T3 |
+| M6c-7 | Una 🔴 con razón, en español, en el móvil y en la terminal | Sí | T4: `confirm.request` en español por el arnés, más el test de terminal del host. | — | medio | T4 |
+| M6c-8 | `LocalesTest` en el emulador | Sí, hecha (M2.5b) | `TestInstrumentedSuite` | — | bajo | Hecha |
+| M6c-9 | El castellano de M5c | No | — | Es una revisión de texto, no del dispositivo. | bajo | Revisión |
+
+### v1 · Diferidos, B (36-41) y L (42-43)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| VD-1 | V43 (herramientas atascadas en `running`) y V05 con Claude Code real | No (PC) | `ADBUDDY_REAL_CLAUDE=1` | Claude Code real. | medio | PC |
+| VB-36 | Android decodifica `%XX` en `android-app://` | Sí | T5: `am start -d android-app://com%2Eandroid%2Esettings` y `dumpsys activity activities`. | — | medio | T5 |
+| VB-37 | "Apagar" con el modo remoto apagado no corta la conexión; un 5555 o un 7777 abiertos a mano se cierran | Sí | T8: `remote` contra el emulador; el registro de estados (`device` o `gone`) muestra si adbd se reinició, porque `adb usb` lo reinicia en ~1 s (S5). | — | medio | T8 |
+| VB-38 | La burbuja sobre la terminal sigue recibiendo salida | Parcial | T3: abrir y plegar la burbuja con UiAutomator (T1-8). | La burbuja de Android 17. Paso: junto con M3b-5. | bajo | T3 + Pixel |
+| VB-39 | Un badge en el chat se ve como enlace y no carga la imagen | Sí (JVM) | Robolectric: `MarkdownText` con el badge; MockWebServer no recibe ninguna petición. | — | medio | fuera del tope |
+| VB-40 | Dos `serve` a la vez en la misma carpeta de datos | Parcial | Con el emulador, por medir: el servidor adb de `serve` (5038) no debe ver nunca el móvil del usuario. El `flock`, en la CI. | — | bajo | CI |
+| VB-41 | `persist.adb.tcp.port` frente a `adb usb` y al reinicio de adbd | Sí | T8: `su 0 setprop persist.adb.tcp.port 5555` (`su 0` medido), `adb usb`, reinicio de adbd y `service.adb.tcp.port`. | — | medio | T8 |
+| VL-42 | Dos `serve` sin móvil: el segundo sale con `ALREADY_RUNNING` | No (PC) | Test de `cli` con un adb real y ningún dispositivo. | — | bajo | PC |
+| VL-43 | En la CI de Linux y macOS, `TestSendFIFOSwappedInBeforeOpen` corre y pasa | No (CI) | — | — | bajo | CI |
+
+### Ola 1, ola 2 H, ola 2 M y pty-kill (pendientes y planes)
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| O1-a | La lista blanca de lectura de `dumpsys` (`activity`, `window`, `procstats`, `package`, `meminfo`, `batterystats`) no cambia estado | Parcial | T5: cada forma corre en el emulador y se graba su salida; un antes y después de `settings list` y de `dumpsys` sirve de indicio. | Que algo no cambie estado no se demuestra observando: se contrasta con AOSP. | alto | T5 |
+| O1-b | `.claude` o `projects` movidos con una junction o un symlink | No (PC) | Test de host en Windows. | — | bajo | PC |
+| O1-c | PC con política de empresa o sin permiso para crear un Job object | No (PC) | — | Un PC con esa política. Paso: opcional. | bajo | Usuario (opcional) |
+| O1-d | En la CI de Linux y macOS pasan los tests Unix de V14, V26, V16, V28 y V24 | No (CI) | — | — | medio | CI |
+| O1-e | Claude Code real: una pregunta dejada en la terminal retiene el chat; el nombre de `elicitation_dialog` | No (PC) | `ADBUDDY_REAL_CLAUDE=1` | — | medio | PC |
+| O2H-a | Workspace dentro de OneDrive con Files-On-Demand | No (PC) | — | El OneDrive del usuario. Paso: opcional. | bajo | Usuario (opcional) |
+| O2H-b | `attach` desde fuera del árbol del agente: otra terminal, IDE, ssh, consola elevada, WSL1 | No (PC) | Test de `ipc` con un cliente lanzado fuera del job. | Terminales concretas. | medio | PC |
+| O2H-c | `SIO_AF_UNIX_GETPEERPID` en Windows 10 y 11 | No (PC) | Este PC (Windows 11) y la CI de Windows. | Windows 10. | medio | PC |
+| O2H-d | Un agente que vacía `ADBUDDY_SOURCE` recibe `AGENT_SESSION` | No (PC) | Test de `cli` con un hijo real del árbol del agente. | — | alto | PC |
+| O2H-e | Un agente en pausa que ejecuta `adbuddy doctor` no llama a adb | No (PC) | Test de `cli`. | — | bajo | PC |
+| O2H-f | La carpeta `journal` movida con una junction se rechaza | No (PC) | Test de host en Windows. | — | bajo | PC |
+| O2H-g | `serve` en un sandbox con espacio de PID propio | No (CI) | `unshare --pid` en la CI de Linux. | — | bajo | CI |
+| O2H-h | WSL1 como cliente intermediario | No (PC) | — | WSL1. Paso: opcional. | bajo | Usuario (opcional) |
+| O2H-i | macOS: `getsid` sobre otra sesión | No (CI) | `host.yml` en macOS. | — | bajo | CI |
+| O2M-a | K1: carga real del PTY con ConPTY y con Unix | No (CI) | CI de Linux; en Windows, con un agente real. | — | medio | CI |
+| O2M-b | K1: `Kill` desatasca el `Write` en Windows | No (CI) | La CI de Linux lo ejecuta (en Windows hace `t.Skip`). | conhost no bloquea. | bajo | CI |
+| O2M-c | K1 con #19: el `guard` no depende de un lock que se tome con `chat.mu` retenido | No | — | Es una revisión de código. | medio | Revisión |
+| O2M-d | J2.3: `/compact` real | No (PC) | `ADBUDDY_REAL_CLAUDE=1` | — | bajo | PC |
+| O2M-e | J2.1: con `Edit` y `Write`, la entrada canónica del hook coincide con la del transcript | No (PC) | `ADBUDDY_REAL_CLAUDE=1`, grabando en `claudecode/testdata`. | — | alto | PC |
+| PTY-a | macOS: `Stop` con un agente que no lee | No (CI) | — | — | bajo | CI |
+| PTY-b | Linux real con un agente que no lee | = O2M-a | — | — | — | — |
+
+### Revisión de seguridad, tarjetas (A4), bidi y M2.5b
+
+| # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+|---|---|---|---|---|---|---|
+| SEG-1 | En Android 14+, `appops set <pkg> PROJECT_MEDIA allow` sigue saltándose el diálogo de consentimiento | Sí (API 34) | T7: la app de pruebas lanza `createScreenCaptureIntent` con y sin el appop; `uiautomator dump` muestra si aparece el diálogo. | — | medio | T7 |
+| A4-1 | Una pregunta especial o de más de 300 caracteres: la notificación solo trae Rechazar y Abrir; ninguna ofrece "Permitir durante la sesión"; el diálogo no activa Permitir hasta el final; con más de 20 000 dice cuántos oculta y solo deja Rechazar | Sí | T4: `uiautomator dump` de la persiana (las acciones) y del diálogo, que se desplaza con `input swipe`. Además, un test JVM del diálogo para B3: `unread` sale del mismo `ScrollState`. | — | alto | T4 |
+| BIDI-1 | Una 🔴 con un nombre en hebreo o árabe en la app real; la tarjeta que cae a la terminal | Sí | T4: el arnés manda la pregunta; se mira con `uiautomator dump` y `screencap`. | — | medio | T4 |
+| M25B-1 | Primera ejecución del job `emulator` con los tests de la app en el runner Windows | No (CI) | En Actions, con el PR de M2.5b. | — | medio | CI |
+| M25B-2 | El job `emulator` en un runner Linux | No (CI) | — | — | bajo | CI |
+| UIJ-1 | Las imágenes de referencia en Linux y macOS | No (CI) | — | — | bajo | CI |
+| UIJ-2 | Las imágenes en otra máquina Windows | No (CI) | — | — | bajo | CI |
+| UIJ-3 | Lo que sigue para el Pixel de M5c-27 y 34 | = M5c-27/34 | — | — | — | — |
+
+## Imágenes para lo que depende de Android 15-17
+
+No se ha instalado nada. Las opciones, en orden, y lo que necesita cada una:
+
+1. **Actualizar el emulador** (37.2.12) y la imagen `android-37.0` a su última revisión, con `sdkmanager --update`. El aborto ocurre porque el `mapper.ranchu.so` de la imagen exige que el host anuncie `hasReadColorBufferDma`, y un emulador más nuevo podría anunciarlo. Es la única vía a Android 17 en un emulador. Coste: una actualización del SDK (la decide el usuario), y luego repetir el S1 de M2.5b (120 s sin cambios de pid ni líneas en `crash`).
+2. **`system-images;android-36;google_apis;x86_64`** (Android 16, unos 1,5-2 GB). Cubre edge-to-edge obligatorio (35+), los cambios de servicios en primer plano de 15-16 y los ajustes restringidos de 15 (M2-3, M5c-24, M3b-7). No cubre 17. Si su mapper tiene la misma aserción, está por medir con el S1. Se usa con `ADBUDDY_EMU_IMAGE` (el script ya la lee) y un AVD `adbuddy-dev36`.
+3. **`android-35`**: lo mismo, sin lo de la 16.
+4. **`android-30` y `android-33`**: para M6a-3 y M2-2 (Android 11-13). Mismo coste.
+
+Mientras no haya imagen nueva, todo se instrumenta en la API 34 y la diferencia con Android 17 queda en la checklist del Pixel.
+
+## Plan de automatización propuesto
+
+Las tareas van en orden de valor y en el emulador propio: AVD `adbuddy-dev34`, consola ≥ 5600, servidor adb propio, mDNS apagado y la guarda de `emutest`, que solo acepta `emulator-*` y rechaza los puertos 5037 y 5038. Cada tarea compila y pasa por sí sola. Las de T3 en adelante que usan el canal real dependen de T3.
+
+**T1 (S). Medir lo que está "por medir"** (la lista de arriba, del 1 al 12).
+- Ficheros: el ledger del plan y este documento, donde cada "por medir" se cambia por el resultado.
+- Aceptación: cada orden con su salida en el ledger, y la limpieza hecha (`pm remove-user`, `locksettings clear`, `disallow_listener`, desinstalar). No lleva RED ni GREEN porque es una medición. Si una medida tumba una fila "Sí", la fila baja a Parcial antes de T2.
+
+**T2 (S). El ticker del `dumpsys notification` redactado** (M5b-18, M5c-35).
+- Ficheros: `android/app/src/androidTest/kotlin/tech/hybriq/adbuddy/TickerOnEmulatorTest.kt` (publica una notificación propia con `setTicker("G-482913 is your ADBuddy test code")`), `host/internal/emutest/notification_dump_test.go` (redactado, `--reveal` y `--noredact`) y la lista de `requiredClasses`. Si se confirma la fuga: `host/internal/classify` (`dumpsys notification` pasa a 🔴), su caso en `testdata/differential.jsonl` y regrabar el oráculo según `host/README.md`; `habitual.jsonl` no lo usa.
+- RED: un test de `classify` que exige 🔴 para `dumpsys notification` falla hoy (es 🟢). GREEN: tras el cambio. Si el emutest **no** confirma la fuga, se queda como guarda de regresión y su RED es la mutación de buscar el prefijo en `--noredact`, que sí lo trae.
+
+**T3 (M). Arnés del canal real en `emutest`.**
+- Ficheros: `host/internal/emutest/link_test.go`, con un `openLink(t)` que abre un listener del bridge en 127.0.0.1, hace `adb reverse`, ejecuta `phoneapp.Handshake` y espera `hello` y `device.info`. Limpieza con `adb reverse --remove-all`. Reutiliza `internal/bridge` y `internal/phoneapp`.
+- RED: `TestTheLinkCarriesDeviceInfo` falla con "no device.info in 10 s" si se quita el `reverse` (mutación). GREEN: con el arnés. Cubre M2-7, M3b-1, 3, 4, 6 y 10, M5a-2 y M6c-6, y lo usan T4, T6, T7 y T8.
+
+**T4 (M). Confirmaciones 🔴 en el emulador** (M2-5, M2-8, M2-9, A4-1, M3b-5 en la parte del bloqueo, M4-c, M4-d, M6c-3, M6c-7, BIDI-1).
+- Ficheros:
+  - `host/internal/emutest/confirm_test.go`: `confirm.request` normal, especial, de más de 300 y de más de 20 000 caracteres por T3; PIN y bloqueo; persiana con `cmd statusbar expand-notifications`, `uiautomator dump`, `input tap` y bouncer.
+  - `android/app/src/test/kotlin/tech/hybriq/adbuddy/confirm/ConfirmDialogScrollTest.kt`: Robolectric; Permitir solo al final; B3.
+  - `android/app/src/test/kotlin/tech/hybriq/adbuddy/ui/PermissionCardScrollTest.kt`.
+- RED por mutación:
+  - `setAuthenticationRequired(false)` en `ConfirmNotifier.kt:127` hace que `TestAllowFromTheLockedShadeAsksToUnlock` reciba `allow` sin bouncer;
+  - quitar `!unread` hace que fallen los dos tests de desplazamiento;
+  - ofrecer Permitir en la notificación de una especial hace que falle el volcado de A4-1.
+- GREEN: con el código de hoy.
+- Si UiAutomator por el shell resulta inestable, la tarea pasa a L.
+
+**T5 (M). La guarda con muestras reales de la API 34** (M5a-3, 5, 6, 7, 8, 9; M5b-14, la muestra de M5b-17, M5b-19; M3b-8; M5c-28 y 34 en la parte de la guarda; VB-36; O1-a).
+- Ficheros: `host/internal/emutest/guard_test.go`, que pone cada estado (ADBuddy delante, persiana, ajustes rápidos, bloqueo, heads-up con `cmd notification post`, diálogo, teclado, burbuja), graba las salidas y prueba la decisión de la guarda; `host/internal/uidump/testdata/api34/*.txt`, y los tests de `uidump` y `daemon` que las leen (`Foreground`, `ParseFocus`/`IsShade`, `ParseSystemUIWindows`, `ServiceOn`, `Asleep`).
+- RED: cada muestra nueva se pasa primero por un test que espera la decisión correcta. Si pasa a la primera, la RED es la mutación de quitar `NotificationShade` o el título de systemui de su lista.
+- GREEN: las muestras quedan versionadas sin seriales ni IPs (`git grep` antes de commitear).
+
+**T6 (M). Listener y consentimiento** (M5c-22, 23, 24, 26, 28 en la parte de la app, 29 y 32).
+- Ficheros: `android/app/src/androidTest/kotlin/tech/hybriq/adbuddy/NotificationListenerOnEmulatorTest.kt` (lee por `NotificationGate.read` y `NotificationReport.build`), `host/internal/emutest/listener_test.go` (`allow_listener` y `disallow_listener`, `am kill`, `am force-stop`, reinicio del AVD y dos `am instrument` para la 32), y `allowedSkips` o `requiredClasses` en `instrumented_test.go` para los tests que solo arrancan desde el host.
+- RED por mutación: quitar `revoke()` de `onListenerDisconnected` hace fallar la 32(a); `secret = false` en `raw()` hace fallar la 26. GREEN: con el código de hoy. Si la 32(b) muestra que la marca sobrevive, es el riesgo aceptado del ruling 15: se anota y el arreglo barato (borrarla también en `onListenerConnected`) lo adjudica el controlador.
+
+**T7 (L). App de pruebas y perfiles** (M5c-25, 30, 33; M5a-4, 10; M5b-16, M5b-17 (a) y (b); M2-4; SEG-1).
+- Ficheros: el módulo nuevo `android/fixtures/poster` en `settings.gradle.kts`, con su variante `bank` (nombre de banca), `receiver` (un paquete de `CODE_RECEIVERS` que la imagen no traiga) y `sms` (los componentes del rol). Publica notificaciones por broadcast (visibilidad, ticker, actualización con el mismo id), y trae un `VpnService`, un servicio de accesibilidad mínimo y `createScreenCaptureIntent`. Además, `host/internal/emutest/fixture_test.go`, y que `android.yml` compile el módulo.
+- RED por mutación: que `ProtectedApps.defaultSms` devuelva `null` hace fallar `TestTheDefaultSmsAppIsProposed`; quitar `sbn.user != Process.myUserHandle()` hace fallar el test del perfil. GREEN: con el código de hoy.
+- Las variantes con nombres de paquete de terceros solo se instalan en el emulador.
+
+**T8 (M). adb, modo remoto y release en la API 34** (M5b-12, M5b-13, VB-37, VB-41, M6a-2, M6a-3).
+- Ficheros: `host/internal/emutest/remote_test.go` (`Enable`, `Disable` y `Reconcile` leyendo `service.adb.tcp.port`, nunca el socket); `host/internal/emutest/release_test.go` (el APK de release firmado con una clave temporal creada en `t.TempDir()`, nunca la de release, y el saludo por T3); `host/internal/emutest/install_test.go` (las salidas de `pm path`, `stat` y `base64`, `install -r`, `base.apk` byte a byte, la autoridad duplicada y los APK de ataque de la spec §5).
+- RED por mutación: un `Disable` que lanza siempre `adb usb` hace que la VB-37 vea `gone`. GREEN: con el código de hoy.
+
+**Fuera del tope** (S cada una; todas son JVM o baratas): M5b-21 (tick), VB-39 (badge), M6c-2 y M6c-4, M6b-c (`battery` y `undo`) y M3b-7 (las pantallas que faltan en la JVM).
+
+## Paso mínimo del usuario
+
+Lo que de verdad necesita a la persona: el Pixel 9 Pro XL con Android 17 en una sesión con su permiso, y nada más. Cada punto cierra la parte de Android 17 de las filas que se citan.
+
+**En el Pixel (una sesión, unos 30 minutos):**
+
+- [ ] **Instalar y emparejar** con `adbuddy setup`: el QR en Windows Terminal y en Git Bash, o el código si el QR falla. Cierra M1b-1, 2 y 3, y de paso M2-2 y M2-3 en Android 17.
+- [ ] **Activar el acceso a notificaciones** desde el onboarding, que en 17 pasa por los ajustes restringidos. Cierra M5c-22, 23 y 24 en 17.
+- [ ] **Con el móvil bloqueado**, Rechazar y Permitir una pregunta 🔴 de prueba, con la biometría. Cierra M2-5 y M2-8.
+- [ ] **Cortar acceso y Reactivar** una vez, con la depuración inalámbrica real. Cierra M2-6 y M2-10.
+- [ ] **Pasada visual:** pantallas en claro, oscuro, al 200 % y en español; abrir la burbuja una vez; mirar la terminal. Cierra M3b-2, 5 y 7, M5c-27 (incluido el título al 200 % en español) y 34, M6c-1, M5a-3, M5b-19 y VB-38.
+- [ ] **Dar permiso a una pasada de solo lectura.** El agente graba `dumpsys`, `getprop` y `settings get` con la persiana bajada, en la pantalla de bloqueo y con una notificación de prueba de una app propia; mira `protected.json`; cronometra un `adbuddy screen`; corre las skills de solo lectura. Cierra M5a-1, 6 y 9, M5b-11, 14 y 17, M5c-25 y 30, M3b-8 y M6b-b en 17.
+- [ ] **Abrir la app del banco** y pedir un `adbuddy screen`, que debe responder Blocked. Cierra M5a-4.
+- [ ] **Fuera de casa, o con el Wi-Fi apagado,** con Tailscale: `adbuddy remote on`, y `serve` reconecta. Cierra M5b-12, 15 y 16.
+
+**En la cuenta de GitHub:** la clave, el environment y los secretos de la release (M6a-4), y un `adbuddy setup --apk` tras M6a (M6a-6).
+
+**Opcional,** solo si los tiene a mano:
+- un móvil de otra marca (M2-4, M5a-6, M5b-14);
+- un reloj Wear o Phone Link (M2-9);
+- KDE Connect o un acompañante de reloj (M5c-31);
+- el lanzador para `home-screen` (M6b-d);
+- OneDrive, WSL1 o un PC con política de empresa (O2H-a, O2H-h, O1-c).
+
+Lo marcado "PC" y "CI" no es del usuario. Las pruebas con Claude Code real (`ADBUDDY_REAL_CLAUDE=1`) y los tests de host en Windows los corre un agente en este PC sin tocar el móvil, y lo de la CI se ve en Actions.
