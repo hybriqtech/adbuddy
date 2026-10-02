@@ -657,18 +657,36 @@ func TestRemoteOnOneQuestionAtATime(t *testing.T) {
 func TestRemoteOnClientGoneWhileAsking(t *testing.T) {
 	h := newRemoteHost(t, withTailscale(), confirm.Allow)
 	entered, ended := make(chan struct{}), make(chan error, 1)
+	var once sync.Once
 	h.l.conf = bridge.NewConfirmer(noApp{}, confirmerFunc(func(ctx context.Context, _ confirm.Request) confirm.Decision {
-		close(entered)
+		once.Do(func() { close(entered) })
 		<-ctx.Done()
-		ended <- ctx.Err()
+		select {
+		case ended <- ctx.Err():
+		default:
+		}
 		return confirm.Deny
 	}))
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	callDone := make(chan struct{})
 	go func() {
+		defer close(callDone)
 		_, _ = ipc.Call(ctx, h.data, ipc.Request{Kind: ipc.KindRemote, Argv: []string{"on"}}, nil, nopWriter{}, nopWriter{}, nil)
 	}()
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the question never reached the phone")
+	}
 	cancel()
+	defer func() {
+		select {
+		case <-callDone:
+		case <-time.After(10 * time.Second):
+			t.Error("the client call did not return after cancelling")
+		}
+	}()
 	select {
 	case err := <-ended:
 		if !errors.Is(err, context.Canceled) {
