@@ -62,15 +62,14 @@ tasks.withType<Test>().configureEach {
 
 // The instrumented tests run only on an emulator, never on the user's phone (M2.5 spec §2.4): ANDROID_SERIAL
 // must name exactly one emulator (AGP splits it on commas, so "emulator-5554,<phone>" is refused too). Checked
-// when a connected task starts, before it installs anything.
-tasks.configureEach {
-    if (name.startsWith("connected")) {
-        doFirst {
-            val serial = System.getenv("ANDROID_SERIAL").orEmpty()
-            check(Regex("emulator-[0-9]+").matches(serial)) {
-                "connected tests run only on one emulator: set ANDROID_SERIAL=emulator-<port> " +
-                    "(scripts/emulator.sh start prints it as ADBUDDY_EMULATOR_SERIAL), not \"$serial\""
-            }
+// when the task graph is built, before any task runs and so before anything is installed (the install tasks
+// that connected tasks depend on would otherwise install on every attached device).
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it.name.startsWith("connected") }) {
+        val serial = System.getenv("ANDROID_SERIAL").orEmpty()
+        check(Regex("emulator-[0-9]+").matches(serial)) {
+            "connected tests run only on one emulator: set ANDROID_SERIAL=emulator-<port> " +
+                "(scripts/emulator.sh start prints it as ADBUDDY_EMULATOR_SERIAL), not \"$serial\""
         }
     }
 }

@@ -24,3 +24,11 @@ AdbWifiObserverTest.class compilado en debugAndroidTest.
 ## Pendiente para el emulador
 Pasos 2 (RED guarda con la tarea real; instalar nada), 3, 4, 6, 7, y parar el emulador.
 Nota: en el Paso 2 la guarda por `doFirst` solo se comprueba de verdad con la tarea real; la logica ya esta probada con la sonda.
+
+## Correccion (aviso del coordinador): guarda en el grafo de tareas
+El `doFirst` llegaba tarde (las tareas install de las que depende connected* corren antes). Ahora la guarda es
+`gradle.taskGraph.whenReady { if (allTasks.any { it.name.startsWith("connected") }) check(Regex("emulator-[0-9]+").matches(serial)) }`.
+Verificado con la sonda `connectedProbe` Y con `gradle -m :app:connectedDebugAndroidTest` (puerto adb 5999; nunca la tarea real):
+sin definir -> exit 1; `emulator-5600` -> exit 0 (la sonda ejecuta PROBE-RAN; el dry-run pasa); `emulator-5600,xyz`, `xyz`,
+` emulator-5600`, `emulator-5600 ` -> exit 1, en ambos metodos. `-m :app:installDebug` y `-m :app:assembleDebugAndroidTest`
+sin ANDROID_SERIAL: BUILD SUCCESSFUL. Paso 9 completo: exit 0.
