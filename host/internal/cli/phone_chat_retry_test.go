@@ -40,7 +40,10 @@ func TestChatSendRetryBeyondTheHistoryIsNotTypedAgain(t *testing.T) {
 	for i := range keptChat + 5 {
 		r.l.addMessage(bridge.ChatMessage{ID: fmt.Sprintf("a_%d", i), Role: "assistant", Text: "x", Conversation: first.Conversation})
 	}
-	if _, ok := r.l.chat.findLocked("m_old"); ok {
+	r.l.chat.mu.Lock()
+	_, still := r.l.chat.findLocked("m_old")
+	r.l.chat.mu.Unlock()
+	if still {
 		t.Fatal("m_old is still in the history")
 	}
 	sendApp(t, r.c, bridge.TypeChatSend, "r_2", bridge.ChatSend{ID: "m_old", Text: "only once"})
