@@ -21,3 +21,6 @@ Supervisor: adbuddy-e5 (Sonnet en sesión e implementadores; opus solo plan, seg
 ## Estado al cortar (07:5x)
 - Rama `fix/v1-diferidos` desde 83b7019 con el plan de la ola 1 (b076052; 7 tareas) y el triage local. Revisión opus del plan EN CURSO (agente a489aeb0c1f25e803, avisará al terminar).
 - Siguiente: aplicar los hallazgos de esa revisión al plan + las órdenes de arriba (insertar 3 tareas de seguridad opus delante: T1 undo/V01 con el diseño "el inverso pasa por el mismo clasificador y confirmación que cualquier orden"; T2 clasificador V06+V02+V03; T3 tarjetas y atención V04+V05; renumerar el resto; V30 en la tarea de setup/CI), commitear el plan y ejecutar con subagentes de uno en uno (implementador Sonnet, revisor según plan).
+
+## Corte (límite de uso)
+Plan reescrito con los hallazgos de la revisión opus del plan y las órdenes del supervisor: 11 tareas (T1 undo/V01, T2 clasificador V06/V02/V03, T3 tarjetas y atención V04/V05, T4 transcript V24 + PTY V25, T5 workspace V14/V26/V15/V32, T6 instalación y CI V16/V17/V30, T7 guarda de pantalla, T8 IPC V29, T9 chat y ficheros, T10 tests, T11 JVM). Pendiente: commitear (hecho al cortar), generar briefs con `task-brief` y ejecutar T1 (implementador Sonnet, revisor opus) de uno en uno; recordar avisar a tern de los textos nuevos de T1-T3 y reconciliar `pendientes-m3-m5.md` al final. Ningún subagente en vuelo.
