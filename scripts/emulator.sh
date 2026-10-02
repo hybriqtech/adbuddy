@@ -6,11 +6,17 @@
 # overridden with ADBUDDY_EMU_AVD, ADBUDDY_EMU_PORT and ADBUDDY_EMU_ADB_PORT
 # (the CI job does, to coexist with an emulator started by hand). The emulator's
 # GPU mode can be set with ADBUDDY_EMU_GPU (swiftshader_indirect by default).
+# The system image can be set with ADBUDDY_EMU_IMAGE (the android-37.0
+# google_apis x86_64 one by default). The AVD is created with that image the
+# first time only: to change the image, use another AVD name (ADBUDDY_EMU_AVD).
+# After boot, start can watch for ADBUDDY_EMU_STABLE_SECS seconds (0 = off, the
+# default) that system_server and surfaceflinger do not restart.
 #
 # Exit codes:
 #   1    the SDK or its packages are missing
 #   2    incorrect usage
 #   3    the emulator's adb server sees another device (or none: it fails closed)
+#   4    the emulator is not stable: system_server or surfaceflinger restarted
 #   124  the emulator did not boot in 10 minutes
 set -euo pipefail
 
@@ -21,7 +27,7 @@ export ADB_MDNS=0
 export ADB_MDNS_AUTO_CONNECT=0
 
 AVD="${ADBUDDY_EMU_AVD:-adbuddy-api37}"
-IMAGE="system-images;android-37.0;google_apis;x86_64"
+IMAGE="${ADBUDDY_EMU_IMAGE:-system-images;android-37.0;google_apis;x86_64}"
 PORT="${ADBUDDY_EMU_PORT:-5580}"
 SERIAL="emulator-$PORT"
 export ANDROID_ADB_SERVER_PORT="${ADBUDDY_EMU_ADB_PORT:-5039}"
@@ -60,13 +66,39 @@ print_env() {
   echo "export ADBUDDY_EMULATOR_ADB='$ADB'"
 }
 
+# The pids of system_server and surfaceflinger, as "pid pid" (empty if adb or
+# pidof fails). boot_completed can be 1 on an image whose system restarts every
+# few seconds, so this is what tells a stable system from a looping one.
+stable_sample() {
+  MSYS_NO_PATHCONV=1 "$ADB" -s "$SERIAL" shell pidof system_server surfaceflinger </dev/null 2>/dev/null | tr -d '\r' || true
+}
+
+# Exits 4 if, for ADBUDDY_EMU_STABLE_SECS, either pid changes or pidof does
+# not return both of them.
+wait_stable() {
+  local total="${ADBUDDY_EMU_STABLE_SECS:-0}" elapsed=0 first now
+  ((total > 0)) || return 0
+  first=$(stable_sample)
+  while [[ "$(wc -w <<<"$first")" -eq 2 ]]; do
+    ((elapsed < total)) || return 0
+    sleep 5
+    elapsed=$((elapsed + 5))
+    now=$(stable_sample)
+    [[ "$now" == "$first" ]] || break
+  done
+  "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
+  "$ADB" kill-server >/dev/null 2>&1 || true
+  echo "the emulator restarts system_server/surfaceflinger: it is not stable (image $IMAGE, gpu ${ADBUDDY_EMU_GPU:-swiftshader_indirect}); try ADBUDDY_EMU_GPU or ADBUDDY_EMU_IMAGE, or set ADBUDDY_EMU_STABLE_SECS=0 to skip this check" >&2
+  exit 4
+}
+
 start() {
   # An old server of our port may have been started with mDNS on; one without
   # it is left alone (it may be serving other work).
   if ! "$ADB" mdns check 2>/dev/null | tr -d '\r' | grep -q 'discovery disabled'; then
     "$ADB" kill-server >/dev/null 2>&1 || true
   fi
-  if [[ ! -x "$SDK/emulator/emulator$EXE" || ! -d "$SDK/system-images/android-37.0/google_apis/x86_64" ]]; then
+  if [[ ! -x "$SDK/emulator/emulator$EXE" || ! -d "$SDK/${IMAGE//;//}" ]]; then
     echo "missing SDK packages; install them with:" >&2
     echo "  sdkmanager emulator '$IMAGE'" >&2
     exit 1
@@ -89,6 +121,7 @@ start() {
     echo "the emulator did not finish booting in 10 minutes; its log: ${TMPDIR:-/tmp}/adbuddy-emulator.log" >&2
     exit 124
   fi
+  wait_stable
   # Safety net: this adb server must see the emulator and nothing else.
   local line devices other="" seen=""
   devices=$("$ADB" devices | tr -d '\r') || other="(adb devices failed)"
