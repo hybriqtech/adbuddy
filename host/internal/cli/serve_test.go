@@ -314,6 +314,12 @@ func TestServeWaitsForRequestsInFlight(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("serve did not stop")
 	}
+	// The lock went with the server's Close: the next serve can start.
+	if lock, err := ipc.Lock(data); err != nil {
+		t.Fatalf("the lock is still held after serve stopped: %v", err)
+	} else {
+		lock.Close()
+	}
 	// Checked as soon as serve returns: nothing may still be in flight.
 	entries, _, err := journal.Open(workspace.JournalDir(ws)).Load()
 	if err != nil || len(entries) != 1 || entries[0].Status != journal.StatusDenied {
@@ -405,4 +411,36 @@ func TestServeWiresRemoteActive(t *testing.T) {
 	if !wired {
 		t.Fatal("serve.go does not give daemon.Options the remote mode's state")
 	}
+}
+
+// One serve per data folder: a second one that finds the lock taken (a serve
+// that has not reached its socket yet) stops with ALREADY_RUNNING before it
+// touches the workspace, asks adb anything or starts its watchers.
+func TestServeFindsTheLockBeforeStarting(t *testing.T) {
+	data := isolate(t)
+	held, err := ipc.Lock(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	ws := filepath.Join(t.TempDir(), "ws")
+	_, errOut, code := run(t, "serve", "--adb", filepath.Join(t.TempDir(), "no-adb"), "--workspace", ws, "--confirm", "deny")
+	if code != ExitFailure || !strings.Contains(errOut, "ALREADY_RUNNING") || exists(ws) {
+		t.Fatalf("exit %d, workspace created %v, stderr %q", code, exists(ws), errOut)
+	}
+}
+
+// serve releases the lock however it ends: here adb cannot even run.
+func TestServeReleasesTheLockWhenItFails(t *testing.T) {
+	data := isolate(t)
+	ws := filepath.Join(t.TempDir(), "ws")
+	_, errOut, code := run(t, "serve", "--adb", filepath.Join(t.TempDir(), "no-adb"), "--workspace", ws, "--confirm", "deny")
+	if code == 0 || strings.Contains(errOut, "ALREADY_RUNNING") {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	lock, err := ipc.Lock(data)
+	if err != nil {
+		t.Fatalf("the lock is still held after serve ended: %v", err)
+	}
+	lock.Close()
 }
