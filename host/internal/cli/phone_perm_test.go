@@ -298,6 +298,8 @@ func TestPermissionIsNotAskedWhenTheCardCannotShowIt(t *testing.T) {
 		"zero width":    {"echo a\u200bb", "do it"},
 		"bidi in title": {"ls", "harmless \u202e"},
 		"private use":   {"echo a\ue000b", "do it"}, // V18
+		"rtl command":   {"mv \u05d0 \u05d1", "do it"},
+		"rtl title":     {"ls", "move \u05d0"},
 	} {
 		p := r.payload("PermissionRequest", map[string]any{"tool_name": "Bash", "tool_input": map[string]any{"command": c.cmd, "description": c.desc}})
 		got := make(chan []byte, 1)
