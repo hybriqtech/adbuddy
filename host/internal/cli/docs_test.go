@@ -31,7 +31,6 @@ var (
 	docIPv4Re    = regexp.MustCompile(`^\d{1,3}(\.\d{1,3}){3}$`)
 	docPrivateRe = regexp.MustCompile(`C:\\Users|/home/|/Users/|emulator-\d+|ANDROID_SERIAL=`)
 	docMarkerRe  = regexp.MustCompile(`<[^<>\n]*>`)
-	docOptionRe  = regexp.MustCompile(`\[[^\[\]\n]*\]`)
 	docVersionRe = regexp.MustCompile(`(?i)(^|[^a-z])(v|version\s*)$`)
 	// Documentation ranges (RFC 5737) and the first CGNAT block, which the
 	// product's own --help uses as its Tailscale example.
@@ -202,6 +201,8 @@ func checkDocLinks(root, file, text string) []string {
 	excludes := docExcludes(root)
 	for _, raw := range targets {
 		target := raw
+		// Links starting with "/" are skipped: they depend on the site's
+		// baseurl on Pages, which a file check cannot know.
 		if strings.Contains(target, "://") || strings.HasPrefix(target, "mailto:") || strings.HasPrefix(target, "#") || strings.HasPrefix(target, "/") {
 			continue
 		}
@@ -249,21 +250,26 @@ func checkDocLinks(root, file, text string) []string {
 // docSegments returns the `adbuddy …` commands of one line as lists of words:
 // the prompt and a trailing " #" comment are dropped, quotes group words
 // (nothing is expanded) and unquoted pipes, && , || and ; split it. <markers>
-// become ARG and [optional groups] disappear.
+// become ARG and unquoted [optional groups] disappear (a bracket inside quotes
+// is kept). A redirection (>, >>, 2>, &>, 2>&1, <) ends the command's
+// arguments, as do the separators.
 func docSegments(line string) [][]string {
 	line = strings.TrimSpace(line)
 	for _, p := range []string{"$ ", "PS> ", "> "} {
 		line = strings.TrimPrefix(line, p)
 	}
 	line = docMarkerRe.ReplaceAllString(line, "ARG")
-	line = docOptionRe.ReplaceAllString(line, "")
+	if strings.HasSuffix(line, ` \`) || strings.HasSuffix(line, " `") {
+		line = line[:len(line)-1] // line continuation
+	}
 	var segs [][]string
 	var words []string
 	var word strings.Builder
 	inWord := false
 	var quote rune
+	stop := false // after a redirection the words are not arguments
 	endWord := func() {
-		if inWord {
+		if inWord && !stop {
 			words = append(words, word.String())
 		}
 		word.Reset()
@@ -275,6 +281,7 @@ func docSegments(line string) [][]string {
 			segs = append(segs, words)
 		}
 		words = nil
+		stop = false
 	}
 	rs := []rune(line)
 scan:
@@ -293,6 +300,22 @@ scan:
 			endWord()
 		case r == '#' && !inWord:
 			break scan
+		case r == '>' || r == '<':
+			// "2>" and "&>" carry the descriptor in the word before it.
+			if w := word.String(); w == "&" || (w != "" && strings.Trim(w, "0123456789") == "") {
+				word.Reset()
+				inWord = false
+			}
+			endWord()
+			stop = true
+		case r == '[':
+			if j := strings.IndexAny(string(rs[i+1:]), "[]"); j >= 0 && rs[i+1+j] == ']' {
+				endWord()
+				i += j + 1
+			} else {
+				word.WriteRune(r)
+				inWord = true
+			}
 		case r == '|' || r == ';':
 			endSeg()
 		case r == '&' && i+1 < len(rs) && rs[i+1] == '&':
@@ -306,8 +329,13 @@ scan:
 	endSeg()
 	var out [][]string
 	for _, s := range segs {
-		switch strings.ToLower(s[0]) {
-		case "adbuddy", "adbuddy.exe", `.\adbuddy`, `.\adbuddy.exe`, "./adbuddy", "./adbuddy.exe":
+		// Only ".exe" is case-insensitive: "ADBuddy setup guide" is prose.
+		name := s[0]
+		if strings.HasSuffix(strings.ToLower(name), ".exe") {
+			name = name[:len(name)-4]
+		}
+		name = strings.TrimPrefix(strings.TrimPrefix(name, "./"), `.\`)
+		if name == "adbuddy" {
 			s[0] = "adbuddy"
 			out = append(out, s)
 		}
@@ -332,6 +360,8 @@ func checkDocCommands(file, text string) []string {
 		tree := NewRoot(&App{Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard, Getenv: func(string) string { return "" }})
 		tree.InitDefaultHelpCmd()
 		tree.InitDefaultHelpFlag()
+		tree.InitDefaultVersionFlag() // cobra adds these two only when it runs
+		tree.InitDefaultCompletionCmd()
 		cmd, rest, err := tree.Find(fields[1:])
 		if err != nil || cmd == tree {
 			switch {
@@ -388,6 +418,18 @@ func checkDocCommands(file, text string) []string {
 	return bad
 }
 
+// docIPPrivate reports whether an address is in a private or link-local range.
+func docIPPrivate(ip string) bool {
+	q := strings.Split(ip, ".")
+	a, _ := strconv.Atoi(q[0])
+	b, _ := strconv.Atoi(q[1])
+	switch {
+	case a == 10, a == 172 && b >= 16 && b <= 31, a == 192 && b == 168, a == 100 && b >= 64 && b <= 127, a == 169 && b == 254:
+		return true
+	}
+	return false
+}
+
 // docIPAllowed reports whether an address is one the guides may show.
 func docIPAllowed(ip string) bool {
 	if slices.Contains(docIPExact, ip) {
@@ -404,7 +446,8 @@ func docIPAllowed(ip string) bool {
 // checkDocPrivacy returns a message for every private-looking datum. A run of
 // digits and dots counts as an address when it has exactly four numbers of
 // 0-255 (so "1.0.410.0" and "1.2.3.4.5" are not) and no "v" or "version"
-// before it (a four-component version such as "version 1.0.41.0").
+// before it (a four-component version such as "version 1.0.41.0"); that
+// exemption does not apply to private ranges.
 func checkDocPrivacy(file, text string) []string {
 	var bad []string
 	if m := docPrivateRe.FindString(text); m != "" {
@@ -423,7 +466,7 @@ func checkDocPrivacy(file, text string) []string {
 				valid = false
 			}
 		}
-		if !valid || docVersionRe.MatchString(text[:start]) || docIPAllowed(tok) {
+		if !valid || (docVersionRe.MatchString(text[:start]) && !docIPPrivate(tok)) || docIPAllowed(tok) {
 			continue
 		}
 		bad = append(bad, file+": contains the IP address "+tok+" (use 192.0.2.x or <ip:port>)")
@@ -506,7 +549,22 @@ func TestDocsGuardCatches(t *testing.T) {
 		{"broken titled link", "docs/page.md", `[a](nope.md "t")`, true},
 		{"broken reference link", "docs/page.md", "[a]: nope.md\n", true},
 		{"help for a missing command", "docs/page.md", sh("adbuddy help bogus"), true},
-		{"bogus subcommand of a group", "docs/page.md", sh("adbuddy skills bogus"), true},
+		{"bogus subcommand of a group", "docs/page.md", sh("adbuddy env bogus"), true},
+		{"unversioned four numbers", "docs/page.md", "Build 1.0.41.0 now.", true},
+		{"version prefix on a private address", "docs/page.md", "Server version 192.168.1." + "5 up.", true},
+		{"v prefix on a private address", "docs/page.md", "Seen v10.0.0." + "5 there.", true},
+		{"version prefix on 10/8", "docs/page.md", "version 10.0.0." + "5", true},
+		{"prose with capitals is not a command", "docs/page.md", inline("ADBuddy bogus"), false},
+		{"version flag", "docs/page.md", sh("adbuddy --version"), false},
+		{"completion command", "docs/page.md", sh("adbuddy completion bash"), false},
+		{"redirect to a file", "docs/page.md", sh("adbuddy journal --json > j.json"), false},
+		{"append redirect", "docs/page.md", sh("adbuddy journal >> j.txt"), false},
+		{"stderr to stdout then tee", "docs/page.md", sh("adbuddy doctor 2>&1 | tee x"), false},
+		{"both streams", "docs/page.md", sh("adbuddy doctor &> out.txt"), false},
+		{"line continuation", "docs/page.md", sh(`adbuddy send x.md \`), false},
+		{"powershell continuation", "docs/page.md", block("powershell", "adbuddy send x.md `"), false},
+		{"bracket in quotes is kept", "docs/page.md", sh(`adbuddy send x.md --caption "[draft]"`), false},
+		{"redirect does not hide a bad flag", "docs/page.md", sh("adbuddy setup --nope > x"), true},
 		// Must pass.
 		{"run with dash then run (one tree each, no panic)", "docs/page.md", sh("adbuddy run codex -- --model o4", "adbuddy run"), false},
 		{"setup code connect", "docs/page.md", sh("adbuddy setup --code --connect 100.64.0.5:41234"), false},
@@ -549,6 +607,11 @@ func TestDocsGuardCatches(t *testing.T) {
 		})
 	}
 
+	// A bracket inside quotes must stay an argument.
+	if got := docSegments(`adbuddy tap "[ok]" extra`); len(got) != 1 || len(got[0]) != 4 {
+		t.Errorf("quoted bracket lost: %v", got)
+	}
+
 	// Each guard on its own, as the plan's interface says.
 	if got := checkDocLinks(root, "docs/page.md", "[a](missing.md)"); len(got) == 0 {
 		t.Error("checkDocLinks missed a broken link")
@@ -558,5 +621,31 @@ func TestDocsGuardCatches(t *testing.T) {
 	}
 	if got := checkDocPrivacy("f.md", "10.0.0." + "5"); len(got) == 0 {
 		t.Error("checkDocPrivacy missed an address")
+	}
+}
+
+func TestDocsPublishedExcludes(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, body string) {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("docs/_config.yml", "exclude:\n  - releasing.md\n  - private/\n  - \"draft-*.md\"\n")
+	for _, f := range []string{"README.md", "docs/index.md", "docs/releasing.md", "docs/private/a.md", "docs/draft-1.md", "docs/.hidden.md", "docs/_site/a.md", "docs/sub/ok.md"} {
+		write(f, "x")
+	}
+	got := publishedDocs(t, root)
+	slices.Sort(got)
+	want := []string{"README.md", "docs/index.md", "docs/sub/ok.md"}
+	if !slices.Equal(got, want) {
+		t.Errorf("published = %v, want %v", got, want)
+	}
+	if !docExcluded([]string{"private"}, "private/a.md") || docExcluded([]string{"private"}, "privacy.md") {
+		t.Error("docExcluded: a folder entry must cover its content and only it")
 	}
 }
