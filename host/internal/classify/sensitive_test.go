@@ -232,6 +232,10 @@ func TestProjectMediaIsSpecial(t *testing.T) {
 		"appops set com.x PROJECT_MEDIA 4",
 		"appops set com.x PROJECT_MEDIA ALLOW",
 		"appops set com.x 46 allow",
+		// AppOpsService parses a numeric op with Integer.parseInt.
+		"appops set com.x 046 allow",
+		"appops set com.x 0046 allow",
+		"appops set com.x +46 allow",
 		"appops set --user 0 com.x PROJECT_MEDIA allow",
 		"appops set --uid com.x PROJECT_MEDIA allow",
 		"appops set com.x PROJECT_MEDIA",
@@ -253,6 +257,7 @@ func TestProjectMediaIsSpecial(t *testing.T) {
 		{sh("appops set com.x PROJECT_MEDIA deny"), Yellow, "appops.set", "appops-set", false},
 		{sh("appops set com.x PROJECT_MEDIA ignore"), Yellow, "appops.set", "appops-set", false},
 		{sh("appops set com.x PROJECT_MEDIA default"), Yellow, "appops.set", "appops-set", false},
+		{sh("appops set com.x 046 deny"), Yellow, "appops.set", "appops-set", false},
 		{sh("appops get com.x PROJECT_MEDIA"), Green, "appops.read", "", false},
 		{sh("appops set com.x CAMERA allow"), Yellow, "appops.set", "appops-set", false},
 		// Product decision (no capar): these stay yellow.
@@ -285,6 +290,8 @@ func TestKeyboardRoleAdminAndLockCommandsAreSpecial(t *testing.T) {
 		"cmd notification allow_dnd com.evil",
 		"cmd role add-role-holder android.app.role.SMS com.evil",
 		"cmd role add-role-holder --user 0 android.app.role.BROWSER com.evil",
+		"cmd role clear-role-holders android.app.role.SMS",
+		"cmd role set-bypassing-role-qualification true",
 		"dpm set-active-admin com.evil/.Admin",
 		"dpm set-active-admin --user 0 com.evil/.Admin",
 		"dpm set-device-owner com.evil/.Admin",

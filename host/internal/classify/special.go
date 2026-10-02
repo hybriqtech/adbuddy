@@ -137,7 +137,7 @@ type grant struct {
 var grants = map[string]grant{
 	"ime":          {[]string{"enable", "set"}, reason("turns on or chooses a keyboard, which sees everything you type, passwords included")},
 	"notification": {[]string{"allow_listener", "allow_assistant", "allow_dnd"}, whyNotifications},
-	"role":         {[]string{"add-role-holder"}, reason("gives an app a role, such as the default SMS app, browser or assistant")},
+	"role":         {[]string{"add-role-holder", "clear-role-holders", "set-bypassing-role-qualification"}, reason("changes who holds a role, such as the default SMS app, browser or assistant")},
 	"dpm":          {[]string{"set-active-admin", "set-device-owner", "set-profile-owner"}, reason("makes an app a device administrator or owner, which can lock or wipe the phone")},
 	"locksettings": {[]string{"set-disabled", "clear", "set-pin", "set-password", "set-pattern"}, reason("changes or removes the screen lock")},
 }
@@ -164,8 +164,9 @@ func grantReason(cmd string, sub Word) Text {
 // grantsProjectMedia reports whether appops set allows PROJECT_MEDIA, with
 // which an app captures the screen without Android's consent dialog.
 // AppOpsService's shell takes the op as android:project_media, PROJECT_MEDIA
-// or its code (46), and the mode as a name or a number: anything but ignore,
-// deny or default (1, 2, 3), or no mode at all, counts.
+// or its code (46, read with Integer.parseInt: 046 and +46 too), and the
+// mode as a name or a number: anything but ignore, deny or default (1, 2, 3),
+// or no mode at all, counts.
 func grantsProjectMedia(ws []Word) bool {
 	sub, at := subAt(ws)
 	if strings.ToLower(sub) != "set" {
@@ -173,6 +174,10 @@ func grantsProjectMedia(ws []Word) bool {
 	}
 	for i := at + 1; i < len(ws); i++ {
 		op := strings.TrimPrefix(strings.ToLower(ws[i].Value), "android:")
+		if n, err := strconv.Atoi(op); err == nil {
+			// Integer.parseInt, like Atoi, takes a sign and leading zeros.
+			op = strconv.Itoa(n)
+		}
 		if ws[i].Dynamic || (op != "project_media" && op != "46") {
 			continue
 		}
