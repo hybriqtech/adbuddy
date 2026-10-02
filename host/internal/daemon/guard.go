@@ -211,7 +211,7 @@ func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
 		}
 	}
 	if f.appProtected {
-		return protectedReason(f.first())
+		return screenProtectedReason(f.first())
 	}
 	if why := d.systemUIReason(ctx, f.viaApp, closesShade(words)); why != "" && !(wakesScreen(words) && d.screenOff(ctx)) {
 		return why
@@ -275,11 +275,20 @@ func (d *Daemon) refuse(ctx context.Context, e journal.Entry, s Stream, why stri
 	return d.block(e, s, why)
 }
 
+// protectedReason is why pkg, which is protected, blocks.
 func protectedReason(pkg string) string {
-	if pkg == "" { // the app says the screen is protected without naming an app
-		pkg = "something on the screen"
-	}
 	return classify.Printable(pkg) + " is a protected app; ask the user to do this part"
+}
+
+// screenProtectedReason is why the app says the screen is protected: not
+// always a protected app, but also a notification on screen or a window whose
+// content the service cannot see. pkg is only what is in front (may be "").
+func screenProtectedReason(pkg string) string {
+	in := ""
+	if pkg != "" {
+		in = "; " + classify.Printable(pkg) + " is in front"
+	}
+	return "something on the screen is protected (a protected app, a notification or a window ADBuddy cannot read" + in + "); ask the user to do this part"
 }
 
 // protected reports whether pkg is ADBuddy or one of the user's protected apps.

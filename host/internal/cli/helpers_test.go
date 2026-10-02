@@ -201,7 +201,7 @@ func TestTypeAndForeground(t *testing.T) {
 		t.Fatalf("too long: %d", code)
 	}
 	out, _, code := runHelper(t, "foreground")
-	if code != 0 || !strings.Contains(out, "com.example.bank/com.example.bank.Main\n") || !strings.Contains(out, "protected app") {
+	if code != 0 || !strings.Contains(out, "com.example.bank/com.example.bank.Main\n") || !strings.Contains(out, "Something on the screen is protected") {
 		t.Fatalf("foreground: %d %q", code, out)
 	}
 }

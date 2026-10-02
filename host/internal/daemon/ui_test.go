@@ -361,15 +361,17 @@ func TestScreenshot(t *testing.T) {
 // The guard (M5 spec §4.3).
 
 func TestGuardBlocksWithAProtectedAppInFront(t *testing.T) {
+	const named, generic = "is a protected app", "something on the screen is protected"
 	cases := []struct {
 		name string
 		fg   bridge.UIForeground
 		list []string
+		want string // what the refusal says: a named protected app, or the generic cause
 	}{
-		{"in the list", bridge.UIForeground{Package: "com.example.bank"}, []string{"com.example.bank"}},
-		{"the app says so", bridge.UIForeground{Package: "com.other.bank", Protected: true}, nil},
-		{"ADBuddy", bridge.UIForeground{Package: "tech.hybriq.adbuddy"}, nil},
-		{"protected without a package", bridge.UIForeground{Protected: true}, nil},
+		{"in the list", bridge.UIForeground{Package: "com.example.bank"}, []string{"com.example.bank"}, named},
+		{"the app says so", bridge.UIForeground{Package: "com.other.bank", Protected: true}, nil, generic},
+		{"ADBuddy", bridge.UIForeground{Package: "tech.hybriq.adbuddy"}, nil, named},
+		{"protected without a package", bridge.UIForeground{Protected: true}, nil, generic},
 	}
 	for _, c := range cases {
 		e := newEnv(t)
@@ -378,7 +380,7 @@ func TestGuardBlocksWithAProtectedAppInFront(t *testing.T) {
 		a.results[bridge.UIOpDump] = dumpResult
 		for _, argv := range [][]string{{"shell", "input", "tap", "1", "1"}, {"exec-out", "screencap", "-p"}, {"shell", "uiautomator", "dump"}} {
 			s, exit := e.exec(t, argv...)
-			if exit.Code != 126 || !strings.Contains(s.errOut.String(), "is a protected app") {
+			if exit.Code != 126 || !strings.Contains(s.errOut.String(), c.want) {
 				t.Errorf("%s: %q: %+v %q", c.name, argv, exit, s.errOut.String())
 			}
 		}
@@ -389,7 +391,7 @@ func TestGuardBlocksWithAProtectedAppInFront(t *testing.T) {
 			} else if op == OpScreenshot {
 				args = ScreenshotArgs{Scale: 1, Format: "png"}
 			}
-			if _, exit := e.helper(t, op, args); exit.Code != 126 || exit.ErrorCode != "UI_BLOCKED" || !strings.Contains(exit.Error, "protected app") {
+			if _, exit := e.helper(t, op, args); exit.Code != 126 || exit.ErrorCode != "UI_BLOCKED" || !strings.Contains(exit.Error, c.want) {
 				t.Errorf("%s: %s: %+v", c.name, op, exit)
 			}
 		}

@@ -277,7 +277,7 @@ func newForegroundCmd(app *App) *cobra.Command {
 				fmt.Fprintln(app.Stdout, classify.Printable(fg.Package)+"/"+classify.Printable(fg.Activity))
 			}
 			if fg.Protected {
-				fmt.Fprintln(app.Stdout, "It is a protected app: ADBuddy does not touch or read it.")
+				fmt.Fprintln(app.Stdout, "Something on the screen is protected (a protected app, a notification or a window ADBuddy cannot read): ADBuddy does not touch or read it.")
 			}
 			return nil
 		},
