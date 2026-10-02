@@ -517,3 +517,7 @@ Validaciones manuales pendientes de este plan, tal como quedaron:
 1. La primera ejecución del job `emulator` con los tests de la app en el runner Windows: duración total y que los pasos nuevos pasan como en el ensayo local.
 2. El job `emulator` en un runner Linux: `setup-gradle`, la guarda de `ANDROID_SERIAL` y `emutest` no se han ejecutado en Linux.
 3. Las de M2 que siguen manuales: 4, 5, 7, 8, 9; la 2, 3 y 10 en Android 17 (y la 2 en Android 11-13); la 6 con la depuración inalámbrica real y el puerto tcpip en el Pixel. Lista completa en `pendientes-m3-m5.md`, "Validaciones que solo se pueden hacer en el Pixel".
+
+## Revisión final opus (22 jun… 2026-10-03): sin críticos; I1 (README con imagen 37), I2, I3, menores
+Evidencia I3 (controlador): `env -u ANDROID_SERIAL gradle -m --no-daemon --offline :app:connectedDebugAndroidTest` → BUILD FAILED "connected tests are not run through Gradle (…) refused: [:app:connectedDebugAndroidTest]", ninguna tarea ejecutada (dry-run).
+Ruling I2: el ensayo local de T5 no se hizo (no hay forma de correr Actions en local; los pasos se validaron con actionlint). La primera ejecución del PR en el runner es la verificación del workflow (validación manual 1 del plan). — Si me equivoco: el primer PR falla en un paso nuevo y se arregla en una ronda.
