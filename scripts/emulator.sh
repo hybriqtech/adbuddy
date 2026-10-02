@@ -39,6 +39,9 @@ if [[ ! "$ADB_PORT" =~ ^[0-9]{1,5}$ ]] || ((10#$ADB_PORT < 1024 || 10#$ADB_PORT 
   echo "ADBUDDY_EMU_ADB_PORT='$ADB_PORT' is not valid: it must be a port in 1024-65535 other than 5037 (the user's adb server) and 5038 (ADBuddy's)" >&2
   exit 2
 fi
+# adb gives these two priority over the port and they would point at another
+# server (the user's): the script must only talk to its own.
+unset ADB_SERVER_SOCKET ANDROID_ADB_SERVER_ADDRESS
 export ANDROID_ADB_SERVER_PORT="$((10#$ADB_PORT))"
 
 usage() {
