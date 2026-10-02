@@ -37,3 +37,5 @@ Task 3a: complete — commit 30e7311 (implementer report OK). Ruling: no per-sub
 Task 3b: complete — commit b49b1b6. Carry: T3c must not pass pid<=0 to InAgentTree; Linux/macOS paths only verified in CI.
 
 Task 3c: complete — commit 8657b15. Open: Windows Conn.peer copy keeps released handle (nobody calls Same() outside handler) -> pendientes.
+
+Task 4: complete — 5d4588d. Opus T3+final review ✅ (0 critical/important); fix wave 1d52cc8 (peer unverifiable Known+Err; release on Conn copy) + 6c48727 (docs). Ready to push as PR.
