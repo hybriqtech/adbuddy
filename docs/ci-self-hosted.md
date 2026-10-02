@@ -17,10 +17,12 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 | Variable | Used by | Default | What the runner needs |
 | --- | --- | --- | --- |
 | `CI_HOST_MATRIX` | `host.yml` | the three hosted cells (`ubuntu-latest`, `windows-latest`, `macos-latest`) | A JSON array of cells `{"name": ..., "runner": ...}`. A Linux cell needs `gcc` (for `go test -race`); a Windows cell needs Git for Windows. Leave a cell out of the array to drop it. |
-| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. |
-| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, the AVD `adbuddy-ci-api37`, hardware acceleration; a Linux runner needs passwordless `sudo` or an accessible `/dev/kvm`. |
+| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min). |
+| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, the AVD `adbuddy-ci-api37`, hardware acceleration; a Linux runner needs `/dev/kvm` (see section 6). |
 | `CI_RUNNER_RELEASE` | `release-check.yml` (`scripts` and `goreleaser`) | `"ubuntu-latest"` | Linux with `shellcheck`. |
 | `CI_RUNNER_SIGN` | `release-check.yml` (`sign`) | `"ubuntu-latest"` | Linux with an Android SDK: `apksigner` and `zipalign` are Linux scripts here. |
+
+`emulator.yml` runs on `pull_request` (same path filters) and by hand with `workflow_dispatch`. It does not run on every push to `main`: merges are fast-forwards of a pull request that already passed it.
 
 The special value `"none"` skips the job of a single-job workflow.
 
@@ -28,16 +30,46 @@ Example for "only a Windows runner for now":
 
 ```sh
 gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-local"]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
 ```
 
 Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`. The same goes for `CI_RUNNER_EMULATOR`.
+
+Example with both runners (Windows and the Linux runner of section 4):
+
+```sh
+gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":["self-hosted","linux","adbuddy-local"]},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
+gh variable set CI_RUNNER_RELEASE --body '["self-hosted","linux","adbuddy-local"]'
+gh variable set CI_RUNNER_SIGN --body '["self-hosted","linux","adbuddy-local"]'
+```
+
+The emulator stays on the Windows runner (`CI_RUNNER_EMULATOR`): it has the AVD and the hardware acceleration of Windows, and the WSL2 runner has no KVM.
 
 Never point a Linux cell at a Windows runner. The steps that only run on Linux (gofmt, `-race`) would be skipped and the cell would be green without them.
 
 Every job whose variable is set refuses pull requests from forks. With no variables set, the workflows behave exactly as before, fork pull requests included, on GitHub-hosted runners.
 
 For `CI_HOST_MATRIX`, `"none"` and `[]` are not valid: they break the workflow. Delete the variable, or leave in the array the cells you want.
+
+### Emulator environment variables
+
+`scripts/emulator.sh` (used by the emulator job and by the local oracle tests) reads these variables:
+
+| Variable | Meaning |
+| --- | --- |
+| `ADBUDDY_EMU_AVD` | AVD name. The CI uses `adbuddy-ci-api37`. |
+| `ADBUDDY_EMU_PORT` | Emulator port. The CI uses `5590`. |
+| `ADBUDDY_EMU_ADB_PORT` | Port of the script's own adb server. The CI uses `5049`. |
+| `ADBUDDY_EMU_GPU` | GPU mode (default `swiftshader_indirect`). |
+| `ADBUDDY_EMU_IMAGE` | System image used when the AVD is created (the AVD is created with it the first time only: to change the image, use another AVD name). |
+| `ADBUDDY_EMU_STABLE_SECS` | After boot, watch this many seconds that `system_server` and `surfaceflinger` do not restart. Default `0` (off); on a restart the script exits with 4. |
+
+The CI values differ from the defaults so that a job does not collide with an emulator started by hand.
+
+The script exports `ADB_MDNS=0` and `ADB_MDNS_AUTO_CONNECT=0` so that its adb server never auto-connects a real phone found over mDNS, and it aborts (exit 3) if that server sees any other device.
+
+Exit codes: `1` SDK or packages missing; `2` incorrect usage; `3` the adb server sees another device (or none); `4` the emulator is not stable; `124` it did not boot in 10 minutes.
 
 ## 3. Setting up a Windows runner
 
@@ -80,23 +112,148 @@ For `CI_HOST_MATRIX`, `"none"` and `[]` are not valid: they break the workflow. 
    run.cmd
    ```
 
+   To start it with a clean environment, relaunch it from Git Bash with `env -i` and pass only what Windows tools need. Pass `OS=Windows_NT` too: some tools detect Windows from `$OS` (`scripts/emulator.sh` also detects it with `uname`, but others do not). Pass `SYSTEMROOT`, `USERPROFILE`, `LOCALAPPDATA`, `APPDATA`, `TEMP`, `TMP`, `HOME` and `COMSPEC` as well, copying their values from your session:
+
+   ```sh
+   env -i OS=Windows_NT SYSTEMROOT="$SYSTEMROOT" USERPROFILE="$USERPROFILE" LOCALAPPDATA="$LOCALAPPDATA" APPDATA="$APPDATA" TEMP="$TEMP" TMP="$TMP" HOME="$HOME" COMSPEC="$COMSPEC" PATH="$PATH" ./run.cmd
+   ```
+
 ## 4. Setting up a Linux runner (WSL2 Ubuntu)
 
-Install the tools the jobs need (`gcc` comes with `build-essential` and is required by `go test -race`):
+This is the procedure that was tested. The Linux runner lives in a WSL2 Ubuntu distribution that cannot see your Windows files (check it with step 4).
 
-```sh
-sudo apt install -y build-essential git curl unzip zip shellcheck
-```
+1. In PowerShell as administrator, install the distribution. The first time it may ask for a reboot (Virtual Machine Platform):
 
-Then download and configure the runner as above, with the `linux-x64` package, in `~/actions-runner`, and the labels `self-hosted,linux,adbuddy-local`:
+   ```powershell
+   wsl --install -d Ubuntu --no-launch
+   ```
 
-```sh
-cd ~/actions-runner
-./config.sh --url https://github.com/OWNER/REPO --token TOKEN --labels self-hosted,linux,adbuddy-local
-./run.sh
-```
+2. Limit and isolate the VM. RAM is the scarce resource of the PC (one emulator uses about 5 GB). Create `%USERPROFILE%\.wslconfig`:
 
-For `CI_RUNNER_SIGN` (and the Android jobs) also install an Android SDK and set `ANDROID_HOME` in the runner's `.env`. In the same `.env`, set `GRADLE_USER_HOME`, `GOMODCACHE` and `GOCACHE` to folders inside the runner folder, so CI never touches your real caches.
+   ```ini
+   [wsl2]
+   memory=8GB
+   processors=6
+   swap=2GB
+   networkingMode=nat
+   localhostForwarding=false
+   guiApplications=false
+   ```
+
+   - `networkingMode=nat`: the loopback of WSL is not the loopback of Windows. `mirrored` would break this and is critical to avoid.
+   - `localhostForwarding=false`: a job cannot take loopback ports of Windows such as 5037.
+   - `guiApplications=false`: no WSLg, so no clipboard, microphone or windows on your desktop.
+
+   `.wslconfig` is global to your Windows user and is applied with `wsl --shutdown` (`wsl -t` is not enough).
+
+3. Isolate the runner. As root in Ubuntu (`wsl -d Ubuntu -u root`), create the user and write `/etc/wsl.conf`:
+
+   ```sh
+   adduser --disabled-password --gecos '' runner
+   groupadd -f kvm
+   usermod -aG kvm runner
+   cat > /etc/wsl.conf <<'EOF'
+   [automount]
+   enabled=false
+   mountFsTab=false
+
+   [interop]
+   enabled=false
+   appendWindowsPath=false
+
+   [user]
+   default=runner
+
+   [boot]
+   command="echo -1 > /proc/sys/fs/binfmt_misc/WSLInterop 2>/dev/null; echo -1 > /proc/sys/fs/binfmt_misc/WSLInterop-late 2>/dev/null; chmod 600 /dev/dxg 2>/dev/null; chgrp kvm /dev/kvm 2>/dev/null; chmod 660 /dev/kvm 2>/dev/null"
+   EOF
+   ```
+
+   Then apply both files from PowerShell with `wsl --shutdown`. The runner user has no root and no sudo. Do not rely on this alone: check it with step 4.
+
+4. Verify the isolation. Open a shell with the environment of the runner:
+
+   ```powershell
+   wsl.exe -d Ubuntu -u runner --exec env -i HOME=$HOME PATH=/usr/bin:/bin bash
+   ```
+
+   and check all of this:
+
+   - `/proc/sys/fs/binfmt_misc/WSLInterop` does not exist.
+   - Copy a real Windows executable into the distribution and run it. From PowerShell:
+
+     ```powershell
+     cmd /c "wsl.exe -d Ubuntu -u runner --exec sh -c 'cat > /tmp/w.exe && chmod 755 /tmp/w.exe' < C:\Windows\System32\whoami.exe"
+     ```
+
+     Neither `/tmp/w.exe` nor `/init /tmp/w.exe` may ever print your Windows `computer\user`.
+   - Ports 5037, 5038, 5039 and 5049 are closed on `127.0.0.1` and on the gateway (`ip route show default`): `timeout 3 bash -c '</dev/tcp/HOST/PORT'` must fail for each.
+   - `python3 -m http.server 5999 --bind 127.0.0.1` in WSL is not reachable from Windows: `Test-NetConnection 127.0.0.1 -Port 5999` must fail.
+   - `/mnt/wslg` and `/tmp/.X11-unix` are empty or do not exist.
+   - `ls -l /dev/dxg` shows mode 600, owner root.
+   - `mkdir /tmp/x; mount -t drvfs C: /tmp/x` fails ("must be superuser").
+   - `sudo -n true` is denied.
+
+   If anything prints your Windows user, stop the runner at once.
+
+5. Install the packages as root (`gcc` comes with `build-essential` and is required by `go test -race`):
+
+   ```sh
+   apt update
+   apt install -y build-essential git curl unzip zip shellcheck openjdk-17-jdk-headless
+   ```
+
+6. As `runner`, install Go and the Android SDK, always checking the checksum before unpacking:
+
+   - Go: the version in `host/go.mod`, from go.dev. Get the SHA-256 of the `linux-amd64` archive from `https://go.dev/dl/?mode=json`, check it with `sha256sum -c`, and unpack it so that `~/tools/go` holds the toolchain.
+   - Android SDK: download the command-line tools listed in `https://dl.google.com/android/repository/repository2-3.xml`, check the SHA-1 listed there with `sha1sum -c`, and unpack them as `~/android-sdk/cmdline-tools/latest`. Then install the packages (accepting the SDK licenses is part of it):
+
+     ```sh
+     export ANDROID_HOME=~/android-sdk
+     yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
+     "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+     ```
+
+7. Install the runner as `runner`: download the `linux-x64` package of `actions/runner` into `~/actions-runner`, check the SHA-256 of the release notes, and unpack it. As root, run `./bin/installdependencies.sh` in that folder.
+
+8. Register it. The registration token must go only through the stdin of the script: never in argv and never in a file. From PowerShell, send a first line that sets the variable, followed by the script, to `bash -s` (with `-c` the stdin does not arrive). If the token comes from `gh.exe`, trim the trailing CR and LF:
+
+   ```sh
+   TOKEN=$(gh api -X POST repos/OWNER/REPO/actions/runners/registration-token --jq .token | tr -d '\r\n')
+   {
+     printf "RT='%s'\n" "$TOKEN"
+     cat <<'EOF'
+   cd ~/actions-runner
+   ./config.sh --unattended --url https://github.com/OWNER/REPO --token "$RT" --labels self-hosted,linux,adbuddy-local
+   EOF
+   } | wsl.exe -d Ubuntu -u runner -- bash -s
+   ```
+
+9. Configure the jobs' environment. In `~/actions-runner/.env`, with the caches inside the runner folder (the runner does not expand `~`, so generate the file with the real paths):
+
+   ```sh
+   cd ~/actions-runner
+   cat > .env <<EOF
+   ANDROID_HOME=$HOME/android-sdk
+   ANDROID_SDK_ROOT=$HOME/android-sdk
+   JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+   GOTOOLCHAIN=local
+   GRADLE_USER_HOME=$PWD/gradle
+   GOMODCACHE=$PWD/gomod
+   GOCACHE=$PWD/gocache
+   EOF
+   printf '%s' "$HOME/tools/go/bin" > .path
+   ```
+
+   `.path` REPLACES the PATH of the jobs, so keep in it everything the jobs need: add the system folders (`/usr/local/bin:/usr/bin:/bin`) after the Go `bin` folder.
+
+10. Start it as a foreground process with a clean environment, from PowerShell:
+
+   ```powershell
+   wsl.exe -d Ubuntu -u runner --exec sh -c 'cd ~/actions-runner && exec env -i HOME="$HOME" USER=runner LOGNAME=runner LANG=C.UTF-8 PATH=/usr/local/bin:/usr/bin:/bin ./run.sh'
+   ```
+
+   That `wsl.exe` process keeps the VM alive. It is not a service and it does not survive a reboot: start it again after one.
 
 ## 5. Switching
 
@@ -132,16 +289,31 @@ The fork guard in the workflows is only an extra, and it acts only when the job'
 
 Bots and agents that open pull requests from branches of the repository itself pass the guard and run their code on the runner. There is no `dependabot.yml` today.
 
-Also:
+### Linux runner
+
+Barriers:
+
+- The `runner` user has no root and no sudo.
+- `/etc/wsl.conf` disables the Windows drives (`automount`), interop and the Windows PATH, and locks `/dev/dxg`.
+- `.wslconfig` uses NAT networking, no localhost forwarding and no WSLg.
+- Step 4 of section 4 checks all of it. Run it again after every `wsl --update` or change of configuration.
+
+Residual risk: a bug in the guest kernel gives root, and root can mount C: and read your adb key. The structural barrier is a dedicated Windows account that installs the distribution and launches `wsl.exe`. Keep `wsl --update` current.
+
+Phone: do not use `adb tcpip`, and reject any unexpected authorization dialog on the phone (the NAT reaches the LAN).
+
+Persistence between jobs: the `runner` user can read the runner's credentials and poison `GOMODCACHE`, `GOCACHE` and Gradle in the runner folder, which affects later jobs. This is the cost of a non-ephemeral runner; `--ephemeral` with a new registration per job would avoid it.
+
+### Also
 
 - Take the runners down (remove them in the repository settings and delete the runner folders) before making the repository public.
 - The workflows use `pull_request` and `push`, never `pull_request_target`, and these jobs have no secrets.
 - One job runs at a time per runner. Register a second runner in another folder to run jobs in parallel.
 - The emulator job uses and stops the AVD `adbuddy-ci-api37` (emulator port 5590) and the adb server on port 5049 of the runner's machine: do not use them by hand meanwhile. It no longer uses the script's default AVD and ports, which can be used by hand at the same time.
 - Two emulators at once need about 5 GB of RAM each.
-- A Linux runner needs passwordless `sudo` or an already accessible `/dev/kvm` for the emulator job.
+- A Linux runner needs /dev/kvm accessible through the kvm group for the emulator job (WSL2 here has no /dev/kvm without nested virtualization, so the emulator job stays on the Windows runner). Never give the runner user sudo: root in the distribution can mount C: and read your adb key.
 
 ## 7. What is not covered locally
 
-- macOS: the macOS cell is left out of `CI_HOST_MATRIX`, so macOS is not tested while the variable is set that way.
+- macOS: the macOS cell is left out of `CI_HOST_MATRIX`, so macOS is not tested locally while the variable is set that way.
 - `release.yml` always runs on GitHub-hosted runners.
