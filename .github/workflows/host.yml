@@ -30,6 +30,27 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+      # Cheap mitigation, not a barrier: the tests of a branch run as the PC's
+      # Windows user; with its own home they do not find the adb key by the
+      # usual paths. A malicious process can still read the real home by
+      # absolute path: the real barrier is a dedicated Windows account
+      # (docs/ci-self-hosted.md). Not needed on the Linux runner (WSL2 cannot
+      # see Windows files).
+      - name: Give the job its own home (self-hosted runners)
+        if: runner.environment == 'self-hosted' && runner.os == 'Windows'
+        shell: bash
+        working-directory: .
+        run: |
+          home="$RUNNER_TEMP/job-home"
+          mkdir -p "$home/.android"
+          win="$(cygpath -w "$home")"
+          {
+            echo "HOME=$win"
+            echo "USERPROFILE=$win"
+            echo "ANDROID_USER_HOME=$win\\.android"
+            echo "ANDROID_AVD_HOME=$win\\.android\\avd"
+            echo "ADB_VENDOR_KEYS="
+          } >> "$GITHUB_ENV"
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: host/go.mod
