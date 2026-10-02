@@ -96,3 +96,13 @@ func TestTerminalQuestionWithoutRTLHasNoNote(t *testing.T) {
 		t.Fatalf("note without RTL:\n%s", out.String())
 	}
 }
+
+func TestDenyAllShowsNoRTL(t *testing.T) {
+	var out syncBuffer
+	if d := (DenyAll{Out: &out}).Confirm(context.Background(), hostile()); d != Nobody {
+		t.Fatal(d)
+	}
+	if out.String() == "" || hasRTL(out.String()) {
+		t.Fatalf("DenyAll output: %q", out.String())
+	}
+}

@@ -14,6 +14,8 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+	"github.com/hybriqtech/adbuddy/host/internal/journal"
+	"github.com/hybriqtech/adbuddy/host/internal/shq"
 )
 
 func rtlIn(s string) bool { return strings.IndexFunc(s, classify.RTL) >= 0 }
@@ -90,10 +92,7 @@ func TestRedCommandWithRTLShowsNoRTLAnywhere(t *testing.T) {
 	}
 }
 
-// An undo question is built by classify and shown through the same Shown. Its
-// inverse comes from the journal, which validInverse limits to words that
-// precheck writes: a forged one with RTL letters is refused before anything is
-// asked, and the question that is asked has none.
+// An undo question is built by classify and shown through the same Shown.
 func TestUndoQuestionShowsNoRTLAnywhere(t *testing.T) {
 	e := newEnv(t)
 	b := &bidiSurfaces{}
@@ -106,16 +105,49 @@ func TestUndoQuestionShowsNoRTLAnywhere(t *testing.T) {
 	}
 }
 
-func TestUndoRefusesAnInverseWithRTLBeforeAsking(t *testing.T) {
+// precheck writes the inverse of a push as `rm -f` with the path quoted by
+// shq.Quote, and validInverse accepts any byte inside single quotes: an undo
+// of a file with a Hebrew name is a real 🔴 question with RTL letters in its
+// command. It is asked, and it shows none on any surface.
+func TestUndoOfAFileWithRTLNameShowsNoRTLAnywhere(t *testing.T) {
 	e := newEnv(t)
 	b := &bidiSurfaces{}
 	e.d.o.Confirmer = b
 	remote := "/sdcard/Download/א"
-	e.forge(t, "j_f1", []string{"push", "x", remote}, "shell", "rm", "-f", remote)
-	res, _, _ := e.undoLast(t)
-	if len(b.asked) != 0 || len(res.Failed) != 1 || e.ranContains("rm") {
-		t.Fatalf("asked %d, failed %+v, ran %q", len(b.asked), res.Failed, e.adb.ran())
+	e.forge(t, "j_f1", []string{"push", "x", remote}, "shell", "rm", "-f", shq.Quote(remote))
+	e.undoLast(t)
+	b.noRTL(t)
+	if !strings.Contains(b.asked[0].RawCommand, string(rune(92))+"u05d0") {
+		t.Errorf("the escaped command is not shown: %q", b.asked[0].RawCommand)
 	}
+}
+
+// The notice that a question waits for a change in flight names that question.
+func TestWaitingNoticeShowsNoRTL(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.OnEntry = func(journal.Entry) {}
+	g := newGated(e.adb, "input tap")
+	e.d.o.ADB = g
+	held := newHeld()
+	e.d.o.Confirmer = held
+	n := &notices{}
+	e.d.o.OnNotice = n.add
+	yellow := e.execAsync("shell", "input tap 1 1")
+	g.waitStarted(t)
+	red := e.execAsync("shell", "settings", "delete", "global", "א")
+	if !n.waitFor("Waiting for") {
+		t.Fatalf("not said: %q", n.get())
+	}
+	for _, s := range n.get() {
+		if rtlIn(s) {
+			t.Errorf("notice shows RTL: %q", s)
+		}
+	}
+	close(g.open)
+	waitResult(t, yellow)
+	asked(t, held)
+	held.answer <- confirm.Deny
+	waitResult(t, red)
 }
 
 // DisplayCommand escapes, but the text next to it (Title, Detail) only gets
