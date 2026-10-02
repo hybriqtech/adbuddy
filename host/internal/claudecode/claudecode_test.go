@@ -285,10 +285,13 @@ func TestParserRecordedBash(t *testing.T) {
 	}
 	for i, w := range want {
 		g := ev[i]
-		g.MessageID, g.MessageOf = "", "" // checked below
+		g.MessageID, g.MessageOf, g.ToolKey = "", "", "" // checked below
 		if g != w {
 			t.Errorf("event %d: %+v, want %+v", i, g, w)
 		}
+	}
+	if ev[1].ToolKey == "" || ev[2].ToolKey != "" {
+		t.Errorf("only the start of a tool use carries its key: %q %q", ev[1].ToolKey, ev[2].ToolKey)
 	}
 	if ev[1].MessageOf == "" || ev[1].MessageOf != ev[2].MessageOf || !strings.HasPrefix(ev[1].MessageOf, "msg_") {
 		t.Errorf("the tool use belongs to its message: %q %q", ev[1].MessageOf, ev[2].MessageOf)

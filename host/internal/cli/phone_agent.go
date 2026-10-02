@@ -65,6 +65,7 @@ type adapter struct {
 	held        bool      // a question was left to Claude Code's dialog on the terminal: until Stop, a prompt or the end (V05)
 	perms       map[string]*pendingPerm
 	order       []string
+	unbound     []unboundTool // tool uses of the transcript no card is tied to (phone_perm.go)
 	lastPerm    time.Time
 	cfgDir      string // Claude Code's configuration directory; "" = the user's
 	// pollMu serializes reads of the transcript (the loop and a Stop's).
@@ -108,6 +109,7 @@ func (l *phoneLink) adapterConversation(conv string, stopped bool) {
 	a.cancel, a.tail = nil, nil
 	a.active, a.degraded, a.hookState = false, false, ""
 	a.lastText, a.fallbacks, a.attention, a.droppedSeen, a.held = "", nil, time.Time{}, 0, false
+	a.unbound = nil
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -331,6 +333,7 @@ func (l *phoneLink) onSessionEnd() {
 	cancel := a.cancel
 	a.cancel, a.tail = nil, nil
 	a.active, a.hookState, a.attention, a.held = false, "", time.Time{}, false
+	a.unbound = nil
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -458,10 +461,12 @@ func (l *phoneLink) apply(e claudecode.Event) {
 			of = "a_" + e.MessageOf // the same namespace as the message it hangs from
 		}
 		l.publishEvent(bridge.TypeToolActivity, bridge.ToolActivity{ID: e.ToolID, MessageID: of, Summary: e.Summary, Status: e.Status})
-		if e.Status != "running" {
+		if e.Status == "running" {
+			l.toolStarted(e.ToolID, e.ToolKey)
+		} else {
 			// The tool that asked ended: it was answered on the terminal
 			// (spec M4 §5.2).
-			l.resolvePermsOf(e.Tool, e.Summary)
+			l.toolEnded(e.ToolID)
 		}
 	}
 }

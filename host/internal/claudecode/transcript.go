@@ -1,8 +1,12 @@
 package claudecode
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"regexp"
 	"strings"
 
@@ -71,6 +75,9 @@ type Event struct {
 	Summary   string
 	Status    string // running, done or error
 	MessageOf string // the message the tool use belongs to
+	// ToolKey is ToolKey(name, input) of a tool use that begins ("" if its
+	// input is not JSON): how a permission card is tied to it (spec M4 §5.2).
+	ToolKey string
 }
 
 // Limits of what the parser keeps; the transcript has no bound of its own.
@@ -101,6 +108,32 @@ type Parser struct {
 }
 
 type toolInfo struct{ name, summary, messageID string }
+
+// ToolKey identifies a tool use by what it does: a SHA-256 of the tool's name
+// and its input in canonical JSON (keys in order, numbers as written, no
+// layout). The PermissionRequest hook has no tool_use_id, so the card and the
+// transcript's tool use are tied by this key, computed the same from both.
+// "" when the input is not one JSON value: it ties to nothing.
+func ToolKey(name string, input json.RawMessage) string {
+	dec := json.NewDecoder(bytes.NewReader(input))
+	dec.UseNumber()
+	var v any
+	if dec.Decode(&v) != nil {
+		return ""
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return ""
+	}
+	canon, err := json.Marshal(v) // map keys are written in order; json.Number as it came
+	if err != nil {
+		return ""
+	}
+	h := sha256.New()
+	h.Write([]byte(name))
+	h.Write([]byte{0})
+	h.Write(canon)
+	return hex.EncodeToString(h.Sum(nil))
+}
 
 // SetLang sets the language of the verb of each tool summary (ToolSummaryIn);
 // English if never set.
@@ -242,7 +275,7 @@ func (p *Parser) assistant(l rawLine, m rawMessage) []Event {
 			}
 			sum := ToolSummaryIn(p.lang, b.Name, b.Input)
 			p.addTool(b.ID, toolInfo{b.Name, sum, id})
-			out = append(out, Event{Kind: KindTool, ToolID: b.ID, Tool: b.Name, Summary: sum, Status: "running", MessageOf: id})
+			out = append(out, Event{Kind: KindTool, ToolID: b.ID, Tool: b.Name, Summary: sum, Status: "running", MessageOf: id, ToolKey: ToolKey(b.Name, b.Input)})
 		}
 	}
 	if grew {

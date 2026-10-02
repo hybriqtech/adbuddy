@@ -22,10 +22,11 @@ var (
 const maxPerms = 8
 
 type pendingPerm struct {
-	req           bridge.PermissionRequest
-	rule          string          // what "yes, always" would add; "" when it is not offered
-	tool, summary string          // how the transcript names the tool use that asks, to tell its end
-	done          chan permResult // receives the outcome once; buffered
+	req    bridge.PermissionRequest
+	rule   string          // what "yes, always" would add; "" when it is not offered
+	key    string          // claudecode.ToolKey of what asks: how the transcript's tool use is tied to this card
+	toolID string          // the tool use tied to it ("" until one is); only its end retires the card
+	done   chan permResult // receives the outcome once; buffered
 }
 
 type permResult struct {
@@ -59,7 +60,7 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 		ExpiresAt:   now.Add(timeout).UTC(),
 		AllowAlways: always,
 	}
-	p := &pendingPerm{req: req, rule: rule, tool: in.ToolName, summary: req.Summary, done: make(chan permResult, 1)}
+	p := &pendingPerm{req: req, rule: rule, key: claudecode.ToolKey(in.ToolName, in.ToolInput), done: make(chan permResult, 1)}
 	a := &l.adapter
 	a.mu.Lock()
 	if len(a.perms) >= maxPerms || now.Sub(a.lastPerm) < permGap {
@@ -73,6 +74,7 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	}
 	a.perms[req.ID] = p
 	a.order = append(a.order, req.ID)
+	a.tieCardLocked(p) // the tool use may have reached the transcript first
 	a.lastPerm = now
 	a.attention = now.Add(attentionTTL)
 	a.mu.Unlock()
@@ -125,21 +127,81 @@ func (l *phoneLink) resolvePerm(id string, d claudecode.Decision, by string) boo
 	return true
 }
 
-// resolvePermsOf ends, as answered on the terminal, the pending permissions of
-// a tool use that has ended (spec M4 §5.2). It matches by the tool and its
-// summary, so that another tool's end does not take a question away.
-func (l *phoneLink) resolvePermsOf(tool, summary string) {
+// maxUnbound bounds the tool uses of the transcript waiting for a card.
+const maxUnbound = 64
+
+// unboundTool is a tool use of the transcript that no card is tied to (yet).
+type unboundTool struct{ id, key string }
+
+// The PermissionRequest hook does not say which tool use asks (spec M4 §5.1),
+// so a card and a tool use are tied by their key (name and canonical input,
+// claudecode.ToolKey), in either order: the tool use is written before the tool
+// runs and the request comes a moment later, so it is usually there first. The
+// oldest of each is tied first. Only the end of the tied tool use retires the
+// card (spec M4 §5.2); with no tie, nothing does and the card stays until the
+// hook closes or it expires. All of it is under adapter.mu.
+
+// tieCardLocked ties a new card to the oldest tool use with its key.
+func (a *adapter) tieCardLocked(p *pendingPerm) {
+	if p.key == "" {
+		return
+	}
+	for i, u := range a.unbound {
+		if u.key == p.key {
+			p.toolID = u.id
+			a.unbound = append(a.unbound[:i:i], a.unbound[i+1:]...)
+			return
+		}
+	}
+}
+
+// toolStarted ties a tool use that begins to the oldest card without one that
+// has its key, or keeps it for the card that may come.
+func (l *phoneLink) toolStarted(id, key string) {
+	if key == "" {
+		return
+	}
+	a := &l.adapter
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, oid := range a.order {
+		if p := a.perms[oid]; p != nil && p.toolID == "" && p.key == key {
+			p.toolID = id
+			return
+		}
+	}
+	for _, u := range a.unbound {
+		if u.id == id {
+			return
+		}
+	}
+	a.unbound = append(a.unbound, unboundTool{id, key})
+	if len(a.unbound) > maxUnbound {
+		a.unbound = append([]unboundTool(nil), a.unbound[len(a.unbound)-maxUnbound:]...)
+	}
+}
+
+// toolEnded ends, as answered on the terminal, the pending permissions tied to
+// a tool use that has ended (spec M4 §5.2). Another tool's end, even of the
+// same name and summary, does not take a question away.
+func (l *phoneLink) toolEnded(id string) {
 	a := &l.adapter
 	a.mu.Lock()
 	var ids []string
-	for _, id := range a.order {
-		if p := a.perms[id]; p != nil && p.tool == tool && p.summary == summary {
-			ids = append(ids, id)
+	for _, oid := range a.order {
+		if p := a.perms[oid]; p != nil && p.toolID == id {
+			ids = append(ids, oid)
+		}
+	}
+	for i, u := range a.unbound {
+		if u.id == id {
+			a.unbound = append(a.unbound[:i:i], a.unbound[i+1:]...)
+			break
 		}
 	}
 	a.mu.Unlock()
-	for _, id := range ids {
-		l.resolvePerm(id, claudecode.NoDecision, "terminal")
+	for _, oid := range ids {
+		l.resolvePerm(oid, claudecode.NoDecision, "terminal")
 	}
 }
 
