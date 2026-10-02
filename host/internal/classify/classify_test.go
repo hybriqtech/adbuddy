@@ -120,7 +120,7 @@ func TestAdbCommands(t *testing.T) {
 		{[]string{"connect", "1.2.3.4:5555"}, Red, "", "", false},
 		{[]string{"sideload", "x.zip"}, Red, "", "", false},
 		{[]string{"abb", "package", "uninstall", "x"}, Red, "unknown", "", false},
-		{[]string{"exec-in", "rm"}, Red, "unknown", "", false},
+		{[]string{"exec-in", "rm"}, Red, "shell.stdin", "", true}, // A4-1: it runs what comes through stdin
 		{[]string{}, Green, "", "", false},
 	})
 }

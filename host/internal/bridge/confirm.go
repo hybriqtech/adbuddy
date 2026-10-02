@@ -62,8 +62,9 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 		return confirm.Deny
 	}
 	// "Allow during the session" covers only the same rule with the same
-	// arguments, and never a command that may cut the connection.
-	allowSession := r.Key != "" && !r.Special
+	// arguments, and never a command that may cut the connection or one
+	// whose effect may come from stdin, which the key does not cover (A4-1).
+	allowSession := r.Key != "" && !r.Special && !r.Stdin
 	c.mu.Lock()
 	if allowSession && c.session[r.Key] {
 		c.mu.Unlock()

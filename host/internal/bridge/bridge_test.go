@@ -580,6 +580,39 @@ func TestAllowSessionCoversOnlyTheSameCommand(t *testing.T) {
 	}
 }
 
+// A4-1: a command whose effect may come from its stdin (adb shell or exec-out
+// without a command, exec-in…) is never allowed for the session, even with a
+// key and not special: the key does not cover what comes through stdin. An
+// app that answers allow_session anyway gets a single allow.
+func TestStdinCommandIsNeverAllowedForTheSession(t *testing.T) {
+	app := &fakeApp{connected: true}
+	c := NewConfirmer(app, fixed(confirm.Deny))
+	app.onPublish = func(r ConfirmRequest) {
+		if r.AllowSession {
+			t.Error("allow_session offered for a command that reads stdin")
+		}
+		reply(c, r.ID, "allow_session")
+	}
+	for _, argv := range []string{"shell", "exec-out"} {
+		r := confirm.Request{ID: "j_" + argv, Key: "shell.interactive\x00/w\x00" + argv, Stdin: true, ExpiresAt: time.Now().Add(time.Minute)}
+		if got := c.Confirm(context.Background(), r); got != confirm.Allow {
+			t.Fatalf("%s: %v, want allow", argv, got)
+		}
+	}
+	app.mu.Lock()
+	app.onPublish = nil
+	app.mu.Unlock()
+	for _, argv := range []string{"shell", "exec-out"} {
+		r := confirm.Request{ID: "j_again_" + argv, Key: "shell.interactive\x00/w\x00" + argv, Stdin: true, ExpiresAt: time.Now().Add(time.Minute)}
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		got := c.Confirm(ctx, r)
+		cancel()
+		if got != confirm.Timeout {
+			t.Fatalf("%s was remembered for the session: %v", argv, got)
+		}
+	}
+}
+
 func TestConfirmRejectsEmptyOrDuplicateIDs(t *testing.T) {
 	app := &fakeApp{connected: true}
 	c := NewConfirmer(app, fixed(confirm.Allow))

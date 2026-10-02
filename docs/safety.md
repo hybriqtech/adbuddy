@@ -36,6 +36,8 @@ Three points matter:
 
 A few commands are **always red** and say so in the question, because they can cut the connection or affect ADBuddy: Wi-Fi and airplane mode, `settings` that touch debugging or accessibility, `adb kill-server`, `adb disconnect`, `adb usb`, `adb tcpip`, reboots, and anything that uninstalls, disables, clears, force-stops or revokes permissions of the ADBuddy app itself. They are fixed in the code: your own `rules.yaml` cannot lower them. The same goes for reading the full text of every app's notifications (`dumpsys … --noredact`), `adb bugreport` and `screenrecord`.
 
+So is a command whose commands come through stdin: `adb shell` or `adb exec-out` without a command (an interactive shell, with or without `-t`), `adb exec-in`, and a shell, `su` or `eval` on the phone that reads its script from stdin. ADBuddy forwards the agent's stdin to adb but does not read it, so it cannot tell you what would run.
+
 Some settings are always red too, because they weaken the phone's security even though one more command undoes them. Changing or deleting them with `settings put`, `settings delete`, `cmd settings` or `content` on the settings provider waits for you:
 
 - **What you type, fill in or say:** the keyboard and the spell checker (`default_input_method`, `enabled_input_methods`, `disabled_system_input_methods`, `selected_spell_checker`), the autofill and passkey services (`autofill_service`, `credential_service`, `credential_service_primary`) and the assistant (`assistant`, `voice_interaction_service`, `voice_recognition_service`), and the accessibility service a shortcut or the accessibility button turns on (`accessibility_shortcut_target_service`, `accessibility_button_targets`). An app chosen there sees your passwords.
@@ -75,7 +77,7 @@ adbuddy undo <id>
 
 A red command waits, and so does the agent. The question says what the command does in plain words, taken from the rule's template, with the command's arguments filled in, **not written by the agent**, and shows the raw command.
 
-- **App connected:** the question is a notification on the phone with **Allow**, **Deny** and, for most commands, **Allow during the session**. The app also shows it as a dialog when it is open. **Allow during the session** covers only the same rule with the same arguments from the same folder, and is never offered for the always-red commands above, nor when the red comes from the state of the phone or a write on the PC. **To allow, the phone must be unlocked**; Deny always works.
+- **App connected:** the question is a notification on the phone with **Allow**, **Deny** and, for most commands, **Allow during the session**. The app also shows it as a dialog when it is open. **Allow during the session** covers only the same rule with the same arguments from the same folder, and is never offered for the always-red commands above, nor when the red comes from the state of the phone or a write on the PC, nor for a command whose effect may come from its stdin (an interactive shell, `exec-in`, `xargs`, `read`, a `$(…)`, `cat`, `dd` or `tee` on the phone, a `-` or `/dev/stdin` operand…): the same command with other input could do anything, so it is asked every time. **To allow, the phone must be unlocked**; Deny always works.
 - **No app connected:** the question is in the `adbuddy serve` terminal. You type a two-digit code to allow it; anything else denies it.
 - **Nobody to ask** (for example `adbuddy serve --confirm deny`): the command is refused with `Denied: nobody could confirm: <title>`.
 
