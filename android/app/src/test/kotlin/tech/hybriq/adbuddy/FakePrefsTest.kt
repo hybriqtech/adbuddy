@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy
 
+import android.content.SharedPreferences
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -42,5 +43,18 @@ class FakePrefsTest {
         p.edit().putBoolean("a", false).commit()
         p.edit().remove("a").putBoolean("a", true).commit()
         assertTrue(p.getBoolean("a", false))
+    }
+
+    @Test fun listenersHearEveryChangedKeyAndStopWhenUnregistered() {
+        val p = FakePrefs()
+        val heard = mutableListOf<String?>()
+        val l = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> heard.add(key) }
+        p.registerOnSharedPreferenceChangeListener(l)
+        p.edit().putBoolean("a", true).putBoolean("b", true).commit()
+        assertEquals(listOf<String?>("a", "b"), heard)
+        p.unregisterOnSharedPreferenceChangeListener(l)
+        p.edit().putBoolean("c", true).commit()
+        assertEquals(2, heard.size)
+        assertEquals(0, p.listenerCount)
     }
 }

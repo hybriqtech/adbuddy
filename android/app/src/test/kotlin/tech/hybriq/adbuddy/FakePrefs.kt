@@ -9,6 +9,8 @@ import android.content.SharedPreferences
  */
 class FakePrefs : SharedPreferences {
     val map = mutableMapOf<String, Any>()
+    private val listeners = mutableListOf<SharedPreferences.OnSharedPreferenceChangeListener>()
+    val listenerCount get() = listeners.size
     override fun getAll(): MutableMap<String, *> = map
     override fun getString(key: String?, defValue: String?) = map[key] as String? ?: defValue
     @Suppress("UNCHECKED_CAST")
@@ -31,12 +33,14 @@ class FakePrefs : SharedPreferences {
         override fun remove(key: String) = apply { pending[key] = removed }
         override fun clear() = apply { clear = true }
         override fun commit(): Boolean {
-            if (clear) map.clear()
-            for ((k, v) in pending) if (v === removed) map.remove(k) else map[k] = v
+            val changed = linkedSetOf<String?>()
+            if (clear) { changed.addAll(map.keys); map.clear() }
+            for ((k, v) in pending) { if (v === removed) map.remove(k) else map[k] = v; changed.add(k) }
+            for (k in changed) for (l in listeners.toList()) l.onSharedPreferenceChanged(this@FakePrefs, k)
             return true
         }
         override fun apply() { commit() }
     }
-    override fun registerOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener?) {}
-    override fun unregisterOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener?) {}
+    override fun registerOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener?) { l?.let { listeners.add(it) } }
+    override fun unregisterOnSharedPreferenceChangeListener(l: SharedPreferences.OnSharedPreferenceChangeListener?) { listeners.remove(l) }
 }

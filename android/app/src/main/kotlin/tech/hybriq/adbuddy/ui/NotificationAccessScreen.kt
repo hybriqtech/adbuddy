@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,9 +33,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
@@ -44,7 +46,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.listener.NotificationAccess
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import tech.hybriq.adbuddy.listener.NotificationAccess.Effective
+import tech.hybriq.adbuddy.listener.NotificationAccess.Listed
 import tech.hybriq.adbuddy.listener.NotificationAccess.State
 import tech.hybriq.adbuddy.listener.NotificationAccessStatus
 import tech.hybriq.adbuddy.listener.NotificationConsent
@@ -61,31 +67,37 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 @Composable
 fun NotificationAccessScreen(step: OnboardingStep?, onBack: () -> Unit, onDone: () -> Unit, onSkip: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val consent = remember(context) { NotificationConsent.of(context) }
-    var confirmed by remember { mutableStateOf(consent.confirmed()) }
-    val state by remember(context) { NotificationAccessStatus.observe(context) }.collectAsStateWithLifecycle(initialValue = State.UNKNOWN)
+    // Refreshing the system's answer after a click that could not confirm: the flow is read again.
+    var refresh by remember { mutableIntStateOf(0) }
+    // Null until the system / the file answer: nothing is shown as allowed or denied before that. The mark is
+    // observed (the listener clears it behind the screen's back) and read again each time the screen starts.
+    val systemState by remember(context, refresh) { NotificationAccessStatus.observe(context) }.collectAsStateWithLifecycle(initialValue = null)
+    val markState by remember(consent) { consent.observe() }.collectAsStateWithLifecycle(initialValue = null)
+    val state = systemState ?: State.UNKNOWN
+    val confirmed = markState == true
     // Observing never confirms; it only takes the mark away when the system says the access is gone.
-    LaunchedEffect(state) {
-        if (state == State.NOT_GRANTED && confirmed) {
-            consent.revoke()
-            confirmed = false
-        }
+    LaunchedEffect(systemState, markState) {
+        if (systemState == State.NOT_GRANTED && markState == true) withContext(Dispatchers.IO) { consent.revoke() }
     }
     if (step == null) BackHandler(onBack = onBack) else BackHandler(enabled = step.previous() != null, onBack = onBack)
     NotificationAccessContent(
         step = step,
+        checking = systemState == null || markState == null,
+        confirmed = confirmed,
         effective = NotificationAccess.effective(state, confirmed),
         onOpen = { NotificationAccessStatus.openSystemSettings(context) },
         onConfirm = {
+            // The only place that sets the mark: a tap, with the system saying "allowed" now, at the click.
             if (state == State.GRANTED) {
-                consent.confirm()
-                confirmed = true
+                scope.launch {
+                    val allowedNow = withContext(Dispatchers.IO) { NotificationAccessStatus.listed(context) == Listed.YES }
+                    if (allowedNow) withContext(Dispatchers.IO) { consent.confirm() } else refresh++
+                }
             }
         },
-        onWithdraw = {
-            consent.revoke()
-            confirmed = false
-        },
+        onWithdraw = { scope.launch { withContext(Dispatchers.IO) { consent.revoke() } } },
         onBack = onBack,
         onDone = onDone,
         onSkip = onSkip,
@@ -97,6 +109,8 @@ fun NotificationAccessScreen(step: OnboardingStep?, onBack: () -> Unit, onDone: 
 @Composable
 fun NotificationAccessContent(
     step: OnboardingStep?,
+    checking: Boolean,
+    confirmed: Boolean,
     effective: Effective,
     onOpen: () -> Unit,
     onConfirm: () -> Unit,
@@ -138,20 +152,38 @@ fun NotificationAccessContent(
         ) {
             if (step != null) StepHeader(step, R.string.access_title, Icons.Default.Notifications)
             Text(stringResource(R.string.access_intro), style = MaterialTheme.typography.bodyMedium)
-            StateCard(effective)
-            when (effective) {
-                Effective.NEEDS_CONFIRMATION -> Button(onClick = onConfirm) { Text(stringResource(R.string.access_confirm)) }
-                Effective.ON -> OutlinedButton(onClick = onWithdraw) { Text(stringResource(R.string.access_withdraw)) }
-                Effective.OFF, Effective.UNKNOWN -> Unit
+            if (checking) CheckingCard() else StateCard(effective)
+            if (!checking) {
+                // Confirming needs the system's "allowed" and no mark yet; withdrawing only takes permission away,
+                // so it shows whenever the mark is there, even if the state is unknown.
+                if (effective == Effective.NEEDS_CONFIRMATION) Button(onClick = onConfirm) { Text(stringResource(R.string.access_confirm)) }
+                if (confirmed) OutlinedButton(onClick = onWithdraw) { Text(stringResource(R.string.access_withdraw)) }
             }
             FilledTonalButton(onClick = onOpen) { Text(stringResource(R.string.access_open)) }
-            if (effective == Effective.OFF || effective == Effective.UNKNOWN) {
+            if (!checking && (effective == Effective.OFF || effective == Effective.UNKNOWN)) {
                 Text(
                     stringResource(R.string.access_restricted_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Text(
+                stringResource(R.string.access_codes_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Neither allowed nor denied: the system has not answered yet. */
+@Composable
+private fun CheckingCard() {
+    val scheme = MaterialTheme.colorScheme
+    Surface(modifier = Modifier.semantics(mergeDescendants = true) {}, color = scheme.surfaceVariant, contentColor = scheme.onSurfaceVariant, shape = MaterialTheme.shapes.medium) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+            Icon(Icons.Default.Refresh, contentDescription = null)
+            Text(stringResource(R.string.access_state_checking), style = MaterialTheme.typography.titleMedium)
         }
     }
 }
@@ -197,11 +229,17 @@ private fun stateDetail(effective: Effective): Int = when (effective) {
 @AdbuddyPreviews
 @Composable
 private fun NotificationAccessOnboardingPreview() {
-    AdbuddyTheme(dynamic = false) { NotificationAccessContent(OnboardingStep.NOTIFICATION_ACCESS, Effective.NEEDS_CONFIRMATION, {}, {}, {}, {}, {}, {}) }
+    AdbuddyTheme(dynamic = false) { NotificationAccessContent(OnboardingStep.NOTIFICATION_ACCESS, false, false, Effective.NEEDS_CONFIRMATION, {}, {}, {}, {}, {}, {}) }
 }
 
 @AdbuddyPreviews
 @Composable
 private fun NotificationAccessUnknownPreview() {
-    AdbuddyTheme(dynamic = false) { NotificationAccessContent(null, Effective.UNKNOWN, {}, {}, {}, {}, {}, {}) }
+    AdbuddyTheme(dynamic = false) { NotificationAccessContent(null, false, true, Effective.UNKNOWN, {}, {}, {}, {}, {}, {}) }
+}
+
+@AdbuddyPreviews
+@Composable
+private fun NotificationAccessCheckingPreview() {
+    AdbuddyTheme(dynamic = false) { NotificationAccessContent(null, true, false, Effective.UNKNOWN, {}, {}, {}, {}, {}, {}) }
 }

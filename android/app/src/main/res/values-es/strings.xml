@@ -150,11 +150,13 @@
     <string name="protected_saved_later">Guardado. El PC la recibirá cuando se conecte.</string>
     <string name="protected_error">No se pudieron leer tus apps. No se ha cambiado nada; inténtalo de nuevo.</string>
     <string name="access_title">Acceso a las notificaciones</string>
-    <string name="access_intro">Permite que el agente lea lo que dicen tus notificaciones, por ejemplo para ver un mensaje que acabas de recibir. Nunca lee las notificaciones de las apps protegidas ni las de ADBuddy, y no puede descartarlas ni pulsarlas. Es opcional.</string>
+    <string name="access_intro">Permite que el agente lea lo que dicen tus notificaciones, por ejemplo para ver un mensaje que acabas de recibir. De las apps protegidas y de ADBuddy solo ve que hay una notificación, nunca lo que dice. No puede descartar ni pulsar ninguna notificación. Es opcional.</string>
     <string name="access_state_granted">Permitido</string>
     <string name="access_state_confirm">Permitido en el sistema, sin confirmar aquí</string>
     <string name="access_state_denied">No permitido</string>
     <string name="access_state_unknown">Desconocido</string>
+    <string name="access_state_checking">Comprobando…</string>
+    <string name="access_codes_hint">Mensajes y Gmail, que reciben tus códigos de acceso, están protegidas por defecto salvo que las quitaras de la lista de apps protegidas.</string>
     <string name="access_detail_granted">El agente puede leer tus notificaciones. Puedes quitárselo aquí o en los ajustes del sistema.</string>
     <string name="access_detail_confirm">El sistema deja que ADBuddy lea tus notificaciones, pero el agente todavía no puede. Confirma aquí que quieres que lo haga. Solo tú puedes: el agente no puede pulsar este botón.</string>
     <string name="access_detail_denied">El agente no puede leer tus notificaciones.</string>
