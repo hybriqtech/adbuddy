@@ -123,3 +123,25 @@ Siguiente: reintento único con ADBUDDY_EMU_GPU=swangle_indirect.
 RAM libre 16.96 GB, ningún qemu `-port 5600`. Vigilante de RAM en segundo plano (cada 5 s; por debajo de 6 GB hace `adb -P 5060 -s emulator-5600 emu kill`). Arranque 19:13:58 → boot y env 19:14:25 (27 s); qemu con `-avd adbuddy-dev -port 5600 ... -gpu swangle_indirect`; `ro.hardware.egl=emulation`. La medida de 120 s empezó a las 19:14:30 y no terminó: a las 19:15:33 la RAM libre llegó a 5.93 GB (bajada continua desde 16.9 GB a ~0.5 GB/5 s) y el vigilante mató el emulador (`OK: killing emulator, bye bye`). Tras el corte: ningún qemu `-port 5600` (solo el vigilante `emulator -kill <pid> -sleep 20`), RAM libre 10.67 GB, y `vmmemWSL` con 6.28 GB de working set (otra carga en WSL2, no mía) y el qemu de la CI con 3.0 GB. La bajada no era solo de mi emulador: la VM de WSL creció a la vez.
 
 Siguiente: esperar a RAM libre >= 12 GB y repetir la medida con swangle_indirect (sigue siendo el único reintento con swangle: el anterior no llegó a medir), leyendo pids y recuento a los 30 s, 60 s y 120 s para que una interrupción deje datos.
+
+### S1 con ADBUDDY_EMU_GPU=swangle_indirect, intento 2: mismo bucle — BLOQUEADO
+
+RAM libre 14.37 GB (esperada con un bucle `until` en segundo plano), ningún qemu `-port 5600`, vigilante de RAM activo. Arranque 19:16:48 → boot y env 19:17:11 (23 s); `guard` (adb -P 5060 devices) solo `emulator-5600`.
+
+```
+$ EMU; "$ADB" -s "$S" shell 'a=$(pidof system_server); f=$(pidof surfaceflinger); echo "t0 ..."; (lecturas a 30, 60 y 120 s de pidof y de logcat -d -b crash | grep -c -i surfaceflinger)'
+ 19:17:16 up 0 min
+t0 system_server=1606 surfaceflinger=1520
+t30 system_server 1606 -> 6114; surfaceflinger 1520 -> 6040; crash=30
+t60 system_server 1606 -> 9785; surfaceflinger 1520 -> 9716; crash=48
+```
+
+La lectura de 120 s no llegó: a las 19:19:09 la RAM libre bajó a 5.82 GB y el vigilante mató el emulador (`OK: killing emulator, bye bye`). Esta vez la VM de WSL no creció (vmmemWSL 2.0 GB): la bajada (~8 GB en 2 min) acompaña al bucle de reinicios de mi emulador. Las lecturas de 30 y 60 s bastan: los dos pid cambian y el buffer `crash` acumula líneas de surfaceflinger al mismo ritmo que con swiftshader_indirect. No sirve. No capturé el `Abort message` antes del corte.
+
+Por qué swangle no cambia nada: el log del emulador (`/tmp/adbuddy-emulator.log`) con `-gpu swangle_indirect` dice `emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swiftshader` y `Graphics Adapter Android Emulator OpenGL ES Translator (Google SwiftShader)`, `OpenGL ES 3.0 SwiftShader 4.0.0.1` (backend gfxstream). En el emulador 37.2.12 de Windows, swangle_indirect acaba en el mismo traductor SwiftShader, que no anuncia `hasReadColorBufferDma`; por eso el aborto del mapper de goldfish en RegionSampling se repite.
+
+Tras el corte: ningún qemu/emulator con `-port 5600` (solo el vigilante `emulator -kill <pid> -sleep 20`, que sale solo), el de la CI (`-port 5590`) sin tocar, RAM libre 12.49 GB.
+
+BLOQUEADO: la imagen android-37.0 google_apis (rev 6) con el emulador 37.2.12 reinicia surfaceflinger y system_server cada ~8 s con swiftshader_indirect y con swangle_indirect (que aquí es el mismo SwiftShader); la app no puede correr en ella. Según el encargo, no se prueban otras imágenes ni GPUs. No se hicieron S2-S7 ni se creó el test temporal; ficheros temporales borrados (`/tmp/adbuddy-m25b-timeline.sh`, `/tmp/adbuddy-m25b-emu.env`).
+
+Opciones para quien decide (no probadas): `-gpu host` (GPU real del PC; en la CI el runner es este mismo PC), otra imagen (android-36 google_apis, o una revisión posterior de android-37.0 cuyo mapper no aborte) o desactivar el muestreo de regiones (RegionSampling) si hubiera una propiedad para ello. Cualquiera necesita que `scripts/emulator.sh` cambie (es de puffin) o decisión del usuario sobre la imagen.
