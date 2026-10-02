@@ -199,6 +199,28 @@ func CardSafe(tool string, raw json.RawMessage) bool {
 			return false
 		}
 	}
+	if tool == "Bash" && !bashRestOff(in) {
+		return false
+	}
+	return true
+}
+
+// bashShown are the fields of a Bash input its card accounts for: the command
+// is the detail, the description the title, and the timeout does not change
+// what runs.
+var bashShown = map[string]bool{"command": true, "description": true, "timeout": true}
+
+// bashRestOff reports whether every other field of a Bash input is off (absent,
+// null or false). One that is on may change how the command runs where the
+// card does not say (dangerouslyDisableSandbox runs it out of the sandbox,
+// run_in_background leaves it running after the answer), and so may one this
+// host does not know: a "yes" would approve the whole input (V04).
+func bashRestOff(in map[string]any) bool {
+	for k, v := range in {
+		if !bashShown[k] && v != nil && v != false {
+			return false
+		}
+	}
 	return true
 }
 

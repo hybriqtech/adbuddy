@@ -844,6 +844,43 @@ func TestCardSafe(t *testing.T) {
 	}
 }
 
+// V04: the card of a Bash shows the command and the description only. A field
+// that changes how it runs where the card does not say (out of the sandbox, in
+// the background, or one this host does not know) leaves the question on the
+// terminal: a "yes" would approve the whole input.
+func TestCardSafeBashFieldsTheCardDoesNotShow(t *testing.T) {
+	ok := []string{
+		`{"command":"ls","description":"list"}`,
+		`{"command":"ls","description":"list","timeout":600000}`,
+		`{"command":"ls","run_in_background":false,"dangerouslyDisableSandbox":false}`,
+		`{"command":"ls","run_in_background":null}`,
+	}
+	for _, in := range ok {
+		if !CardSafe("Bash", json.RawMessage(in)) {
+			t.Errorf("%s refused", in)
+		}
+	}
+	bad := []string{
+		`{"command":"ls","description":"list","dangerouslyDisableSandbox":true}`,
+		`{"command":"ls","description":"list","run_in_background":true}`,
+		`{"command":"ls","run_in_background":true,"dangerouslyDisableSandbox":true}`,
+		`{"command":"ls","dangerouslyDisableSandbox":"true"}`,
+		`{"command":"ls","run_in_background":1}`,
+		`{"command":"ls","DangerouslyDisableSandbox":true}`,
+		`{"command":"ls","sandbox":{"network":"any"}}`,
+		`{"command":"ls","shell":""}`,
+	}
+	for _, in := range bad {
+		if CardSafe("Bash", json.RawMessage(in)) {
+			t.Errorf("%s accepted", in)
+		}
+	}
+	// Tools whose card shows the whole input as JSON show these fields too.
+	if !CardSafe("PowerShell", json.RawMessage(`{"command":"ls","run_in_background":true}`)) {
+		t.Error("a tool whose whole input is the detail was refused")
+	}
+}
+
 func TestParserVersionIsKeptOnlyIfItLooksLikeOne(t *testing.T) {
 	long := "2." + strings.Repeat("1", 40)
 	for in, want := range map[string]string{
