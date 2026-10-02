@@ -43,6 +43,19 @@
     <string name="confirm_sending">Respondida: esperando al PC</string>
     <string name="confirm_offline">Sin conexión con el PC</string>
     <string name="confirm_expired">Caducada: ya no se puede responder.</string>
+    <string name="confirm_open_cut">El comando está recortado: ábrelo en ADBuddy para leerlo entero y responder.</string>
+    <string name="confirm_open_special">Abre ADBuddy para leer el aviso y permitirlo.</string>
+    <string name="confirm_too_long">El comando es demasiado largo para enseñarlo entero: solo se puede rechazar.</string>
+    <string name="confirm_scroll">Desplázate hasta el final para permitirlo</string>
+    <string name="action_open">Abrir</string>
+    <plurals name="confirm_more">
+        <item quantity="one">y %1$d más</item>
+        <item quantity="other">y %1$d más</item>
+    </plurals>
+    <plurals name="confirm_hidden">
+        <item quantity="one">%1$d carácter del comando no se muestra</item>
+        <item quantity="other">%1$d caracteres del comando no se muestran</item>
+    </plurals>
 
     <string name="consent_title">Configurar ADBuddy con %1$s</string>
     <string name="consent_intro">El PC \"%1$s\" pide terminar de configurar ADBuddy. Si aceptas, va a:</string>

@@ -100,11 +100,12 @@ var reasonsES = map[string]string{
 	"writes to a relative path or several files":                            "escribe en una ruta relativa o en varios ficheros",
 
 	// classify.go
-	"arguments only known on the phone could name ADBuddy or a critical app":      "los argumentos que solo se conocen en el móvil podrían nombrar a ADBuddy o a una app crítica",
-	"arguments only known on the phone":                                           "argumentos que solo se conocen en el móvil",
-	"exec-out without a command":                                                  "exec-out sin comando",
-	"interactive shell: the commands would come from stdin":                       "shell interactiva: los comandos llegarían por la entrada estándar",
-	"names the ADBuddy app":                                                       "nombra la app ADBuddy",
+	"arguments only known on the phone could name ADBuddy or a critical app":                     "los argumentos que solo se conocen en el móvil podrían nombrar a ADBuddy o a una app crítica",
+	"arguments only known on the phone":                                                          "argumentos que solo se conocen en el móvil",
+	"exec-in: the command reads what comes through stdin, which is not analysed":                 "exec-in: el comando lee lo que llega por la entrada estándar, que no se analiza",
+	"abb_exec and abb: the system service reads what comes through stdin, which is not analysed": "abb_exec y abb: el servicio del sistema lee lo que llega por la entrada estándar, que no se analiza",
+	"the commands come through stdin and are not analysed":                                       "los comandos llegan por la entrada estándar y no se analizan",
+	"names the ADBuddy app": "nombra la app ADBuddy",
 	"several changes in one command: run them one by one to be able to undo them": "varios cambios en un solo comando: hay que hacerlos uno a uno para poder deshacerlos",
 	"unknown adb shell option {arg}":                                              "opción desconocida de adb shell: {arg}",
 	"unknown command":                                                             "comando desconocido",

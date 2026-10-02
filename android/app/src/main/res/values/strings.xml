@@ -44,6 +44,19 @@
     <string name="confirm_sending">Answered: waiting for the PC</string>
     <string name="confirm_offline">No connection with the PC</string>
     <string name="confirm_expired">Expired: it can no longer be answered.</string>
+    <string name="confirm_open_cut">The command is cut here: open it in ADBuddy to read it all and answer.</string>
+    <string name="confirm_open_special">Open ADBuddy to read the warning and allow it.</string>
+    <string name="confirm_too_long">The command is too long to show whole: it can only be denied.</string>
+    <string name="confirm_scroll">Scroll to the end to allow it</string>
+    <string name="action_open">Open</string>
+    <plurals name="confirm_more">
+        <item quantity="one">and %1$d more</item>
+        <item quantity="other">and %1$d more</item>
+    </plurals>
+    <plurals name="confirm_hidden">
+        <item quantity="one">%1$d character of the command is not shown</item>
+        <item quantity="other">%1$d characters of the command are not shown</item>
+    </plurals>
 
     <string name="consent_title">Set up ADBuddy with %1$s</string>
     <string name="consent_intro">The PC \"%1$s\" asks to finish setting up ADBuddy. If you accept, it will:</string>

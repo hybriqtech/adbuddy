@@ -44,22 +44,56 @@ object ConfirmUi {
         return Status.OPEN
     }
 
-    /** The buttons a question offers, in order: none unless it can be answered. */
+    /**
+     * The buttons a question offers in the dialog, in order: none unless it can be answered. Only Deny for a
+     * command longer than the dialog shows (H3): nobody can have read its end. Allow during the session only when
+     * the host offers it and the notification shows the whole command (A4-2): what a person allows for the rest
+     * of the session must fit on screen at a glance.
+     */
     fun decisions(r: ConfirmRequest, status: Status): List<String> = when {
         status != Status.OPEN -> emptyList()
-        r.allowSession -> listOf(Decision.DENY, Decision.ALLOW, Decision.ALLOW_SESSION)
+        tooLong(r) -> listOf(Decision.DENY)
+        r.allowSession && !cut(r) -> listOf(Decision.DENY, Decision.ALLOW, Decision.ALLOW_SESSION)
         else -> listOf(Decision.DENY, Decision.ALLOW)
     }
 
     /**
-     * Whether a notification button may send decision for id now: the question
-     * is still open and offers that decision, and allowing needs the phone
-     * unlocked (a tap can arrive late, after the bouncer, or from a stale
-     * notification). Denying is always fine.
+     * The buttons of the notification: those of the dialog, but never Allow during the session (M2: collapsed,
+     * the notification shows only the title and a line), and only Deny for a special question (its ⚠ must be
+     * read, A4-3) or a command the notification cuts (the rest must be read, A4-2). The person opens the dialog
+     * for the rest.
      */
-    fun canSend(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean): Boolean {
+    fun notificationDecisions(r: ConfirmRequest, status: Status): List<String> =
+        decisions(r, status).filter { it != Decision.ALLOW_SESSION }
+            .let { all -> if (r.special || cut(r)) all.filter { it == Decision.DENY } else all }
+
+    /** Why a notification does not allow what the question asks: the command is [TOO_LONG], [CUT] or [SPECIAL]. */
+    enum class Why { TOO_LONG, CUT, SPECIAL }
+
+    fun why(r: ConfirmRequest, status: Status): Why? = when {
+        status != Status.OPEN -> null
+        tooLong(r) -> Why.TOO_LONG
+        Decision.ALLOW in notificationDecisions(r, status) -> null
+        cut(r) -> Why.CUT
+        else -> Why.SPECIAL
+    }
+
+    /** Whether the command is longer than the dialog shows ([DIALOG_MAX_COMMAND]): it can only be denied. */
+    fun tooLong(r: ConfirmRequest): Boolean = r.rawCommand.length > DIALOG_MAX_COMMAND
+
+    /** Whether the notification cuts the command (longer than [MAX_COMMAND]). */
+    fun cut(r: ConfirmRequest): Boolean = r.rawCommand.length > MAX_COMMAND
+
+    /**
+     * Whether a button may send decision for id now: the question is still open and offers that decision where
+     * it was tapped (the [notification] offers less than the dialog), and allowing needs the phone unlocked (a
+     * tap can arrive late, after the bouncer, or from a stale notification). Denying is always fine.
+     */
+    fun canSend(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean, notification: Boolean): Boolean {
         val r = state.pending.firstOrNull { it.id == id } ?: return false
-        if (decision !in decisions(r, status(r, state, now))) return false
+        val status = status(r, state, now)
+        val offered = if (notification) notificationDecisions(r, status) else decisions(r, status)
+        if (decision !in offered) return false
         return decision == Decision.DENY || !locked
     }
 
@@ -75,20 +109,40 @@ object ConfirmUi {
     }
 
     /**
-     * What the question says, in order: the host's rule (detail and the ⚠
-     * warning) first, then the agent's command, cut to maxCommand characters,
-     * and last the footer (expiry or state). The agent's text never pushes
-     * the rule's out of sight. With [ltr] the detail and the command start with a left-to-right mark (for plain
-     * text that cannot set a direction, the notification): the app adds it when it shows them, so a command that
-     * starts with a right-to-left letter is not laid out right to left. The labels are never marked.
+     * What a question shows: whether it carries the ⚠ warning, the first [maxDetail] lines of the host's detail
+     * and how many more there are, and the agent's command cut to [maxCommand] characters with how many of them
+     * are hidden.
      */
-    fun lines(r: ConfirmRequest, special: String, footer: String, maxCommand: Int = MAX_COMMAND, ltr: Boolean = false): List<String> = buildList {
-        val mark = if (ltr) LRM else ""
-        if (r.detail.isNotEmpty()) add(mark + r.detail)
-        if (r.special) add("⚠ $special")
-        add(mark + (if (r.rawCommand.length <= maxCommand) r.rawCommand else r.rawCommand.take(maxCommand - 1) + "…"))
-        add(footer)
+    data class Shown(val warning: Boolean, val detail: List<String>, val more: Int, val command: String, val hidden: Int)
+
+    fun shown(r: ConfirmRequest, maxDetail: Int = Int.MAX_VALUE, maxCommand: Int = DIALOG_MAX_COMMAND): Shown {
+        val all = if (r.detail.isEmpty()) emptyList() else r.detail.split('\n')
+        val detail = all.take(maxDetail)
+        if (r.rawCommand.length <= maxCommand) return Shown(r.special, detail, all.size - detail.size, r.rawCommand, 0)
+        // Cut by characters, not UTF-16 units: half a surrogate pair would show as garbage (B2).
+        val kept = r.rawCommand.take(maxCommand - 1).let { if (it.isNotEmpty() && it.last().isHighSurrogate()) it.dropLast(1) else it }
+        return Shown(r.special, detail, all.size - detail.size, "$kept…", r.rawCommand.length - kept.length)
     }
+
+    /**
+     * What the notification says, in order: the ⚠ warning first (A4-3: the detail is the agent's to make long,
+     * the warning must not fall out of sight), the host's detail (at most [NOTIFICATION_MAX_DETAIL] lines and
+     * [more] for the rest), the agent's command cut to [MAX_COMMAND] characters, [open] when the notification
+     * does not allow it (why to open the app), and last the footer (expiry or state). With [ltr] the detail and
+     * the command start with a left-to-right mark (plain text cannot set a direction): a command that starts
+     * with a right-to-left letter is not laid out right to left. The labels are never marked.
+     */
+    fun notificationLines(r: ConfirmRequest, special: String, footer: String, more: (Int) -> String, open: String?, ltr: Boolean = false): List<String> =
+        buildList {
+            val mark = if (ltr) LRM else ""
+            val s = shown(r, NOTIFICATION_MAX_DETAIL, MAX_COMMAND)
+            if (s.warning) add("⚠ $special")
+            for (line in s.detail) add(mark + line)
+            if (s.more > 0) add(more(s.more))
+            add(mark + s.command)
+            if (open != null) add(open)
+            add(footer)
+        }
 
     /** Milliseconds until the soonest expiry still to come, when the screen must look again; null if none. */
     fun nextExpiry(pending: List<ConfirmRequest>, now: Long): Long? =
@@ -134,7 +188,14 @@ object ConfirmUi {
         return Plan(cancel = shown.keys - ids, post = post, shown = next)
     }
 
+    /** What the notification shows of the command; a longer one is cut there and only the dialog allows it. */
     const val MAX_COMMAND = 300
+
+    /** What the dialog shows of the command (it scrolls); past it, it says how many characters it hides. */
+    const val DIALOG_MAX_COMMAND = 20_000
+
+    /** Lines of the detail in the notification; the dialog shows them all. */
+    const val NOTIFICATION_MAX_DETAIL = 3
 
     private const val LRM = "‎"
 }

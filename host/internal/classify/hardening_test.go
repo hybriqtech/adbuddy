@@ -27,7 +27,9 @@ func TestExecOutQuotesLikeAdb(t *testing.T) {
 		{[]string{"exec-out", "rm -rf /sdcard"}, Red, "", "", false},
 		{[]string{"exec-out", "screencap", "-p"}, Green, "", "", false},
 		{[]string{"exec-out", "cat", "/sdcard/a b.txt"}, Green, "", "", false},
-		{[]string{"exec-out"}, Red, "shell.interactive", "", false},
+		// A4-1: without a command the commands come through stdin, which is
+		// not analysed: special, so never allowed for the session.
+		{[]string{"exec-out"}, Red, "shell.interactive", "", true},
 	})
 	if got := adbEscapeArg("it's"); got != `'it'\''s'` {
 		t.Fatalf("adbEscapeArg: %s", got)

@@ -5,8 +5,10 @@ package classify
 // name/value pairs after it, and its Spanish from reasonsES, filled the same
 // way. The Spanish of a template that is not in reasonsES is empty, which
 // Text.In answers in English; TestReasonsBilingual makes that impossible in a
-// build that passes its tests. A value is not translated and not escaped here:
-// Result.Detail escapes the whole line (Printable).
+// build that passes its tests. A value is not translated; it is shortened like
+// a title's words (display: escaped, blanks compacted, 80 runes), so the agent
+// cannot make a line of the detail endless, and Result.Detail escapes the
+// whole line again (Printable, which is idempotent).
 func reason(en string, kv ...string) Text {
 	t := Text{EN: en, ES: reasonsES[en]}
 	if len(kv) == 0 {
@@ -14,7 +16,7 @@ func reason(en string, kv ...string) Text {
 	}
 	vars := make(map[string]string, len(kv)/2)
 	for i := 0; i+1 < len(kv); i += 2 {
-		vars[kv[i]] = kv[i+1]
+		vars[kv[i]] = display([]string{kv[i+1]}) // A4-3: no endless line in the detail
 	}
 	return render(t, vars)
 }
