@@ -78,7 +78,8 @@ object Markdown {
             i++
         }
         flush()
-        return out
+        // A line can flush a paragraph and add its own block in one go: one more than the loop allows.
+        return if (out.size > MAX_BLOCKS) out.subList(0, MAX_BLOCKS).toList() else out
     }
 
     /** The inline spans of a text: `code`, **strong**, *em* and _em_, [text](url) and ![alt](url) (only its alt). No nesting. */
@@ -104,9 +105,20 @@ object Markdown {
                 }
                 c == '[' -> {
                     val l = link(s, i, find)
-                    if (l == null) { text.append(c); i++ } else {
-                        if (Links.domain(l.url) != null) { flush(); out.add(Inline.Link(l.text.ifEmpty { l.url }, l.url)) } else text.append(l.text)
-                        i = l.end
+                    when {
+                        l == null -> { text.append(c); i++ }
+                        // [![alt](image)](url), a linked image (a badge): the link, with the alt as its text. What
+                        // l read is the image (its ']' is the first one); its own URL is never a link.
+                        l.text.startsWith("![") -> {
+                            val alt = l.text.substring(2)
+                            val outer = linkAfter(s, l.end, find)
+                            if (outer != null && Links.domain(outer.url) != null) { flush(); out.add(Inline.Link(alt.ifEmpty { outer.url }, outer.url)) } else text.append(alt)
+                            i = outer?.end ?: l.end
+                        }
+                        else -> {
+                            if (Links.domain(l.url) != null) { flush(); out.add(Inline.Link(l.text.ifEmpty { l.url }, l.url)) } else text.append(l.text)
+                            i = l.end
+                        }
                     }
                 }
                 c == '*' && s.startsWith("**", i) -> {
@@ -178,5 +190,13 @@ object Markdown {
         val end = find.url(close)
         if (end < 0) return null
         return Link(s.substring(open + 1, close), s.substring(start, end), end + 1)
+    }
+
+    /** The "](url)" right at [close], which ends a linked image's outer link, or null. Its text is empty. */
+    private fun linkAfter(s: String, close: Int, find: Finder): Link? {
+        if (close + 1 >= s.length || s[close] != ']' || s[close + 1] != '(') return null
+        val end = find.url(close)
+        if (end < 0) return null
+        return Link("", s.substring(close + 2, end), end + 1)
     }
 }

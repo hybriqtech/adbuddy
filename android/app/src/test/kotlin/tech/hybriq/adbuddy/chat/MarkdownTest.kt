@@ -110,6 +110,8 @@ class MarkdownTest {
             "shared close, url of brackets" to "[".repeat(n / 2) + "](" + "]".repeat(n / 2 - 2),
             "links and a closing paren" to "[a](".repeat(n / 4 - 1) + ")",
             "images" to "![a](".repeat(n / 5),
+            "linked images" to "[![a](b)](".repeat(n / 10),
+            "linked images with no link" to "[![a](b)".repeat(n / 9),
         )
         for ((name, text) in inputs) {
             val t0 = System.nanoTime()
@@ -126,6 +128,36 @@ class MarkdownTest {
         val flat = (b.single() as Block.Paragraph).inlines
         assertTrue(flat.toString(), flat.contains(Inline.Link("x [y", "https://example.com")))
         assertEquals(" [z](", (flat.last() as Inline.Text).text)
+    }
+
+    /** V43: never more than MAX_BLOCKS, also when one line flushes a paragraph and adds its own block. */
+    @Test fun neverMoreThanMaxBlocks() {
+        val headings = (1 until Markdown.MAX_BLOCKS).joinToString("\n") { "# h$it" } // one block short
+        val b = Markdown.parse("$headings\nthe last paragraph\n# one too many")
+        assertEquals(Markdown.MAX_BLOCKS, b.size)
+        assertEquals(p(Inline.Text("the last paragraph")), b.last())
+        val fence = Markdown.parse("$headings\nthe last paragraph\n```\ncode")
+        assertEquals(Markdown.MAX_BLOCKS, fence.size)
+    }
+
+    /**
+     * V43: an image inside a link (a badge) is the link, with the image's alt text as its text; the image's own
+     * URL is never a link, as with an image alone.
+     */
+    @Test fun aLinkedImageIsTheLinkWithItsAltText() {
+        val flat = (Markdown.parse("[![build](https://img.example/badge.svg)](https://example.com/repo)").single() as Block.Paragraph).inlines
+        assertEquals(listOf<Inline>(Inline.Link("build", "https://example.com/repo")), flat)
+        for (s in listOf(
+            "[![a](https://img.example/x.png)](javascript:alert(1))", // not a web link: only text
+            "[![a](https://img.example/x.png) and more", // no link around it
+            "[![](https://img.example/x.png)](ftp://example.com/x)",
+        )) {
+            val inl = (Markdown.parse(s).single() as Block.Paragraph).inlines
+            assertTrue("$s: $inl", inl.none { it is Inline.Link })
+            assertFalse("$s: $inl", inl.joinToString("") { (it as Inline.Text).text }.contains("img.example"))
+        }
+        val empty = (Markdown.parse("[![](https://img.example/x.png)](https://example.com/)").single() as Block.Paragraph).inlines
+        assertEquals("no alt: the link shows its URL", listOf<Inline>(Inline.Link("https://example.com/", "https://example.com/")), empty)
     }
 }
 
