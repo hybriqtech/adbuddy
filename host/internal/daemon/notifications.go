@@ -31,11 +31,21 @@ func (d *Daemon) notifications(ctx context.Context, raw json.RawMessage) (any, s
 		case errors.Is(err, ErrUITimeout):
 			return nil, "", fail(exitTransient, "UI_TIMEOUT", "the ADBuddy app did not answer in time: try again")
 		}
-		return nil, "", appFailure(ctx, err)
+		// The app's error text may repeat a notification, and the decoder's
+		// error quotes what it could not parse: only the access message (fixed
+		// text the agent needs) goes through, the rest says nothing of the app.
+		var ue *UIError
+		if errors.As(err, &ue) && ue.Code == bridge.CodeUnavailable {
+			return nil, "", appFailure(ctx, err)
+		}
+		if ctx.Err() != nil {
+			return nil, "", appFailure(ctx, err)
+		}
+		return nil, "", fail(1, "UI_FAILED", "the ADBuddy app could not read the notifications")
 	}
 	v, err := checkResult(bridge.UIOpNotifications, res)
 	if err != nil {
-		return nil, "", fail(1, "UI_FAILED", "the ADBuddy app answered something unreadable: "+err.Error())
+		return nil, "", fail(1, "UI_FAILED", "the ADBuddy app answered something unreadable")
 	}
 	n, ok := v.(*bridge.UINotifications)
 	if !ok {

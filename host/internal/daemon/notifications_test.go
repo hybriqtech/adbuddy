@@ -80,10 +80,13 @@ func TestNotificationsAreHiddenAgainByTheHost(t *testing.T) {
 	if got := n.Notifications[0]; got.Package != "com.example.bank" || got.Title != "" || got.Text != "" || got.Key == "" {
 		t.Fatalf("bank %+v", got)
 	}
-	if got := n.Notifications[1]; got.Package != "tech.hybriq.adbuddy" || got.Text != "" {
+	if got := n.Notifications[1]; got.Package != "tech.hybriq.adbuddy" || got.Text != "" || got.Key != "hidden-1" {
 		t.Fatalf("adbuddy %+v", got)
 	}
-	if got := n.Notifications[2]; got.Package != "" || got.Text != "" {
+	if got := n.Notifications[0]; got.Key != "hidden-0" {
+		t.Fatalf("bank key %q", got.Key)
+	}
+	if got := n.Notifications[2]; got.Package != "" || got.Text != "" || got.Key != "hidden-2" {
 		t.Fatalf("invalid package %+v", got)
 	}
 	if got := n.Notifications[3]; len([]rune(got.Title)) != bridge.MaxNotificationText || len([]rune(got.Text)) != bridge.MaxNotificationText {
@@ -190,12 +193,60 @@ func TestNotificationsLeaveNothingInTheJournal(t *testing.T) {
 	if _, exit := e.helper(t, bridge.UIOpNotifications, struct{}{}); exit.Code != 0 {
 		t.Fatal(exit)
 	}
+	files := 0
 	_ = filepath.Walk(e.ws, func(p string, info os.FileInfo, err error) error {
 		if err == nil && !info.IsDir() {
+			files++
 			if b, _ := os.ReadFile(p); strings.Contains(string(b), "una frase privada") || strings.Contains(string(b), "Ana") {
 				t.Errorf("%s keeps the text of a notification", p)
 			}
 		}
 		return nil
 	})
+	if files == 0 || len(e.entries) == 0 {
+		t.Fatalf("nothing was written: %d files, %d entries", files, len(e.entries))
+	}
+	if j := e.last(t); j.Rule != "helper.notifications" {
+		t.Fatalf("journal %+v", j)
+	}
+}
+
+// The app's own error text can repeat a notification: it does not get out.
+func TestNotificationsAppErrorTextDoesNotGetOut(t *testing.T) {
+	e := newEnv(t)
+	a := e.withApp()
+	a.errs[bridge.UIOpNotifications] = &UIError{Code: bridge.CodeFailed, Text: bankCode}
+	s, exit := e.helper(t, bridge.UIOpNotifications, struct{}{})
+	b, _ := json.Marshal(e.last(t))
+	if exit.Code == 0 || strings.Contains(exit.Error, "482913") || strings.Contains(s.errOut.String(), "482913") || strings.Contains(string(b), "482913") {
+		t.Fatalf("%+v %s", exit, b)
+	}
+}
+
+// A malformed answer is quoted by the decoder (time.Parse repeats the value):
+// the error must not carry any of it to the agent or to the journal.
+func TestNotificationsUnreadableAnswersDoNotQuoteTheApp(t *testing.T) {
+	for name, raw := range map[string]string{
+		"bad time":     `{"notifications":[{"postedAt":"Your code is 482913"}]}`,
+		"wrong type":   `{"notifications":[{"package":482913,"text":"Your code is 482913"}]}`,
+		"wrong nested": `{"notifications":"Your code is 482913"}`,
+	} {
+		e := newEnv(t)
+		a := e.withApp()
+		a.results[bridge.UIOpNotifications] = json.RawMessage(raw)
+		s, exit := e.helper(t, bridge.UIOpNotifications, struct{}{})
+		if exit.ErrorCode != "UI_FAILED" {
+			t.Fatalf("%s: %+v", name, exit)
+		}
+		if strings.Contains(exit.Error, "482913") || strings.Contains(s.errOut.String(), "482913") {
+			t.Errorf("%s: the error quotes the app: %q", name, exit.Error)
+		}
+		j := e.last(t)
+		if j.Status != journal.StatusError {
+			t.Errorf("%s: journal %+v", name, j)
+		}
+		if b, _ := json.Marshal(j); strings.Contains(string(b), "482913") {
+			t.Errorf("%s: the journal quotes the app: %s", name, b)
+		}
+	}
 }
