@@ -117,3 +117,9 @@ Mismo aborto que en el primer intento (cada ~8 s). La RAM libre bajó a 6.37 GB 
 Nota: que el emulador de la CI "aguante" con swiftshader_indirect solo se ve desde el shell (adbd y mksh sobreviven a las caídas de surfaceflinger); no lo he comprobado en su emulador (no se toca), pero con la misma imagen y GPU es probable que también reinicie surfaceflinger sin que el oráculo lo note.
 
 Siguiente: reintento único con ADBUDDY_EMU_GPU=swangle_indirect.
+
+### S1 con ADBUDDY_EMU_GPU=swangle_indirect, intento 1: interrumpido por RAM (sin veredicto)
+
+RAM libre 16.96 GB, ningún qemu `-port 5600`. Vigilante de RAM en segundo plano (cada 5 s; por debajo de 6 GB hace `adb -P 5060 -s emulator-5600 emu kill`). Arranque 19:13:58 → boot y env 19:14:25 (27 s); qemu con `-avd adbuddy-dev -port 5600 ... -gpu swangle_indirect`; `ro.hardware.egl=emulation`. La medida de 120 s empezó a las 19:14:30 y no terminó: a las 19:15:33 la RAM libre llegó a 5.93 GB (bajada continua desde 16.9 GB a ~0.5 GB/5 s) y el vigilante mató el emulador (`OK: killing emulator, bye bye`). Tras el corte: ningún qemu `-port 5600` (solo el vigilante `emulator -kill <pid> -sleep 20`), RAM libre 10.67 GB, y `vmmemWSL` con 6.28 GB de working set (otra carga en WSL2, no mía) y el qemu de la CI con 3.0 GB. La bajada no era solo de mi emulador: la VM de WSL creció a la vez.
+
+Siguiente: esperar a RAM libre >= 12 GB y repetir la medida con swangle_indirect (sigue siendo el único reintento con swangle: el anterior no llegó a medir), leyendo pids y recuento a los 30 s, 60 s y 120 s para que una interrupción deje datos.
