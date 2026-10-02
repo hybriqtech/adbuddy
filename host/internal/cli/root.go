@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/paths"
 	"github.com/spf13/cobra"
 )
@@ -20,6 +21,9 @@ type App struct {
 	Stderr io.Writer
 	Getenv func(string) string
 	JSON   bool
+	// Lang is the language of what this run writes for people (lang.go).
+	// The zero value, an App built by hand in a test, is English.
+	Lang i18n.Lang
 }
 
 const exitCodesHelp = `Exit codes:
@@ -77,7 +81,12 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 // mainContext is Main with a context that tests can cancel (Ctrl+C).
 func mainContext(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	app := &App{Stdin: stdin, Stdout: stdout, Stderr: stderr, Getenv: os.Getenv}
+	defer utf8Console(asFile(stdout), asFile(stderr))()
+	lang := detectLang(os.Getenv)
+	if wantsJSON(args) {
+		lang = i18n.EN // machine output, help included, is English
+	}
+	app := &App{Stdin: stdin, Stdout: stdout, Stderr: stderr, Getenv: withLang(os.Getenv, lang), Lang: lang}
 	root := NewRoot(app)
 	app.JSON = wantsJSON(args) // errors raised before cobra reads --json still use the envelope
 	root.SetArgs(args)

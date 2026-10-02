@@ -1,0 +1,2 @@
+# The messages of the host in English: the source of every translation (see host/README.md).
+# One key per message: "<area>.<what>[.<variant>]" = "text", with %[1]s style verbs.

@@ -10,6 +10,7 @@ host/**/*.md text eol=lf
 host/**/*.jsonl text eol=lf
 host/**/*.tsv text eol=lf
 host/**/testdata/** text eol=lf
+host/**/*.toml text eol=lf
 .github/**/*.yml text eol=lf
 
 # android/: LF (Gradle, Kotlin and Android resources)
@@ -18,6 +19,7 @@ android/**/*.kts text eol=lf
 android/**/*.xml text eol=lf
 android/**/*.toml text eol=lf
 android/**/*.properties text eol=lf
+android/**/*.txt text eol=lf
 android/**/*.pro text eol=lf
 android/**/*.md text eol=lf
 android/.gitignore text eol=lf

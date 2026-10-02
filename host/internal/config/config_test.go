@@ -157,3 +157,41 @@ func TestRemoteFields(t *testing.T) {
 		t.Error("an unreadable until must read as none")
 	}
 }
+
+func TestLangFollowsADBUDDYLangFirst(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	c := Default()
+	c.Language = "es"
+	if got := c.Lang(env(map[string]string{"ADBUDDY_LANG": "en", "LANG": "es_ES"})); got != "en" {
+		t.Fatalf("ADBUDDY_LANG must win over config.language: %s", got)
+	}
+	if got := Default().Lang(env(map[string]string{"LC_ALL": "C", "LANG": "es_ES"})); got != "en" {
+		t.Fatalf("LC_ALL=C decides: %s", got)
+	}
+}
+
+func TestReadLanguage(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, c := range []struct{ name, content, want string }{
+		{"es", "language = \"es\"\n", "es"},
+		{"en", "language = \"en\"\n", "en"},
+		{"other keys do not matter", "typo_key = 1\nserial = \"abc\"\nlanguage = \"es\"\n", "es"},
+		{"unknown language", "language = \"fr\"\n", ""},
+		{"no language", "serial = \"abc\"\n", ""},
+		{"broken toml", "language = \n[[", ""},
+	} {
+		if got := ReadLanguage(write(c.name+".toml", c.content)); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	if got := ReadLanguage(filepath.Join(dir, "missing.toml")); got != "" {
+		t.Errorf("a missing file: %q", got)
+	}
+}

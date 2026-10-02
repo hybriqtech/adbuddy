@@ -24,6 +24,9 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	// The language of the machine never changes what the tests read: English
+	// (ADBUDDY_LANG beats config.language, LANG and the language of Windows).
+	os.Setenv("ADBUDDY_LANG", "en")
 	// serve starts the agent: never a real one from the tests.
 	lookAgent = func(string) (string, error) { return "", exec.ErrNotFound }
 	// Nor Claude Code's real configuration: trusting a folder writes it.

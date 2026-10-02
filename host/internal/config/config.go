@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
 // Config is the content of config.toml. Every field is optional.
@@ -159,21 +160,31 @@ func (c Config) WorkspaceDir(home string) string {
 	return filepath.Join(home, "ADBuddy", "default")
 }
 
-// Lang is the language for rule descriptions: the configured one, else "es"
-// when LC_ALL/LC_MESSAGES/LANG start with "es", else "en".
+// Lang is the language of the host's texts as the environment and this
+// config give it (i18n.Resolve): ADBUDDY_LANG, then language, then
+// LC_ALL, LC_MESSAGES and LANG, else "en". It does not ask the system; the
+// command line's entry point does (i18n.Detect), so that serve and its
+// daemon never disagree with the help.
 func (c Config) Lang(getenv func(string) string) string {
-	if c.Language != "" {
+	return string(i18n.Resolve(getenv, c.Language))
+}
+
+// ReadLanguage is the "language" of the config.toml at path, "" when the file
+// is missing, unreadable or does not say. It ignores every other key and
+// every error: a broken configuration must not keep --help or an error
+// message from appearing in the right language.
+func ReadLanguage(path string) string {
+	var c struct {
+		Language string `toml:"language"`
+	}
+	if _, err := toml.DecodeFile(path, &c); err != nil {
+		return ""
+	}
+	switch c.Language {
+	case "en", "es":
 		return c.Language
 	}
-	for _, k := range []string{"LC_ALL", "LC_MESSAGES", "LANG"} {
-		if v := getenv(k); v != "" {
-			if strings.HasPrefix(strings.ToLower(v), "es") {
-				return "es"
-			}
-			return "en"
-		}
-	}
-	return "en"
+	return ""
 }
 
 // validAddress accepts only IP:port with a port in 1-65535.
