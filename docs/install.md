@@ -77,7 +77,7 @@ These steps apply once a release exists. One command installs the latest release
 curl -fsSL https://github.com/hybriqtech/adbuddy/releases/latest/download/install.sh | sh
 ```
 
-The script needs `curl` or `wget`, `tar`, `awk` and `sha256sum` or `shasum`. It picks the archive for your system (Linux on x86-64 or arm64, macOS on Intel or Apple silicon), downloads `checksums.txt` and the archive, checks the archive's SHA-256 and refuses to install on a mismatch. If `~/.local/bin` is not in your `PATH`, it says so.
+The script needs `curl`, `tar`, `awk` and `sha256sum` or `shasum`. It picks the archive for your system (Linux on x86-64 or arm64, macOS on Intel or Apple silicon), downloads `checksums.txt` and the archive, checks the archive's SHA-256 and refuses to install on a mismatch. If `~/.local/bin` is not in your `PATH`, it says so.
 
 The checksum file comes from the same release as the archive. It catches a damaged download; the checksum is not a signature.
 

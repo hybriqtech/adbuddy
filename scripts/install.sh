@@ -22,23 +22,20 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # sum file: the SHA-256 and the name, as sha256sum prints them.
 sum() { if have sha256sum; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 
-# fetch url file: HTTPS only, unless the URL is a test's.
+# fetch url file: curl only (BusyBox wget cannot promise HTTPS-only redirects).
+# --proto and --proto-redir both say =https: the first hop and every
+# redirection must be HTTPS, so a redirect to http is refused. A test sets
+# ADBUDDY_DOWNLOAD_URL to another scheme and gets plain curl.
 fetch() {
-	if have curl; then
-		if [ -n "${ADBUDDY_DOWNLOAD_URL:-}" ]; then
-			curl -fsSL -o "$2" "$1"
-		else
-			curl --proto '=https' --tlsv1.2 -fsSL -o "$2" "$1"
-		fi
-	elif [ -n "${ADBUDDY_DOWNLOAD_URL:-}" ]; then
-		wget -q -O "$2" "$1"
+	if [ -n "${ADBUDDY_DOWNLOAD_URL:-}" ]; then
+		curl -fsSL -o "$2" "$1"
 	else
-		wget --https-only -q -O "$2" "$1"
+		curl --proto "=https" --proto-redir "=https" --tlsv1.2 -fsSL -o "$2" "$1"
 	fi
 }
 
 main() {
-	have curl || have wget || die "needs curl or wget"
+	have curl || die "needs curl"
 	have tar || die "needs tar"
 	have awk || die "needs awk"
 	have sha256sum || have shasum || die "needs sha256sum or shasum"
