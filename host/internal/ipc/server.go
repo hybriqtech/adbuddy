@@ -174,7 +174,7 @@ const maxPreauth = 32
 // Server accepts requests on the daemon socket.
 type Server struct {
 	ln      net.Listener
-	lock    *os.File      // held until Close (lockPath)
+	lock    *ServeLock    // held until Close (lockPath)
 	preauth chan struct{} // a slot per connection that has not authenticated yet
 	secret  string
 	handler Handler
@@ -185,57 +185,76 @@ type Server struct {
 	closed  bool
 }
 
-// Listen creates the socket in dataDir. A leftover socket from a dead daemon
-// is removed; a live one yields ErrAlreadyRunning. secret must be the
-// 64-hex-character installation secret.
+// Listen creates the socket in dataDir, holding the data folder's lock
+// (Lock) until Close. A leftover socket from a dead daemon is removed; a live
+// one, or the lock held by another daemon, yields ErrAlreadyRunning. secret
+// must be the 64-hex-character installation secret.
 func Listen(dataDir, secret string, h Handler) (*Server, error) {
-	path := SocketPath(dataDir)
-	if len(path) > maxSocketPath {
-		return nil, fmt.Errorf("socket path %s is longer than %d characters; set ADBUDDY_DATA_DIR to a shorter folder", path, maxSocketPath)
-	}
-	if _, err := hex.DecodeString(secret); err != nil || len(secret) != 64 {
-		return nil, errors.New("the IPC secret must be 64 hexadecimal characters")
-	}
-	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+	if err := checkListen(dataDir, secret); err != nil {
 		return nil, err
 	}
 	// One daemon per data directory, for as long as it serves: two serve that
 	// start at once could otherwise both find a dead socket and the second
 	// remove the first one's live socket (Stat, Dial and Remove are not one
 	// step).
-	lock, err := tryLock(lockPath(dataDir))
-	if errors.Is(err, errLocked) {
-		return nil, ErrAlreadyRunning
-	}
+	lock, err := Lock(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	fail := func(err error) (*Server, error) {
+	s, err := ListenLocked(lock, secret, h)
+	if err != nil {
 		lock.Close()
+	}
+	return s, err
+}
+
+// ListenLocked is Listen with the data folder's lock already taken (serve
+// takes it before it starts anything else). The Server releases it on Close;
+// if ListenLocked fails, the lock stays with the caller. A lock already
+// released is refused: a daemon never serves without it.
+func ListenLocked(lock *ServeLock, secret string, h Handler) (*Server, error) {
+	if !lock.held() {
+		return nil, errors.New("the daemon lock is not held")
+	}
+	dataDir := lock.dir
+	if err := checkListen(dataDir, secret); err != nil {
 		return nil, err
 	}
+	path := SocketPath(dataDir)
 	if _, err := os.Stat(path); err == nil {
 		// A daemon of an older version holds no lock, but it answers.
 		if c, err := net.DialTimeout("unix", path, 500*time.Millisecond); err == nil {
 			c.Close()
-			return fail(ErrAlreadyRunning)
+			return nil, ErrAlreadyRunning
 		}
 		if err := os.Remove(path); err != nil {
-			return fail(err)
+			return nil, err
 		}
 	}
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		return fail(err)
+		return nil, err
 	}
 	if runtime.GOOS != "windows" {
 		if err := os.Chmod(path, 0o600); err != nil {
 			ln.Close()
-			return fail(err)
+			return nil, err
 		}
 	}
 	ctx, cancel := context.WithCancelCause(context.Background())
 	return &Server{ln: ln, lock: lock, preauth: make(chan struct{}, maxPreauth), secret: secret, handler: h, ctx: ctx, cancel: cancel}, nil
+}
+
+// checkListen refuses a socket path too long for the system and a secret
+// that is not 64 hexadecimal characters.
+func checkListen(dataDir, secret string) error {
+	if path := SocketPath(dataDir); len(path) > maxSocketPath {
+		return fmt.Errorf("socket path %s is longer than %d characters; set ADBUDDY_DATA_DIR to a shorter folder", path, maxSocketPath)
+	}
+	if _, err := hex.DecodeString(secret); err != nil || len(secret) != 64 {
+		return errors.New("the IPC secret must be 64 hexadecimal characters")
+	}
+	return nil
 }
 
 // Serve accepts connections until Close.
