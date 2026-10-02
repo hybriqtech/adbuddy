@@ -357,3 +357,38 @@ I/TestRunner( 6078): run finished: 1 tests, 0 failed, 0 ignored
 ```
 
 Medidas: (i) sale de `device` ~2 s después del corte (21:14:59.355 → gone 21:15:01); (ii) vuelve a `device` solo a las 21:15:16, ~17 s desde el corte (~2 s después de `restored`), sin `reconnect`; (iii) `cut=true isCut=true`, `restored=true isCut=false`, `adb_enabled=1` (y `adb_wifi_enabled=0`, como antes). `listening before the cut: true` sin modo tcpip: es el transporte del emulador en 5555 (ver S2), no tcpip. system_server y surfaceflinger no cambian.
+
+### S5 (paso 7): modo tcpip
+
+```
+$ guard: emulator-5600	device;
+$ (21:18:03) EMU; "$ADB" -s "$S" tcpip 5555
+rc=0
+registro 90 s:
+21:18:01 device
+21:18:03 gone
+21:18:05 device
+last: 21:19:38 device
+$ EMU; "$ADB" -s "$S" shell getprop service.adb.tcp.port   → 5555   (netstat: [::]:5555 LISTEN 6165/adbd)
+```
+
+Vuelve como `emulator-5600` en ~2 s (no aparece otro número de serie). R3 en modo tcpip (CI-LIBRE `0`, `logcat -c`, mismas órdenes):
+
+```
+$ (21:19:50) am instrument ... (sin -w)   rc=0
+registro 150 s:
+21:19:46 device
+21:19:51 offline
+21:20:07 device
+last: 21:22:29 device
+10-02 21:19:49.961 I/ADBuddyEmuCut( 6213): listening before the cut: true
+10-02 21:19:49.970 I/ADBuddyEmuCut( 6213): cut=true isCut=true
+10-02 21:19:50.473 I/ADBuddyEmuCut( 6213): listening after the cut: false
+10-02 21:20:05.482 I/ADBuddyEmuCut( 6213): restored=true isCut=false
+adb_enabled=1  adb_wifi_enabled=0  service.adb.tcp.port=5555  (5555 LISTEN 6267/adbd)  pids 422 558
+I/TestRunner( 6213): run finished: 1 tests, 0 failed, 0 ignored
+```
+
+(i) sale ~1 s tras el corte; (ii) vuelve solo a ~17 s; (iii) cumple. Tras Reactivar el modo tcpip sigue (`service.adb.tcp.port=5555`), como dice la spec §4.6 (hasta `adb usb`). `adb -s emulator-5600 usb` (21:22:36, "restarting in USB mode"), registro 60 s: `21:22:34 device / 21:22:36 gone / 21:22:37 device / last 21:23:37 device`; después `service.adb.tcp.port=0`, `adb_enabled=1`, y 5555 sigue en LISTEN (adbd, transporte del emulador).
+
+Salvedad: en el emulador, `listening before the cut: true` / `listening after the cut: false` salen igual con y sin modo tcpip (R3 sin tcpip dio lo mismo), porque el 5555 del invitado es también el transporte del emulador. Esas líneas prueban que el corte cierra adbd, no que cierre el modo tcpip en particular.
