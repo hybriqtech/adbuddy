@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
@@ -94,7 +96,7 @@ func newRemoteCmd(app *App) *cobra.Command {
 						if app.JSON {
 							return WriteData(app.Stdout, remoteInfo{})
 						}
-						fmt.Fprintln(app.Stdout, "serve is not running; remote mode is already off.")
+						fmt.Fprintln(app.Stdout, app.T("remotecmd.serve_is_not_running_remote"))
 						return nil
 					}
 					var offErr error
@@ -117,21 +119,27 @@ func newRemoteCmd(app *App) *cobra.Command {
 			if app.JSON {
 				return WriteData(app.Stdout, info)
 			}
-			fmt.Fprintln(app.Stdout, remoteText(op, info))
+			fmt.Fprintln(app.Stdout, remoteTextIn(app.speaks(), op, info))
 			return nil
 		},
 	}
 }
 
-// remoteText is what the person reads.
-func remoteText(op string, i remoteInfo) string {
+// remoteText is what the person reads, in English.
+func remoteText(op string, i remoteInfo) string { return remoteTextIn(i18n.EN, op, i) }
+
+// remoteTextIn is remoteText in lang. A sentence that follows "serve is not
+// running; " keeps its first letter as the catalog has it (lower case); alone,
+// it starts with a capital.
+func remoteTextIn(lang i18n.Lang, op string, i remoteInfo) string {
 	prefix := ""
 	if !i.Serve {
-		prefix = "serve is not running; "
+		prefix = lang.T("remote.text.no_serve")
 	}
 	sentence := func(s string) string {
 		if prefix == "" && s != "" {
-			return strings.ToUpper(s[:1]) + s[1:]
+			r, n := utf8.DecodeRuneInString(s)
+			return string(unicode.ToUpper(r)) + s[n:]
 		}
 		return prefix + s
 	}
@@ -141,28 +149,26 @@ func remoteText(op string, i remoteInfo) string {
 	}
 	switch {
 	case !i.Enabled && op == "off":
-		return "Remote mode is off: port 5555 is closed."
+		return lang.T("remote.text.off_closed")
 	case !i.Enabled:
-		return sentence("remote mode: off")
+		return sentence(lang.T("remote.text.off"))
 	case i.Closing && i.Serve:
-		return sentence("remote mode: expired at " + until + ", but port 5555 is not closed yet. Serve keeps trying; you can also run 'adbuddy remote off'.")
+		return sentence(lang.T("remote.text.expired_serve", until))
 	case i.Closing:
-		return sentence("remote mode: expired at " + until + ", but port 5555 may still be open. Run 'adbuddy remote off' to close it.")
+		return sentence(lang.T("remote.text.expired", until))
 	}
-	left := "about " + remoteLeft(i)
-	reach := "Reach the phone at its Tailscale address on port 5555."
+	left := lang.T("remote.text.about", remoteLeft(i))
+	reach := lang.T("remote.text.reach_tailscale")
 	if i.Address != "" {
-		reach = "Reach the phone at " + i.Address + "."
+		reach = lang.T("remote.text.reach", i.Address)
 	}
 	switch {
 	case op == "on":
-		return "Remote mode is on until " + until + " (" + left + "). " + reach +
-			" It stays open on any network until then: turn it off with 'adbuddy remote off' when you are home."
+		return lang.T("remote.text.on", until, left, reach)
 	case !i.Serve:
-		return sentence("remote mode: on until "+until+" ("+left+"). "+reach) +
-			" Nothing closes it while serve is stopped: run 'adbuddy remote off'."
+		return sentence(lang.T("remote.text.status_on", until, left, reach)) + " " + lang.T("remote.text.no_serve_rest")
 	}
-	return sentence("remote mode: on until " + until + " (" + left + "). " + reach)
+	return sentence(lang.T("remote.text.status_on", until, left, reach))
 }
 
 // remoteLeft is the time to the expiry, rounded to hours (minutes when under one).
@@ -197,7 +203,7 @@ func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, er
 		return remoteInfo{}, ConfigErrorT("ADB_NOT_CONFIGURED", "err.remotecmd.adb_not_configured", "err.remotecmd.adb_not_configured.fix")
 	}
 	runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
-	failed := func(why string) error {
+	failed := func(why i18n.Msg) error {
 		return NewErrorT("REMOTE_OFF_FAILED", "err.remotecmd.remote_off_failed", "err.remotecmd.remote_off_failed.fix", why)
 	}
 	if err := startServer(ctx, runner); err != nil {
@@ -210,7 +216,7 @@ func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, er
 	case hasCode(err, "WRONG_PHONE") || hasCode(err, "DEVICE_UNREADABLE"):
 		return remoteInfo{}, err
 	case err != nil:
-		return remoteInfo{}, failed("could not reach the phone (" + classify.Printable(err.Error()) + ")")
+		return remoteInfo{}, failed(i18n.M("remote.off.unreachable", classify.Printable(err.Error())))
 	}
 	runner.Serial = k.Active
 	octx, cancel := context.WithTimeout(ctx, remoteOpTimeout)
@@ -221,9 +227,9 @@ func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, er
 	case ctx.Err() != nil:
 		return remoteInfo{}, Interrupted()
 	case err != nil:
-		return remoteInfo{}, failed("adb usb failed (" + classify.Printable(err.Error()) + ")")
+		return remoteInfo{}, failed(i18n.M("remote.off.usb_failed", classify.Printable(err.Error())))
 	case code != 0:
-		return remoteInfo{}, failed("adb usb failed (" + classify.Printable(strings.TrimSpace(errb.String()+" "+out.String())) + ")")
+		return remoteInfo{}, failed(i18n.M("remote.off.usb_failed", classify.Printable(strings.TrimSpace(errb.String()+" "+out.String()))))
 	}
 	cfg, err := config.Load(e.dirs.ConfigFile())
 	if err != nil {

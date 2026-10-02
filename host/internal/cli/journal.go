@@ -75,7 +75,7 @@ func newJournalCmd(app *App) *cobra.Command {
 				out = out[len(out)-limit:]
 			}
 			if !signed && len(out) > 0 {
-				fmt.Fprintln(app.Stderr, "⚠ the journal signatures could not be verified (no ipc.secret)")
+				fmt.Fprintln(app.Stderr, app.T("journal.the_journal_signatures_could_not"))
 			}
 			if app.JSON {
 				list := make([]journalEntry, 0, len(out))
@@ -85,13 +85,13 @@ func newJournalCmd(app *App) *cobra.Command {
 				return WriteData(app.Stdout, map[string]any{"entries": list, "skippedLines": skipped})
 			}
 			for _, j := range out {
-				fmt.Fprintln(app.Stdout, formatEntry(j))
+				fmt.Fprintln(app.Stdout, formatEntryIn(app.speaks(), j))
 			}
 			if len(out) == 0 {
-				fmt.Fprintln(app.Stderr, "The journal is empty.")
+				fmt.Fprintln(app.Stderr, app.T("journal.the_journal_is_empty"))
 			}
 			if skipped > 0 {
-				fmt.Fprintf(app.Stderr, "⚠ %d damaged journal lines were skipped.\n", skipped)
+				fmt.Fprintln(app.Stderr, app.T("journal.damaged_journal_lines_were_skipped", skipped))
 			}
 			return nil
 		},

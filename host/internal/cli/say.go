@@ -29,3 +29,7 @@ func tell(w io.Writer, key string, args ...any) {
 // Log is where serve and setup write what a person reads as it happens: the
 // terminal's error output, in the language of this run.
 func (a *App) Log() io.Writer { return langWriter{Writer: a.Stderr, Lang: a.speaks()} }
+
+// Say wraps w, one of the outputs of this run (the standard output), with the
+// language of the run: what tell writes to it is in that language.
+func (a *App) Say(w io.Writer) io.Writer { return langWriter{Writer: w, Lang: a.speaks()} }

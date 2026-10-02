@@ -22,6 +22,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
@@ -90,7 +91,7 @@ func newServeCmd(app *App) *cobra.Command {
 				return err
 			}
 			if n := cls.UserRuleCount(); n > 0 {
-				fmt.Fprintf(app.Stderr, "Using %d rules of yours on top of the built-in ones (%s).\n", n, rulesPath(e))
+				fmt.Fprintln(app.Stderr, app.T("serve.using_rules_of_yours_on", n, rulesPath(e)))
 			}
 			if ctx.Err() != nil {
 				return Interrupted()
@@ -100,7 +101,7 @@ func newServeCmd(app *App) *cobra.Command {
 			// Tailscale address, the remote mode's expiry).
 			store := newCfgStore(e.dirs.ConfigFile(), e.cfg)
 			runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
-			fmt.Fprintf(app.Stderr, "Waiting for the phone on ADBuddy's adb server (port %d)…\n", e.cfg.ADBServerPort)
+			fmt.Fprintln(app.Stderr, app.T("serve.waiting_for_the_phone_on", e.cfg.ADBServerPort))
 			// The phone that mDNS does not find (Tailscale, another network) is
 			// tried at the address that worked last time.
 			// The addresses are those of the phone in config.toml. The remote
@@ -110,7 +111,7 @@ func newServeCmd(app *App) *cobra.Command {
 			if serial == e.cfg.Serial {
 				addrs = candidateAddrs(store.Config(), !store.Until().IsZero())
 			}
-			const reconnect = "run `adbuddy connect <new ip:port>` with the IP address and port on the phone's Wireless debugging screen, then `adbuddy serve` again."
+			reconnect := i18n.M("serve.reconnect") // a piece of the fix: it goes in the language of the error
 			k, err := findKnownPhone(ctx, runner, serial, addrs, deviceWait, app.Log())
 			switch {
 			case err != nil && ctx.Err() != nil:
@@ -134,7 +135,7 @@ func newServeCmd(app *App) *cobra.Command {
 			if k.Verified {
 				identity = phoneIdentity(serial, activeSerial)
 			} else if _, byGuid := pairing.GuidOf(serial); byGuid || k.Used != "" {
-				fmt.Fprintf(app.Stderr, "Note: could not check that the phone at %s is the one you set up (%s); the journal knows it as %s this time.\n", activeSerial, unverifiedWhy(serial), activeSerial)
+				fmt.Fprintln(app.Stderr, app.T("serve.note_could_not_check_that", activeSerial, unverifiedWhy(serial)))
 			}
 			hostRunner := runner // for host commands: the watcher of the connection has no serial
 			runner.Serial = activeSerial
@@ -150,11 +151,11 @@ func newServeCmd(app *App) *cobra.Command {
 				if ctx.Err() != nil {
 					return Interrupted()
 				}
-				fmt.Fprintf(app.Stderr, "⚠ Could not check the remote mode (%s).\n", classify.Printable(err.Error()))
+				fmt.Fprintln(app.Stderr, app.T("serve.could_not_check_the_remote", classify.Printable(err.Error())))
 			}
 			if rs.Enabled {
 				keep = remote.Port
-				fmt.Fprintln(app.Stderr, remoteOnNotice(rs))
+				fmt.Fprintln(app.Stderr, remoteOnNoticeIn(app.speaks(), rs))
 			}
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
 			if err := applyInvariant(ctx, active.Runner(), deviceWait, app.Log(), "adbuddy serve", keep); err != nil {
@@ -198,12 +199,12 @@ func newServeCmd(app *App) *cobra.Command {
 			// Read here, before the goroutine: a test that sets remoteTick for its
 			// own serve must not race with the goroutine of a previous one.
 			every, opTimeout := remoteTick, remoteOpTimeout
-			go watchRemote(ctx, app.Stderr, ctl, link.remote, every, opTimeout)
+			go watchRemote(ctx, app.Log(), ctl, link.remote, every, opTimeout)
 			// Same here for the watcher of the phone's connection. It never
 			// touches the adb port: only the remote mode does.
 			go watchPhone(ctx, phoneWatch{
 				Active: active, Runner: hostRunner, Serial: serial,
-				Cfg: store.Config, RemoteOn: func() bool { return !store.Until().IsZero() }, Log: app.Stderr,
+				Cfg: store.Config, RemoteOn: func() bool { return !store.Until().IsZero() }, Log: app.Log(),
 				Every: watchEvery, Misses: watchMisses, TryWait: watchTryWait,
 			})
 			ui, protected := link.helpers()
@@ -220,7 +221,7 @@ func newServeCmd(app *App) *cobra.Command {
 					if app.JSON {
 						_ = writeJSON(app.Stdout, j)
 					} else {
-						fmt.Fprintln(app.Stdout, formatEntry(j))
+						fmt.Fprintln(app.Stdout, formatEntryIn(app.speaks(), j))
 					}
 					link.Entry(j)
 				},
@@ -239,10 +240,10 @@ func newServeCmd(app *App) *cobra.Command {
 			if err != nil {
 				return NewError("SOCKET_FAILED", err.Error(), "")
 			}
-			fmt.Fprintf(app.Stderr, "ADBuddy is serving %s (session %s).\nJournal: %s\nPress Ctrl+C to stop.\n",
-				activeSerial, session, workspace.JournalDir(ws))
+			fmt.Fprintln(app.Stderr, app.T("serve.adbuddy_is_serving_session_journal", activeSerial, session, workspace.JournalDir(ws)))
 			if noAgent {
-				fmt.Fprintf(app.Stderr, "In another terminal run: adbuddy run %s\n\n", agentName)
+				fmt.Fprintln(app.Stderr, app.T("serve.in_another_terminal", agentName))
+				fmt.Fprintln(app.Stderr)
 			} else {
 				startAgent(app, sess, agentName)
 				fmt.Fprintln(app.Stderr)
@@ -251,9 +252,9 @@ func newServeCmd(app *App) *cobra.Command {
 				return NewError("SOCKET_FAILED", err.Error(), "")
 			}
 			if s := ctl.State(); s.Enabled {
-				fmt.Fprintln(app.Stderr, stillOnNotice(s))
+				fmt.Fprintln(app.Stderr, stillOnNoticeIn(app.speaks(), s))
 			}
-			fmt.Fprintln(app.Stderr, "ADBuddy stopped.")
+			fmt.Fprintln(app.Stderr, app.T("serve.adbuddy_stopped"))
 			return nil
 		},
 	}
@@ -269,7 +270,8 @@ func newServeCmd(app *App) *cobra.Command {
 // that owns it. It also tells the link how to ask the user about `remote on`
 // (their language and confirm_timeout, as the daemon has them).
 func serveHandler(link *phoneLink, cfg config.Config, getenv func(string) string, ws, agentName string, sess *session.Manager, d *daemon.Daemon) ipc.Handler {
-	link.useRemoteAsk(cfg.Lang(getenv), cfg.ConfirmTimeout.Duration)
+	lang := cfg.Lang(getenv)
+	link.useRemoteAsk(lang, cfg.ConfirmTimeout.Duration)
 	return func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {
 		if req.Kind == ipc.KindSend {
 			return link.handleSend(ctx, ws, req, c)
@@ -281,7 +283,7 @@ func serveHandler(link *phoneLink, cfg config.Config, getenv func(string) string
 			return link.handleRemote(ctx, req, c, d)
 		}
 		if req.Kind == ipc.KindAttach || req.Kind == ipc.KindSession {
-			return handleSession(ctx, sess, agentName, req, c)
+			return handleSessionIn(i18n.Parse(lang), ctx, sess, agentName, req, c)
 		}
 		return d.Handle(ctx, req, c)
 	}

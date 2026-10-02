@@ -102,12 +102,13 @@ func ConfigError(code, message, fix string) *Error {
 
 // Interrupted is returned when the user stops a command with Ctrl+C.
 func Interrupted() *Error {
-	return &Error{Code: "INTERRUPTED", Message: "stopped with Ctrl+C", exit: ExitInterrupt}
+	return errorT(ExitInterrupt, false, "INTERRUPTED", "error.interrupted", "", nil)
 }
 
 // UsageError builds an invalid-usage failure (exit code 2).
 func UsageError(message string) *Error {
-	return &Error{Code: "USAGE", Message: message, Fix: "Run `adbuddy --help` to see the usage.", exit: ExitUsage}
+	// The message is cobra's (English, a cause); the fix is ours, in the language of the person.
+	return errorT(ExitUsage, false, "USAGE", "error.cause", "error.usage_fix", []any{message})
 }
 
 // AsError converts any error into an *Error. Cobra's own parsing errors

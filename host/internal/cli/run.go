@@ -74,7 +74,7 @@ func newRunCmd(app *App) *cobra.Command {
 			if _, err := workspace.Init(workspace.Options{Dir: ws, Exe: exe}); err != nil {
 				return NewErrorT("WORKSPACE_FAILED", "error.cause", "err.run.workspace_failed.fix", err.Error(), ws)
 			}
-			fmt.Fprintf(app.Stderr, "Starting %s in %s (phone %s)…\n", name, ws, ping.Phone())
+			fmt.Fprintln(app.Stderr, app.T("run.starting_in_phone", name, ws, ping.Phone()))
 			code, err := agent.Run(cmd.Context(), agent.Options{
 				Agent: name, Args: rest, Dir: ws, BinDir: workspace.BinDir(ws), Serial: ping.Phone(), // the name the journal knows it by
 				Environ: os.Environ(), Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,

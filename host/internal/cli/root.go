@@ -57,7 +57,7 @@ func NewRoot(app *App) *cobra.Command {
 			if app.JSON || !isTerminal(app.Stdin) || !isTerminal(app.Stderr) {
 				return ConfigErrorT("NOT_CONFIGURED", "err.root.not_configured", "err.root.not_configured.fix")
 			}
-			fmt.Fprintln(app.Stderr, "ADBuddy is not set up yet: starting `adbuddy setup`.")
+			fmt.Fprintln(app.Stderr, app.T("root.adbuddy_is_not_set_up"))
 			setup.SetContext(cmd.Context())
 			return setup.RunE(setup, nil)
 		}

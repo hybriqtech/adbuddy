@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
 )
@@ -165,7 +165,7 @@ func (r *remoteLink) handleSet(m bridge.Message) {
 	}
 	if m.RID == "" {
 		// A request by protocol: with no rid there is nobody to answer.
-		fmt.Fprintln(r.log, "⚠ The phone app sent remote.set without a request id: ignored.")
+		tell(r.log, "phone_remote.the_phone_app_sent_remote")
 		return
 	}
 	var req struct {
@@ -315,14 +315,14 @@ func watchRemote(ctx context.Context, log io.Writer, ctl *remote.Controller, lin
 			link.refresh() // Closing: the snapshot says on
 			if !warned {
 				warned = true
-				fmt.Fprintf(log, "⚠ Remote mode expired but port 5555 could not be closed: %s; trying again.\n", classify.Printable(err.Error()))
+				tell(log, "phone_remote.remote_mode_expired_but_port", classify.Printable(err.Error()))
 			}
 			wait = min(max(1, wait*2), maxSkip)
 			skip = wait
 		default:
 			warned, wait, skip = false, 0, 0
 			if changed {
-				fmt.Fprintln(log, "Remote mode expired: port 5555 closed.")
+				tell(log, "phone_remote.remote_mode_expired_port_5555")
 				link.refresh()
 				link.publish(s)
 			}
@@ -330,21 +330,27 @@ func watchRemote(ctx context.Context, log io.Writer, ctl *remote.Controller, lin
 	}
 }
 
-// remoteOnNotice is what serve says at start when the remote mode is on.
-func remoteOnNotice(s remote.State) string {
+// remoteOnNotice is what serve says at start when the remote mode is on, in English.
+func remoteOnNotice(s remote.State) string { return remoteOnNoticeIn(i18n.EN, s) }
+
+// remoteOnNoticeIn is remoteOnNotice in lang.
+func remoteOnNoticeIn(lang i18n.Lang, s remote.State) string {
 	if s.Closing {
-		return "Remote mode expired but port 5555 could not be closed yet: serve keeps trying."
+		return lang.T("remote.notice.closing")
 	}
-	return "Remote mode is on until " + s.ExpiresAt.Local().Format("15:04") + " (port 5555 open)."
+	return lang.T("remote.notice.on", s.ExpiresAt.Local().Format("15:04"))
 }
 
-// stillOnNotice is what serve says when it stops with the remote mode on.
-func stillOnNotice(s remote.State) string {
-	const rest = "Nothing closes it while serve is stopped: run `adbuddy remote off` (it closes the port directly) or start serve again."
+// stillOnNotice is what serve says when it stops with the remote mode on, in English.
+func stillOnNotice(s remote.State) string { return stillOnNoticeIn(i18n.EN, s) }
+
+// stillOnNoticeIn is stillOnNotice in lang.
+func stillOnNoticeIn(lang i18n.Lang, s remote.State) string {
+	rest := lang.T("remote.notice.rest")
 	if s.Closing {
-		return "Remote mode expired but port 5555 could not be closed yet. " + rest
+		return lang.T("remote.still.closing", rest)
 	}
-	return "Remote mode is still on (port 5555 stays open until " + s.ExpiresAt.Local().Format("15:04") + "). " + rest
+	return lang.T("remote.still.on", s.ExpiresAt.Local().Format("15:04"), rest)
 }
 
 // onDeviceInfo keeps the Tailscale address the app reports, and the port of
@@ -366,7 +372,7 @@ func (r *remoteLink) onDeviceInfo(m bridge.Message, info bridge.DeviceInfo) {
 		}
 		r.mu.Unlock()
 		if !told {
-			fmt.Fprintf(r.log, "⚠ The phone app reported %s as its Tailscale address, which is not in 100.64.0.0/10: ignored.\n", classify.Printable(info.TailscaleIP))
+			tell(r.log, "phone_remote.the_phone_app_reported_as", classify.Printable(info.TailscaleIP))
 		}
 		return
 	}
@@ -417,7 +423,7 @@ func (r *remoteLink) save(m bridge.Message, info bridge.DeviceInfo) {
 		}
 	})
 	if err != nil {
-		fmt.Fprintf(r.log, "⚠ Could not save the phone's Tailscale address (%s).\n", classify.Printable(err.Error()))
+		tell(r.log, "phone_remote.could_not_save_the_phone", classify.Printable(err.Error()))
 		return
 	}
 	// The address is part of the state while the mode is on.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/paths"
@@ -79,8 +80,13 @@ var isTerminal = func(v any) bool {
 
 var notRunning = NewErrorT("DAEMON_NOT_RUNNING", "err.common.daemon_not_running", "err.common.daemon_not_running.fix")
 
-// formatEntry renders a journal entry on one line (plus its inverse).
-func formatEntry(e journal.Entry) string {
+// formatEntry renders a journal entry on one line (plus its inverse), in English.
+func formatEntry(e journal.Entry) string { return formatEntryIn(i18n.EN, e) }
+
+// formatEntryIn is formatEntry in lang: the words around the entry (undone, the
+// labels of the reason and of the undo) are the catalog's; the status word of
+// the entry, its description and its command are data and are not translated.
+func formatEntryIn(lang i18n.Lang, e journal.Entry) string {
 	lvl := map[string]string{"green": "🟢", "yellow": "🟡", "red": "🔴"}[e.Level]
 	if lvl == "" {
 		lvl = "·"
@@ -90,18 +96,18 @@ func formatEntry(e journal.Entry) string {
 	// terminal.
 	status := classify.Printable(e.Status)
 	if e.UndoneBy != nil {
-		status += ", undone"
+		status += lang.T("journal.status.undone")
 	}
 	if e.Tampered {
-		status += ", ⚠ not written by ADBuddy"
+		status += lang.T("journal.status.tampered")
 	}
 	line := fmt.Sprintf("%s %s %-8s %s  [%s] adb %s", e.TS.Local().Format("15:04:05"), lvl, status,
 		classify.Printable(e.Description), classify.Printable(e.ID), classify.Printable(strings.Join(e.Argv, " ")))
 	if e.Reason != "" && e.Status != journal.StatusOK {
-		line += "\n    reason: " + classify.Printable(e.Reason)
+		line += "\n    " + lang.T("journal.label.reason") + " " + classify.Printable(e.Reason)
 	}
 	if e.Inverse != nil && e.UndoneBy == nil && e.Source != journal.SourceUndo {
-		line += "\n    undo: adb " + classify.Printable(strings.Join(e.Inverse.Argv, " "))
+		line += "\n    " + lang.T("journal.label.undo") + " adb " + classify.Printable(strings.Join(e.Inverse.Argv, " "))
 	}
 	return line
 }

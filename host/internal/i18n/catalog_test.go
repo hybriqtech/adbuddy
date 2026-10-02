@@ -24,6 +24,7 @@ var sameInBoth = map[string]string{
 	"appsetup.summary.consent":  "a version and the state word of the JSON result: nothing to translate",
 	"doctor.name.adb":           "adb is the name of the tool",
 	"doctor.name.serve":         "serve is the name of a command",
+	"version.adbuddy":           "a name, a version and a platform: nothing to translate",
 }
 
 // keyTables are the variables that hold catalog keys by a code (a map from an

@@ -24,7 +24,7 @@ func newVersionCmd(app *App) *cobra.Command {
 			if app.JSON {
 				return WriteData(app.Stdout, info)
 			}
-			_, err := fmt.Fprintf(app.Stdout, "adbuddy %s (%s, %s/%s)\n", info.Version, info.Go, info.OS, info.Arch)
+			_, err := fmt.Fprintln(app.Stdout, app.T("version.adbuddy", info.Version, info.Go, info.OS, info.Arch))
 			return err
 		},
 	}

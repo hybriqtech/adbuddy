@@ -37,6 +37,7 @@ var updateLint = flag.Bool("update-lint", false, "rewrite testdata/textlint.txt"
 var exemptions = map[string]map[string]string{
 	"helpers.go": {
 		"error": "the commands of the agent (screen, tap, type, foreground, screenshot) answer in English always (M6c spec section 3)",
+		"print": "the same: what screen, tap, type, foreground and screenshot print is read by the agent",
 	},
 	"send.go": {
 		"error": "adbuddy send is for the agent: its errors are English always (M6c spec section 3)",

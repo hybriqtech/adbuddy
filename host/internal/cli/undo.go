@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
@@ -76,7 +75,7 @@ func newUndoCmd(app *App) *cobra.Command {
 					if app.JSON {
 						return writeFailureData(app.Stdout, failure, res)
 					}
-					printUndoItems(app.Stderr, nil, nil, res.Skipped)
+					printUndoItems(app.Log(), nil, nil, res.Skipped)
 				}
 				return failure
 			}
@@ -86,7 +85,7 @@ func newUndoCmd(app *App) *cobra.Command {
 				}
 				return WriteData(app.Stdout, res)
 			}
-			printUndoItems(app.Stdout, res.Undone, res.Failed, res.Skipped)
+			printUndoItems(app.Say(app.Stdout), res.Undone, res.Failed, res.Skipped)
 			if exit.Code != 0 {
 				return failure
 			}
@@ -101,12 +100,12 @@ func newUndoCmd(app *App) *cobra.Command {
 // journal, which the agent can write: they are escaped.
 func printUndoItems(w io.Writer, undone, failed, skipped []daemon.UndoItem) {
 	for _, it := range undone {
-		fmt.Fprintf(w, "undone   %s  %s\n", classify.Printable(it.ID), classify.Printable(it.Description))
+		tell(w, "undo.undone", classify.Printable(it.ID), classify.Printable(it.Description))
 	}
 	for _, it := range failed {
-		fmt.Fprintf(w, "failed   %s  %s: %s\n", classify.Printable(it.ID), classify.Printable(it.Description), classify.Printable(it.Error))
+		tell(w, "undo.failed", classify.Printable(it.ID), classify.Printable(it.Description), classify.Printable(it.Error))
 	}
 	for _, it := range skipped {
-		fmt.Fprintf(w, "skipped  %s  %s (%s)\n", classify.Printable(it.ID), classify.Printable(it.Description), classify.Printable(it.Error))
+		tell(w, "undo.skipped", classify.Printable(it.ID), classify.Printable(it.Description), classify.Printable(it.Error))
 	}
 }

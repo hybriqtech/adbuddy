@@ -55,7 +55,7 @@ func newAttachCmd(app *App) *cobra.Command {
 			switch {
 			case keys.detached():
 				// Whether the agent still runs, serve said on the screen.
-				fmt.Fprintln(app.Stderr, "\r\nDetached. `adbuddy attach` connects again.")
+				fmt.Fprintln(app.Stderr, app.T("attach.detached_adbuddy_attach_connects_again"))
 				return nil
 			case err != nil:
 				return NewErrorT("ATTACH_FAILED", "error.cause", "err.attach.attach_failed.fix", err.Error())
@@ -64,7 +64,7 @@ func newAttachCmd(app *App) *cobra.Command {
 			case exit.Code != 0:
 				return NewError("ATTACH_FAILED", exit.Error, "")
 			}
-			fmt.Fprintln(app.Stderr, "\r\nadbuddy serve closed the connection.")
+			fmt.Fprintln(app.Stderr, app.T("attach.adbuddy_serve_closed_the_connection"))
 			return nil
 		},
 	}

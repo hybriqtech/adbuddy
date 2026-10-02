@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"slices"
@@ -13,6 +12,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
 )
@@ -128,7 +128,7 @@ func (w *watcher) step(ctx context.Context) {
 	}
 	if hasSerial(online, w.Active.Serial()) {
 		if w.warned {
-			fmt.Fprintln(w.Log, "📱 The phone is reachable again.")
+			tell(w.Log, "phone_watch.the_phone_is_reachable_again")
 		}
 		w.count, w.warned = 0, false
 		clear(w.wrong)
@@ -142,7 +142,7 @@ func (w *watcher) step(ctx context.Context) {
 	// to be the one in config.toml: a guid can be announced by anything on the
 	// network and an address can reach another phone.
 	if !w.canCheck {
-		w.warnOnce("The phone is not listed and its identity cannot be checked (" + unverifiedWhy(w.Serial).String() + "): waiting for it to come back as " + w.Active.Serial() + ".")
+		w.warnOnce(i18n.M("phone_watch.not_listed", unverifiedWhy(w.Serial), w.Active.Serial()))
 		return
 	}
 	// mDNS brought it back under another name.
@@ -183,9 +183,9 @@ func (w *watcher) step(ctx context.Context) {
 		}
 	}
 	if len(tried) == 0 {
-		w.warnOnce("The phone is not reachable (no other address known): waiting for it.")
+		w.warnOnce(i18n.M("phone_watch.not_reachable_none"))
 	} else {
-		w.warnOnce("The phone is not reachable (tried " + strings.Join(tried, ", ") + "): waiting for it.")
+		w.warnOnce(i18n.M("phone_watch.not_reachable", strings.Join(tried, ", ")))
 	}
 }
 
@@ -194,15 +194,15 @@ func (w *watcher) switchTo(serial, where string) {
 	w.Active.Switch(serial)
 	w.count, w.warned = 0, false
 	clear(w.wrong)
-	fmt.Fprintf(w.Log, "📱 The phone is now at %s.\n", where)
+	tell(w.Log, "phone_watch.the_phone_is_now_at", where)
 }
 
-func (w *watcher) warnOnce(msg string) {
+func (w *watcher) warnOnce(msg i18n.Msg) {
 	if w.warned {
 		return
 	}
 	w.warned = true
-	fmt.Fprintln(w.Log, "⚠ "+msg)
+	tell(w.Log, "phone_watch.warn", msg)
 }
 
 // skip says once per address that it is another phone.
@@ -211,7 +211,7 @@ func (w *watcher) skip(addr string, err error) {
 		return
 	}
 	w.wrong[addr] = true
-	fmt.Fprintf(w.Log, "Warning: the phone at %s %s.\n", classify.Printable(addr), wrongPhoneWarningText)
+	tell(w.Log, "phone_watch.warning_the_phone_at", classify.Printable(addr), wrongPhoneWarningText)
 }
 
 func (w *watcher) disconnect(ctx context.Context, addr string) {

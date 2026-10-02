@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -42,13 +43,13 @@ func newEnvCmd(app *App) *cobra.Command {
 				return WriteData(app.Stdout, res)
 			}
 			fmt.Fprintln(app.Stdout, res.Dir)
-			for _, l := range groupSkillPaths("created", res.Created) {
+			for _, l := range groupSkillLines(app.speaks(), "created", res.Created) {
 				fmt.Fprintln(app.Stderr, l)
 			}
-			for _, l := range groupSkillPaths("updated", res.Updated) {
+			for _, l := range groupSkillLines(app.speaks(), "updated", res.Updated) {
 				fmt.Fprintln(app.Stderr, l)
 			}
-			fmt.Fprintln(app.Stderr, "Environment ready. Next: `adbuddy serve`, then `adbuddy run` in another terminal.")
+			fmt.Fprintln(app.Stderr, app.T("envcmd.environment_ready_next_adbuddy_serve"))
 			return nil
 		},
 	}
@@ -58,9 +59,16 @@ func newEnvCmd(app *App) *cobra.Command {
 	return env
 }
 
-// groupSkillPaths prints one line per path, except the skill files, which are
-// summarised in one line per folder: "created 9 skills in .claude/skills".
+// groupSkillPaths is groupSkillLines in English (what the tests read).
 func groupSkillPaths(verb string, paths []string) []string {
+	return groupSkillLines(i18n.EN, verb, paths)
+}
+
+// groupSkillLines prints one line per path, except the skill files, which are
+// summarised in one line per folder: "created 9 skills in .claude/skills". verb
+// is "created" or "updated". The English keeps "1 skills" as it always said;
+// the Spanish has its singular.
+func groupSkillLines(lang i18n.Lang, verb string, paths []string) []string {
 	var lines, order []string
 	skills := map[string]map[string]bool{}
 	for _, p := range paths {
@@ -72,7 +80,11 @@ func groupSkillPaths(verb string, paths []string) []string {
 			}
 		}
 		if root == "" {
-			lines = append(lines, "  "+verb+" "+slash)
+			if verb == "created" {
+				lines = append(lines, lang.T("envcmd.created", slash))
+			} else {
+				lines = append(lines, lang.T("envcmd.updated", slash))
+			}
 			continue
 		}
 		name, _, _ := strings.Cut(strings.TrimPrefix(slash, root+"/"), "/")
@@ -83,7 +95,11 @@ func groupSkillPaths(verb string, paths []string) []string {
 		skills[root][name] = true
 	}
 	for _, r := range order {
-		lines = append(lines, fmt.Sprintf("  %s %d skills in %s", verb, len(skills[r]), r))
+		if verb == "created" {
+			lines = append(lines, lang.TN("envcmd.skills_created", len(skills[r]), r))
+		} else {
+			lines = append(lines, lang.TN("envcmd.skills_updated", len(skills[r]), r))
+		}
 	}
 	return lines
 }

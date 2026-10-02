@@ -83,7 +83,7 @@ func newUILink(file string, log io.Writer) *uiLink {
 		err = checkProtected(p.ProtectedApps)
 	}
 	if err != nil {
-		fmt.Fprintf(log, "⚠ The saved list of protected apps (%s) is unreadable (%s): only ADBuddy is protected until the phone app sends it again.\n", file, classify.Printable(err.Error()))
+		tell(log, "uilink.the_saved_list_of_protected", file, classify.Printable(err.Error()))
 		return u
 	}
 	u.setProtected(p.ProtectedApps)
@@ -212,7 +212,7 @@ func (u *uiLink) onDeviceInfo(m bridge.Message) {
 		return
 	}
 	if err := checkProtected(info.ProtectedApps); err != nil {
-		fmt.Fprintf(u.log, "⚠ The phone app sent a list of protected apps that is not valid (%s): keeping the last one.\n", classify.Printable(err.Error()))
+		tell(u.log, "uilink.the_phone_app_sent_a", classify.Printable(err.Error()))
 		return
 	}
 	u.setProtected(info.ProtectedApps)
@@ -220,7 +220,7 @@ func (u *uiLink) onDeviceInfo(m bridge.Message) {
 		return
 	}
 	if err := writeProtected(u.file, protectedFile{ProtectedApps: info.ProtectedApps, Updated: u.now().UTC()}); err != nil {
-		fmt.Fprintf(u.log, "⚠ Could not save the list of protected apps (%s): it holds until ADBuddy stops.\n", classify.Printable(err.Error()))
+		tell(u.log, "uilink.could_not_save_the_list", classify.Printable(err.Error()))
 	}
 }
 
@@ -254,7 +254,7 @@ func (u *uiLink) Protected(pkg string) bool {
 	defer u.mu.Unlock()
 	if !u.known && !u.warned {
 		u.warned = true
-		fmt.Fprintln(u.log, "⚠ The phone app has not sent its list of protected apps yet: only ADBuddy itself is protected from the agent's taps and screen reads.")
+		tell(u.log, "uilink.the_phone_app_has_not")
 	}
 	return u.protected[pkg]
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 )
 
@@ -177,11 +178,11 @@ func (l *phoneLink) handleHook(ctx context.Context, ws string, req ipc.Request, 
 func (l *phoneLink) hookCall(ctx context.Context, ws, event string, raw []byte) []byte {
 	in, err := claudecode.ParseHook(event, raw)
 	if err != nil {
-		fmt.Fprintln(l.log, "⚠ Claude Code hook ignored:", err)
+		fmt.Fprintln(l.log, l.lang.T("phone_agent.claude_code_hook_ignored", err))
 		return nil
 	}
 	if !sameTree(ws, in.Cwd) {
-		fmt.Fprintln(l.log, "⚠ Claude Code hook ignored: it is not from the agent's environment")
+		fmt.Fprintln(l.log, l.lang.T("phone_agent.claude_code_hook_ignored_it"))
 		return nil
 	}
 	switch in.Event {
@@ -277,7 +278,7 @@ func (l *phoneLink) configDir() string {
 func (l *phoneLink) onSessionStart(in claudecode.HookInput) {
 	path, err := claudecode.ValidTranscript(in.TranscriptPath, l.configDir())
 	if err != nil {
-		fmt.Fprintln(l.log, "⚠ Claude Code transcript ignored:", err)
+		fmt.Fprintln(l.log, l.lang.T("phone_agent.claude_code_transcript_ignored", err))
 		return
 	}
 	tl := claudecode.NewTailer(path, in.Source == "resume" || in.Source == "compact")
@@ -341,19 +342,19 @@ func (l *phoneLink) pollTranscript(ctx context.Context, tl *claudecode.Tailer, s
 	p := tl.Parser()
 	switch {
 	case err != nil:
-		l.degrade("the transcript cannot be read")
+		l.degrade(i18n.M("phone_agent.degrade.unreadable"))
 		return false
 	case !tl.Started() && time.Since(started) > grace:
-		l.degrade("the transcript did not appear")
+		l.degrade(i18n.M("phone_agent.degrade.missing"))
 		return false
 	case p.BadRun() >= badLines:
-		l.degrade("the transcript is not in a format this host understands")
+		l.degrade(i18n.M("phone_agent.degrade.format"))
 		return false
 	case p.BadVersion():
-		l.degrade("the Claude Code version is not a tested version") // never the text of the transcript
+		l.degrade(i18n.M("phone_agent.degrade.untested_version")) // never the text of the transcript
 		return false
 	case !claudecode.Supported(p.Version()):
-		l.degrade("Claude Code " + p.Version() + " is not a tested version")
+		l.degrade(i18n.M("phone_agent.degrade.untested", p.Version()))
 		return false
 	}
 	// droppedSeen belongs to a.mu like the rest of the state (pollMu is taken
@@ -365,7 +366,7 @@ func (l *phoneLink) pollTranscript(ctx context.Context, tl *claudecode.Tailer, s
 	}
 	a.mu.Unlock()
 	if fresh {
-		fmt.Fprintf(l.log, "⚠ Claude Code chat: %d answer(s) without a valid id were not shown\n", n)
+		fmt.Fprintln(l.log, l.lang.T("phone_agent.claude_code_chat_answer_s", n))
 	}
 	for _, e := range events {
 		l.apply(e)
@@ -375,7 +376,7 @@ func (l *phoneLink) pollTranscript(ctx context.Context, tl *claudecode.Tailer, s
 
 // degrade puts the chat on its fallback (spec M4 §4.4): the terminal view
 // and the last answer of each turn. It says so once.
-func (l *phoneLink) degrade(why string) {
+func (l *phoneLink) degrade(why i18n.Msg) {
 	a := &l.adapter
 	a.mu.Lock()
 	already := a.degraded
@@ -388,7 +389,7 @@ func (l *phoneLink) degrade(why string) {
 	if already {
 		return
 	}
-	fmt.Fprintln(l.log, "⚠ Claude Code chat view off:", why)
+	fmt.Fprintln(l.log, l.lang.T("phone_agent.claude_code_chat_view_off", why))
 	l.publishEvent(bridge.TypeNotice, bridge.Notice{Level: "info", Text: l.lang.T("notice.chat_off", why)})
 	l.publishState()
 }

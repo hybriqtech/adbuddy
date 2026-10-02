@@ -13,6 +13,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/agent"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/pty"
 	"github.com/hybriqtech/adbuddy/host/internal/session"
@@ -47,11 +48,11 @@ func newSession(app *App, ws, serial string, onInfo func(session.Info)) *session
 			}
 			cfg := claudeConfig(app.Getenv, home)
 			if cfg == "" {
-				fmt.Fprintf(app.Stderr, "⚠ Could not find Claude Code's configuration to mark %s as trusted: answer its question in the terminal.\n", dir)
+				fmt.Fprintln(app.Stderr, app.T("serve_session.could_not_find_claude_code", dir))
 				return
 			}
 			if _, err := agent.TrustFolder(cfg, dir); err != nil {
-				fmt.Fprintf(app.Stderr, "⚠ Could not mark %s as trusted for Claude Code (%s): answer its question in the terminal.\n", dir, classify.Printable(err.Error()))
+				fmt.Fprintln(app.Stderr, app.T("serve_session.could_not_mark_as_trusted", dir, classify.Printable(err.Error())))
 			}
 		},
 		OnInfo: onInfo,
@@ -99,10 +100,10 @@ func termEnv(env []string) []string {
 // last conversation. A missing agent leaves serve without a session.
 func startAgent(app *App, sess *session.Manager, name string) {
 	if err := sess.Start(name, true); err != nil {
-		fmt.Fprintf(app.Stderr, "⚠ Could not start %s: %s\n  %s\n", name, classify.Printable(err.Error()), agent.InstallHint(name))
+		fmt.Fprintln(app.Stderr, app.T("serve_session.could_not_start", name, classify.Printable(err.Error()), agent.InstallHint(name)))
 		return
 	}
-	fmt.Fprintf(app.Stderr, "Agent: %s, in this host. Connect a terminal with `adbuddy attach` (Ctrl+] to detach), or chat from the phone.\n", name)
+	fmt.Fprintln(app.Stderr, app.T("serve_session.agent_in_this_host_connect", name))
 }
 
 var attachIDs atomic.Int64
@@ -110,6 +111,11 @@ var attachIDs atomic.Int64
 // sessionRequest answers the IPC requests of the session: attach, new, stop.
 // The agent may not use them: it would type into its own terminal.
 func handleSession(ctx context.Context, sess *session.Manager, defaultAgent string, req ipc.Request, c *ipc.Conn) ipc.Exit {
+	return handleSessionIn(i18n.EN, ctx, sess, defaultAgent, req, c)
+}
+
+// handleSessionIn is handleSession with what it tells the person written in lang.
+func handleSessionIn(lang i18n.Lang, ctx context.Context, sess *session.Manager, defaultAgent string, req ipc.Request, c *ipc.Conn) ipc.Exit {
 	if req.Env["ADBUDDY_SOURCE"] == "agent" {
 		return ipc.Exit{Code: 1, ErrorCode: "AGENT_SESSION", Error: "the agent cannot control its own session"}
 	}
@@ -138,11 +144,11 @@ func handleSession(ctx context.Context, sess *session.Manager, defaultAgent stri
 			if err := sess.Start(name, false); err != nil {
 				return ipc.Exit{Code: 1, ErrorCode: "AGENT_NOT_FOUND", Error: classify.Printable(err.Error()) + ". " + agent.InstallHint(name)}
 			}
-			fmt.Fprintf(c.Stdout(), "New conversation with %s.\n", name)
+			tell(langWriter{Writer: c.Stdout(), Lang: lang}, "serve_session.new_conversation_with", name)
 			return ipc.Exit{}
 		case "stop":
 			sess.Stop()
-			fmt.Fprintln(c.Stdout(), "The agent stopped; adbuddy serve keeps running.")
+			tell(langWriter{Writer: c.Stdout(), Lang: lang}, "serve_session.the_agent_stopped_adbuddy_serve")
 			return ipc.Exit{}
 		}
 		return ipc.Exit{Code: 2, ErrorCode: "USAGE", Error: "new or stop"}

@@ -8,7 +8,6 @@ import (
 	"io"
 	"math/big"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -126,17 +125,17 @@ var newToken = bridge.NewToken
 // confirms with fallback and never pauses, and says why: no failure of the
 // app's channel stops serve. Its only error is Interrupted (ctx ended).
 func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl *remote.Controller, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
-	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf, lang: app.Lang}
-	l.ui = newUILink(protectedAppsPath(e), app.Stderr)
-	l.remote = newRemoteLink(ctx, store, ctl, a, app.Stderr)
+	l := &phoneLink{log: app.Log(), agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf, lang: app.Lang}
+	l.ui = newUILink(protectedAppsPath(e), app.Log())
+	l.remote = newRemoteLink(ctx, store, ctl, a, app.Log())
 	l.ui.deviceInfo = l.remote.onDeviceInfo
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
 	l.conf.StaleText = l.lang.T("notice.stale_reply")
 	if trust := phoneapp.LoadTrust(releaseCert, e.dirs.Data); trust.DevAPK != "" {
-		fmt.Fprintf(app.Stderr, "⚠ ADBuddy trusts a development build of the phone app (SHA-256 %s, from `adbuddy setup --apk`): it gets the token like a release. Delete %s to stop.\n", trust.DevAPK, phoneapp.DevTrustPath(e.dirs.Data))
+		fmt.Fprintln(app.Stderr, app.T("phone.adbuddy_trusts_a_development_build", trust.DevAPK, phoneapp.DevTrustPath(e.dirs.Data)))
 	}
-	without := func(why string) (*phoneLink, error) {
-		fmt.Fprintf(app.Stderr, "⚠ %s. 🔴 confirmations happen here, without the phone app.\n", why)
+	without := func(why i18n.Msg) (*phoneLink, error) {
+		fmt.Fprintln(app.Stderr, app.T("phone.confirmations_happen_here_without_the", why))
 		return l, nil
 	}
 	version, err := phoneapp.InstalledVersion(ctx, a)
@@ -145,22 +144,20 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 	}
 	if err != nil {
 		// Only checked here: the app stays off until serve starts again.
-		fmt.Fprintf(app.Stderr, "⚠ Could not check whether the ADBuddy app is on the phone (%s). The phone app is off for the rest of this session: "+
-			"🔴 confirmations happen here; restart `adbuddy serve` to use it.\n", classify.Printable(err.Error()))
+		fmt.Fprintln(app.Stderr, app.T("phone.could_not_check_whether_the", classify.Printable(err.Error())))
 		return l, nil
 	}
 	if version == "" {
-		fmt.Fprintln(app.Stderr, "The ADBuddy app is not on the phone: 🔴 confirmations happen here. Run `adbuddy setup` to install it.")
+		fmt.Fprintln(app.Stderr, app.T("phone.the_adbuddy_app_is_not"))
 		return l, nil
 	}
 	port, err := chatPort(store)
 	if err != nil {
-		return without("Could not choose a port for the phone app's channel (" + classify.Printable(err.Error()) + "); set chat_port in " + e.dirs.ConfigFile())
+		return without(i18n.M("phone.chat_port_unavailable", classify.Printable(err.Error()), e.dirs.ConfigFile()))
 	}
 	listener, err := bridge.Listen(port)
 	if err != nil {
-		return without("Port " + strconv.Itoa(port) + " for the phone app's channel is in use (" + classify.Printable(err.Error()) + "); change chat_port in " +
-			e.dirs.ConfigFile() + " to a free port between 1024 and 65535 and start adbuddy serve again")
+		return without(i18n.M("phone.chat_port_in_use", port, classify.Printable(err.Error()), e.dirs.ConfigFile()))
 	}
 	l.verifier = phoneapp.NewVerifier(func() phoneapp.Trust { return phoneapp.LoadTrust(releaseCert, e.dirs.Data) }, phoneapp.MinAppVersionCode)
 	l.recheck = make(chan struct{}, 1)
@@ -172,11 +169,11 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 		OnAttach:  l.onAttach,
 		Snapshot:  l.snapshot,
 		OnReject: func(h bridge.Hello) {
-			fmt.Fprintf(app.Stderr, "⚠ The ADBuddy app on the phone (%s) is too old for this host: run `adbuddy setup` to update it.\n", classify.Printable(h.AppVersion))
+			fmt.Fprintln(app.Stderr, app.T("phone.the_adbuddy_app_on_the", classify.Printable(h.AppVersion)))
 		},
 		Admit: func(ctx context.Context, _ bridge.Hello) bool {
 			if err := l.verifier.Same(ctx, a); err != nil {
-				fmt.Fprintf(app.Stderr, "⚠ An app with the token connected, but it is not the app ADBuddy checked (%s): refused, checking the app again.\n", classify.Printable(err.Error()))
+				fmt.Fprintln(app.Stderr, app.T("phone.an_app_with_the_token", classify.Printable(err.Error())))
 				select {
 				case l.recheck <- struct{}{}:
 				default:
@@ -187,12 +184,12 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 		},
 		OnConnect: func(on bool) {
 			if on {
-				fmt.Fprintln(app.Stderr, "📱 The phone app is connected: 🔴 confirmations go to the phone.")
+				fmt.Fprintln(app.Stderr, app.T("phone.the_phone_app_is_connected"))
 				return
 			}
-			fmt.Fprintln(app.Stderr, "📱 The phone app disconnected: 🔴 confirmations happen here.")
+			fmt.Fprintln(app.Stderr, app.T("phone.the_phone_app_disconnected_confirmations"))
 			if l.Paused() {
-				fmt.Fprintln(app.Stderr, "⏸ Still paused: resume from the app when it reconnects, or restart adbuddy serve.")
+				fmt.Fprintln(app.Stderr, app.T("phone.still_paused_resume_from_the"))
 			}
 			// A question already on the phone would wait there for
 			// nobody: it moves here too.
@@ -206,7 +203,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 	l.setAreas(l.confirmArea(), l.chatArea(), l.agentArea(), l.uiArea(), l.remote.area())
 	l.conf.Notify = func(title string, moved bool) {
 		if moved {
-			fmt.Fprintf(app.Stderr, "📱 The phone app disconnected before you answered “%s”: it no longer waits for the phone.\n", classify.Printable(title))
+			fmt.Fprintln(app.Stderr, app.T("phone.the_phone_app_disconnected_before", classify.Printable(title)))
 			// The app keeps its questions while away and when it comes
 			// back to the same session: a snapshot without this one takes
 			// it off the phone. It goes to the events kept for the app, so
@@ -214,7 +211,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 			// back (it may have got the question in its welcome's snapshot).
 			l.srv.PublishSnapshot()
 		} else {
-			fmt.Fprintf(app.Stderr, "📱 The phone app is back: “%s” still waits for your answer on the phone.\n", classify.Printable(title))
+			fmt.Fprintln(app.Stderr, app.T("phone.the_phone_app_is_back", classify.Printable(title)))
 		}
 	}
 	go l.srv.Serve(ctx, listener)
@@ -247,7 +244,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 		return nil, Interrupted()
 	}
 	if err != nil {
-		fmt.Fprintf(app.Stderr, "⚠ Could not reach the phone app (%s): 🔴 confirmations happen here until it connects.\n", classify.Printable(err.Error()))
+		fmt.Fprintln(app.Stderr, app.T("phone.could_not_reach_the_phone", classify.Printable(err.Error())))
 	}
 	// Read here, before the goroutine: a test that sets tunnelCheck for its
 	// own link must not race with the goroutine of a previous one.
@@ -278,7 +275,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 				warned = false
 			} else if !warned && ctx.Err() == nil {
 				warned = true
-				fmt.Fprintf(app.Stderr, "⚠ Could not reopen the phone app's channel: %s\n", classify.Printable(err.Error()))
+				fmt.Fprintln(app.Stderr, app.T("phone.could_not_reopen_the_phone", classify.Printable(err.Error())))
 			}
 		}
 	}()
@@ -468,7 +465,7 @@ func (l *phoneLink) onPauseMessage(m bridge.Message) {
 	withdraw := l.onPause
 	l.mu.Unlock()
 	if pause {
-		fmt.Fprintln(l.log, "⏸ Paused from the phone: every adb command of the agent is refused until you resume.")
+		fmt.Fprintln(l.log, l.lang.T("phone.paused_from_the_phone_every"))
 		// After Paused reports true: the command whose question is
 		// withdrawn then ends blocked as paused.
 		if withdraw != nil {
@@ -476,7 +473,7 @@ func (l *phoneLink) onPauseMessage(m bridge.Message) {
 		}
 		l.withdrawRemoteAsk()
 	} else {
-		fmt.Fprintln(l.log, "▶ Resumed from the phone.")
+		fmt.Fprintln(l.log, l.lang.T("phone.resumed_from_the_phone"))
 	}
 	_ = l.srv.Publish(bridge.TypeSessionState, l.state())
 }
