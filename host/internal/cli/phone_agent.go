@@ -281,6 +281,7 @@ func (l *phoneLink) onSessionStart(in claudecode.HookInput) {
 		return
 	}
 	tl := claudecode.NewTailer(path, in.Source == "resume" || in.Source == "compact")
+	tl.Parser().SetLang(l.lang)
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &l.adapter
 	a.mu.Lock()
@@ -388,7 +389,7 @@ func (l *phoneLink) degrade(why string) {
 		return
 	}
 	fmt.Fprintln(l.log, "⚠ Claude Code chat view off:", why)
-	l.publishEvent(bridge.TypeNotice, bridge.Notice{Level: "info", Text: "The chat view is off (" + why + "); the answers still come after each turn and the terminal shows everything."})
+	l.publishEvent(bridge.TypeNotice, bridge.Notice{Level: "info", Text: l.lang.T("notice.chat_off", why)})
 	l.publishState()
 }
 

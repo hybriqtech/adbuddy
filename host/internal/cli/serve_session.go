@@ -34,6 +34,7 @@ func newSession(app *App, ws, serial string, onInfo func(session.Info)) *session
 		home = ""
 	}
 	return session.New(session.Options{
+		Lang: app.Lang,
 		Dir:  ws,
 		Look: lookAgent,
 		Env: func(string) []string {

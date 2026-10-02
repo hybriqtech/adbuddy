@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
@@ -365,12 +366,7 @@ func moveBackTarget(argv []string) (string, bool) {
 	return unquote(argv[3])
 }
 
-func undoPrefix(lang string) string {
-	if lang == "es" {
-		return "Deshacer: "
-	}
-	return "Undo: "
-}
+func undoPrefix(lang string) string { return i18n.Lang(lang).T("undo.prefix") }
 
 // States in the undone log. Its lines are "running <id>" (written and synced
 // before the inverse runs), "<id>" (undone) and "failed <id>" (the inverse

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
 // Text that comes from the transcript and reaches the phone (the version in
@@ -83,6 +85,7 @@ const (
 // join the lines of one message and to name a tool's end: bounded, and
 // forgotten as it grows. Not safe for concurrent use.
 type Parser struct {
+	lang    i18n.Lang // the language of the verb of a tool summary
 	version string
 	badRun  int
 
@@ -98,6 +101,10 @@ type Parser struct {
 }
 
 type toolInfo struct{ name, summary, messageID string }
+
+// SetLang sets the language of the verb of each tool summary (ToolSummaryIn);
+// English if never set.
+func (p *Parser) SetLang(l i18n.Lang) { p.lang = l }
 
 // NewParser returns an empty Parser.
 func NewParser() *Parser {
@@ -233,7 +240,7 @@ func (p *Parser) assistant(l rawLine, m rawMessage) []Event {
 			if !ValidID(b.ID) {
 				continue
 			}
-			sum := ToolSummary(b.Name, b.Input)
+			sum := ToolSummaryIn(p.lang, b.Name, b.Input)
 			p.addTool(b.ID, toolInfo{b.Name, sum, id})
 			out = append(out, Event{Kind: KindTool, ToolID: b.ID, Tool: b.Name, Summary: sum, Status: "running", MessageOf: id})
 		}

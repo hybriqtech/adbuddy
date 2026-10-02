@@ -1,1 +1,37 @@
 # The messages of the host in Spanish: the same keys as en.toml, the same verbs (see host/README.md).
+
+# confirm: la pregunta de un comando 🔴 en la terminal de `adbuddy serve` (confirm/confirm.go)
+"confirm.nobody" = "🔴 Denegado (nadie puede confirmar): %[1]s"
+"confirm.header" = "🔴 Hace falta tu confirmación (caduca en %[1]s)"
+"confirm.why" = "Motivo:"
+"confirm.special" = "⚠ Esto puede cortar la conexión con el móvil o afectar a ADBuddy."
+"confirm.howto" = "Para permitirlo escribe %[1]s y pulsa Intro; cualquier otra cosa lo deniega."
+"confirm.code" = "Código:"
+"confirm.allowed" = "→ permitido"
+"confirm.denied" = "→ denegado"
+"confirm.no_input" = "→ denegado (no hay más entrada: nadie puede confirmar)"
+"confirm.expired" = "→ caducó, denegado"
+"confirm.withdrawn" = "→ retirada: %[1]s"
+"confirm.abandoned" = "→ abandonada por el agente"
+# session: lo que enseña una terminal conectada (session/attach.go)
+"session.agent_ended" = "El agente terminó. Vuelve a arrancarlo con adbuddy new, o desconéctate con Ctrl+]."
+# daemon: lo que serve cuenta a la persona de los comandos del agente (daemon/daemon.go, daemon/undo.go)
+"daemon.waiting" = "Esperando a que termine \"%[1]s\" antes de preguntar \"%[2]s\". Para dejar de esperar, pausa desde la app del móvil, detén el comando del agente o pulsa Ctrl+C para parar ADBuddy."
+"daemon.inverse_failed" = "no se pudo calcular el inverso de %[1]s: %[2]s"
+"daemon.journal_failed" = "falló la escritura en el diario para %[1]s: %[2]s"
+"undo.prefix" = "Deshacer: "
+# remote: la pregunta de `adbuddy remote on` (cli/remotecmd.go)
+"remote.confirm.title" = "Abrir el puerto de red 5555 de adb durante 12 horas"
+"remote.confirm.detail" = "adb escuchará en el puerto 5555 de cualquier red hasta que lo cierres con `adbuddy remote off` o pasen 12 horas."
+# tool: el verbo de lo que hace el agente, en los resúmenes que enseña el móvil (claudecode/rule.go)
+"tool.read" = "Leer %[1]s"
+"tool.edit" = "Editar %[1]s"
+"tool.write" = "Escribir %[1]s"
+"tool.search" = "Buscar %[1]s"
+"tool.find" = "Buscar ficheros %[1]s"
+"tool.fetch" = "Descargar %[1]s"
+"tool.web_search" = "Buscar en la web: %[1]s"
+# notice: lo que el host cuenta a la app del móvil, tal cual se enseña (cli/phone*.go, bridge/confirm.go)
+"notice.unsupported" = "Esta versión de ADBuddy en el PC todavía no gestiona %[1]s."
+"notice.chat_off" = "La vista del chat está desactivada (%[1]s); las respuestas siguen llegando al final de cada turno y la terminal lo muestra todo."
+"notice.stale_reply" = "Esa pregunta ya se respondió o pasó a la terminal del PC."

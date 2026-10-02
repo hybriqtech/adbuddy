@@ -16,6 +16,11 @@ var attachBacklog = 256
 // ends; it stays attached.
 const AgentEnded = "\r\n[ADBuddy] The agent ended. Start it again with adbuddy new, or detach with Ctrl+].\r\n"
 
+// agentEnded is AgentEnded in the language of the PC (catalog session.agent_ended).
+func (m *Manager) agentEnded() string {
+	return "\r\n[ADBuddy] " + m.o.Lang.T("session.agent_ended") + "\r\n"
+}
+
 // firstSize is how long attach waits for the terminal's size.
 var firstSize = 2 * time.Second
 
@@ -78,7 +83,7 @@ func (m *Manager) ServeAttach(ctx context.Context, c *ipc.Conn, id string) ipc.E
 			return nil
 		}
 		ended = true
-		_, err := io.WriteString(c.Stdout(), AgentEnded)
+		_, err := io.WriteString(c.Stdout(), m.agentEnded())
 		return err
 	}
 	redraw := func() error {

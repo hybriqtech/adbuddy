@@ -52,7 +52,7 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	req := bridge.PermissionRequest{
 		ID:          newID("p_"),
 		Tool:        in.ToolName,
-		Summary:     claudecode.ToolSummary(in.ToolName, in.ToolInput),
+		Summary:     claudecode.ToolSummaryIn(l.lang, in.ToolName, in.ToolInput),
 		Detail:      claudecode.ToolDetail(in.ToolName, in.ToolInput),
 		ExpiresAt:   now.Add(timeout).UTC(),
 		AllowAlways: always,
@@ -174,7 +174,7 @@ func (l *phoneLink) onPermReply(m bridge.Message) {
 	}
 	a.mu.Unlock()
 	if p == nil || !l.resolvePerm(rep.ID, d, "phone") {
-		l.publishEvent(bridge.TypeNotice, bridge.Notice{Level: "info", Text: bridge.StaleReplyText})
+		l.publishEvent(bridge.TypeNotice, bridge.Notice{Level: "info", Text: l.lang.T("notice.stale_reply")})
 	}
 }
 

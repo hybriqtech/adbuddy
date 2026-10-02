@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
 const (
@@ -38,10 +40,14 @@ func oneLine(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// ToolSummary is the one line the phone shows of a tool use (spec M4 §4.2):
-// the verb and what it works on, never the whole input, never a path with
+// ToolSummary is ToolSummaryIn in English.
+func ToolSummary(tool string, raw json.RawMessage) string { return ToolSummaryIn(i18n.EN, tool, raw) }
+
+// ToolSummaryIn is the one line the phone shows of a tool use (spec M4 §4.2):
+// the verb, in the language of the PC, and what it works on, which is the
+// agent's and is never translated; never the whole input, never a path with
 // folders. At most 120 characters.
-func ToolSummary(tool string, raw json.RawMessage) string {
+func ToolSummaryIn(lang i18n.Lang, tool string, raw json.RawMessage) string {
 	in := input(raw)
 	base := func(key string) string {
 		p := str(in, key)
@@ -57,21 +63,21 @@ func ToolSummary(tool string, raw json.RawMessage) string {
 		}
 		return oneLine(str(in, "command"), maxSummary)
 	case "Read":
-		return oneLine("Read "+base("file_path"), maxSummary)
+		return oneLine(lang.T("tool.read", base("file_path")), maxSummary)
 	case "Edit", "MultiEdit":
-		return oneLine("Edit "+base("file_path"), maxSummary)
+		return oneLine(lang.T("tool.edit", base("file_path")), maxSummary)
 	case "Write":
-		return oneLine("Write "+base("file_path"), maxSummary)
+		return oneLine(lang.T("tool.write", base("file_path")), maxSummary)
 	case "NotebookEdit":
-		return oneLine("Edit "+base("notebook_path"), maxSummary)
+		return oneLine(lang.T("tool.edit", base("notebook_path")), maxSummary)
 	case "Grep":
-		return oneLine("Search "+str(in, "pattern"), maxSummary)
+		return oneLine(lang.T("tool.search", str(in, "pattern")), maxSummary)
 	case "Glob":
-		return oneLine("Find "+str(in, "pattern"), maxSummary)
+		return oneLine(lang.T("tool.find", str(in, "pattern")), maxSummary)
 	case "WebFetch":
-		return oneLine("Fetch "+domainOf(str(in, "url")), maxSummary)
+		return oneLine(lang.T("tool.fetch", domainOf(str(in, "url"))), maxSummary)
 	case "WebSearch":
-		return oneLine("Search the web: "+str(in, "query"), maxSummary)
+		return oneLine(lang.T("tool.web_search", str(in, "query")), maxSummary)
 	}
 	if rest, ok := strings.CutPrefix(tool, "mcp__"); ok {
 		server, name, _ := strings.Cut(rest, "__")

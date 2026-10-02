@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/pty"
 	"github.com/hybriqtech/adbuddy/host/internal/term"
 )
@@ -75,6 +76,9 @@ type Options struct {
 	// it is at the time of the call, and must not call back into the Manager
 	// while holding its own locks.
 	OnInfo func(Info)
+	// Lang is the language of what the manager writes to a person's terminal
+	// (the notice that the agent ended); English if empty.
+	Lang i18n.Lang
 }
 
 // Output is a piece of the PTY's output, already in its screen. Two pieces

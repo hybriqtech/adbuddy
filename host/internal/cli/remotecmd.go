@@ -13,6 +13,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
@@ -239,19 +240,9 @@ func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, er
 }
 
 // remoteConfirmTitle is the question's title, in the user's language.
-func remoteConfirmTitle(lang string) string {
-	if lang == "es" {
-		return "Abrir el puerto de red 5555 de adb durante 12 horas"
-	}
-	return "Open adb's network port 5555 for 12 hours"
-}
+func remoteConfirmTitle(lang string) string { return i18n.Lang(lang).T("remote.confirm.title") }
 
-func remoteConfirmDetail(lang string) string {
-	if lang == "es" {
-		return "adb escuchará en el puerto 5555 de cualquier red hasta que lo cierres con `adbuddy remote off` o pasen 12 horas."
-	}
-	return "adb will listen on port 5555 on any network until you close it with `adbuddy remote off` or 12 hours pass."
-}
+func remoteConfirmDetail(lang string) string { return i18n.Lang(lang).T("remote.confirm.detail") }
 
 // withdrawRemoteAsk cancels the question of `remote on` that is waiting, if
 // any (a pause from the phone).

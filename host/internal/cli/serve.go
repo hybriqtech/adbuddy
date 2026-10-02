@@ -175,14 +175,14 @@ Keep it open and start the agent in another terminal with ` + "`adbuddy run`" + 
 			var confirmer confirm.Confirmer
 			switch confirmMode {
 			case "auto":
-				confirmer = confirm.DenyAll{Out: app.Stderr}
+				confirmer = confirm.DenyAll{Out: app.Stderr, Lang: app.Lang}
 				if isTerminal(app.Stdin) {
-					confirmer = confirm.NewTerminal(app.Stdin, app.Stderr)
+					confirmer = confirm.NewTerminal(app.Stdin, app.Stderr).WithLang(app.Lang)
 				}
 			case "terminal":
-				confirmer = confirm.NewTerminal(app.Stdin, app.Stderr)
+				confirmer = confirm.NewTerminal(app.Stdin, app.Stderr).WithLang(app.Lang)
 			case "deny":
-				confirmer = confirm.DenyAll{Out: app.Stderr}
+				confirmer = confirm.DenyAll{Out: app.Stderr, Lang: app.Lang}
 			default:
 				return UsageError("--confirm must be auto, terminal or deny")
 			}

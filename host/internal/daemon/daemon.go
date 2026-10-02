@@ -15,6 +15,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/precheck"
@@ -232,7 +233,7 @@ func (d *Daemon) waitChanges(ctx context.Context, q *question) error {
 		d.askMu.Unlock()
 		if !told {
 			told = true
-			d.o.OnNotice(`Waiting for "` + classify.Printable(running) + `" to finish before asking "` + classify.Printable(q.title) + `". To stop waiting, pause from the phone app, stop the agent's command or press Ctrl+C to stop ADBuddy.`)
+			d.o.OnNotice(d.lang().T("daemon.waiting", classify.Printable(running), classify.Printable(q.title)))
 		}
 		select {
 		case <-idle:
@@ -358,6 +359,9 @@ func New(o Options) *Daemon {
 	}
 	return &Daemon{o: o}
 }
+
+// lang is the language of what serve tells the person (Options.Lang).
+func (d *Daemon) lang() i18n.Lang { return i18n.Lang(d.o.Lang) }
 
 // identity is the name the journal and undo know the phone by.
 func (d *Daemon) identity() string {
@@ -612,7 +616,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	e.ExitCode = &code
 	if prep.After != nil && code == 0 {
 		if inv, err := prep.After(ctx); err != nil {
-			d.o.OnWarning("could not compute the inverse of " + e.ID + ": " + err.Error())
+			d.o.OnWarning(d.lang().T("daemon.inverse_failed", e.ID, err.Error()))
 		} else if inv != nil {
 			e.Inverse = &journal.Inverse{Argv: inv}
 		}
@@ -639,7 +643,7 @@ func (d *Daemon) block(e journal.Entry, s Stream, reason string) ipc.Exit {
 // record appends the final record and shows it in the live view.
 func (d *Daemon) record(e journal.Entry) {
 	if err := d.o.Journal.Append(e); err != nil {
-		d.o.OnWarning("journal write failed for " + e.ID + ": " + err.Error())
+		d.o.OnWarning(d.lang().T("daemon.journal_failed", e.ID, err.Error()))
 	}
 	d.o.OnEntry(e)
 }

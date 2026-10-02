@@ -17,6 +17,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
@@ -37,6 +38,9 @@ type phoneLink struct {
 	conf  *bridge.Confirmer
 	log   io.Writer
 	agent string
+	// lang is the language of what serve tells the phone app in a notice
+	// (startPhoneLink: App.Lang); English when empty.
+	lang i18n.Lang
 
 	// verifier checks the app installed (spec M6a §6.3). recheck is how
 	// Admit asks for a new connect() when an app that is not the verified
@@ -122,11 +126,12 @@ var newToken = bridge.NewToken
 // confirms with fallback and never pauses, and says why: no failure of the
 // app's channel stops serve. Its only error is Interrupted (ctx ended).
 func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl *remote.Controller, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
-	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf}
+	l := &phoneLink{log: app.Stderr, agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf, lang: app.Lang}
 	l.ui = newUILink(protectedAppsPath(e), app.Stderr)
 	l.remote = newRemoteLink(ctx, store, ctl, a, app.Stderr)
 	l.ui.deviceInfo = l.remote.onDeviceInfo
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
+	l.conf.StaleText = l.lang.T("notice.stale_reply")
 	if trust := phoneapp.LoadTrust(releaseCert, e.dirs.Data); trust.DevAPK != "" {
 		fmt.Fprintf(app.Stderr, "⚠ ADBuddy trusts a development build of the phone app (SHA-256 %s, from `adbuddy setup --apk`): it gets the token like a release. Delete %s to stop.\n", trust.DevAPK, phoneapp.DevTrustPath(e.dirs.Data))
 	}
@@ -196,6 +201,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 		},
 	})
 	l.conf = bridge.NewConfirmer(l.srv, fallback)
+	l.conf.StaleText = l.lang.T("notice.stale_reply")
 	l.remote.setServer(l.srv)
 	l.setAreas(l.confirmArea(), l.chatArea(), l.agentArea(), l.uiArea(), l.remote.area())
 	l.conf.Notify = func(title string, moved bool) {
@@ -433,11 +439,13 @@ func (l *phoneLink) unsupported(m bridge.Message) {
 	if r := []rune(typ); len(r) > 64 {
 		typ = string(r[:64]) + "…"
 	}
-	text := "This version of the ADBuddy host does not handle " + classify.Printable(typ) + " yet."
 	if m.RID != "" {
+		// The error's text is English by protocol (§4.1): the app shows its own by code.
+		text := i18n.EN.T("notice.unsupported", classify.Printable(typ))
 		_ = l.srv.Reply(m, bridge.TypeError, bridge.ErrorReply{Code: bridge.CodeUnsupported, Text: text})
 		return
 	}
+	text := l.lang.T("notice.unsupported", classify.Printable(typ))
 	l.mu.Lock()
 	told := l.noticed[typ] || len(l.noticed) >= maxNotices
 	if l.noticed == nil {

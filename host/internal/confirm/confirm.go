@@ -13,8 +13,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
 // Request is what the person sees. Title and Detail come from the rules,
@@ -61,11 +63,14 @@ type Confirmer interface {
 
 // DenyAll answers Nobody: used when nobody can be asked (spec §4.5: "si no hay
 // ninguna de las dos opciones, se rechaza").
-type DenyAll struct{ Out io.Writer }
+type DenyAll struct {
+	Out  io.Writer
+	Lang i18n.Lang // the language of what it writes; English if empty
+}
 
 func (d DenyAll) Confirm(_ context.Context, r Request) Decision {
 	if d.Out != nil {
-		fmt.Fprintf(d.Out, "🔴 Denied (nobody to confirm): %s\n", classify.Printable(r.Title))
+		fmt.Fprintln(d.Out, d.Lang.T("confirm.nobody", classify.Printable(r.Title)))
 	}
 	return Nobody
 }
@@ -87,12 +92,22 @@ type line struct {
 // an answer meant for another question, can never approve it.
 type Terminal struct {
 	out    io.Writer
+	lang   i18n.Lang
 	lines  chan line
 	eof    chan struct{}
 	turn   chan struct{}
 	settle time.Duration
 	code   func() string
 	last   string // the previous question's code, never reused next
+}
+
+// WithLang sets the language of what the terminal writes (English if it is
+// never set). The title and the detail of a question already come in the PC's
+// language from the rules; this is the frame around them. What decides is the
+// same in every language: the code on the screen allows, anything else denies.
+func (t *Terminal) WithLang(l i18n.Lang) *Terminal {
+	t.lang = l
+	return t
 }
 
 // NewTerminal reads answers from in and writes questions to out.
@@ -149,19 +164,20 @@ func (t *Terminal) Confirm(ctx context.Context, r Request) Decision {
 		code = t.code()
 	}
 	t.last = code
-	fmt.Fprintf(t.out, "\n🔴 Confirmation needed (expires in %s)\n   %s\n   %s\n",
-		time.Until(r.ExpiresAt).Round(time.Second), classify.Printable(r.Title), classify.Printable(r.RawCommand))
+	fmt.Fprintf(t.out, "\n%s\n   %s\n   %s\n",
+		t.lang.T("confirm.header", time.Until(r.ExpiresAt).Round(time.Second)), classify.Printable(r.Title), classify.Printable(r.RawCommand))
 	if r.Detail != "" {
 		var parts []string
 		for _, l := range strings.Split(r.Detail, "\n") {
 			parts = append(parts, classify.Printable(l))
 		}
-		fmt.Fprintf(t.out, "   Why: %s\n", strings.Join(parts, "\n        "))
+		why := t.lang.T("confirm.why")
+		fmt.Fprintf(t.out, "   %s %s\n", why, strings.Join(parts, "\n   "+strings.Repeat(" ", utf8.RuneCountInString(why)+1)))
 	}
 	if r.Special {
-		fmt.Fprintf(t.out, "   ⚠ This may cut the connection with the phone or affect ADBuddy.\n")
+		fmt.Fprintf(t.out, "   %s\n", t.lang.T("confirm.special"))
 	}
-	fmt.Fprintf(t.out, "   To allow it type %s and press Enter; anything else denies it.\nCode: ", code)
+	fmt.Fprintf(t.out, "   %s\n%s ", t.lang.T("confirm.howto", code), t.lang.T("confirm.code"))
 	shown := time.Now()
 	for {
 		select {
@@ -173,14 +189,14 @@ func (t *Terminal) Confirm(ctx context.Context, r Request) Decision {
 				return t.expired(ctx)
 			}
 			if strings.TrimSpace(l.text) == code {
-				fmt.Fprintln(t.out, "→ allowed")
+				fmt.Fprintln(t.out, t.lang.T("confirm.allowed"))
 				return Allow
 			}
-			fmt.Fprintln(t.out, "→ denied")
+			fmt.Fprintln(t.out, t.lang.T("confirm.denied"))
 			return Deny
 		case <-t.eof:
 			// Nobody can answer any more (a pipe that ended): not the user's no.
-			fmt.Fprintln(t.out, "\n→ denied (no more input: nobody to confirm)")
+			fmt.Fprintln(t.out, "\n"+t.lang.T("confirm.no_input"))
 			return Nobody
 		case <-ctx.Done():
 			return t.expired(ctx)
@@ -192,12 +208,12 @@ func (t *Terminal) expired(ctx context.Context) Decision {
 	d := fromContext(ctx)
 	switch cause := context.Cause(ctx); {
 	case d == Timeout:
-		fmt.Fprintln(t.out, "\n→ expired, denied")
+		fmt.Fprintln(t.out, "\n"+t.lang.T("confirm.expired"))
 	case cause != nil && !errors.Is(cause, context.Canceled):
 		// Withdrawn by the host, with a reason (a pause from the phone).
-		fmt.Fprintf(t.out, "\n→ withdrawn: %s\n", classify.Printable(cause.Error()))
+		fmt.Fprintln(t.out, "\n"+t.lang.T("confirm.withdrawn", classify.Printable(cause.Error())))
 	default:
-		fmt.Fprintln(t.out, "\n→ abandoned by the agent")
+		fmt.Fprintln(t.out, "\n"+t.lang.T("confirm.abandoned"))
 	}
 	return d
 }

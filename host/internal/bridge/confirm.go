@@ -28,6 +28,9 @@ type Confirmer struct {
 	// goroutine that waits for the answer; title comes from the rules and the
 	// agent's arguments: escape it before printing.
 	Notify func(title string, moved bool)
+	// StaleText is what the app is told when its answer comes too late, in the
+	// language of the PC; StaleReplyText (English) if empty.
+	StaleText string
 
 	mu      sync.Mutex
 	pending map[string]*pendingReq
@@ -169,7 +172,11 @@ func (c *Confirmer) Reply(raw json.RawMessage) {
 	if !ok {
 		c.mu.Unlock()
 		// Publish takes the server's lock: never under c.mu.
-		_ = c.App.Publish(TypeNotice, Notice{Level: "info", Text: StaleReplyText})
+		text := c.StaleText
+		if text == "" {
+			text = StaleReplyText
+		}
+		_ = c.App.Publish(TypeNotice, Notice{Level: "info", Text: text})
 		return
 	}
 	defer c.mu.Unlock()

@@ -1,2 +1,38 @@
 # The messages of the host in English: the source of every translation (see host/README.md).
 # One key per message: "<area>.<what>[.<variant>]" = "text", with %[1]s style verbs.
+
+# confirm: the question of a 🔴 command in the terminal of `adbuddy serve` (confirm/confirm.go)
+"confirm.nobody" = "🔴 Denied (nobody to confirm): %[1]s"
+"confirm.header" = "🔴 Confirmation needed (expires in %[1]s)"
+"confirm.why" = "Why:"
+"confirm.special" = "⚠ This may cut the connection with the phone or affect ADBuddy."
+"confirm.howto" = "To allow it type %[1]s and press Enter; anything else denies it."
+"confirm.code" = "Code:"
+"confirm.allowed" = "→ allowed"
+"confirm.denied" = "→ denied"
+"confirm.no_input" = "→ denied (no more input: nobody to confirm)"
+"confirm.expired" = "→ expired, denied"
+"confirm.withdrawn" = "→ withdrawn: %[1]s"
+"confirm.abandoned" = "→ abandoned by the agent"
+# session: what an attached terminal shows (session/attach.go)
+"session.agent_ended" = "The agent ended. Start it again with adbuddy new, or detach with Ctrl+]."
+# daemon: what serve tells the person about the agent's commands (daemon/daemon.go, daemon/undo.go)
+"daemon.waiting" = "Waiting for \"%[1]s\" to finish before asking \"%[2]s\". To stop waiting, pause from the phone app, stop the agent's command or press Ctrl+C to stop ADBuddy."
+"daemon.inverse_failed" = "could not compute the inverse of %[1]s: %[2]s"
+"daemon.journal_failed" = "journal write failed for %[1]s: %[2]s"
+"undo.prefix" = "Undo: "
+# remote: the question of `adbuddy remote on` (cli/remotecmd.go)
+"remote.confirm.title" = "Open adb's network port 5555 for 12 hours"
+"remote.confirm.detail" = "adb will listen on port 5555 on any network until you close it with `adbuddy remote off` or 12 hours pass."
+# tool: the verb of what the agent does, in the summaries the phone shows (claudecode/rule.go)
+"tool.read" = "Read %[1]s"
+"tool.edit" = "Edit %[1]s"
+"tool.write" = "Write %[1]s"
+"tool.search" = "Search %[1]s"
+"tool.find" = "Find %[1]s"
+"tool.fetch" = "Fetch %[1]s"
+"tool.web_search" = "Search the web: %[1]s"
+# notice: what the host tells the phone app, shown as it is (cli/phone*.go, bridge/confirm.go)
+"notice.unsupported" = "This version of the ADBuddy host does not handle %[1]s yet."
+"notice.chat_off" = "The chat view is off (%[1]s); the answers still come after each turn and the terminal shows everything."
+"notice.stale_reply" = "That question was already answered or moved to the PC terminal."
