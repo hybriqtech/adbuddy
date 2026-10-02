@@ -25,11 +25,11 @@ func newAttachCmd(app *App) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if app.Getenv("ADBUDDY_SOURCE") == "agent" {
-				return NewError("AGENT_SESSION", "`adbuddy attach` cannot be run from the agent's session", "Run it yourself in a terminal.")
+				return NewErrorT("AGENT_SESSION", "err.attach.agent_session", "err.attach.agent_session.fix")
 			}
 			in, out := os.Stdin, os.Stdout
 			if !isTerminal(in) || !isTerminal(out) {
-				return UsageError("adbuddy attach needs an interactive terminal")
+				return UsageErrorT("err.attach.usage_adbuddy_attach_needs_an_interactive")
 			}
 			e, err := loadEnv(app)
 			if err != nil {
@@ -58,7 +58,7 @@ func newAttachCmd(app *App) *cobra.Command {
 				fmt.Fprintln(app.Stderr, "\r\nDetached. `adbuddy attach` connects again.")
 				return nil
 			case err != nil:
-				return NewError("ATTACH_FAILED", err.Error(), "Check that `adbuddy serve` is still running.")
+				return NewErrorT("ATTACH_FAILED", "error.cause", "err.attach.attach_failed.fix", err.Error())
 			case exit.ErrorCode == "NO_SESSION":
 				return NewError("NO_SESSION", exit.Error, "")
 			case exit.Code != 0:
@@ -160,7 +160,7 @@ func newStopCmd(app *App) *cobra.Command {
 // it would control its own session (spec M3 §3.4); serve checks it too.
 func sessionRequest(ctx context.Context, app *App, argv []string) error {
 	if app.Getenv("ADBUDDY_SOURCE") == "agent" {
-		return NewError("AGENT_SESSION", fmt.Sprintf("`adbuddy %s` cannot be run from the agent's session", argv[0]), "Run it yourself in a terminal.")
+		return NewErrorT("AGENT_SESSION", "err.attach.agent_session_2", "err.attach.agent_session_2.fix", argv[0])
 	}
 	e, err := loadEnv(app)
 	if err != nil {

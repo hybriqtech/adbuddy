@@ -49,12 +49,14 @@ func infoOf(s remote.State, serve bool) remoteInfo {
 	return i
 }
 
-var remoteFixes = map[string]string{
-	"AGENT_SESSION":      "Run it yourself in a terminal; only the user can change the remote mode.",
-	"REMOTE_UNAVAILABLE": "Open the ADBuddy app on the phone with Tailscale on, then run it again.",
-	"REMOTE_DENIED":      "Run `adbuddy remote on` again and allow the question (in the ADBuddy app or the serve terminal).",
-	"REMOTE_FAILED":      "Check the phone is connected and run it again; `adbuddy remote status` says what the host believes.",
-	"REMOTE_BUSY":        "Try again in a moment.",
+// remoteFixKeys are the catalog keys of the fix of each code the daemon can
+// answer `adbuddy remote` with; a code that is not here has no fix.
+var remoteFixKeys = map[string]string{
+	"AGENT_SESSION":      "err.remotecmd.fix.agent_session",
+	"REMOTE_UNAVAILABLE": "err.remotecmd.fix.remote_unavailable",
+	"REMOTE_DENIED":      "err.remotecmd.fix.remote_denied",
+	"REMOTE_FAILED":      "err.remotecmd.fix.remote_failed",
+	"REMOTE_BUSY":        "err.remotecmd.fix.remote_busy",
 }
 
 func newRemoteCmd(app *App) *cobra.Command {
@@ -67,10 +69,10 @@ func newRemoteCmd(app *App) *cobra.Command {
 		ValidArgs: []string{"on", "off", "status"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if app.Getenv("ADBUDDY_SOURCE") == "agent" {
-				return NewError("AGENT_SESSION", "`adbuddy remote` cannot be run from the agent's session", remoteFixes["AGENT_SESSION"])
+				return NewErrorT("AGENT_SESSION", "err.remotecmd.agent_session", remoteFixKeys["AGENT_SESSION"])
 			}
 			if len(args) != 1 || args[0] != "on" && args[0] != "off" && args[0] != "status" {
-				return UsageError("use `adbuddy remote on`, `off` or `status`")
+				return UsageErrorT("err.remotecmd.usage_use_adbuddy_remote_on_off")
 			}
 			op := args[0]
 			e, err := loadEnv(app)
@@ -109,7 +111,8 @@ func newRemoteCmd(app *App) *cobra.Command {
 				return NewError("DAEMON_UNREACHABLE", err.Error(), "")
 			case exit.Code != 0:
 				code := orDefault(exit.ErrorCode, "DAEMON_ERROR") // e.g. "unauthorized" after the secret changed
-				return &Error{Code: code, Message: exit.Error, Fix: remoteFixes[code], exit: exit.Code}
+				// The daemon's text is English and for the agent: it is the cause; the fix is ours.
+				return errorT(exit.Code, false, code, "error.cause", remoteFixKeys[code], []any{exit.Error})
 			}
 			if app.JSON {
 				return WriteData(app.Stdout, info)
@@ -191,12 +194,11 @@ func remoteStatusWithoutServe(e env) remoteInfo {
 func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, error) {
 	adbPath := configuredADB(e, "")
 	if adbPath == "" {
-		return remoteInfo{}, ConfigError("ADB_NOT_CONFIGURED", "ADBuddy's adb is not installed", "Run `adbuddy setup`.")
+		return remoteInfo{}, ConfigErrorT("ADB_NOT_CONFIGURED", "err.remotecmd.adb_not_configured", "err.remotecmd.adb_not_configured.fix")
 	}
 	runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
 	failed := func(why string) error {
-		return NewError("REMOTE_OFF_FAILED", why+"; the remote mode stays on in config.toml",
-			"Connect the phone (wireless debugging on, same network or Tailscale) and run `adbuddy remote off` again; restarting the phone also closes the port.")
+		return NewErrorT("REMOTE_OFF_FAILED", "err.remotecmd.remote_off_failed", "err.remotecmd.remote_off_failed.fix", why)
 	}
 	if err := startServer(ctx, runner); err != nil {
 		return remoteInfo{}, err
@@ -225,12 +227,11 @@ func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, er
 	}
 	cfg, err := config.Load(e.dirs.ConfigFile())
 	if err != nil {
-		return remoteInfo{}, ConfigError("CONFIG_INVALID", err.Error(), "Fix or delete "+e.dirs.ConfigFile()+".")
+		return remoteInfo{}, ConfigErrorT("CONFIG_INVALID", "error.cause", "err.remotecmd.config_invalid.fix", err.Error(), e.dirs.ConfigFile())
 	}
 	cfg.RemoteUntil = ""
 	if err := config.Save(e.dirs.ConfigFile(), cfg); err != nil {
-		return remoteInfo{}, NewError("CONFIG_UNWRITABLE", "port 5555 is closed but remote_until could not be cleared: "+err.Error(),
-			"Delete the remote_until line in "+e.dirs.ConfigFile()+".")
+		return remoteInfo{}, NewErrorT("CONFIG_UNWRITABLE", "err.remotecmd.config_unwritable", "err.remotecmd.config_unwritable.fix", err.Error(), e.dirs.ConfigFile())
 	}
 	return remoteInfo{}, nil
 }

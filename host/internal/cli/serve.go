@@ -52,7 +52,7 @@ func newServeCmd(app *App) *cobra.Command {
 			// The agent must not be able to start its own host and answer
 			// its own confirmations.
 			if app.Getenv("ADBUDDY_SOURCE") == "agent" {
-				return NewError("AGENT_SESSION", "`adbuddy serve` cannot be started from the agent's session", "Run it yourself in a separate terminal.")
+				return NewErrorT("AGENT_SESSION", "err.serve.agent_session", "err.serve.agent_session.fix")
 			}
 			e, err := loadEnv(app)
 			if err != nil {
@@ -60,7 +60,7 @@ func newServeCmd(app *App) *cobra.Command {
 			}
 			adbPath = configuredADB(e, adbPath)
 			if adbPath == "" {
-				return ConfigError("ADB_NOT_CONFIGURED", "ADBuddy's adb is not installed", "Run `adbuddy setup` (or pass --adb <path to adb 37 or newer>).")
+				return ConfigErrorT("ADB_NOT_CONFIGURED", "err.serve.adb_not_configured", "err.serve.adb_not_configured.fix")
 			}
 			if serial == "" {
 				serial = e.cfg.Serial
@@ -76,7 +76,7 @@ func newServeCmd(app *App) *cobra.Command {
 			}
 			ws, err := filepath.Abs(e.workspace(wsDir))
 			if err != nil {
-				return NewError("WORKSPACE_FAILED", err.Error(), "Pass --workspace with an absolute path.")
+				return NewErrorT("WORKSPACE_FAILED", "error.cause", "err.serve.workspace_failed.fix", err.Error())
 			}
 			exe, err := os.Executable()
 			if err != nil {
@@ -118,15 +118,13 @@ func newServeCmd(app *App) *cobra.Command {
 			case hasCode(err, "WRONG_PHONE") || hasCode(err, "DEVICE_UNREADABLE"):
 				return err
 			case errors.Is(err, adb.ErrNoDevice) && k.AddrErr != nil:
-				return TransientError("DEVICE_NOT_FOUND", "the phone did not show up, and its saved address did not work ("+strings.Join(addrs, ", ")+": "+AsError(k.AddrErr).Message+")",
-					"The port changes each time wireless debugging is turned on: "+reconnect)
+				return TransientErrorT("DEVICE_NOT_FOUND", "err.serve.device_not_found", "err.serve.device_not_found.fix", strings.Join(addrs, ", "), AsError(k.AddrErr).Message, reconnect)
 			case errors.Is(err, adb.ErrNoDevice):
-				return TransientError("DEVICE_NOT_FOUND", "no phone in state `device` on adb server port "+strconv.Itoa(e.cfg.ADBServerPort),
-					"Turn on wireless debugging on the phone and keep it on the same Wi-Fi as this PC; if it was never paired, run `adbuddy setup`; on another network (e.g. Tailscale), run `adbuddy connect <ip:port>`.")
+				return TransientErrorT("DEVICE_NOT_FOUND", "err.serve.device_not_found_2", "err.serve.device_not_found_2.fix", strconv.Itoa(e.cfg.ADBServerPort))
 			case errors.Is(err, adb.ErrManyDevices):
-				return NewError("MULTIPLE_DEVICES", "more than one phone is connected", "Pass --serial <serial> (see `adb -P "+strconv.Itoa(e.cfg.ADBServerPort)+" devices`) or set serial in "+e.dirs.ConfigFile()+".")
+				return NewErrorT("MULTIPLE_DEVICES", "err.serve.multiple_devices", "err.serve.multiple_devices.fix", strconv.Itoa(e.cfg.ADBServerPort), e.dirs.ConfigFile())
 			case err != nil:
-				return NewError("ADB_FAILED", err.Error(), "Check the adb path ("+adbPath+").")
+				return NewErrorT("ADB_FAILED", "error.cause", "err.serve.adb_failed.fix", err.Error(), adbPath)
 			}
 			activeSerial := k.Active
 			// The journal and undo know the phone by its stable name only when
@@ -168,7 +166,7 @@ func newServeCmd(app *App) *cobra.Command {
 
 			secret, err := ipc.EnsureSecret(e.dirs.Data)
 			if err != nil {
-				return NewError("SECRET_FAILED", err.Error(), "Check that "+e.dirs.Data+" is writable.")
+				return NewErrorT("SECRET_FAILED", "error.cause", "err.serve.secret_failed.fix", err.Error(), e.dirs.Data)
 			}
 			var confirmer confirm.Confirmer
 			switch confirmMode {
@@ -182,7 +180,7 @@ func newServeCmd(app *App) *cobra.Command {
 			case "deny":
 				confirmer = confirm.DenyAll{Out: app.Stderr, Lang: app.Lang}
 			default:
-				return UsageError("--confirm must be auto, terminal or deny")
+				return UsageErrorT("err.serve.usage_confirm_must_be_auto_terminal")
 			}
 
 			agentName := e.cfg.Agent
@@ -289,7 +287,7 @@ func serveHandler(link *phoneLink, cfg config.Config, getenv func(string) string
 	}
 }
 
-var alreadyRunning = NewError("ALREADY_RUNNING", "another `adbuddy serve` is already running", "Use that terminal, or stop it (Ctrl+C) first.")
+var alreadyRunning = NewErrorT("ALREADY_RUNNING", "err.serve.already_running", "err.serve.already_running.fix")
 
 // serveRunning reports whether a serve answers on the data folder's socket.
 // A socket owned by something that does not answer as a host (another
@@ -304,8 +302,7 @@ func serveRunning(ctx context.Context, dataDir string) (bool, error) {
 	case errors.Is(err, ipc.ErrNotRunning):
 		return false, nil
 	}
-	return false, NewError("DAEMON_UNREACHABLE", "the ADBuddy socket does not answer: "+err.Error(),
-		"Stop the other `adbuddy serve` or delete "+ipc.SocketPath(dataDir)+" if none is running.")
+	return false, NewErrorT("DAEMON_UNREACHABLE", "err.serve.daemon_unreachable", "err.serve.daemon_unreachable.fix", err.Error(), ipc.SocketPath(dataDir))
 }
 
 // serveUntil serves requests until ctx ends, then waits for the ones in
@@ -345,11 +342,11 @@ func loadClassifier(e env) (*classify.Classifier, error) {
 	path := rulesPath(e)
 	data, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, ConfigError("RULES_UNREADABLE", err.Error(), "Check "+path+".")
+		return nil, ConfigErrorT("RULES_UNREADABLE", "error.cause", "err.serve.rules_unreadable.fix", err.Error(), path)
 	}
 	cls, err := classify.New(data)
 	if err != nil {
-		return nil, ConfigError("RULES_INVALID", path+": "+err.Error(), "Fix the rule or remove it.")
+		return nil, ConfigErrorT("RULES_INVALID", "err.serve.rules_invalid", "err.serve.rules_invalid.fix", path, err.Error())
 	}
 	return cls, nil
 }

@@ -78,7 +78,7 @@ func newDoctorCmd(app *App) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			agent := app.Getenv("ADBUDDY_SOURCE") == "agent"
 			if fix && agent {
-				return NewError("AGENT_SESSION", "`adbuddy doctor --fix` cannot be run from the agent's session", "Run `adbuddy doctor` (without --fix) and follow its Run: lines, or ask the user to run --fix.")
+				return NewErrorT("AGENT_SESSION", "err.doctor.agent_session", "err.doctor.agent_session.fix")
 			}
 			// stop is Ctrl+C; ctx also ends when doctor's time is up, and
 			// then the checks still left say so instead of stopping.
@@ -112,8 +112,7 @@ func newDoctorCmd(app *App) *cobra.Command {
 			broken := rep.Verdict == "broken"
 			if app.JSON {
 				if broken {
-					return writeFailureData(app.Stdout, NewError("DOCTOR_BROKEN", "ADBuddy cannot work until the failed checks are fixed",
-						"Follow the run and guidance of the failed checks, from the top."), rep)
+					return writeFailureData(app.Stdout, NewErrorT("DOCTOR_BROKEN", "err.doctor.doctor_broken", "err.doctor.doctor_broken.fix"), rep)
 				}
 				return WriteData(app.Stdout, rep)
 			}

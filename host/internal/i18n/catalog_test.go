@@ -17,13 +17,20 @@ import (
 
 // sameInBoth are the keys whose text is the same in English and Spanish on
 // purpose (a proper name, a command, a symbol). Each one says why.
-var sameInBoth = map[string]string{}
+var sameInBoth = map[string]string{
+	"error.line":                "the label of an error is Error in both languages",
+	"err.setup.usage_adb":       "a flag name and the message of the system: nothing to translate",
+	"err.setup.usage_workspace": "a flag name and the message of the system: nothing to translate",
+}
 
 // keyTables are the variables that hold catalog keys by a code (a map from an
 // error code to the key of its fix): their string values count as used keys,
 // and a call may take its key from them (`NewErrorT(code, msg, fixKeys[code])`).
 // Each one says where it is.
-var keyTables = map[string]string{}
+var keyTables = map[string]string{
+	"remoteFixKeys": "cli/remotecmd.go: the key of the fix of each code the daemon answers to `adbuddy remote`",
+	"undoFixKeys":   "cli/undo.go: the key of the fix of each code the daemon answers to `adbuddy undo`",
+}
 
 // dynamicPrefixes are the key prefixes that a call builds at run time
 // (`T("doctor.name."+id)`): every catalog key with one of them counts as used,

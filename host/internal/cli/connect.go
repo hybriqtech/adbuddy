@@ -27,9 +27,6 @@ var (
 	identityWait    = 8 * time.Second  // bounds the check of the phone's identity (getprop ro.serialno)
 )
 
-// wrongPhoneFix is the fix of WRONG_PHONE.
-const wrongPhoneFix = "that address is another phone; check the IP and port on the phone you set up"
-
 type connectResult struct {
 	Serial   string `json:"serial"` // the serial adb lists the phone with now
 	Address  string `json:"address"`
@@ -50,11 +47,11 @@ func newConnectCmd(app *App) *cobra.Command {
 			go func() { <-ctx.Done(); stop() }()
 			err := func() error {
 				if app.Getenv("ADBUDDY_SOURCE") == "agent" {
-					return NewError("AGENT_SESSION", "`adbuddy connect` cannot be run from the agent's session", "Run it yourself in a terminal.")
+					return NewErrorT("AGENT_SESSION", "err.connect.agent_session", "err.connect.agent_session.fix")
 				}
 				addr := args[0]
 				if !validPairAddr(addr) {
-					return UsageError(fmt.Sprintf("%q is not an IP address and port: type them as the phone shows them on its Wireless debugging screen (e.g. 100.64.0.5:41234)", classify.Printable(addr)))
+					return UsageErrorT("err.connect.usage_is_not_an_ip_address", classify.Printable(addr))
 				}
 				e, err := loadEnv(app)
 				if err != nil {
@@ -65,11 +62,11 @@ func newConnectCmd(app *App) *cobra.Command {
 				if running, err := serveRunning(ctx, e.dirs.Data); err != nil {
 					return err
 				} else if running {
-					return NewError("ALREADY_RUNNING", "`adbuddy serve` is running", "Stop `adbuddy serve` first (Ctrl+C in its terminal), then run `adbuddy connect` again.")
+					return NewErrorT("ALREADY_RUNNING", "err.connect.already_running", "err.connect.already_running.fix")
 				}
 				adbPath := configuredADB(e, adbFlag)
 				if adbPath == "" {
-					return ConfigError("ADB_NOT_CONFIGURED", "ADBuddy's adb is not installed", "Run `adbuddy setup` (or pass --adb <path to adb 37 or newer>).")
+					return ConfigErrorT("ADB_NOT_CONFIGURED", "err.connect.adb_not_configured", "err.connect.adb_not_configured.fix")
 				}
 				runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
 				if err := startServer(ctx, runner); err != nil {
@@ -87,7 +84,7 @@ func newConnectCmd(app *App) *cobra.Command {
 				cfg := e.cfg
 				cfg.Address = addr
 				if err := config.Save(e.dirs.ConfigFile(), cfg); err != nil {
-					return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")
+					return ConfigErrorT("CONFIG_UNWRITABLE", "error.cause", "err.connect.config_unwritable.fix", err.Error(), e.dirs.Config)
 				}
 				res := connectResult{Serial: active, Address: addr, Verified: verified}
 				if app.JSON {
@@ -142,9 +139,9 @@ func connectAddr(ctx context.Context, runner adb.Runner, addr, guid string, time
 	case ctx.Err() != nil:
 		return "", false, ctx.Err()
 	case errors.Is(err, pairing.ErrTimeout):
-		return "", false, TransientError("DEVICE_NOT_FOUND", err.Error(), "Unlock the phone and check that wireless debugging is on and that this PC is paired with it (`adbuddy setup --code`), then try again.")
+		return "", false, TransientErrorT("DEVICE_NOT_FOUND", "error.cause", "err.connect.device_not_found.fix", err.Error())
 	case err != nil:
-		return "", false, TransientError("CONNECT_FAILED", err.Error(), "Check the IP address and port on the phone's Wireless debugging screen (the port changes each time wireless debugging is turned on) and that the phone and this PC can reach each other.")
+		return "", false, TransientErrorT("CONNECT_FAILED", "error.cause", "err.connect.connect_failed.fix", err.Error())
 	}
 	verified, err = verifyAt(ctx, runner, active, guid)
 	if err != nil {
@@ -173,8 +170,7 @@ func verifyAt(ctx context.Context, runner adb.Runner, active, guid string) (veri
 	case ctx.Err() != nil:
 		return false, ctx.Err()
 	case err != nil && timedOut:
-		return false, TransientError("DEVICE_UNREADABLE", fmt.Sprintf("the phone at %s did not answer in %s", classify.Printable(active), identityWait),
-			"Unlock the phone and check that it is still connected, then try again.")
+		return false, TransientErrorT("DEVICE_UNREADABLE", "err.connect.device_unreadable", "err.connect.device_unreadable.fix", classify.Printable(active), identityWait)
 	case errors.Is(err, pairing.ErrWrongPhone):
 		host := runner
 		host.Serial = ""
@@ -184,9 +180,9 @@ func verifyAt(ctx context.Context, runner adb.Runner, active, guid string) (veri
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
-		return false, NewError("WRONG_PHONE", "the phone at "+classify.Printable(active)+" is not the phone you set up", wrongPhoneFix)
+		return false, NewErrorT("WRONG_PHONE", "err.connect.wrong_phone", "err.connect.wrong_phone.fix", classify.Printable(active))
 	case err != nil:
-		return false, NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
+		return false, NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.connect.device_unreadable.fix_2", err.Error())
 	}
 	return true, nil
 }
@@ -280,9 +276,6 @@ func tryAddr(ctx context.Context, runner adb.Runner, online []adb.Device, addr, 
 	return knownPhone{Active: active, Used: addr, Verified: verified}, true, nil
 }
 
-// mdnsWrongPhoneFix is the fix of WRONG_PHONE for a phone found by mDNS.
-const mdnsWrongPhoneFix = "Something else on this network answers with your phone's name: turn off wireless debugging on your other devices and try again."
-
 // checkFound checks the phone found under active by its guid (or by mDNS).
 func checkFound(ctx context.Context, runner adb.Runner, active, guid string, byGuid bool) (knownPhone, error) {
 	if !byGuid {
@@ -290,7 +283,7 @@ func checkFound(ctx context.Context, runner adb.Runner, active, guid string, byG
 	}
 	verified, err := verifyAt(ctx, runner, active, guid)
 	if hasCode(err, "WRONG_PHONE") {
-		err = NewError("WRONG_PHONE", "the phone found as "+classify.Printable(active)+" is not the phone you set up", mdnsWrongPhoneFix)
+		err = NewErrorT("WRONG_PHONE", "err.connect.wrong_phone_mdns", "err.connect.wrong_phone_mdns.fix", classify.Printable(active))
 	}
 	if err != nil {
 		return knownPhone{}, err

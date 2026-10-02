@@ -12,19 +12,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var undoFixes = map[string]string{
-	"NOTHING_TO_UNDO":    "See `adbuddy journal` for what was done.",
-	"NOT_FOUND":          "Check the id with `adbuddy journal`.",
-	"NO_INVERSE":         "This change has to be reverted by hand.",
-	"ALREADY_UNDONE":     "Nothing to do.",
-	"NOT_APPLIED":        "Nothing to do: the command never ran.",
-	"UNTRUSTED_ENTRY":    "The entry was not written by ADBuddy: check the phone and undo it by hand if needed.",
-	"JOURNAL_UNWRITABLE": "Check that the journal folder is writable; the changes listed as undone did happen.",
-	"UNCERTAIN_STATE":    "Check the phone: the command failed, the host stopped while it ran, or its place on the phone is taken again, so its inverse is not run automatically.",
-	"OTHER_DEVICE":       "Connect the phone the change was made on (see `adbuddy journal`) and undo it there, or revert it by hand.",
-	"UNDO_FAILED":        "Check the phone and the journal; failed inverses can be retried with `adbuddy undo <id>`.",
-	"WAITING_FOR_ANSWER": "A 🔴 command is waiting for confirmation (in the ADBuddy app or the serve terminal); retry when it is answered.",
-	"PAUSED":             "Resume from the ADBuddy app, then run adbuddy undo again for the rest.",
+// undoFixKeys are the catalog keys of the fix of each code the daemon can
+// answer `adbuddy undo` with; a code that is not here has no fix.
+var undoFixKeys = map[string]string{
+	"NOTHING_TO_UNDO":    "err.undo.fix.nothing_to_undo",
+	"NOT_FOUND":          "err.undo.fix.not_found",
+	"NO_INVERSE":         "err.undo.fix.no_inverse",
+	"ALREADY_UNDONE":     "err.undo.fix.already_undone",
+	"NOT_APPLIED":        "err.undo.fix.not_applied",
+	"UNTRUSTED_ENTRY":    "err.undo.fix.untrusted_entry",
+	"JOURNAL_UNWRITABLE": "err.undo.fix.journal_unwritable",
+	"UNCERTAIN_STATE":    "err.undo.fix.uncertain_state",
+	"OTHER_DEVICE":       "err.undo.fix.other_device",
+	"UNDO_FAILED":        "err.undo.fix.undo_failed",
+	"WAITING_FOR_ANSWER": "err.undo.fix.waiting_for_answer",
+	"PAUSED":             "err.undo.fix.paused",
 }
 
 // undoTransient are the failures that go away by themselves: the pause ends,
@@ -61,9 +63,9 @@ func newUndoCmd(app *App) *cobra.Command {
 			if code == "" {
 				code = "DAEMON_ERROR" // e.g. "unauthorized" after the secret changed
 			}
-			failure := NewError(code, exit.Error, undoFixes[code])
+			failure := NewErrorT(code, "error.cause", undoFixKeys[code], exit.Error)
 			if undoTransient[code] {
-				failure = TransientError(code, exit.Error, undoFixes[code])
+				failure = TransientErrorT(code, "error.cause", undoFixKeys[code], exit.Error)
 			}
 			// A pause in the middle stops undo after some changes: say which.
 			paused := code == "PAUSED" && len(res.Undone)+len(res.Failed)+len(res.Skipped) > 0

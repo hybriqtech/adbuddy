@@ -25,11 +25,11 @@ type env struct {
 func loadEnv(app *App) (env, error) {
 	dirs, err := paths.Default(app.Getenv)
 	if err != nil {
-		return env{}, ConfigError("DIRS_UNKNOWN", err.Error(), "Set ADBUDDY_CONFIG_DIR and ADBUDDY_DATA_DIR.")
+		return env{}, ConfigErrorT("DIRS_UNKNOWN", "error.cause", "err.common.dirs_unknown.fix", err.Error())
 	}
 	cfg, err := config.Load(dirs.ConfigFile())
 	if err != nil {
-		return env{}, ConfigError("CONFIG_INVALID", err.Error(), "Fix or delete "+dirs.ConfigFile()+".")
+		return env{}, ConfigErrorT("CONFIG_INVALID", "error.cause", "err.common.config_invalid.fix", err.Error(), dirs.ConfigFile())
 	}
 	home, _ := os.UserHomeDir()
 	return env{dirs: dirs, cfg: cfg, home: home}, nil
@@ -77,7 +77,7 @@ var isTerminal = func(v any) bool {
 	return ok && (isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd()))
 }
 
-var notRunning = NewError("DAEMON_NOT_RUNNING", "the ADBuddy host is not running", "Start it with `adbuddy serve` in another terminal.")
+var notRunning = NewErrorT("DAEMON_NOT_RUNNING", "err.common.daemon_not_running", "err.common.daemon_not_running.fix")
 
 // formatEntry renders a journal entry on one line (plus its inverse).
 func formatEntry(e journal.Entry) string {

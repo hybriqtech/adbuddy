@@ -27,7 +27,7 @@ var (
 func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) error {
 	restarted, err := device.EnsureNoTCPPort(ctx, runner, keep)
 	if err != nil {
-		return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
+		return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix", err.Error())
 	}
 	if !restarted {
 		return nil
@@ -40,8 +40,7 @@ func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, 
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return TransientError("DEVICE_NOT_FOUND", "the phone did not come back after `adb usb`",
-			"Check that wireless debugging is still on, then run `"+command+"` again.")
+		return TransientErrorT("DEVICE_NOT_FOUND", "err.invariant.device_not_found", "err.invariant.device_not_found.fix", command)
 	}
 	// Only read the port now: another `adb usb` would restart adbd again.
 	port, err := device.TCPPort(ctx, runner)
@@ -49,11 +48,10 @@ func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, 
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
+		return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix_2", err.Error())
 	}
 	if port != "" && port != keep {
-		return NewError("DEVICE_PORT_OPEN", "adb's network port on the phone is still open after `adb usb`",
-			"Restart the phone (that closes a port opened with `adb tcpip`), turn wireless debugging on again and run `"+command+"` again.")
+		return NewErrorT("DEVICE_PORT_OPEN", "err.invariant.device_port_open", "err.invariant.device_port_open.fix", command)
 	}
 	return nil
 }

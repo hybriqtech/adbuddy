@@ -25,7 +25,7 @@ func newRunCmd(app *App) *cobra.Command {
 				before = args[:at]
 			}
 			if len(before) > 1 {
-				return UsageError("only one agent can be given; put its arguments after --")
+				return UsageErrorT("err.run.usage_only_one_agent_can_be")
 			}
 			return nil
 		},
@@ -50,7 +50,7 @@ func newRunCmd(app *App) *cobra.Command {
 				return notRunning
 			}
 			if err != nil {
-				return NewError("DAEMON_UNREACHABLE", err.Error(), "Restart `adbuddy serve`.")
+				return NewErrorT("DAEMON_UNREACHABLE", "error.cause", "err.run.daemon_unreachable.fix", err.Error())
 			}
 			// The agent must work where serve looks: its journal, and the only
 			// place where adb pull may write without asking.
@@ -63,8 +63,7 @@ func newRunCmd(app *App) *cobra.Command {
 			}
 			if serveWS != "" && ws != serveWS {
 				if !sameDir(ws, serveWS) {
-					return NewError("WORKSPACE_MISMATCH", "`adbuddy serve` is watching "+serveWS+", not "+ws,
-						"Run `adbuddy run` without --workspace to use "+serveWS+", or stop serve and start it with `adbuddy serve --workspace "+ws+"`.")
+					return NewErrorT("WORKSPACE_MISMATCH", "err.run.workspace_mismatch", "err.run.workspace_mismatch.fix", serveWS, ws)
 				}
 				ws = serveWS
 			}
@@ -73,7 +72,7 @@ func newRunCmd(app *App) *cobra.Command {
 				return NewError("EXECUTABLE_UNKNOWN", err.Error(), "")
 			}
 			if _, err := workspace.Init(workspace.Options{Dir: ws, Exe: exe}); err != nil {
-				return NewError("WORKSPACE_FAILED", err.Error(), "Close other agents running in "+ws+" and try again.")
+				return NewErrorT("WORKSPACE_FAILED", "error.cause", "err.run.workspace_failed.fix", err.Error(), ws)
 			}
 			fmt.Fprintf(app.Stderr, "Starting %s in %s (phone %s)…\n", name, ws, ping.Phone())
 			code, err := agent.Run(cmd.Context(), agent.Options{
@@ -81,7 +80,7 @@ func newRunCmd(app *App) *cobra.Command {
 				Environ: os.Environ(), Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 			})
 			if errors.Is(err, agent.ErrNotFound) {
-				return NewError("AGENT_NOT_FOUND", name+" is not installed or not in PATH", agent.InstallHint(name))
+				return NewErrorT("AGENT_NOT_FOUND", "err.run.agent_not_found", "err.run.agent_not_found.fix", name, agent.InstallHint(name))
 			}
 			if err != nil {
 				return NewError("AGENT_FAILED", err.Error(), "")

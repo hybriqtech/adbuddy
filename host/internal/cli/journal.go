@@ -29,7 +29,7 @@ func newJournalCmd(app *App) *cobra.Command {
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if limit < 0 {
-				return UsageError("--limit must be 0 (all) or a positive number")
+				return UsageErrorT("err.journal.usage_limit_must_be_0_all")
 			}
 			e, err := loadEnv(app)
 			if err != nil {
@@ -42,7 +42,7 @@ func newJournalCmd(app *App) *cobra.Command {
 				cancel()
 				if session == "current" {
 					if errors.Is(err, ipc.ErrNotRunning) {
-						return NewError("DAEMON_NOT_RUNNING", "the current session is only known while `adbuddy serve` runs", "Pass --session <id> (ids start with s_).")
+						return NewErrorT("DAEMON_NOT_RUNNING", "err.journal.daemon_not_running", "err.journal.daemon_not_running.fix")
 					}
 					if err != nil {
 						return NewError("DAEMON_UNREACHABLE", err.Error(), "")

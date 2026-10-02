@@ -55,7 +55,7 @@ func NewRoot(app *App) *cobra.Command {
 	root.RunE = func(cmd *cobra.Command, _ []string) error {
 		if dirs, err := paths.Default(app.Getenv); err == nil && !fileExists(dirs.ConfigFile()) {
 			if app.JSON || !isTerminal(app.Stdin) || !isTerminal(app.Stderr) {
-				return ConfigError("NOT_CONFIGURED", "ADBuddy is not set up yet", "Run `adbuddy setup`.")
+				return ConfigErrorT("NOT_CONFIGURED", "err.root.not_configured", "err.root.not_configured.fix")
 			}
 			fmt.Fprintln(app.Stderr, "ADBuddy is not set up yet: starting `adbuddy setup`.")
 			setup.SetContext(cmd.Context())
@@ -84,7 +84,7 @@ func mainContext(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	root.SetArgs(args)
 	err := root.ExecuteContext(ctx)
 	if err != nil {
-		WriteFailure(stdout, stderr, app.JSON, err)
+		WriteFailureIn(stdout, stderr, app.JSON, app.speaks(), err)
 	}
 	return ExitCode(err)
 }

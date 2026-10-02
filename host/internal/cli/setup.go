@@ -90,13 +90,13 @@ func newSetupCmd(app *App) *cobra.Command {
 			go func() { <-ctx.Done(); stop() }()
 			err := func() error {
 				if app.Getenv("ADBUDDY_SOURCE") == "agent" {
-					return NewError("AGENT_SESSION", "`adbuddy setup` cannot be run from the agent's session", "Run it yourself in a terminal.")
+					return NewErrorT("AGENT_SESSION", "err.setup.agent_session", "err.setup.agent_session.fix")
 				}
 				if apkFlag != "" && noApp {
-					return UsageError("--apk and --no-app contradict each other: use only one")
+					return UsageErrorT("err.setup.usage_apk_and_no_app_contradict")
 				}
 				if connectFlag != "" && !validPairAddr(connectFlag) {
-					return UsageError(fmt.Sprintf("--connect: %q is not an IP address and port: type them as the phone shows them on its Wireless debugging screen (e.g. 100.64.0.5:41234)", classify.Printable(connectFlag)))
+					return UsageErrorT("err.setup.usage_connect_is_not_an_ip", classify.Printable(connectFlag))
 				}
 				e, err := loadEnv(app)
 				if err != nil {
@@ -120,7 +120,7 @@ func newSetupCmd(app *App) *cobra.Command {
 						return "", ctx.Err()
 					case a := <-ch:
 						if a.err != nil && a.line == "" {
-							return "", UsageError("no answer on stdin")
+							return "", UsageErrorT("err.setup.usage_no_answer_on_stdin")
 						}
 						return strings.TrimSpace(a.line), nil
 					}
@@ -131,7 +131,7 @@ func newSetupCmd(app *App) *cobra.Command {
 				if running, err := serveRunning(ctx, e.dirs.Data); err != nil {
 					return err
 				} else if running {
-					return NewError("ALREADY_RUNNING", "`adbuddy serve` is running", "Stop `adbuddy serve` first (Ctrl+C in its terminal), then run `adbuddy setup` again.")
+					return NewErrorT("ALREADY_RUNNING", "err.setup.already_running", "err.setup.already_running.fix")
 				}
 
 				// serve, run and journal read config.toml from any folder:
@@ -139,12 +139,12 @@ func newSetupCmd(app *App) *cobra.Command {
 				adbArg, wsDir := adbFlag, wsFlag
 				if adbArg != "" {
 					if adbArg, err = absExecutable(adbArg); err != nil {
-						return UsageError("--adb: " + err.Error())
+						return UsageErrorT("err.setup.usage_adb", err.Error())
 					}
 				}
 				if wsDir != "" {
 					if wsDir, err = filepath.Abs(wsDir); err != nil {
-						return UsageError("--workspace: " + err.Error())
+						return UsageErrorT("err.setup.usage_workspace", err.Error())
 					}
 				}
 
@@ -159,9 +159,9 @@ func newSetupCmd(app *App) *cobra.Command {
 					switch {
 					case errors.Is(err, platformtools.ErrChecksum):
 						// Not a network hiccup: the same file would come again.
-						return NewError("TOOLS_CHECKSUM_MISMATCH", err.Error(), "Run `adbuddy setup` again later; if it keeps failing, pass --adb <path to adb 37 or newer> and report it at https://github.com/hybriqtech/adbuddy/issues.")
+						return NewErrorT("TOOLS_CHECKSUM_MISMATCH", "error.cause", "err.setup.tools_checksum_mismatch.fix", err.Error())
 					case err != nil:
-						return TransientError("TOOLS_DOWNLOAD_FAILED", err.Error(), "Check the internet connection and run `adbuddy setup` again, or pass --adb <path to adb 37 or newer>.")
+						return TransientErrorT("TOOLS_DOWNLOAD_FAILED", "error.cause", "err.setup.tools_download_failed.fix", err.Error())
 					}
 					adbPath = res.ADB
 				}
@@ -241,12 +241,11 @@ func newSetupCmd(app *App) *cobra.Command {
 								return err
 							}
 							if !validPairAddr(addr) {
-								return UsageError(fmt.Sprintf("%q is not an IP address and port: type them as the phone shows them on its Wireless debugging screen", classify.Printable(addr)))
+								return UsageErrorT("err.setup.usage_is_not_an_ip_address", classify.Printable(addr))
 							}
 						}
 						if addr == "" {
-							return TransientError("DEVICE_NOT_FOUND", "the paired phone did not connect: "+err.Error(),
-								"Check that wireless debugging is still on, then run `adbuddy setup` again; if the phone is on another network (e.g. Tailscale), add --connect <ip:port> with the IP address and port on its Wireless debugging screen.")
+							return TransientErrorT("DEVICE_NOT_FOUND", "err.setup.device_not_found", "err.setup.device_not_found.fix", err.Error())
 						}
 						say("Connecting to %s…\n", addr)
 						s, verified, err := connectAddr(ctx, runner, addr, guid, connectAddrWait)
@@ -269,7 +268,7 @@ func newSetupCmd(app *App) *cobra.Command {
 				// Profile of the phone.
 				prof, err := device.Collect(ctx, runner)
 				if err != nil {
-					return NewError("DEVICE_UNREADABLE", err.Error(), "Check that the phone is unlocked and still connected.")
+					return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.setup.device_unreadable.fix", err.Error())
 				}
 				say("Phone: %s, Android %s.\n", classify.Printable(prof.Model), classify.Printable(prof.Android))
 
@@ -339,7 +338,7 @@ func newSetupCmd(app *App) *cobra.Command {
 					cfg.RemoteUntil = ""
 				}
 				if err := config.Save(e.dirs.ConfigFile(), cfg); err != nil {
-					return ConfigError("CONFIG_UNWRITABLE", err.Error(), "Check that "+e.dirs.Config+" is writable.")
+					return ConfigErrorT("CONFIG_UNWRITABLE", "error.cause", "err.setup.config_unwritable.fix", err.Error(), e.dirs.Config)
 				}
 
 				res := setupResult{Device: prof, Serial: saved, Active: serial, Address: cfg.Address, Workspace: ws, Agent: chosen, ADB: adbPath, App: appRes}
@@ -394,18 +393,18 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 			return "", err
 		}
 		if !validPairAddr(addr) {
-			return "", UsageError(fmt.Sprintf("%q is not an IP address and port: type them as the phone shows them under Pair device with pairing code", classify.Printable(addr)))
+			return "", UsageErrorT("err.setup.usage_is_not_an_ip_address_2", classify.Printable(addr))
 		}
 		code, err := ask("Wi-Fi pairing code: ")
 		if err != nil {
 			return "", err
 		}
 		if !pairingCodeRe.MatchString(code) {
-			return "", UsageError("the Wi-Fi pairing code is 6 digits")
+			return "", UsageErrorT("err.setup.usage_the_wi_fi_pairing_code")
 		}
 		guid, err := pairing.Pair(ctx, runner, addr, code)
 		if err != nil {
-			return "", NewError("PAIRING_FAILED", err.Error(), "Keep the pairing popup open until setup says Paired: the code stops working as soon as it closes, also when you switch to another app to copy it. Open it again and use the new address and code.")
+			return "", NewErrorT("PAIRING_FAILED", "error.cause", "err.setup.pairing_failed.fix", err.Error())
 		}
 		return guid, nil
 	}
@@ -423,10 +422,10 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 	guid, err := pairing.PairQR(ctx, runner, q, pairingWait)
 	stopHint()
 	if errors.Is(err, pairing.ErrTimeout) {
-		return "", TransientError("PAIRING_TIMEOUT", "the phone did not answer the QR code in time", "Check that phone and PC are on the same Wi-Fi and run `adbuddy setup` again, or use `adbuddy setup --code`.")
+		return "", TransientErrorT("PAIRING_TIMEOUT", "err.setup.pairing_timeout", "err.setup.pairing_timeout.fix")
 	}
 	if err != nil {
-		return "", NewError("PAIRING_FAILED", err.Error(), "Try again, or use `adbuddy setup --code`.")
+		return "", NewErrorT("PAIRING_FAILED", "error.cause", "err.setup.pairing_failed.fix_2", err.Error())
 	}
 	return guid, nil
 }
@@ -550,15 +549,15 @@ func startServer(ctx context.Context, runner adb.Runner) error {
 	case ctx.Err() != nil:
 		return ctx.Err() // Ctrl+C becomes INTERRUPTED
 	case sctx.Err() != nil:
-		return NewError("ADB_FAILED", fmt.Sprintf("adb start-server did not answer in %s", startServerWait), "Check "+runner.Path+", or stop other adb servers and try again.")
+		return NewErrorT("ADB_FAILED", "err.setup.adb_failed", "err.setup.adb_failed.fix", startServerWait, runner.Path)
 	case err != nil:
-		return NewError("ADB_FAILED", "cannot start ADBuddy's adb server: "+err.Error(), "Check "+runner.Path+".")
+		return NewErrorT("ADB_FAILED", "err.setup.adb_failed_2", "err.setup.adb_failed_2.fix", err.Error(), runner.Path)
 	case code != 0:
 		msg := classify.Printable(strings.TrimSpace(errOut))
 		if msg == "" {
 			msg = "no message"
 		}
-		return NewError("ADB_FAILED", fmt.Sprintf("cannot start ADBuddy's adb server: exit %d: %s", code, msg), "Check "+runner.Path+".")
+		return NewErrorT("ADB_FAILED", "err.setup.adb_failed_3", "err.setup.adb_failed_3.fix", code, msg, runner.Path)
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
@@ -78,7 +79,7 @@ func TestSetupConnectToAnotherPhone(t *testing.T) {
 	shortWaits(t)
 	e := newSetupEnv(t, remoteRules("ZZZZ9999"))
 	_, errOut, code := runWithInput(t, "192.0.2.10:37000\n123456\n", "setup", "--code", "--connect", tsAddr, "--adb", fakeADB(t), "--workspace", e.ws)
-	if code != ExitFailure || !strings.Contains(errOut, "WRONG_PHONE") || !strings.Contains(errOut, wrongPhoneFix) {
+	if code != ExitFailure || !strings.Contains(errOut, "WRONG_PHONE") || !strings.Contains(errOut, i18n.EN.T("err.connect.wrong_phone.fix")) {
 		t.Fatalf("exit %d stderr %q", code, errOut)
 	}
 	if exists(filepath.Join(e.cfgDir, "config.toml")) || exists(e.ws) {

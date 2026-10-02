@@ -3,6 +3,8 @@ package cli
 import (
 	"errors"
 	"strings"
+
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
 // Exit codes. They are part of the CLI contract and are listed in `adbuddy --help`.
@@ -23,6 +25,62 @@ type Error struct {
 	Fix       string `json:"fix"`
 	Transient bool   `json:"transient"`
 	exit      int
+
+	// key, fixKey and args are the catalog keys of Message and Fix and their
+	// arguments, when the error was built with NewErrorT and its relatives.
+	// Message and Fix are then the English of those keys, computed when the
+	// error is built: --json, the agent and the tests read them, and they never
+	// change with the language. Only the human message of WriteFailure is
+	// written again in the language of the person (Error.in).
+	key, fixKey string
+	args        []any
+}
+
+// errorT builds an error from catalog keys. fixKey may be "". The arguments
+// are shared: the message and the fix pick what they need by index
+// (%[1]s, %[2]s). A cause of the system or of another package, which is
+// English and is not translated, goes in as the argument of the key
+// "error.cause" (the text is "%[1]s").
+func errorT(exit int, transient bool, code, key, fixKey string, args []any) *Error {
+	e := &Error{Code: code, Message: i18n.EN.T(key, args...), Transient: transient, exit: exit, key: key, fixKey: fixKey, args: args}
+	if fixKey != "" {
+		e.Fix = i18n.EN.T(fixKey, args...)
+	}
+	return e
+}
+
+// NewErrorT is NewError with catalog keys (exit code 1).
+func NewErrorT(code, key, fixKey string, args ...any) *Error {
+	return errorT(ExitFailure, false, code, key, fixKey, args)
+}
+
+// TransientErrorT is TransientError with catalog keys (exit code 75).
+func TransientErrorT(code, key, fixKey string, args ...any) *Error {
+	return errorT(ExitTransient, true, code, key, fixKey, args)
+}
+
+// ConfigErrorT is ConfigError with catalog keys (exit code 78).
+func ConfigErrorT(code, key, fixKey string, args ...any) *Error {
+	return errorT(ExitConfig, false, code, key, fixKey, args)
+}
+
+// UsageErrorT is UsageError with a catalog key for the message; the fix is
+// always "Run `adbuddy --help` to see the usage." (error.usage_fix).
+func UsageErrorT(key string, args ...any) *Error {
+	return errorT(ExitUsage, false, "USAGE", key, "error.usage_fix", args)
+}
+
+// in is the message and the fix in lang: the catalog's when the error has
+// keys, else its English fields (an error that is not migrated, a cause).
+func (e *Error) in(lang i18n.Lang) (message, fix string) {
+	if e.key == "" {
+		return e.Message, e.Fix
+	}
+	message = lang.T(e.key, e.args...)
+	if e.fixKey != "" {
+		fix = lang.T(e.fixKey, e.args...)
+	}
+	return message, fix
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
