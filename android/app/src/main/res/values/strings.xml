@@ -150,4 +150,5 @@
     <string name="protected_discard_confirm">Discard</string>
     <string name="protected_saved_sent">Sent to the PC.</string>
     <string name="protected_saved_later">Saved. The PC gets it when it connects.</string>
+    <string name="protected_error">Could not read your apps. Nothing was changed; try again.</string>
 </resources>

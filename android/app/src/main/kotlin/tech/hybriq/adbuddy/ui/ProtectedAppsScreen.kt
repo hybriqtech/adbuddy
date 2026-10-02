@@ -3,6 +3,7 @@ package tech.hybriq.adbuddy.ui
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -40,6 +42,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
@@ -51,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -75,33 +79,41 @@ private val SelectionSaver = Saver<Set<String>?, ArrayList<String>>(save = { sel
 fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Unit, onDone: () -> Unit, onSkip: () -> Unit) {
     val context = LocalContext.current
     val protectedApps = remember(context) { ProtectedApps.of(context) }
-    val saved = remember { protectedApps.list() }
-    val confirmed = remember { protectedApps.confirmed }
-    var installed by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
-    var receivers by remember { mutableStateOf(ProtectedApps.Heuristic.CODE_RECEIVERS) }
+    var load by remember { mutableStateOf<ProtectedAppsUi.LoadState>(ProtectedAppsUi.LoadState.Loading) }
+    var attempt by rememberSaveable { mutableIntStateOf(0) }
     var selection by rememberSaveable(stateSaver = SelectionSaver) { mutableStateOf<Set<String>?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var askDiscard by rememberSaveable { mutableStateOf(false) }
 
-    // What is checked when the screen opens: the saved list, or the proposal while it is not confirmed.
-    val initial = remember(installed, receivers) { installed?.let { ProtectedAppsUi.initialSelection(it, saved, confirmed, receivers) } }
-
-    LaunchedEffect(Unit) {
-        val (apps, sms) = withContext(Dispatchers.IO) {
-            ProtectedApps.launcherApps(context) to ProtectedApps.defaultSms(context)
+    // Everything the system and the prefs give is read off the main thread; the screen is not usable until it is all there.
+    LaunchedEffect(attempt) {
+        load = ProtectedAppsUi.LoadState.Loading
+        load = withContext(Dispatchers.IO) {
+            ProtectedAppsUi.load {
+                val sms = ProtectedApps.defaultSms(context)
+                ProtectedAppsUi.Loaded(ProtectedApps.launcherApps(context), protectedApps.list(), protectedApps.confirmed, ProtectedApps.Heuristic.receivers(sms))
+            }
         }
-        receivers = ProtectedApps.Heuristic.receivers(sms)
-        installed = apps
     }
+
+    val ready = (load as? ProtectedAppsUi.LoadState.Ready)?.data
+    val confirmed = ready?.confirmed ?: false
+    // What is checked when the screen opens: the saved list, or the proposal while it is not confirmed.
+    val initial = remember(ready) { ready?.let { ProtectedAppsUi.initialSelection(it.installed, it.saved, it.confirmed, it.receivers) } }
     LaunchedEffect(initial) {
         if (selection == null && initial != null) selection = initial
     }
 
     val current = selection
-    val dirty = current != null && ProtectedAppsUi.dirty(current, saved)
+    val dirty = ready != null && current != null && ProtectedAppsUi.dirty(current, ready.saved)
+    val rows = remember(ready, initial, current, query) {
+        if (ready == null || current == null || initial == null) emptyList()
+        else ProtectedAppsUi.rows(ready.installed, initial, current, ready.receivers, query)
+    }
     val savedSent = stringResource(R.string.protected_saved_sent)
     val savedLater = stringResource(R.string.protected_saved_later)
     fun save() {
+        if (ready == null) return
         val list = ProtectedAppsUi.result(selection ?: return)
         protectedApps.confirm(list)
         val sent = UiHelpers.publishProtectedApps(app)
@@ -113,14 +125,16 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
 
     ProtectedAppsContent(
         step = step,
-        loading = current == null || installed == null,
-        rows = if (current == null || initial == null) emptyList() else ProtectedAppsUi.rows(installed.orEmpty(), initial, current, receivers, query),
+        loading = load is ProtectedAppsUi.LoadState.Loading || (ready != null && current == null),
+        error = load is ProtectedAppsUi.LoadState.Error,
+        onRetry = { attempt++ },
+        rows = rows,
         selectedCount = current?.size ?: 0,
         proposal = !confirmed,
         query = query,
         onQuery = { query = it },
         onToggle = { pkg, on -> selection = ProtectedAppsUi.toggle(selection.orEmpty(), pkg, on) },
-        canSave = ProtectedAppsUi.canSave(current != null && installed != null, step != null, dirty, confirmed),
+        canSave = ProtectedAppsUi.canSave(ready != null && current != null, step != null, dirty, confirmed),
         onSave = ::save,
         onBack = { if (dirty) askDiscard = true else onBack() },
         onSkip = onSkip,
@@ -143,6 +157,8 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
 fun ProtectedAppsContent(
     step: OnboardingStep?,
     loading: Boolean,
+    error: Boolean,
+    onRetry: () -> Unit,
     rows: List<ProtectedAppsUi.Row>,
     selectedCount: Int,
     proposal: Boolean,
@@ -175,7 +191,7 @@ fun ProtectedAppsContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     // Unknown (still loading) is not "0 apps": nothing is said until the list is there.
-                    if (!loading) {
+                    if (!loading && !error) {
                         Text(
                             stringResource(R.string.settings_protected_confirmed, selectedCount),
                             style = MaterialTheme.typography.labelLarge,
@@ -183,7 +199,7 @@ fun ProtectedAppsContent(
                         )
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                        if (step != null) OutlinedButton(onClick = onSkip) { Text(stringResource(R.string.onboarding_skip)) }
+                        if (step != null) OutlinedButton(onClick = onSkip, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) { Text(stringResource(R.string.onboarding_skip), color = MaterialTheme.colorScheme.onSurface) }
                         Button(onClick = onSave, enabled = canSave) {
                             Text(stringResource(if (proposal) R.string.protected_confirm else R.string.protected_save))
                         }
@@ -213,11 +229,18 @@ fun ProtectedAppsContent(
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                        placeholder = { Text(stringResource(R.string.protected_search)) },
+                        label = { Text(stringResource(R.string.protected_search)) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     )
                 }
             }
             when {
+                error -> item {
+                    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(stringResource(R.string.protected_error), style = MaterialTheme.typography.bodyMedium)
+                        Button(onClick = onRetry) { Text(stringResource(R.string.chat_retry)) }
+                    }
+                }
                 loading -> item { Text(stringResource(R.string.protected_loading), Modifier.padding(24.dp), style = MaterialTheme.typography.bodyMedium) }
                 rows.isEmpty() -> item { Text(stringResource(R.string.protected_empty), Modifier.padding(24.dp), style = MaterialTheme.typography.bodyMedium) }
                 else -> items(rows, key = { it.pkg }) { row ->
@@ -271,7 +294,7 @@ private val sampleRows = listOf(
 @Composable
 private fun ProtectedAppsOnboardingPreview() {
     AdbuddyTheme(dynamic = false) {
-        ProtectedAppsContent(OnboardingStep.PROTECTED_APPS, false, sampleRows, 2, true, "", {}, { _, _ -> }, true, {}, {}, {})
+        ProtectedAppsContent(OnboardingStep.PROTECTED_APPS, false, false, {}, sampleRows, 2, true, "", {}, { _, _ -> }, true, {}, {}, {})
     }
 }
 
@@ -279,6 +302,6 @@ private fun ProtectedAppsOnboardingPreview() {
 @Composable
 private fun ProtectedAppsSettingsPreview() {
     AdbuddyTheme(dynamic = false) {
-        ProtectedAppsContent(null, false, sampleRows, 2, false, "", {}, { _, _ -> }, false, {}, {}, {})
+        ProtectedAppsContent(null, false, false, {}, sampleRows, 2, false, "", {}, { _, _ -> }, false, {}, {}, {})
     }
 }

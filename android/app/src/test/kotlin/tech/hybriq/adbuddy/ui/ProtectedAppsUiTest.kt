@@ -137,4 +137,24 @@ class ProtectedAppsUiTest {
         assertTrue(ProtectedAppsUi.dirty(saved - "com.a.app", saved))
         assertTrue(ProtectedAppsUi.dirty(saved + "com.c.app", saved))
     }
+
+    @Test fun aFailedLoadIsAnErrorNeverAnEmptyList() {
+        val failed = ProtectedAppsUi.load { throw IllegalStateException("TransactionTooLargeException") }
+        assertTrue(failed is ProtectedAppsUi.LoadState.Error)
+        val ok = ProtectedAppsUi.load { ProtectedAppsUi.Loaded(installed, emptySet(), false, receivers) }
+        assertTrue(ok is ProtectedAppsUi.LoadState.Ready)
+    }
+
+    @Test fun cancellationAndErrorsAreNotSwallowed() {
+        try {
+            ProtectedAppsUi.load { throw kotlinx.coroutines.CancellationException("x") }
+            org.junit.Assert.fail()
+        } catch (_: kotlinx.coroutines.CancellationException) {
+        }
+        try {
+            ProtectedAppsUi.load { throw OutOfMemoryError() }
+            org.junit.Assert.fail()
+        } catch (_: OutOfMemoryError) {
+        }
+    }
 }

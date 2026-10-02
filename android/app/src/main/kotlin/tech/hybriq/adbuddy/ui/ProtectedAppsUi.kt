@@ -66,6 +66,28 @@ object ProtectedAppsUi {
     fun result(selection: Set<String>): Set<String> =
         selection.filter { it != Packages.ADBUDDY && UiLimits.validPackage(it) }.take(UiLimits.MAX_PROTECTED_APPS).toSet()
 
+    /** What the screen reads before it can be used. */
+    class Loaded(val installed: List<Pair<String, String>>, val saved: Set<String>, val confirmed: Boolean, val receivers: Set<String>)
+
+    /**
+     * Loading, failed or ready. A failure is never an empty list: confirming over an incomplete view of
+     * what is installed would drop protected apps without the user knowing.
+     */
+    sealed interface LoadState {
+        data object Loading : LoadState
+        data object Error : LoadState
+        class Ready(val data: Loaded) : LoadState
+    }
+
+    /** Runs the (blocking) read; a RuntimeException from the system becomes Error, cancellation and real Errors pass through. */
+    fun load(read: () -> Loaded): LoadState = try {
+        LoadState.Ready(read())
+    } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+        throw e
+    } catch (e: RuntimeException) {
+        LoadState.Error
+    }
+
     /** Whether the save button is on: the apps are loaded, and there is something to confirm or save. */
     fun canSave(loaded: Boolean, onboarding: Boolean, dirty: Boolean, confirmed: Boolean): Boolean =
         loaded && (onboarding || dirty || !confirmed)
