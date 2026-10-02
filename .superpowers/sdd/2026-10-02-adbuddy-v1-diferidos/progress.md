@@ -40,3 +40,21 @@ Plan reescrito con los hallazgos de la revisión opus del plan y las órdenes de
 - T4a (V24) despachada (implementador opus affa7fd1f622da366, BASE bceb578). T4b (V25 PTY Job object, Sonnet) despues.
 - T4a (V24): d1fe7df; revision opus ✅✅ sin Critical/Important; arreglo de comentario en curso. Validacion manual pendiente: usuario con .claude como junction y transcript_path ya resuelto (falla cerrado, igual que antes). Para el PR: cambia API ValidTranscript->Transcript, NewTailer lo recibe.
 - Task 4a: complete (d1fe7df, 9cccd65).
+- Rebase sobre main 0aaa593 (M6c): conflictos reales en classify/undo (motivos pasan a Text con catalogo). Abortado a mano; delegado a implementador opus aef07c12743a09829 (backup branch backup/v1-diferidos-pre-m6c; rebase + conversion de textos T1-T3 a catalogo EN/ES + Long de cli/undo.go y UNDO_DENIED). Despues: review (sonnet) del rebase y T4b.
+- Rebase M6c: HEAD bf81b28, revision sonnet aprobada. Ruling: dejar los 3 commits intermedios de T2 con TestReasonsBilingual rojo (el castellano llega en bf81b28) — reescribir historia es mas arriesgado que util; coste: bisect incomodo en 3 commits. Pendiente menor para el final: m2 (matar->detener en reasons_es.go:129,134), m3 (TestUndoDeniedHasAFix debe exigir exit 1). Cuenta: textos EN/ES de T1-T3 ya en catalogo; undo item.Error (denied/refused) sigue en ingles como M6c deja el resto.
+- Task 4b (V25): 8d04d43; revision sonnet aprobada; arreglo menor test (w.job=0) en curso. Para el final/T10: flake preexistente internal/ipc TestClientDisconnectIsNotErrClosed (ipc_test.go:319-336, Sleep(100ms) bajo carga) -> V37; OJO ipc/ es de nautilus (T8). Aviso sin job object en pty usa log.Printf en ingles (no catalogo): apuntar a tern/pendientes.
+- Task 4: complete (V24 d1fe7df+9cccd65; V25 8d04d43+53b8263). T5 se parte en 5a (V14+V26, opus) y 5b (V15+V32, sonnet).
+- T5a (V14 b35bc0f, V26 6f8f5ab): revision opus ✅✅; ronda de tests menores en curso. DIFERIDO NUEVO (decirlo al supervisor): journal/journal.go:137-140 openAppend sigue enlaces en runtime y :197 Load sin acotar (FIFO cuelga journal/undo/doctor). Tests Unix de V14/V26 solo se ven pasar en CI.
+- Task 5a: complete (b35bc0f, 6f8f5ab, b1fcf17). Siguiente 5b (V15+V32, sonnet).
+- T5b (V15 40504ce, V32 4953403): revision opus ✅✅; minors en curso.
+- Task 5: complete (5a b35bc0f 6f8f5ab b1fcf17; 5b 40504ce 4953403 16a34f7). T6 despachada.
+- Task 6: complete (ca85a26 V16, d5e34cc V17, 1a78e17 V30; revision sonnet ✅✅ con SHAs verificados). Minor: comentario de chooseAPK (MaxAPK/FIFO) obsoleto, aplazado.
+- Task 7: complete (8cedd68 V10, 349e466 V12, 1123b69 V13; revision sonnet ✅✅). Minors aplazados: tests de bounds invertidos/id; mensaje UI_FAILED menos accionable que UI_AMBIGUOUS; bounds negativos no tocados.
+- T9a (V28, opus afa8a861289251911, BASE 1123b69) despachada; 9b (V23+V41) despues.
+- Task 9a (V28 c937176): revision opus ✅✅. Minors aplazados: lecturas por ruta tras openRoot (cuota, e.Info ModTime, miniatura), symlink relativo Unix dentro del entorno, orden de limpieza en tests. Texto nuevo para catalogo: files.too_many_downloads ("Too many downloads at once: wait for one to finish.").
+- T9b (V41b 512d179, V23+V41a 3245459): revision sonnet ✅✅; 2 minors de tests en curso. Pendiente UX: invalid en reintento (app FAILED con Reintentar).
+- Task 9: complete (9a c937176; 9b 512d179 3245459 4f86efd). T10 despachada (sonnet).
+- T10 (V37 1d72cab, V33 f2df7a6, V39 4269146): revision sonnet ✅✅; ronda de menores + m2/m3 del rebase en curso. Pendiente para nautilus: flake internal/ipc TestClientDisconnectIsNotErrClosed (Sleep(100ms)).
+- Tras T10: revision final opus de toda la rama (git diff origin/main..HEAD), una sola tanda de arreglos, git grep IPs/seriales, push fix/v1-diferidos y PR (hybriqtech).
+- Task 10: complete (1d72cab f2df7a6 4269146 + 4c86592 28f4529 097565a). Siguiente: reconciliar pendientes-m3-m5.md (doc) y revision final opus.
+- Doc pendientes reconciliado (f2e2703). Siguiente: revision final opus.
