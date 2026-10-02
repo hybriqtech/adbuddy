@@ -4,13 +4,16 @@ name: emulator
 
 # Tests that need a real Android: the classifier's oracle (what the phone's
 # mksh does with each differential case) and the read-only examples of the
-# skills (they must run on the phone's toybox). Only on pull requests and by
+# skills (they must run on the phone's toybox) and the app's tests (its
+# instrumented tests and the host against it, M2.5b: they run on an android-34
+# image, after the oracle, in the same job because one emulator fits in RAM at
+# a time). Only on pull requests and by
 # hand (workflow_dispatch), and only when what it checks changes. It does not
 # run on pushes to main: merges to main are fast-forwards of a pull request
 # that already passed it, so main's tree is the one it validated.
 on:
   pull_request:
-    paths: ["host/internal/classify/**", "host/internal/workspace/skills/**", "host/internal/cli/skills_*_test.go", "scripts/emulator.sh", ".github/workflows/emulator.yml"]
+    paths: ["host/internal/classify/**", "host/internal/workspace/skills/**", "host/internal/cli/skills_*_test.go", "host/internal/emutest/**", "host/internal/phoneapp/**", "host/internal/adb/**", "host/internal/bridge/**", "android/**", "scripts/emulator.sh", ".github/workflows/emulator.yml"]
   workflow_dispatch:
 
 permissions:
@@ -54,6 +57,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+        with:
+          gradle-version: "9.8.0"
+          cache-disabled: ${{ runner.environment != 'github-hosted' }}
       - name: Point the emulator at the AVD (Linux runners)
         if: runner.os == 'Linux'
         run: '[ -z "$XDG_CONFIG_HOME" ] || echo "ANDROID_AVD_HOME=$XDG_CONFIG_HOME/.android/avd" >> "$GITHUB_ENV"'
@@ -70,6 +77,19 @@ jobs:
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" emulator "system-images;android-37.0;google_apis;x86_64" > /dev/null
+      # Built before any emulator starts, so they never share the RAM. No device
+      # and no ANDROID_SERIAL here: no connected* task is ever run (Gradle's own
+      # adb server is 5037, where a phone may be); the host installs the APKs
+      # through the emulator's adb server (internal/emutest).
+      # compileSdk = 37: its SDK package is "platforms;android-37.0", as in android.yml.
+      # Kotlin in-process: no Kotlin daemon is left running on a self-hosted runner.
+      - name: Build the app and its instrumented tests
+        working-directory: android
+        run: |
+          sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -e "$sm" ] || sm="$sm.bat"
+          yes | "$sm" "platforms;android-37.0" > /dev/null
+          gradle --no-daemon -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Clear a leftover emulator of this job
         run: scripts/emulator.sh stop
       - name: Start the emulator
@@ -85,6 +105,32 @@ jobs:
         working-directory: host
         # Without the variables the test would skip and the step would pass.
         run: test -n "$ADBUDDY_MKSH_SERIAL" && test -n "$ADBUDDY_MKSH_ADB" && go test -timeout 20m -count=1 -run TestSkillsReadOnlyOnEmulator ./internal/cli
+      # The app's tests: android-34, because android-37 loops in surfaceflinger
+      # with every GPU mode tried. One emulator at a time: the 37 is stopped
+      # first. Same emulator port and adb server port as the job (the env of the
+      # step overrides the job's), another AVD. The start rewrites the
+      # ADBUDDY_* variables of $GITHUB_ENV with the same serial and adb path.
+      # TestCutAccessAndReactivate is not run here (it needs ADBUDDY_EMULATOR_CUT=1).
+      - name: Stop the android-37 emulator
+        run: scripts/emulator.sh stop
+      - name: Install the android-34 system image
+        run: |
+          sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -e "$sm" ] || sm="$sm.bat"
+          yes | "$sm" "system-images;android-34;google_apis;x86_64" > /dev/null
+      - name: Start the android-34 emulator
+        shell: bash # with pipefail: a failed start fails this step, not the next one
+        env:
+          ADBUDDY_EMU_IMAGE: system-images;android-34;google_apis;x86_64
+          ADBUDDY_EMU_AVD: adbuddy-ci-api34
+          ADBUDDY_EMU_PORT: "5590"
+          ADBUDDY_EMU_ADB_PORT: "5049"
+          ADBUDDY_EMU_STABLE_SECS: "120"
+        run: scripts/emulator.sh start | sed "s/^export //; s/'//g" >> "$GITHUB_ENV"
+      - name: The host against the app on the emulator
+        working-directory: host
+        # Without the variables the tests would skip and the step would pass.
+        run: test -n "$ADBUDDY_EMULATOR_SERIAL" && test -n "$ADBUDDY_EMULATOR_ADB" && go test -timeout 20m -count=1 -v ./internal/emutest
       # Evidence for a failed start or recording: why the emulator did not
       # boot. The emulator has its own adb server (scripts/emulator.sh).
       - name: Emulator diagnostics
