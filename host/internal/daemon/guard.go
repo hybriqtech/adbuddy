@@ -108,7 +108,10 @@ func decodings(w string) (forms []string, ok bool) {
 
 // percentDecode turns each %XX (two hex digits, in either case) into its
 // byte and leaves any other % as it is. Android's Uri.decode turns a
-// malformed escape into U+FFFD, which no package name has either.
+// malformed escape into U+FFFD (it consumes the next character and adds a
+// control byte), which no package name has either. Ours differs there, but it
+// does not matter: the % splits the token (notInPackageName), and Android
+// does not split a name at U+FFFD.
 func percentDecode(s string) string {
 	if !strings.Contains(s, "%") {
 		return s

@@ -475,6 +475,7 @@ func TestPercentDecodings(t *testing.T) {
 		{"a%2Eb", []string{"a%2Eb", "a.b"}, true},
 		{"a%2eb", []string{"a%2eb", "a.b"}, true},
 		{"a%252Eb", []string{"a%252Eb", "a%2Eb", "a.b"}, true},
+		{"a%2525252Eb", []string{"a%2525252Eb", "a%25252Eb", "a%252Eb", "a%2Eb", "a.b"}, true},
 		{"a%ZZb%2", []string{"a%ZZb%2"}, true},
 		{"%", []string{"%"}, true},
 		{"a%25252525252Eb", nil, false},
