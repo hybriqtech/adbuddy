@@ -463,14 +463,54 @@ func checkSs(ws []Word) checkResult {
 	return ok()
 }
 
+// ip objects that only have a reading side. iproute2 accepts any prefix of an
+// object (ip a, ip l, ip r), so a word is an object if it is one.
+var ipObjects = []string{"address", "link", "route", "rule", "neighbor", "neighbour", "netconf", "maddress", "mroute"}
+
+// ip options that only change how the answer is printed. -b/-batch (read
+// commands from a file or stdin), -force, -n/-netns, -f and the rest are 🔴.
+var ipOptions = []string{
+	"-4", "-6", "-s", "-d", "-o", "-j", "-p", "-br", "-c",
+	"-stats", "-statistics", "-details", "-oneline", "-json", "-pretty", "-brief", "-color",
+}
+
+// ipReadVerbs: the verb is read exactly (an abbreviation such as s can be set,
+// save or show depending on the object). No verb shows.
+var ipReadVerbs = []string{"show", "list", "get"}
+
+// checkIP: ip [read-only options] OBJECT [show|list|get ...]; everything else
+// is 🔴, whether it is an unknown option, an abbreviated or unlisted object or
+// any verb that is not reading.
 func checkIP(ws []Word) checkResult {
-	for _, w := range ws[1:] {
-		switch w.Value {
-		case "add", "del", "delete", "change", "replace", "set", "flush", "append", "prepend", "save", "restore", "exec", "up", "down":
-			return red(reason("ip command that changes the network"))
+	i := 1
+	for ; i < len(ws) && strings.HasPrefix(ws[i].Value, "-"); i++ {
+		if !contains(ipOptions, ws[i].Value) {
+			return red(reason("ip option {v} is not a known way of reading the network", "v", ws[i].Value))
 		}
 	}
-	return ok()
+	if i == len(ws) {
+		return ok()
+	}
+	if !isIPObject(ws[i].Value) {
+		return red(reason("ip {v} is not a known way of reading the network", "v", ws[i].Value))
+	}
+	i++
+	if i == len(ws) || contains(ipReadVerbs, ws[i].Value) {
+		return ok()
+	}
+	return red(reason("ip command that changes the network"))
+}
+
+func isIPObject(w string) bool {
+	if w == "" || strings.HasPrefix(w, "-") {
+		return false
+	}
+	for _, o := range ipObjects {
+		if strings.HasPrefix(o, w) {
+			return true
+		}
+	}
+	return false
 }
 
 func checkIfconfig(ws []Word) checkResult {

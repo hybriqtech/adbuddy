@@ -74,6 +74,8 @@ var reasonsES = map[string]string{
 	"hostname changing the name":                                            "hostname cambia el nombre",
 	"ifconfig changing an interface":                                        "ifconfig cambia una interfaz",
 	"ip command that changes the network":                                   "comando de ip que cambia la red",
+	"ip option {v} is not a known way of reading the network":               "la opción {v} de ip no es una forma conocida de leer la red",
+	"ip {v} is not a known way of reading the network":                      "ip {v} no es una forma conocida de leer la red",
 	"pgrep -L sends a signal to the processes":                              "pgrep -L envía una señal a los procesos",
 	"pgrep option {v} may send a signal":                                    "la opción {v} de pgrep puede enviar una señal",
 	"sed -i edits files in place":                                           "sed -i modifica los ficheros directamente",
