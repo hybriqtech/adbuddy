@@ -39,7 +39,7 @@ Comandos disponibles:
 
 Opciones:
   -h, --help      ayuda de adbuddy
-      --json      escribe JSON legible por programas en la salida estándar
+      --json      salida JSON para programas, en los comandos que la admiten
   -v, --version   versión de adbuddy
 
 Usa "adbuddy [command] --help" para más información sobre un comando.

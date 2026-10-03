@@ -16,4 +16,4 @@ Flags:
       --workspace string   agent environment (default: the one 'adbuddy serve' is watching, else ~/ADBuddy/default)
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

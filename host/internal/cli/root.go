@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/paths"
@@ -48,6 +50,36 @@ func NewRoot(app *App) *cobra.Command {
 	root.AddCommand(newSendCmd(app), newRemoteCmd(app))
 	root.AddCommand(newHookCmd(app))
 	root.AddCommand(newHelperCmds(app)...)
+	root.SetHelpCommand(&cobra.Command{
+		Use: "help [command]",
+		ValidArgsFunction: func(c *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+			var completions []cobra.Completion
+			cmd, _, e := c.Root().Find(args)
+			if e != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			if cmd == nil {
+				cmd = c.Root()
+			}
+			for _, sub := range cmd.Commands() {
+				if sub.IsAvailableCommand() || sub.Name() == "help" {
+					if strings.HasPrefix(sub.Name(), toComplete) {
+						completions = append(completions, cobra.CompletionWithDesc(sub.Name(), sub.Short))
+					}
+				}
+			}
+			return completions, cobra.ShellCompDirectiveNoFileComp
+		},
+		RunE: func(c *cobra.Command, args []string) error {
+			target, _, err := c.Root().Find(args)
+			if target == nil || err != nil {
+				return UsageErrorT("err.help.unknown_topic", strings.Join(args, " "))
+			}
+			target.InitDefaultHelpFlag()
+			target.InitDefaultVersionFlag()
+			return target.Help()
+		},
+	})
 	localizeHelp(app, root)
 	// `adbuddy` alone starts the setup the first time (spec §3.1), but only
 	// for a person at a terminal: a script, a CI job or an agent would get a
@@ -82,8 +114,17 @@ func mainContext(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	root := NewRoot(app)
 	app.JSON = wantsJSON(args) // errors raised before cobra reads --json still use the envelope
 	root.SetArgs(args)
-	err := root.ExecuteContext(ctx)
+	cmd, err := root.ExecuteContextC(ctx)
 	if err != nil {
+		var code *exitCodeError
+		if !errors.As(err, &code) && cmd != nil {
+			name := cmd.CommandPath()
+			// help's own usage error points at the root, not at `adbuddy help --help`.
+			if cmd.Name() == "help" && cmd.Parent() == root {
+				name = root.CommandPath()
+			}
+			err = AsError(err).forCommand(name)
+		}
 		WriteFailureIn(stdout, stderr, app.JSON, app.speaks(), err)
 	}
 	return ExitCode(err)

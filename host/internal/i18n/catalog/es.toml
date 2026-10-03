@@ -155,7 +155,7 @@ abierto. No disponible para el agente."""
 "help.root.short" = "Deja que cualquier agente de código gestione tu móvil Android por adb Wi-Fi, con seguridad"
 
 # root.go: flag
-"help.root.flag.json" = "escribe JSON legible por programas en la salida estándar"
+"help.root.flag.json" = "salida JSON para programas, en los comandos que la admiten"
 
 # run.go: cobra
 "help.run.short" = "Arranca un agente de código en el entorno de ADBuddy"
@@ -266,6 +266,8 @@ Códigos de salida:
 "error.fix_line" = "Arreglo: %[1]s"
 "error.cause" = "%[1]s"
 "error.usage_fix" = "Ejecuta `adbuddy --help` para ver cómo se usa."
+"error.usage_fix_cmd" = "Ejecuta `%[1]s --help` para ver cómo se usa."
+"err.help.unknown_topic" = "tema de ayuda desconocido %[1]q"
 
 # attach.go: error
 "err.attach.agent_session" = "`adbuddy attach` no se puede ejecutar desde la sesión del agente"

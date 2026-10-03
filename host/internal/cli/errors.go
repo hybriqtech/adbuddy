@@ -34,6 +34,8 @@ type Error struct {
 	// written again in the language of the person (Error.in).
 	key, fixKey string
 	args        []any
+	// fixArgs, when not nil, are the arguments of the fix instead of args.
+	fixArgs []any
 }
 
 // errorT builds an error from catalog keys. fixKey may be "". The arguments
@@ -78,9 +80,28 @@ func (e *Error) in(lang i18n.Lang) (message, fix string) {
 	}
 	message = lang.T(e.key, e.args...)
 	if e.fixKey != "" {
-		fix = lang.T(e.fixKey, e.args...)
+		fix = lang.T(e.fixKey, e.fixArguments()...)
 	}
 	return message, fix
+}
+
+func (e *Error) fixArguments() []any {
+	if e.fixArgs != nil {
+		return e.fixArgs
+	}
+	return e.args
+}
+
+// forCommand points a usage error at the help of the command that failed, not at the root's.
+func (e *Error) forCommand(path string) *Error {
+	if e.fixKey != "error.usage_fix" || path == "" {
+		return e
+	}
+	c := *e
+	c.fixKey = "error.usage_fix_cmd"
+	c.fixArgs = []any{path}
+	c.Fix = i18n.EN.T("error.usage_fix_cmd", path)
+	return &c
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -168,7 +189,7 @@ func (e *Error) msgs() (message, fix i18n.Msg) {
 	}
 	message = i18n.M(e.key, e.args...)
 	if e.fixKey != "" {
-		fix = i18n.M(e.fixKey, e.args...)
+		fix = i18n.M(e.fixKey, e.fixArguments()...)
 	}
 	return message, fix
 }

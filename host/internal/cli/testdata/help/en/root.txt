@@ -39,7 +39,7 @@ Available Commands:
 
 Flags:
   -h, --help      help for adbuddy
-      --json      print machine-readable JSON on stdout
+      --json      machine-readable JSON output, for the commands that support it
   -v, --version   version for adbuddy
 
 Use "adbuddy [command] --help" for more information about a command.
