@@ -486,6 +486,15 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
   - No comprobado: si la `sed` de toybox implementa la orden `e` (da igual: `sed` ya no conserva la clave) y si `bu` es accesible desde la shell de adb en Android 14+ (tampoco conserva la clave).
 - **Validación manual pendiente (nadie la ha corrido en un móvil):** con una pregunta especial y con un comando de más de 300 caracteres, la notificación solo muestra Rechazar y Abrir; ninguna notificación ofrece «Permitir durante la sesión»; el diálogo no activa Permitir hasta llegar al final, y con un comando de más de 20 000 caracteres dice cuántos oculta y solo ofrece Rechazar.
 
+### Post-v1: la guarda en la API 34 (hallazgos de la T5 y de su revisión)
+
+- **(a) El fondo de pantalla bloquea la guarda sin la app.** `com.android.systemui.wallpapers.ImageWallpaper` está siempre visible; sin la app, la guarda bloquea en todas las pantallas de la API 34. Es seguro, pero inutiliza el respaldo por `adb`.
+  - Arreglo mínimo del revisor: añadir ese título a `fixedSystemUI` en `host/internal/uidump/window.go`. `ParseSystemUIWindows` solo mira ventanas del paquete systemui, así que suplantar el título con otro paquete no cambia nada.
+  - Luego, invertir los tests marcados con `TODO(adjudicar)`: `TestAPI34SystemUIWindows`, los casos de fondo de `TestTheGuardOnAPI34Screens`, `wallpaperReason` y `onlyWallpaper` de `guard_test.go`, y el apaño de `TestTheFallbackWithoutTheApp`.
+  - Opcional: saltar las ventanas de systemui con `mIsWallpaper=true`.
+- **(b) Hueco ya existente:** las superposiciones de terceros (`TYPE_APPLICATION_OVERLAY`) no las ve `ParseSystemUIWindows`, porque filtra por paquete. Confirmarlo en la T7 con una app de pruebas, y también con una superposición con `package=com.android.systemui` y ese título.
+- **(c) Falta una muestra del foco `StatusBar`** (solo hay `NotificationShade`) para Android 17.
+
 ### Post-v1: Permitir tras desbloquear con PIN (M2-8)
 
 - **Ruling del supervisor f3:** post-v1, no se implementa ahora. Falla seguro (no se ejecuta nada sin confirmación), es un problema de experiencia, y tocar `ConfirmReceiver`/`BridgeService` a última hora arriesga abrir el hueco que se protege.
