@@ -49,12 +49,12 @@ class ChatScreensTest(private val mode: ScreenMode) {
 
     private fun text(id: Int, vararg args: Any): String = app.getString(id, *args)
 
-    private fun show(state: BridgeState, cut: Boolean = false, configured: Boolean = true, outgoing: List<Outgoing> = emptyList()) {
+    private fun show(state: BridgeState, cut: Boolean = false, configured: Boolean = true, outgoing: List<Outgoing> = emptyList(), terminalOpenByDefault: Boolean = true) {
         compose.setContent {
             AdbuddyTheme(dynamic = false) {
                 ChatScreen(
                     state, outgoing = outgoing, drafts = emptyList(), downloads = emptyMap(), cut = cut, terminal = null,
-                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = configured, remoteCard = {},
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = configured, terminalOpenByDefault = terminalOpenByDefault, remoteCard = {},
                 )
             }
         }
@@ -106,6 +106,20 @@ class ChatScreensTest(private val mode: ScreenMode) {
         compose.onNodeWithContentDescription(text(R.string.chat_stop)).assertIsDisplayed()
         compose.assertTextsFit()
         compose.shot("chat_working", mode)
+    }
+
+    private val connected = BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc")
+
+    @Test fun theTerminalStartsOpenByDefault() {
+        show(connected)
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_hide)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_show)).assertDoesNotExist()
+    }
+
+    @Test fun theTerminalStartsFoldedWhenAskedTo() {
+        show(connected, terminalOpenByDefault = false)
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_show)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_hide)).assertDoesNotExist()
     }
 
     @Test fun offlineWaitingSaysItShortInTheHeaderAndInFullInTheBanner() {

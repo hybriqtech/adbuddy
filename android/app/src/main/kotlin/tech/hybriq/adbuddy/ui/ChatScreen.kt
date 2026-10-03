@@ -94,11 +94,13 @@ fun ChatScreen(
     hostNow: () -> Long = { 0L },
     /** The host has handed this phone a link: without it (and without a channel) the banner says to run adbuddy setup. */
     configured: Boolean = true,
+    /** False in the chat bubble (about 600 dp tall): the terminal starts folded and opens with the arrow. */
+    terminalOpenByDefault: Boolean = true,
     /** The remote-mode switch (RemoteCard), shown above the conversation; a preview passes an empty one. */
     remoteCard: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    var terminalShown by rememberSaveable { mutableStateOf(true) }
+    var terminalShown by rememberSaveable { mutableStateOf(terminalOpenByDefault) }
     var text by rememberSaveable { mutableStateOf("") }
     var link by remember { mutableStateOf<Pair<String, String>?>(null) }
     var askNew by rememberSaveable { mutableStateOf(false) }

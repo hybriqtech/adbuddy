@@ -77,6 +77,12 @@ class BubbleFlowTest {
         assertFalse(Onboarding.of(app).done())
     }
 
+    @Test fun theBubbleStartsWithTheTerminalFolded() {
+        // C12: the bubble is ~600 dp tall; an open terminal would leave the messages a few dp.
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_show)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_hide)).assertDoesNotExist()
+    }
+
     @Test fun settingsLeadsToTheProtectedAppsAndTheNotificationAccess() {
         openSettings()
         compose.onNodeWithText(text(R.string.protected_title)).performClick()

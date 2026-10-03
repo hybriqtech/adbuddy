@@ -45,7 +45,7 @@ import tech.hybriq.adbuddy.files.FileIntents
  * the notification access under it), and the red questions over all of them.
  */
 @Composable
-fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, onClose: (String) -> Unit) {
+fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = true, onClose: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by app.bridge.state.collectAsStateWithLifecycle()
@@ -145,7 +145,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             // The chat leaves the composition under Settings and Activity: its state (the text being written,
             // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
             Route.CHAT -> holder.SaveableStateProvider("chat") {
-                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured) {
+                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured, terminalOpenByDefault = terminalOpenByDefault) {
                     RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
                 }
             }
