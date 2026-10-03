@@ -45,8 +45,8 @@ private class UnknownMark(val remote: RemoteState?)
 
 /**
  * The remote-mode switch (M5). The logic is RemoteUi; this only draws it.
- * Turning it on asks first (port 5555 open on any network); turning it off does not
- * ask, except for the note on losing access away from home.
+ * Turning it on asks first (port 5555 open on any network); turning it off asks too, with
+ * the note on losing access away from home.
  */
 @Composable
 fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: (String) -> Unit, modifier: Modifier = Modifier) {

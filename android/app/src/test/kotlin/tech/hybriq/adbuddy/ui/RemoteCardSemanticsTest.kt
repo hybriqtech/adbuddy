@@ -66,6 +66,15 @@ class RemoteCardSemanticsTest {
         assertEquals(listOf(text(R.string.remote_failed)), messages)
     }
 
+    @Test fun tappingTheTitleWhileOnAsksBeforeTurningOffAndSendsNothingUntilConfirmed() {
+        show(BridgeState(connection = BridgeState.Connection.CONNECTED, remote = RemoteState(enabled = true, address = "192.0.2.1:5555")))
+        compose.onNodeWithText(text(R.string.remote_title)).performClick()
+        compose.onNodeWithText(text(R.string.remote_disable_title)).assertIsDisplayed()
+        assertTrue("asking sends nothing", messages.isEmpty())
+        compose.onNodeWithText(text(R.string.remote_disable_confirm)).performClick()
+        assertEquals(listOf(text(R.string.remote_failed)), messages)
+    }
+
     @Test fun cancellingTheDialogSendsNothing() {
         show(connectedOff)
         compose.onNodeWithText(text(R.string.remote_title)).performClick()

@@ -8,7 +8,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -33,8 +32,8 @@ class SecondaryActionButtonTest {
         compose.setContent { AdbuddyTheme(dynamic = false) { SecondaryActionButton("Not now", onClick = { clicks++ }) } }
         val node = compose.onNodeWithText("Not now")
         node.assertIsEnabled()
-        assertEquals(Role.Button, compose.onNodeWithText("Not now").fetchSemanticsNode().config.getOrNull(SemanticsProperties.Role))
+        assertEquals(Role.Button, node.fetchSemanticsNode().config.getOrNull(SemanticsProperties.Role))
         node.performClick()
-        assertTrue("one click", clicks == 1)
+        assertEquals("one click", 1, clicks)
     }
 }

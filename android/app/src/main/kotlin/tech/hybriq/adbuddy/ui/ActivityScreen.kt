@@ -7,9 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -31,7 +29,6 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 
 /** Every adb command of the agent, with the level the host gave it and how to undo it (spec section 6). */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActivityScreen(state: BridgeState, onBack: () -> Unit) {
     var filter by rememberSaveable { mutableStateOf<String?>(null) }
