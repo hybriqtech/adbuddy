@@ -41,8 +41,9 @@ func newHelperCmds(app *App) []*cobra.Command {
 
 // callHelper runs a helper on the serve that runs and returns its data.
 // stdout gets what the helper streams (the screenshot's bytes). The daemon
-// writes the journal's command itself, from op and args.
-func callHelper(cmd *cobra.Command, app *App, op string, args any, stdout io.Writer) ([]byte, error) {
+// writes the journal's command itself, from op and args. screen asks the
+// daemon for the settled screen too (tap, type) or to wait for it (screen).
+func callHelper(cmd *cobra.Command, app *App, op string, args any, screen bool, stdout io.Writer) ([]byte, error) {
 	e, err := loadEnv(app)
 	if err != nil {
 		return nil, err
@@ -53,7 +54,7 @@ func callHelper(cmd *cobra.Command, app *App, op string, args any, stdout io.Wri
 	}
 	cwd, _ := os.Getwd()
 	var data []byte
-	req := ipc.Request{Kind: ipc.KindUI, UIOp: op, UIArgs: raw, Cwd: cwd,
+	req := ipc.Request{Kind: ipc.KindUI, UIOp: op, UIArgs: raw, Screen: screen, Cwd: cwd,
 		Env: map[string]string{"ADBUDDY_SOURCE": app.Getenv("ADBUDDY_SOURCE")}}
 	exit, err := ipc.Call(cmd.Context(), e.dirs.Data, req, nil, stdout, app.Stderr, func(b []byte) error {
 		data = append([]byte{}, b...)
@@ -79,31 +80,65 @@ func callHelper(cmd *cobra.Command, app *App, op string, args any, stdout io.Wri
 }
 
 func newScreenCmd(app *App) *cobra.Command {
-	var all bool
+	var all, settle bool
 	cmd := &cobra.Command{
 		Use:     "screen",
 		Short:   app.T("help.screen.short"),
 		Long:    app.T("help.screen.long"),
-		Example: "  adbuddy screen\n  adbuddy screen --all --json",
+		Example: "  adbuddy screen\n  adbuddy screen --settle\n  adbuddy screen --all --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			data, err := callHelper(cmd, app, bridge.UIOpDump, bridge.UIDumpArgs{All: all}, app.Stderr)
+			data, err := callHelper(cmd, app, bridge.UIOpDump, bridge.UIDumpArgs{All: all}, settle, app.Stderr)
 			if err != nil {
 				return err
 			}
-			var d bridge.UIDump
+			// settled is a *bool: an old daemon does not say, and then there is
+			// nothing to warn about.
+			var d struct {
+				bridge.UIDump
+				Settled *bool `json:"settled"`
+			}
 			if err := json.Unmarshal(data, &d); err != nil {
 				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if app.JSON {
-				return WriteData(app.Stdout, d)
+				if d.Settled != nil {
+					return WriteData(app.Stdout, daemon.ScreenSettled{UIDump: d.UIDump, Settled: *d.Settled})
+				}
+				return WriteData(app.Stdout, d.UIDump)
 			}
-			printScreen(app.Stdout, d)
+			printScreen(app.Stdout, d.UIDump)
+			if d.Settled != nil && !*d.Settled {
+				fmt.Fprintln(app.Stdout, stillChanging)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, app.T("help.screen.flag.all"))
+	cmd.Flags().BoolVar(&settle, "settle", false, app.T("help.screen.flag.settle"))
 	return cmd
+}
+
+// stillChanging is what the agent reads when the screen did not settle in time.
+const stillChanging = "(the screen was still changing: run adbuddy screen again if you need it steady)"
+
+// printAfterAct writes what tap and type print after the act itself, with
+// --screen: the settled screen, the daemon's note (the act was done and the
+// read was refused or failed: exit 0, so nothing retries the act) or, from a
+// daemon that ignored the flag, where to look. Fixed English, for the agent.
+func printAfterAct(w io.Writer, screen *daemon.ScreenSettled, note string) {
+	switch {
+	case screen != nil:
+		fmt.Fprintln(w)
+		printScreen(w, screen.UIDump)
+		if !screen.Settled {
+			fmt.Fprintln(w, stillChanging)
+		}
+	case note != "":
+		fmt.Fprintln(w, note)
+	default:
+		fmt.Fprintln(w, "This ADBuddy did not return the screen: run adbuddy screen.")
+	}
 }
 
 // printScreen writes a dump for the agent, one element per line. Everything
@@ -170,6 +205,7 @@ func quoteScreen(s string) string {
 
 func newTapCmd(app *App) *cobra.Command {
 	var id, at string
+	var screen bool
 	cmd := &cobra.Command{
 		Use:     `tap ["<text>"] [--id <id>] [--xy <x,y>]`,
 		Short:   app.T("help.tap.short"),
@@ -196,23 +232,30 @@ func newTapCmd(app *App) *cobra.Command {
 			if n != 1 {
 				return UsageError("tap needs exactly one of a text, --id or --xy")
 			}
-			data, err := callHelper(cmd, app, bridge.UIOpClick, a, app.Stderr)
+			data, err := callHelper(cmd, app, bridge.UIOpClick, a, screen, app.Stderr)
 			if err != nil {
 				return err
 			}
-			var c bridge.UIClicked
+			var c daemon.ClickedScreen
 			if err := json.Unmarshal(data, &c); err != nil {
 				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if app.JSON {
-				return WriteData(app.Stdout, c)
+				if screen {
+					return WriteData(app.Stdout, c)
+				}
+				return WriteData(app.Stdout, c.UIClicked)
 			}
 			fmt.Fprintf(app.Stdout, "Tapped (%d,%d)-(%d,%d).\n", c.Bounds[0], c.Bounds[1], c.Bounds[2], c.Bounds[3])
+			if screen {
+				printAfterAct(app.Stdout, c.Screen, c.Note)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&id, "id", "", app.T("help.tap.flag.id"))
 	cmd.Flags().StringVar(&at, "xy", "", app.T("help.tap.flag.xy"))
+	cmd.Flags().BoolVar(&screen, "screen", false, app.T("help.tap.flag.screen"))
 	return cmd
 }
 
@@ -227,7 +270,8 @@ func parseXY(s string) (x, y int, ok bool) {
 }
 
 func newTypeCmd(app *App) *cobra.Command {
-	return &cobra.Command{
+	var screen bool
+	cmd := &cobra.Command{
 		Use:     `type "<text>"`,
 		Short:   app.T("help.type.short"),
 		Long:    app.T("help.type.long"),
@@ -237,16 +281,31 @@ func newTypeCmd(app *App) *cobra.Command {
 			if n := utf8.RuneCountInString(args[0]); n == 0 || n > bridge.MaxSetText {
 				return UsageError(fmt.Sprintf("type needs a text of 1 to %d characters", bridge.MaxSetText))
 			}
-			if _, err := callHelper(cmd, app, bridge.UIOpSetText, bridge.UISetTextArgs{Text: args[0]}, app.Stderr); err != nil {
+			data, err := callHelper(cmd, app, bridge.UIOpSetText, bridge.UISetTextArgs{Text: args[0]}, screen, app.Stderr)
+			if err != nil {
 				return err
 			}
+			var r daemon.TextSetScreen
+			if screen {
+				if err := json.Unmarshal(data, &r); err != nil {
+					return NewError("UI_FAILED", "unreadable answer", "")
+				}
+			}
 			if app.JSON {
+				if screen {
+					return WriteData(app.Stdout, r)
+				}
 				return WriteData(app.Stdout, bridge.UITextSet{Set: true})
 			}
 			fmt.Fprintln(app.Stdout, "Typed.")
+			if screen {
+				printAfterAct(app.Stdout, r.Screen, r.Note)
+			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&screen, "screen", false, app.T("help.type.flag.screen"))
+	return cmd
 }
 
 func newForegroundCmd(app *App) *cobra.Command {
@@ -256,7 +315,7 @@ func newForegroundCmd(app *App) *cobra.Command {
 		Example: "  adbuddy foreground\n  adbuddy foreground --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			data, err := callHelper(cmd, app, bridge.UIOpForeground, bridge.Empty{}, app.Stderr)
+			data, err := callHelper(cmd, app, bridge.UIOpForeground, bridge.Empty{}, false, app.Stderr)
 			if err != nil {
 				return err
 			}
@@ -346,7 +405,7 @@ func newScreenshotCmd(app *App) *cobra.Command {
 				return UsageError("--scale must be more than 0 and at most 1")
 			}
 			var img bytes.Buffer
-			data, err := callHelper(cmd, app, daemon.OpScreenshot, daemon.ScreenshotArgs{Scale: scale, Format: format}, &img)
+			data, err := callHelper(cmd, app, daemon.OpScreenshot, daemon.ScreenshotArgs{Scale: scale, Format: format}, false, &img)
 			if err != nil {
 				return err
 			}

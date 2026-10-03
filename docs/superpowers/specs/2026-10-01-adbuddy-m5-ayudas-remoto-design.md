@@ -66,7 +66,7 @@ agente ──► adbuddy tap --text OK          (CLI, en la sesión del agente)
 
 M3.0 dejó `args` y `result` como JSON libre (`json.RawMessage` y `JsonElement`). M5 los define aquí, con estructuras propias en ficheros nuevos (`bridge/ui_ops.go`, `ProtocolUiOps.kt`) y una fixture por operación (§12). `UIRequest` y `UIResponse` no cambian.
 
-### 3.1 `dump` → `adbuddy screen [--all] [--json]`
+### 3.1 `dump` → `adbuddy screen [--all] [--settle] [--json]`
 
 `args`: `{}`.
 
@@ -107,9 +107,11 @@ com.android.settings · 1344×2992
 - "Wi-Fi" Switch (980,700)-(1302,780) click checked=false
 ```
 
+`--settle` (latencia, 2026-10-03) pide al daemon que espere a que la pantalla se asiente antes de devolverla (dos lecturas seguidas iguales, unos 2 s como máximo, cada lectura con la guarda): sirve tras una orden `adb` en bruto (`am start`, `input`). La respuesta añade `settled`; si es `false`, la CLI avisa de que la pantalla seguía cambiando. Sin la bandera, la salida es la de siempre.
+
 `[id]` sale si hay `id`, y si no, un `-`. Los textos van entre comillas, recortados a 120 caracteres y escapados con `classify.Printable`: un texto de la pantalla no puede meter secuencias de control en la terminal del agente.
 
-### 3.2 `click` → `adbuddy tap "<texto>" | --id <id> | --xy x,y`
+### 3.2 `click` → `adbuddy tap "<texto>" | --id <id> | --xy x,y [--screen]`
 
 `args`: `{"text": "..."}`, `{"id": "..."}` o `{"x": 10, "y": 20}`, solo uno.
 
@@ -118,14 +120,15 @@ com.android.settings · 1344×2992
 - **Por `id` o por texto:** se busca entre los nodos que `dump` mostraría, por este orden: `id` exacto; texto o descripción exactos; y los mismos sin distinguir mayúsculas. Del nodo que coincide se sube al antepasado pulsable más cercano, y se pulsa con `ACTION_CLICK` (`how: action`). Si coinciden varios pulsables distintos, el error es `ambiguous` (§12), con el número de coincidencias y los límites de las 5 primeras en `text`. El agente repite entonces con `--id` o `--xy`. Si no coincide ninguno, `not_found`.
 - **Por coordenadas:** un toque con `dispatchGesture` (`how: gesture`), 50 ms. Antes de tocar se mira qué ventana tiene encima ese punto. Si es de ADBuddy o de una app protegida, el error es `protected`.
 - La superposición marca el punto (§6).
+- **`--screen`:** el daemon, tras el toque, lee la pantalla asentada (como `screen --settle`) y la CLI la imprime a continuación del `Tapped …`; así el agente no necesita otra llamada. Si la guarda impide leerla (el toque abrió una app protegida, por ejemplo), la respuesta trae `screenNote` en vez de `screen` y la CLI la imprime y sale con 0: el toque sí ocurrió y un código de error haría reintentarlo. Deja **dos entradas** en el diario: la del toque y una `adbuddy screen` de la lectura.
 
-### 3.3 `setText` → `adbuddy type "<texto>"`
+### 3.3 `setText` → `adbuddy type "<texto>" [--screen]`
 
 `args`: `{"text": "..."}`, hasta 4096 caracteres.
 
 `result`: `{"set": true}`.
 
-- Va al nodo con el foco de entrada (`findFocus(FOCUS_INPUT)`), con `ACTION_SET_TEXT`. Reemplaza el texto del campo: así es la acción de Android. Para añadir, el agente lee el campo con `screen` y manda el texto completo.
+- Va al nodo con el foco de entrada (`findFocus(FOCUS_INPUT)`), con `ACTION_SET_TEXT`. Reemplaza el texto del campo: así es la acción de Android. Para añadir, el agente lee el campo con `screen` y manda el texto completo. `--screen` funciona igual que en `tap` (§3.2).
 - Sin campo con foco: `not_found` ("Tap a text field first").
 - Campo de contraseña: `protected` ("ADBuddy does not type into password fields: ask the user to type it").
 - Bloqueado: `protected` ("The phone is locked: ask the user to unlock it").
@@ -331,11 +334,11 @@ Sin `canTakeScreenshot`: la captura la hace el host (§3.6). La descripción del
 ## 11. Tests
 
 - **Host:**
-  - el daemon con un `UI` falso: cada puerta de §4.1, el orden pausa → pregunta → guarda → admisión, y una entrada del diario por ayuda;
+  - el daemon con un `UI` falso: cada puerta de §4.1, el orden pausa → pregunta → guarda → admisión, y una entrada del diario por ayuda (dos con `--screen`: la de la acción y la `adbuddy screen` de la lectura posterior);
   - la guarda: con una app protegida, ADBuddy, primer plano desconocido o sin lista, para `input`, `am start -n`, `monkey -p`, `screencap` y las ayudas;
   - el respaldo con el adb falso de `testutil`: `uiautomator` con el servicio vinculado y sin vincular, `input text` con espacios, comillas y Unicode, y `dumpsys` de Android 11 a 17 (muestras reales en `testdata`);
   - `uiArea` con una app falsa de `bridge`: respuesta tardía, respuesta de otra conexión, `id` desconocido y caducidad;
-  - la CLI: la salida de texto escapada, `--json` y los códigos de salida;
+  - la CLI: la salida de texto escapada, `--json`, los códigos de salida, y `tap`/`type --screen` y `screen --settle` (pantalla, nota con salida 0, daemon antiguo, aviso de pantalla cambiante);
   - el reescalado: tamaño y formato.
 - **App** (JVM, sin Android):
   - `Dumper`, `Matcher` y `ProtectedApps` sobre un modelo propio de nodo (`UiNode`), que el servicio construye a partir de `AccessibilityNodeInfo`, para que la lógica no dependa de clases de Android;

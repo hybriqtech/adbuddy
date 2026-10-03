@@ -23,7 +23,7 @@ func newNotificationsCmd(app *App) *cobra.Command {
 		Example: "  adbuddy notifications\n  adbuddy notifications --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			data, err := callHelper(cmd, app, bridge.UIOpNotifications, bridge.Empty{}, app.Stderr)
+			data, err := callHelper(cmd, app, bridge.UIOpNotifications, bridge.Empty{}, false, app.Stderr)
 			if err != nil {
 				return err
 			}

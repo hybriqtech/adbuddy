@@ -497,7 +497,7 @@ func TestTemplatesImportNotesAndChainScreenHelpers(t *testing.T) {
 		}
 	}
 	a := read(t, filepath.Join(dir, "AGENTS.md"))
-	for _, want := range []string{"Do several steps in one call", "adbuddy tap \"<text>\" && adbuddy screen", "in one call", "If it is not already in your context, read it before you start."} {
+	for _, want := range []string{"adbuddy tap \"Network & internet\" --screen", "`adbuddy screen --settle`", "--screen", "do not repeat it", "If it is not already in your context, read it before you start."} {
 		if !strings.Contains(a, want) {
 			t.Errorf("AGENTS.md lacks %q", want)
 		}

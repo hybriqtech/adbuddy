@@ -404,3 +404,147 @@ func TestScreenshotExplicitOutputOverwrites(t *testing.T) {
 		t.Fatalf("holds %q", got)
 	}
 }
+
+func screenOf(pkg string) bridge.UIDump {
+	return bridge.UIDump{Package: pkg, Width: 1080, Height: 2400, Elements: []bridge.UIElement{
+		{ID: "a:id/x", Text: "Wi-Fi", Class: "TextView", Bounds: [4]int{1, 2, 3, 4}, Click: true, Enabled: true, Window: "app"},
+	}}
+}
+
+const wantStillChanging = "(the screen was still changing: run adbuddy screen again if you need it steady)"
+
+func TestTapScreen(t *testing.T) {
+	var reply any
+	reqs := helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(reply)
+		return ipc.Exit{}
+	})
+	clicked := bridge.UIClicked{Clicked: true, Bounds: [4]int{1, 2, 3, 4}, How: "action"}
+
+	// With the screen, settled.
+	reply = daemon.ClickedScreen{UIClicked: clicked, Screen: &daemon.ScreenSettled{UIDump: screenOf("com.android.settings"), Settled: true}}
+	out, errOut, code := runHelper(t, "tap", "OK", "--screen")
+	if code != 0 || !strings.HasPrefix(out, "Tapped (1,2)-(3,4).\n\ncom.android.settings · 1080×2400\n") ||
+		!strings.Contains(out, `[a:id/x] "Wi-Fi" TextView (1,2)-(3,4) click`) || strings.Contains(out, "still changing") {
+		t.Fatalf("exit %d %q %q", code, out, errOut)
+	}
+	if r := (*reqs)[0]; !r.Screen || r.UIOp != bridge.UIOpClick || string(r.UIArgs) != `{"text":"OK"}` {
+		t.Fatalf("request %+v", r)
+	}
+
+	// Still changing.
+	reply = daemon.ClickedScreen{UIClicked: clicked, Screen: &daemon.ScreenSettled{UIDump: screenOf("p"), Settled: false}}
+	if out, _, code := runHelper(t, "tap", "OK", "--screen"); code != 0 || !strings.Contains(out, wantStillChanging+"\n") {
+		t.Fatalf("exit %d %q", code, out)
+	}
+
+	// The guard blocked the read: the note, and exit 0 (the tap happened).
+	note := "The action was done; do not repeat it. The screen was not read. Blocked by ADBuddy: x is a protected app"
+	reply = daemon.ClickedScreen{UIClicked: clicked, Note: note}
+	out, errOut, code = runHelper(t, "tap", "OK", "--screen")
+	if code != 0 || !strings.Contains(out, "Tapped (1,2)-(3,4).\n") || !strings.Contains(out, note+"\n") || errOut != "" {
+		t.Fatalf("note: exit %d %q %q", code, out, errOut)
+	}
+
+	// An old daemon ignored the flag.
+	reply = clicked
+	out, _, code = runHelper(t, "tap", "OK", "--screen")
+	if code != 0 || !strings.Contains(out, "Tapped (1,2)-(3,4).\n") || !strings.Contains(out, "This ADBuddy did not return the screen: run adbuddy screen.\n") {
+		t.Fatalf("old daemon: exit %d %q", code, out)
+	}
+
+	// Without the flag: as always, and the request does not ask for the screen.
+	reply = clicked
+	n := len(*reqs)
+	out, _, code = runHelper(t, "tap", "OK")
+	if code != 0 || out != "Tapped (1,2)-(3,4).\n" || (*reqs)[n].Screen {
+		t.Fatalf("plain: exit %d %q %+v", code, out, (*reqs)[n])
+	}
+
+	// --json keeps every field.
+	reply = daemon.ClickedScreen{UIClicked: clicked, Screen: &daemon.ScreenSettled{UIDump: screenOf("p"), Settled: false}, Note: ""}
+	out, _, code = runHelper(t, "tap", "OK", "--screen", "--json")
+	var env struct {
+		OK   bool
+		Data daemon.ClickedScreen
+	}
+	if code != 0 || json.Unmarshal([]byte(out), &env) != nil || !env.OK || !env.Data.Clicked || env.Data.Screen == nil || env.Data.Screen.Settled || len(env.Data.Screen.Elements) != 1 {
+		t.Fatalf("json: exit %d %q", code, out)
+	}
+	reply = daemon.ClickedScreen{UIClicked: clicked, Note: note}
+	out, _, code = runHelper(t, "tap", "OK", "--screen", "--json")
+	if code != 0 || !strings.Contains(out, `"screenNote":`) || !strings.Contains(out, `"clicked":true`) {
+		t.Fatalf("json note: exit %d %q", code, out)
+	}
+}
+
+func TestTypeScreen(t *testing.T) {
+	var reply any
+	reqs := helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(reply)
+		return ipc.Exit{}
+	})
+	reply = daemon.TextSetScreen{UITextSet: bridge.UITextSet{Set: true}, Screen: &daemon.ScreenSettled{UIDump: screenOf("p"), Settled: true}}
+	out, errOut, code := runHelper(t, "type", "Wi-Fi", "--screen")
+	if code != 0 || !strings.HasPrefix(out, "Typed.\n\np · 1080×2400\n") || strings.Contains(out, "still changing") {
+		t.Fatalf("exit %d %q %q", code, out, errOut)
+	}
+	if r := (*reqs)[0]; !r.Screen || r.UIOp != bridge.UIOpSetText {
+		t.Fatalf("request %+v", r)
+	}
+	reply = daemon.TextSetScreen{UITextSet: bridge.UITextSet{Set: true}, Note: "The action was done; do not repeat it. stopped"}
+	if out, _, code := runHelper(t, "type", "x", "--screen"); code != 0 || !strings.Contains(out, "Typed.\n") || !strings.Contains(out, "do not repeat it. stopped\n") {
+		t.Fatalf("note: exit %d %q", code, out)
+	}
+	reply = bridge.UITextSet{Set: true}
+	if out, _, code := runHelper(t, "type", "x", "--screen"); code != 0 || !strings.Contains(out, "This ADBuddy did not return the screen: run adbuddy screen.\n") {
+		t.Fatalf("old daemon: exit %d %q", code, out)
+	}
+	reply = daemon.TextSetScreen{UITextSet: bridge.UITextSet{Set: true}, Screen: &daemon.ScreenSettled{UIDump: screenOf("p"), Settled: true}}
+	out, _, code = runHelper(t, "type", "x", "--screen", "--json")
+	var env struct{ Data daemon.TextSetScreen }
+	if code != 0 || json.Unmarshal([]byte(out), &env) != nil || !env.Data.Set || env.Data.Screen == nil || !env.Data.Screen.Settled {
+		t.Fatalf("json: exit %d %q", code, out)
+	}
+	n := len(*reqs)
+	reply = bridge.UITextSet{Set: true}
+	if out, _, code := runHelper(t, "type", "x"); code != 0 || out != "Typed.\n" || (*reqs)[n].Screen {
+		t.Fatalf("plain: exit %d %q", code, out)
+	}
+}
+
+func TestScreenSettle(t *testing.T) {
+	var reply any
+	reqs := helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(reply)
+		return ipc.Exit{}
+	})
+	reply = daemon.ScreenSettled{UIDump: screenOf("p"), Settled: false}
+	out, _, code := runHelper(t, "screen", "--settle")
+	if code != 0 || !strings.Contains(out, "p · 1080×2400\n") || !strings.HasSuffix(out, wantStillChanging+"\n") {
+		t.Fatalf("exit %d %q", code, out)
+	}
+	if r := (*reqs)[0]; !r.Screen || r.UIOp != bridge.UIOpDump {
+		t.Fatalf("request %+v", r)
+	}
+	reply = daemon.ScreenSettled{UIDump: screenOf("p"), Settled: true}
+	if out, _, code := runHelper(t, "screen", "--settle"); code != 0 || strings.Contains(out, "still changing") {
+		t.Fatalf("settled: exit %d %q", code, out)
+	}
+	// An old daemon does not say: no warning.
+	reply = screenOf("p")
+	if out, _, code := runHelper(t, "screen", "--settle"); code != 0 || strings.Contains(out, "still changing") || !strings.Contains(out, "p · 1080×2400\n") {
+		t.Fatalf("old daemon: exit %d %q", code, out)
+	}
+	reply = daemon.ScreenSettled{UIDump: screenOf("p"), Settled: false}
+	out, _, code = runHelper(t, "screen", "--settle", "--json")
+	var env struct{ Data daemon.ScreenSettled }
+	if code != 0 || json.Unmarshal([]byte(out), &env) != nil || env.Data.Settled || len(env.Data.Elements) != 1 || !strings.Contains(out, `"settled":false`) {
+		t.Fatalf("json: exit %d %q", code, out)
+	}
+	n := len(*reqs)
+	reply = screenOf("p")
+	if _, _, code := runHelper(t, "screen"); code != 0 || (*reqs)[n].Screen {
+		t.Fatalf("plain screen asked to settle")
+	}
+}
