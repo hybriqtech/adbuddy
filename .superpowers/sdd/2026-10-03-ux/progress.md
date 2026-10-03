@@ -53,3 +53,8 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - Ruling: tras la revision final se hizo un segundo arreglo (d5c56f1) aunque la skill dice "una sola oleada" — era un fallo de mi propio arreglo, de dos lineas, y dejarlo mostraba "ADB access is cut" tras quitar el corte — cuesta: una revision mas.
 - Ruling: M1/M3/M2 de la final (configured obsoleto sin cambio de conexion, ChatHeader recalcula LinkStatus, aviso de rechazo seguido de paso 1) — DEFER, notados en el fragmento/ledger — cuestan: edge cases raros.
 - P2: listo para PR (ux/p2, d5c56f1).
+
+## Fase 2 - P3 (chat, adjuntos, terminal, diario) en la rama ux/p3 (desde ux/p2)
+- P2 subido (ux/p2 76c1407, avisado al lider). Plan P3: docs/superpowers/plans/2026-10-03-ux-p3-chat-adjuntos-terminal.md, revisado por adbuddy-reviewer (aec45a0f): 3 bloqueos de compilacion/test y 6 importantes, todos incorporados (QuickKeysRow(enabled primero), DraftStatus.DONE, DraftChips test apilado, FlowRow de filtros, Parar solo con barra vacia y con reposo anti doble toque, hint de undo con id validado, test obligatorio de la burbuja, fecha si no es de hoy, notify() con cierre propio).
+- Ruling: C16, C19 (JS del terminal y teclas), persistencia de C12, "Restaurar" tras cut_done (C11) — aplazados — piden diseño o tocan el corta-accesos — cuesta: captura de la propia app, terminal sin zoom, restaurar solo por menu.
+- Ruling: el botón Parar queda deshabilitado 3 s tras pulsarlo — agent.interrupt no tiene respuesta y un segundo toque mandaria un segundo ESC — cuesta: si el agente no para, hay que esperar 3 s para reintentar.
