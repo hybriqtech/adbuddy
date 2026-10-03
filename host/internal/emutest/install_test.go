@@ -63,8 +63,11 @@ func TestTheInstalledAppReadsBackByteForByte(t *testing.T) {
 	// mtime is whole seconds: wait for the inode or the mtime to move.
 	var stat2 string
 	if !poll(5*time.Second, func() bool {
-		path2 := firstPath(e.shell(t, shq.Join("pm", "path", phoneapp.Package)))
-		stat2 = e.shell(t, shq.Join("stat", "-c", "%s %i %Y", path2))
+		path2 := firstPath(e.tryShell(shq.Join("pm", "path", phoneapp.Package)))
+		if path2 == "" {
+			return false
+		}
+		stat2 = e.tryShell(shq.Join("stat", "-c", "%s %i %Y", path2))
 		_, i2, m2, ok := threeInts(stat2)
 		return ok && (i2 != inode || m2 != mtime)
 	}) {

@@ -151,7 +151,9 @@ func adbdTests(t *testing.T) {
 func portClosed(p string) bool { return p == "" || p == "0" }
 
 // closedAtStartAndEnd requires adbd without a TCP port before the test and
-// closes it at cleanup if the test left it open (adb usb).
+// closes it at cleanup if the test left it open (adb usb). adb usb leaves
+// service.adb.tcp.port at "0" where it could have been "" before (both mean
+// closed, portClosed).
 func (e *emu) closedAtStartAndEnd(t *testing.T) {
 	t.Helper()
 	if _, p := e.adbd(t); !portClosed(p) {
@@ -161,7 +163,11 @@ func (e *emu) closedAtStartAndEnd(t *testing.T) {
 		c := *e
 		c.ctx = context.WithoutCancel(e.ctx)
 		pid, p, ok := c.adbdNow()
-		if !ok || portClosed(p) {
+		if !ok {
+			t.Errorf("could not read adbd's pid and port at the cleanup (emulator %q): the port may be left open; %s", c.state(), restartHint)
+			return
+		}
+		if portClosed(p) {
 			return
 		}
 		ctx, cancel := context.WithTimeout(c.ctx, time.Minute)
@@ -330,7 +336,23 @@ func TestPersistTCPPortAgainstUSBAndRestarts(t *testing.T) {
 	if p := persist(); p != "" {
 		t.Fatalf("persist.adb.tcp.port = %q before the test: left over; clear it with `adb shell su 0 setprop persist.adb.tcp.port ''`", p)
 	}
-	// Cleanups run last first: this one before closedAtStartAndEnd's adb usb.
+	// Cleanups run last first: the order is the persist clear, the adbd restart
+	// (only if the reboot step ran: adbd listens on the persist port until it
+	// restarts), then closedAtStartAndEnd's adb usb.
+	rebooted := false
+	t.Cleanup(func() {
+		if !rebooted {
+			return
+		}
+		c := *e
+		c.ctx = context.WithoutCancel(e.ctx)
+		if c.state() != "device" {
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.ctx, time.Minute)
+		defer cancel()
+		_, _, _, _ = c.adb.Output(ctx, "shell", "su 0 setprop ctl.restart adbd")
+	})
 	e.atCleanup(t, "shell", "su 0 setprop persist.adb.tcp.port ''")
 
 	// Can the shell user set it without su? Measured and logged, not
@@ -343,7 +365,10 @@ func TestPersistTCPPortAgainstUSBAndRestarts(t *testing.T) {
 		t.Fatalf("persist.adb.tcp.port = %q after emptying it", p)
 	}
 
+	// If the shell attempt above restarted adbd, wait until it is stable
+	// before taking the pid that restartedBySetprop compares with.
 	pid, port := e.adbd(t)
+	e.sameAdbd(t, pid, port)
 	e.shell(t, "su 0 setprop persist.adb.tcp.port 5555")
 	restartedBySetprop := poll(10*time.Second, func() bool {
 		now, _, ok := e.adbdNow()
@@ -386,6 +411,7 @@ func TestPersistTCPPortAgainstUSBAndRestarts(t *testing.T) {
 		t.Logf("persist.adb.tcp.port = %q before the reboot (adb usb cleared it?): the reboot step has nothing to show", p)
 		return
 	}
+	rebooted = true
 	e.rebootAndWait(t)
 	pid, port = e.adbd(t)
 	t.Logf("after the reboot: service.adb.tcp.port %q, persist.adb.tcp.port %q", port, persist())
