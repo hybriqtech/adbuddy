@@ -2,6 +2,7 @@ package emutest
 
 import (
 	"context"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -566,5 +567,55 @@ func TestTheListenerContent(t *testing.T) {
 	e.shell(t, "am force-stop com.android.shell")
 	if list := e.shell(t, "cmd notification list"); strings.Contains(list, "t6fill") {
 		t.Errorf("the host's fillers are still posted after force-stop of com.android.shell:\n%s", list)
+	}
+}
+
+// M5c-29: the listener stays bound with the app in the background: after
+// `su 0 kill -9` (am kill does not kill it, T1-9), after am force-stop and,
+// with ADBUDDY_EMULATOR_REBOOT=1, after adb reboot (the AVD keeps its data),
+// the system binds it again without opening the app, and the user's mark
+// stays (the same access: the process went, the access did not).
+func TestTheListenerStaysBound(t *testing.T) {
+	e := listenerEmu(t)
+	e.allowListener(t, true)
+	e.confirmOnScreen(t)
+
+	rebound := func(step, before string) {
+		t.Helper()
+		start := time.Now()
+		var pid string
+		if !poll(20*time.Second, func() bool {
+			pid = e.pidNow()
+			return pid != "" && pid != before && e.listenerBound(t)
+		}) {
+			t.Fatalf("after %s: the listener is not bound again in a new process in 20 s (pid %q, was %s)", step, pid, before)
+		}
+		t.Logf("after %s: bound again in process %s within %.1f s", step, pid, time.Since(start).Seconds())
+	}
+	pid := e.pidOf(t)
+	e.shell(t, "su 0 kill -9 "+pid)
+	rebound("kill -9", pid)
+
+	pid = e.pidOf(t)
+	e.shell(t, "am force-stop "+phoneapp.Package)
+	rebound("am force-stop", pid)
+
+	if os.Getenv("ADBUDDY_EMULATOR_REBOOT") == "1" {
+		e.rebootAndWait(t)
+		// The first bind after the boot may fail and the next one binds (T1-9).
+		if !poll(60*time.Second, func() bool { return e.listenerBound(t) }) {
+			t.Fatal("after adb reboot: the listener is not bound 60 s after the boot")
+		}
+		t.Logf("after adb reboot: bound again (process %s)", e.pidNow())
+	} else {
+		t.Log("the reboot step needs ADBUDDY_EMULATOR_REBOOT=1")
+	}
+
+	g := e.gateRead(t)
+	wantGate(t, "after the kills", g, map[string]string{
+		"listed": "YES", "connected": "true", "state": "GRANTED", "mark": "true", "effective": "ON",
+	})
+	if !strings.HasPrefix(g["gate"], "Ok:") {
+		t.Errorf("after the kills: the gate reads %q, want Ok", g["gate"])
 	}
 }
