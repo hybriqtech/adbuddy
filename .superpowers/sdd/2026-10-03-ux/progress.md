@@ -67,3 +67,10 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - P3 Task 7: complete (limpieza 37a3f82, fragmento 572f519). Revision final opus (a0307857): 0 criticos/importantes en codigo; 4 frases del fragmento inexactas -> corregidas por el controlador (docs). Suite 1m39 + lint verdes.
 - Ruling: M2-M5 de la final (orden de un import, contentDescription de las filas del diario, aviso si falla bridge.send en Parar, "hoy" tras medianoche) — DEFER, anotados en el fragmento — cuestan: pulido de accesibilidad pendiente.
 - P3: listo para PR (ux/p3).
+
+## Fase 2 - P4 (notificaciones) en la rama ux/p4 (desde ux/p3)
+- P3 subido (ux/p3 7a48a1d, avisado). Plan P4: docs/superpowers/plans/2026-10-03-ux-p4-notificaciones.md, revisado por adbuddy-reviewer-opus (a60bdfd5): 2 bloqueos (burbuja enseñaria el dialogo; concesion del permiso en tests de flujo debe ir en el init) y 6 importantes, todos incorporados.
+- Ruling: el aviso de pregunta del agente se calcula sobre el CONJUNTO de ids pendientes y el estado "app delante" (AdbuddyApp.foreground con ActivityLifecycleCallbacks): avisa si hay una pregunta nueva y la app no esta delante, se retira al abrir la app y vuelve a avisar si se va a segundo plano con la pregunta pendiente — el revisor encontro que sin esto sonaria con la app abierta y no avisaria de segundas preguntas — cuesta: una reconexion con la pregunta aun pendiente tambien reavisa.
+- Ruling: con la sesion en pausa o el acceso cortado el aviso SI sale (la pregunta caduca igual) — cuesta: ConversationView.asking y AskNotice.pending no coinciden (documentado).
+- Ruling: sin dialogo del motivo en la burbuja ni con una pregunta pendiente (askForNotifications=false en la burbuja; questionPending) — un dialogo no puede quedar encima de una decision — cuesta: en la burbuja el permiso solo se pide desde la app.
+- Ruling: la fila de notificaciones en Ajustes (O4) aplazada — el banner del chat ya es el aviso permanente — cuesta: sin vista de estado en Ajustes.
