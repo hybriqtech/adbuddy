@@ -125,9 +125,9 @@
     <string name="file_tap_download">Toca para descargar</string>
     <string name="file_downloading">Descargando… %1$d%%</string>
     <string name="file_tap_cancel">Toca para cancelar</string>
-    <string name="file_action_download">descargar el archivo</string>
+    <string name="file_action_download">descargar el fichero</string>
     <string name="file_action_cancel">cancelar la descarga</string>
-    <string name="file_action_open">abrir el archivo</string>
+    <string name="file_action_open">abrir el fichero</string>
     <string name="file_action_retry">reintentar la descarga</string>
     <string name="file_open">Toca para abrir</string>
     <string name="file_failed">Falló la descarga: toca para reintentar</string>
