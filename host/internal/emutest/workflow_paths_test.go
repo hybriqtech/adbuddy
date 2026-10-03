@@ -39,21 +39,26 @@ func TestAppWorkflowPathsCoverDependencies(t *testing.T) {
 	for _, p := range wf.On.PullRequest.Paths {
 		have[p] = true
 	}
-	cmd := exec.Command("go", "list", "-test", "-deps", "-f", "{{.ImportPath}}", ".")
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("go list: %v: %s", err, errb.String())
-	}
+	// The union over every GOOS: some dependencies exist behind build tags
+	// (procinfo is Linux-only), and the test must not depend on where it runs.
 	const prefix = "github.com/hybriqtech/adbuddy/host/"
 	missing := map[string]bool{}
-	for _, imp := range strings.Fields(out.String()) {
-		rest, ok := strings.CutPrefix(strings.TrimSuffix(imp, ".test"), prefix)
-		if !ok {
-			continue
+	for _, goos := range []string{"windows", "linux", "darwin"} {
+		cmd := exec.Command("go", "list", "-test", "-deps", "-f", "{{.ImportPath}}", ".")
+		cmd.Env = append(os.Environ(), "GOOS="+goos, "CGO_ENABLED=0")
+		var out, errb bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &out, &errb
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("go list (GOOS=%s): %v: %s", goos, err, errb.String())
 		}
-		if path := "host/" + rest + "/**"; !have[path] {
-			missing[path] = true
+		for _, imp := range strings.Fields(out.String()) {
+			rest, ok := strings.CutPrefix(strings.TrimSuffix(imp, ".test"), prefix)
+			if !ok {
+				continue
+			}
+			if path := "host/" + rest + "/**"; !have[path] {
+				missing[path] = true
+			}
 		}
 	}
 	var list []string
