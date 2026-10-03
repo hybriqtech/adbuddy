@@ -4,10 +4,10 @@ name: host
 
 on:
   pull_request:
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
   push:
     branches: [main]
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
 
 permissions:
   contents: read
