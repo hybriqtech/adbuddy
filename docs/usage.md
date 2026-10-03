@@ -89,7 +89,7 @@ adbuddy stop
 
 When the agent runs a command ADBuddy ranks red, it holds the command until you answer. The agent waits.
 
-- **App connected:** the question appears on the phone as a notification with **Allow**, **Deny** and, when the host offers it, **Allow during the session**. The app shows the same question as a dialog when it is open. The phone must be unlocked to allow; Deny always works.
+- **App connected:** the question appears on the phone as a notification with **Allow**, **Deny** and, when the host offers it, **Allow during the session**. The app shows the same question as a dialog when it is open. The phone must be unlocked to allow, and Allow waits 600 ms from when the question appears; Deny always works, at once.
 - **No app connected:** the question appears in the `adbuddy serve` terminal, similar to this (a `Why:` line follows when there is a reason):
 
   ```text
