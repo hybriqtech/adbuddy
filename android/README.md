@@ -65,7 +65,7 @@ there, whole, on screen and apart) and against a golden image in `src/test/scree
   shown to come out the same on Linux or macOS). CI warns about it in the run's summary and uploads that folder as
   `screen-differences`.
 - A UI fault the tests see but that is not fixed yet goes in `KNOWN_UI_ISSUES` (`screens/ScreenTestSupport.kt`): it
-  is let through while it lasts and fails once fixed, so it is never recorded as if it were right.
+  is let through while it lasts and fails once fixed, so it is never recorded as if it were right. It is empty today.
 
 Robolectric's Android jar is a Gradle dependency (`robolectricAndroid` in `app/build.gradle.kts`), so `--offline` works
 once the cache has it; the tests never download anything.

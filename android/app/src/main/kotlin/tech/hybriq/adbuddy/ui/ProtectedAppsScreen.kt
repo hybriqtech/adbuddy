@@ -21,15 +21,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -38,7 +35,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -56,6 +52,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -161,7 +159,6 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
 }
 
 /** The screen without state, so it has previews: header, search and the rows, with its actions at the foot. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProtectedAppsContent(
     step: OnboardingStep?,
@@ -182,14 +179,7 @@ fun ProtectedAppsContent(
     Scaffold(
         topBar = {
             if (step == null) {
-                TopAppBar(
-                    title = { Text(stringResource(R.string.protected_title)) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                        }
-                    },
-                )
+                AdbuddyTopBar(stringResource(R.string.protected_title), onBack)
             }
         },
         bottomBar = {
@@ -289,7 +279,7 @@ fun StepHeader(step: OnboardingStep, @StringRes title: Int, icon: ImageVector = 
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(stringResource(title), style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(title), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
     }
 }
 
