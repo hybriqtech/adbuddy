@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
@@ -153,6 +154,26 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 
 	data, via, f := d.runUI(ctx, req.UIOp, req.UIArgs, s)
+
+	// screen with Screen: wait for it to settle; the read above counts as the first one.
+	if f == nil && req.Screen && req.UIOp == bridge.UIOpDump {
+		if first, ok := asDump(data); ok {
+			scr, how, why, sf := d.settle(ctx, req.UIArgs, &first, time.Now())
+			switch {
+			case sf != nil:
+				f = sf
+			case why != "":
+				return d.blockUI(e, why) // nothing read before is returned
+			case scr == nil: // the agent or serve went away
+				code := ExitDenied
+				e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
+				d.record(e)
+				return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
+			default:
+				data, via = *scr, how+", settled"
+			}
+		}
+	}
 	code := 0
 	if f != nil {
 		code = f.exit
@@ -169,6 +190,10 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		return ipc.Exit{Code: f.exit, ErrorCode: f.code, Error: f.msg}
 	}
 	if data != nil {
+		if req.Screen && f == nil && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
+			release() // the change is done: a question must not wait for the screen to settle
+			data = d.withScreen(ctx, req, data)
+		}
 		if err := s.Data(data); err != nil {
 			return ipc.Exit{Code: 1, ErrorCode: "UI_FAILED", Error: err.Error()}
 		}
