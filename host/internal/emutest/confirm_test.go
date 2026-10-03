@@ -40,6 +40,13 @@ const (
 	txtCapture      = "Send screenshot"
 )
 
+// armingWait is how long a test lets a 🔴 question's Allow arm before it
+// looks at it or taps it: the dialog's and the notification's Allow allow
+// nothing for ConfirmUi.ARMING_MS (600 ms) after they appear, the dialog's
+// again each time the app comes to the front. With a margin for a slow
+// emulator; Deny never waits.
+const armingWait = 1500 * time.Millisecond
+
 // confirmNotificationID is ConfirmNotifier.NOTIFICATION_ID: every question
 // has it, with its id as the tag.
 const confirmNotificationID = 2
@@ -253,6 +260,11 @@ func TestTheDialogAllowsOnlyWhatWasRead(t *testing.T) {
 	}) {
 		t.Fatalf("no Allow in the dialog in 15 s: %+v", nodes)
 	}
+	// Past its arming (ConfirmUi.ARMING_MS since the dialog appeared): if Allow is
+	// off now, it is because the text has not been read.
+	time.Sleep(armingWait)
+	nodes = e.screen(t)
+	allow, _ = dialogButton(nodes, txtAllow)
 	if allow.Enabled {
 		t.Fatal("Allow is on before the text was read")
 	}
@@ -528,6 +540,11 @@ func (e *emu) tapInShade(t *testing.T, title, label string) {
 	e.openShade(t)
 	isButton := func(n uiNode) bool { return strings.EqualFold(n.Text, label) && n.Class == "android.widget.Button" }
 	nodes := e.shadeUntil(t, title, func(nodes []uiNode) bool { return slices.ContainsFunc(nodes, isButton) })
+	if strings.EqualFold(label, txtAllow) {
+		// Allow drops a tap in its first ConfirmUi.ARMING_MS (ConfirmArming): the
+		// shade's dumps take longer than that already, but do not rely on it.
+		time.Sleep(armingWait)
+	}
 	e.tap(t, nodes[slices.IndexFunc(nodes, isButton)])
 }
 

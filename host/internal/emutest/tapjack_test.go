@@ -517,6 +517,10 @@ func TestAnObscuringOverlayRefusesTheTapsThatGrant(t *testing.T) {
 		}) {
 			t.Fatalf("no Allow in the question's dialog in 15 s: %+v", nodes)
 		}
+		// Allow is off for ConfirmUi.ARMING_MS after the dialog appears: look again once it is armed.
+		time.Sleep(armingWait)
+		nodes = e.screen(t)
+		allow, _ = dialogButton(nodes, txtAllow)
 		if !allow.Enabled {
 			t.Fatalf("Allow is off for a short command: the refusal below would prove nothing: %+v", nodes)
 		}
