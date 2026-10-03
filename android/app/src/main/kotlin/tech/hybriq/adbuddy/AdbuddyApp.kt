@@ -107,7 +107,11 @@ class AdbuddyApp : Application() {
         createNotificationChannels()
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(a: Activity) { started.incrementAndGet(); _foreground.value = true }
-            override fun onActivityStopped(a: Activity) { _foreground.value = started.decrementAndGet() > 0 }
+            override fun onActivityStopped(a: Activity) {
+                val n = started.decrementAndGet()
+                // A recreation (rotation, dark mode, language) stops the activity and starts it again at once: it stays in front.
+                if (n > 0 || !a.isChangingConfigurations) _foreground.value = n > 0
+            }
             override fun onActivityCreated(a: Activity, savedInstanceState: Bundle?) {}
             override fun onActivityResumed(a: Activity) {}
             override fun onActivityPaused(a: Activity) {}

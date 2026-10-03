@@ -13,7 +13,11 @@ object AskNotice {
     fun pending(s: BridgeState): Set<String> =
         if (s.connection == BridgeState.Connection.CONNECTED) s.chat.permissions.map { it.id }.toSet() else emptySet()
 
-    /** Applies what the state asks for and returns the ids announced now (the next call's [announced]). */
+    /**
+     * Applies what the state asks for and returns the ids announced now (the next call's [announced]).
+     * With notifications off, ask() returns without posting but the id still counts as announced: turning them on with
+     * the question open does not notify until the app goes to the front and back.
+     */
     fun apply(ctx: Context, announced: Set<String>, s: BridgeState, foreground: Boolean): Set<String> {
         val want = if (foreground) emptySet() else pending(s)
         when {
