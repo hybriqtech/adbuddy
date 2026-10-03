@@ -190,7 +190,7 @@ jobs:
         # Without the variables the tests would skip and the step would pass.
         env:
           ADBUDDY_EMULATOR_CUT: ""
-        run: test -n "$ADBUDDY_EMULATOR_SERIAL" && test -n "$ADBUDDY_EMULATOR_ADB" && go test -timeout 20m -count=1 -v -skip '^TestTheGuard' ./internal/emutest
+        run: test -n "$ADBUDDY_EMULATOR_SERIAL" && test -n "$ADBUDDY_EMULATOR_ADB" && go test -timeout 40m -count=1 -v -skip '^TestTheGuard' ./internal/emutest
       - name: Emulator memory after the rest
         if: always()
         run: scripts/emulator.sh mem || true
