@@ -359,6 +359,8 @@ The table below is the contract; `python scripts/check-ci-runner-rules.py` evalu
 | `push` to `main` | any | as today | as today | no `push` trigger |
 | `workflow_dispatch` | any | as today | n/a | runs as today |
 
+`schedule` and `workflow_dispatch` are trusted events: only someone with write access can trigger them, so they are treated like `push`. A `schedule` trigger only runs on the default branch.
+
 If the pull requests of the owner are ever opened by another account (an agent), add `contains(fromJSON(vars.CI_TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login) ||` to the predicate. Not implemented: nothing needs it today.
 
 **Approving a Dependabot pull request** (the merge is the review of the dependency, because the `push` to `main` that follows does run on the self-hosted runners):

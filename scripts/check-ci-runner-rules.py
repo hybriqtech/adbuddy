@@ -139,12 +139,41 @@ class Parser:
         raise ValueError("unexpected token %r" % (val,))
 
     def lookup(self, path):
+        """Only whitelisted context paths are modelled; anything else is an error,
+        never a silent None (the job would read something the contract ignores)."""
+        if path.startswith("vars."):
+            if path[5:] not in self.ctx.get("vars", {}):
+                raise ValueError("reads %s, which the contract does not model (only the job's own variable)" % path)
+        elif path not in MODELLED_PATHS:
+            raise ValueError("reads %s, which the contract does not model" % path)
         cur = self.ctx
         for part in path.split("."):
             if not isinstance(cur, dict) or part not in cur:
-                return None
+                return None  # e.g. the pull_request payload on a push event
             cur = cur[part]
         return cur
+
+
+MODELLED_PATHS = frozenset([
+    "github.event_name", "github.repository", "github.repository_owner",
+    "github.event.pull_request.user.login", "github.event.pull_request.head.repo.full_name",
+])
+
+
+def evaluate_if(value, ctx):
+    """A job `if:` is always an expression, with or without `${{ }}`. Absent = true."""
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("if: is not a string or boolean (%r)" % (value,))
+    m = re.fullmatch(r"\s*\$\{\{(.*)\}\}\s*", value, re.S)
+    if m:
+        return truthy(Parser(m.group(1), ctx).parse())
+    if "${{" in value:
+        raise ValueError("if: mixes text and ${{ }}")
+    return truthy(Parser(value, ctx).parse())
 
 
 def evaluate(expr, ctx):
@@ -196,6 +225,8 @@ ROLE_VARS = {
     "CI_RUNNER_SIGN": (LINUX_LABEL, False, LINUX_SELF),
     "CI_RUNNER_EMULATOR": (EMU_LABEL, True, EMU_SELF),
 }
+FORBIDDEN_LITERAL = re.compile(r"(?<![\w-])(self-hosted|%s|%s|%s)(?![\w-])" % (
+    EMU_LABEL, HOSTWIN_LABEL, LINUX_LABEL), re.I)
 EMU_HEURISTIC = ("emulator.sh", "avdmanager", "ADBUDDY_EMU", "emulator ")
 ABSENT_ALLOWED = ()  # CI_* variables allowed to be missing in --live: none today
 
@@ -260,6 +291,20 @@ def static_checks(root):
             failures.append("%s: cannot parse (%s)" % (wf, e))
             continue
         evs, unknown = workflow_events(doc)
+        if "vars.CI_" in text:
+            on = doc.get("on", doc.get(True))
+            push_names = on if isinstance(on, (list, dict)) else [on]
+            if "push" in push_names:
+                cfg = on.get("push") if isinstance(on, dict) else None
+                pats = []
+                if isinstance(cfg, dict):
+                    for k in ("branches", "tags"):
+                        v = cfg.get(k)
+                        pats += [v] if isinstance(v, str) else (v if isinstance(v, list) else [])
+                if not pats:
+                    failures.append("%s: reads CI_* variables but its push trigger has no closed branches/tags" % wf)
+                elif any(str(x).strip() in ("*", "**") for x in pats):
+                    failures.append("%s: push branches/tags pattern %r is not closed" % (wf, pats))
         for jname, job in jobs.items():
             tag = "%s/%s" % (wf, jname)
             ro = job.get("runs-on") if isinstance(job, dict) else None
@@ -276,8 +321,9 @@ def static_checks(root):
             if not re.fullmatch(r"\s*\$\{\{.*\}\}\s*", ro, re.S):
                 failures.append("%s: runs-on literal %r is not a hosted runner" % (tag, ro))
                 continue
-            if "self-hosted" in ro:
-                failures.append("%s: runs-on has a literal self-hosted label" % tag)
+            lit = FORBIDDEN_LITERAL.search(ro) or FORBIDDEN_LITERAL.search(str(job.get("if", "")))
+            if lit:
+                failures.append("%s: runs-on/if has the literal label %s (labels come only from the variables)" % (tag, lit.group(0)))
                 continue
             if flat == "${{matrix.runner}}":
                 if wf != "host.yml":
@@ -308,7 +354,7 @@ def check_single(tag, job, var, is_emu, evs, check, failures):
         for val, vname in (("", "empty"), (selfv, "self-hosted"), ('"none"', "none")):
             ctx = {"github": event(ev), "vars": {var: val}}
             try:
-                run = truthy(evaluate(job.get("if", "${{ true }}"), ctx))
+                run = evaluate_if(job.get("if"), ctx)
                 runs_on = evaluate(job["runs-on"], ctx) if run else None
             except Exception as e:  # noqa: BLE001
                 failures.append("%s %s var=%s: cannot evaluate (%s)" % (tag, ev, vname, e))
@@ -333,15 +379,19 @@ def check_host_matrix(tag, job, evs, unknown, check, failures):
         failures.append("%s: events %s are not modelled" % (tag, unknown))
         return
     try:
-        include = job["strategy"]["matrix"]["include"]
+        matrix = job["strategy"]["matrix"]
+        include = matrix["include"]
     except Exception:  # noqa: BLE001
         failures.append("%s: matrix.runner without strategy.matrix.include" % tag)
+        return
+    if set(matrix) != {"include"}:
+        failures.append("%s: strategy.matrix has keys besides include (%s)" % (tag, sorted(set(matrix) - {"include"})))
         return
     for ev in evs:
         for val, vname in (("", "empty"), (HOST_SELF, "self-hosted matrix")):
             ctx = {"github": event(ev), "vars": {"CI_HOST_MATRIX": val}}
             try:
-                run = truthy(evaluate(job.get("if", "${{ true }}"), ctx))
+                run = evaluate_if(job.get("if"), ctx)
                 cells = evaluate(include, ctx) if run else None
             except Exception as e:  # noqa: BLE001
                 failures.append("%s %s var=%s: cannot evaluate (%s)" % (tag, ev, vname, e))
@@ -445,11 +495,17 @@ def live_checks(variables, runners, strict=False):
 
     for name, (cap, _is_emu, _s) in ROLE_VARS.items():
         val, ok = parse(name)
-        if not ok or isinstance(val, str):
-            continue  # hosted literal, "none" or empty default: legitimate
+        if not ok:
+            continue
+        if isinstance(val, str):  # empty default, "none" or a hosted literal are legitimate
+            if val not in ("", "none") and val not in HOSTED:
+                fail("%s: string value %r is not a hosted literal or none" % (name, val))
+            continue
         match(name, val, cap)
 
     val, ok = parse("CI_HOST_MATRIX")
+    if ok and isinstance(val, str) and val != "":
+        fail("CI_HOST_MATRIX must be empty or a list of cells, got the string %r" % val)
     if ok and not isinstance(val, str):
         if not isinstance(val, list):
             fail("CI_HOST_MATRIX must be a list of cells")
@@ -651,6 +707,44 @@ def self_test(root):
         t("static: emulator job on the wrong variable fails",
           worse(emu_files[0], lambda s: s.replace("CI_RUNNER_EMULATOR", "CI_RUNNER_ANDROID")))
         t("static: emulator job on a hosted literal fails", worse(emu_files[0], set_runs_on("ubuntu-latest")))
+
+    def sub_line(pattern, repl):
+        return lambda s: re.sub(pattern, repl, s, count=1, flags=re.M)
+
+    t("static: A fromJSON(pull_request.body ...) in runs-on fails",
+      worse("android.yml", lambda s: s.replace("|| '\"ubuntu-latest\"') }}", "|| github.event.pull_request.body || '\"ubuntu-latest\"') }}", 1)))
+    t("static: B github.head_ref guard in runs-on fails",
+      worse("android.yml", sub_line(r"(runs-on:.*?)github\.event_name != 'pull_request'", r"\1github.head_ref == 'trusted'")))
+    t("static: D vars.CI_TRUST_ALL in the if fails",
+      worse("android.yml", lambda s: s.replace("vars.CI_RUNNER_ANDROID == ''", "vars.CI_TRUST_ALL", 1)))
+    t("static: github.actor in the if fails",
+      worse("android.yml", lambda s: s.replace("vars.CI_RUNNER_ANDROID == ''", "github.actor == 'x'", 1)))
+    t("static: H2 extra matrix dimension fails",
+      worse("host.yml", lambda s: s.replace("      matrix:\n", "      matrix:\n        os: [a]\n", 1)))
+    t("static: push without branches/tags fails",
+      worse("android.yml", lambda s: s.replace("  push:\n    branches: [main]\n", "  push:\n", 1)))
+    t("static: push with branches ** fails",
+      worse("android.yml", lambda s: s.replace("branches: [main]", "branches: ['**']", 1)))
+    if emu_files:
+        t("static: C pull_request.draft in the emulator if fails",
+          worse(emu_files[0], sub_line(r"^(\s*if: \$\{\{ vars\.CI_RUNNER_EMULATOR.*) \}\}$", r"\1 && github.event.pull_request.draft }}")))
+        t("static: E Self-Hosted/adbuddy-emulator literal behind draft fails",
+          worse(emu_files[0], set_runs_on("${{ fromJSON(github.event.pull_request.draft && '[\"Self-Hosted\",\"adbuddy-emulator\"]' || vars.CI_RUNNER_EMULATOR || '\"ubuntu-latest\"') }}")))
+    t("static: capability literal adbuddy-emulator in a runs-on fails",
+      worse("android.yml", set_runs_on("${{ fromJSON('[\"ADBuddy-Emulator\"]') }}")))
+    ectx = {"github": event("push"), "vars": {"CI_X": ""}}
+    for bad in ("github.event.pull_request.body", "github.head_ref", "github.event.pull_request.draft",
+                "vars.OTRA", "needs.x.result", "github.actor"):
+        try:
+            Parser(bad, ectx).parse()
+            t("eval: %s is rejected" % bad, False)
+        except ValueError:
+            t("eval: %s is rejected" % bad, True)
+    t("eval: if without ${{ }} is an expression", evaluate_if("github.event_name == 'push'", ectx) is True)
+    t("eval: modelled paths and the job variable work", Parser("vars.CI_X == '' && github.event_name", ectx).parse() == "push")
+    for sv in ('"self-hosted"', '"adbuddy-emulator"', '"Self-Hosted"'):
+        t("live: string value %s fails" % sv, _fails(live_checks(dict(v, CI_RUNNER_ANDROID=sv), r)))
+    t("live: string value in CI_HOST_MATRIX fails", _fails(live_checks(dict(v, CI_HOST_MATRIX='"ubuntu-latest"'), r)))
 
     for name, ok in results:
         print(("ok   " if ok else "FAIL ") + name)
