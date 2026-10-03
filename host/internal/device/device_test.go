@@ -14,6 +14,17 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 )
 
+const (
+	serviceProp = "shell getprop service.adb.tcp.port"
+	persistProp = "shell getprop persist.adb.tcp.port"
+)
+
+// ensureRan is EnsureNoTCPPort's answer of whether it ran `adb usb`.
+func ensureRan(f *fakeADB, keep string) (bool, error) {
+	_, ran, err := EnsureNoTCPPort(context.Background(), f, keep)
+	return ran, err
+}
+
 type fakeADB struct {
 	answers map[string]string // joined args -> stdout
 	stderr  map[string]string // joined args -> stderr of a failure
@@ -28,6 +39,9 @@ func (f *fakeADB) Run(_ context.Context, _ string, args []string, _ io.Reader, s
 		return 1, nil
 	}
 	out, ok := f.answers[key]
+	if !ok && key == persistProp {
+		out, ok = "\n", true // unset, unless the test says otherwise
+	}
 	if !ok {
 		return 1, nil
 	}
@@ -115,7 +129,7 @@ func TestWriteJSON(t *testing.T) {
 func TestEnsureNoTCPPort(t *testing.T) {
 	for port, wantUSB := range map[string]bool{"": false, "0": false, "5555": true} {
 		f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": port + "\n", "usb": "restarting in USB mode\n"}}
-		ran, err := EnsureNoTCPPort(context.Background(), f, "")
+		ran, err := ensureRan(f, "")
 		if err != nil || ran != wantUSB {
 			t.Errorf("port %q: ran %v err %v", port, ran, err)
 		}
@@ -127,7 +141,7 @@ func TestEnsureNoTCPPort(t *testing.T) {
 			t.Errorf("port %q: adb usb called = %v (calls %q)", port, usb, f.calls)
 		}
 	}
-	if _, err := EnsureNoTCPPort(context.Background(), &fakeADB{}, ""); err == nil {
+	if _, err := ensureRan(&fakeADB{}, ""); err == nil {
 		t.Fatal("an unreadable property must be an error")
 	}
 }
@@ -236,20 +250,20 @@ func TestWriteJSONIsAtomicAndPrivate(t *testing.T) {
 func TestEnsureNoTCPPortEdgeCases(t *testing.T) {
 	for port, wantUSB := range map[string]bool{"0\r\n": false, " 0 ": false, "\r\n": false, "5555\r\n": true, "abc": true} {
 		f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": port, "usb": "restarting in USB mode\n"}}
-		ran, err := EnsureNoTCPPort(context.Background(), f, "")
+		ran, err := ensureRan(f, "")
 		if err != nil || ran != wantUSB {
 			t.Errorf("port %q: ran %v err %v", port, ran, err)
 		}
 	}
 	// adb usb fails: an error, and nothing restarted.
 	f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": "5555\n"}, stderr: map[string]string{"usb": "error: closed\x1b[2J"}}
-	ran, err := EnsureNoTCPPort(context.Background(), f, "")
+	ran, err := ensureRan(f, "")
 	if err == nil || ran || strings.ContainsRune(err.Error(), 0x1b) {
 		t.Fatalf("failed usb: ran %v err %q", ran, err)
 	}
 	// The property cannot be read: an error, and no adb usb.
 	f = &fakeADB{stderr: map[string]string{"shell getprop service.adb.tcp.port": "error: device offline\x1b]0;x\x07"}}
-	ran, err = EnsureNoTCPPort(context.Background(), f, "")
+	ran, err = ensureRan(f, "")
 	if err == nil || ran || strings.ContainsAny(err.Error(), "\x1b\x07") {
 		t.Fatalf("unreadable: ran %v err %q", ran, err)
 	}
@@ -260,20 +274,57 @@ func TestEnsureNoTCPPortEdgeCases(t *testing.T) {
 	}
 }
 
-// TCPPort only reads the property: it never runs `adb usb`.
-func TestTCPPort(t *testing.T) {
-	for raw, want := range map[string]string{"": "", "0": "", "5555": "5555", " 5555\r": "5555"} {
-		f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": raw + "\n", "usb": ""}}
-		port, err := TCPPort(context.Background(), f)
-		if err != nil || port != want {
-			t.Errorf("%q: port %q err %v", raw, port, err)
+// ReadTCP only reads the two properties: it never runs `adb usb`. Now is the
+// service property, or persist's when the service property is empty; any
+// value but empty or 0 is a port, kept short and printable.
+func TestReadTCP(t *testing.T) {
+	for _, c := range []struct {
+		service, persist string
+		want             TCP
+	}{
+		{"", "", TCP{}},
+		{"0", "", TCP{}},
+		{" 5555\r", "", TCP{Now: "5555"}},
+		{"", "5555", TCP{Now: "5555", Persist: "5555"}},
+		{"0", "5555", TCP{Persist: "5555"}},
+		{"5555", "7777", TCP{Now: "5555", Persist: "7777"}},
+		{"", "0", TCP{}},
+		{"", "abc", TCP{Now: "abc", Persist: "abc"}},
+		{"", "-1", TCP{Now: "-1", Persist: "-1"}},
+		{"0", "99999999999999999999999", TCP{Persist: "9999999999999999…"}},
+		{"0", "55\x1b[2J55", TCP{Persist: `55\u001b[2J55`}},
+	} {
+		f := &fakeADB{answers: map[string]string{serviceProp: c.service + "\n", persistProp: c.persist + "\r\n", "usb": ""}}
+		got, err := ReadTCP(context.Background(), f)
+		if err != nil || got != c.want {
+			t.Errorf("service %q persist %q: %+v err %v, want %+v", c.service, c.persist, got, err, c.want)
 		}
-		if strings.Join(f.calls, "|") != "shell getprop service.adb.tcp.port" {
-			t.Errorf("%q: calls %q", raw, f.calls)
+		if strings.Join(f.calls, "|") != serviceProp+"|"+persistProp {
+			t.Errorf("service %q persist %q: calls %q", c.service, c.persist, f.calls)
 		}
 	}
-	if _, err := TCPPort(context.Background(), &fakeADB{}); err == nil {
-		t.Fatal("an unreadable property must be an error")
+	// Either property unreadable: an error, never a closed port.
+	if got, err := ReadTCP(context.Background(), &fakeADB{}); err == nil || got != (TCP{}) {
+		t.Fatalf("service unreadable: %+v %v", got, err)
+	}
+	f := &fakeADB{answers: map[string]string{serviceProp: "0\n"}, stderr: map[string]string{persistProp: "error: closed"}}
+	if got, err := ReadTCP(context.Background(), f); err == nil || got != (TCP{}) {
+		t.Fatalf("persist unreadable: %+v %v", got, err)
+	}
+}
+
+// EnsureNoTCPPort returns what it read, before `adb usb`: the caller warns
+// about a persist port.
+func TestEnsureNoTCPPortReturnsTheRead(t *testing.T) {
+	f := &fakeADB{answers: map[string]string{serviceProp: "\n", persistProp: "5555\n", "usb": ""}}
+	got, ran, err := EnsureNoTCPPort(context.Background(), f, "")
+	if err != nil || !ran || got != (TCP{Now: "5555", Persist: "5555"}) {
+		t.Fatalf("%+v %v %v", got, ran, err)
+	}
+	f = &fakeADB{answers: map[string]string{serviceProp: "0\n", persistProp: "5555\n", "usb": ""}}
+	got, ran, err = EnsureNoTCPPort(context.Background(), f, "")
+	if err != nil || ran || got != (TCP{Persist: "5555"}) {
+		t.Fatalf("service at 0: %+v %v %v", got, ran, err)
 	}
 }
 
@@ -289,13 +340,63 @@ func TestEnsureNoTCPPortKeep(t *testing.T) {
 		{"", "5555", false},
 	} {
 		f := &fakeADB{answers: map[string]string{"shell getprop service.adb.tcp.port": c.port + "\n", "usb": "restarting in USB mode\n"}}
-		ran, err := EnsureNoTCPPort(context.Background(), f, c.keep)
+		ran, err := ensureRan(f, c.keep)
 		usb := false
 		for _, call := range f.calls {
 			usb = usb || call == "usb"
 		}
 		if err != nil || ran != c.wantUSB || usb != c.wantUSB {
 			t.Errorf("port %q keep %q: ran %v usb %v err %v", c.port, c.keep, ran, usb, err)
+		}
+	}
+}
+
+// VB-41: AOSP adbd takes persist.adb.tcp.port at its start when
+// service.adb.tcp.port is empty (after a reboot), so the invariant reads both.
+// Any persist value but empty or 0 is a port to close while the service
+// property is empty; with the service property at 0, `adb usb` already ran
+// since the boot and running it again would only restart adbd (no loop).
+func TestEnsureNoTCPPortReadsPersist(t *testing.T) {
+	for _, c := range []struct {
+		name, service, persist, keep string
+		wantUSB                      bool
+	}{
+		{"persist after a reboot", "", "5555", "", true},
+		{"another persist port", "", "7777", "5555", true},
+		{"persist is the kept port", "", "5555", "5555", false},
+		{"service at 0", "0", "5555", "", false},
+		{"persist 0", "", "0", "", false},
+		{"nothing", "", "", "", false},
+		{"not a number", "", "abc", "", true},
+		{"huge", "", "99999999999999999999999", "", true},
+		{"negative", "", "-1", "", true},
+		{"both set", "5555", "7777", "", true},
+	} {
+		f := &fakeADB{answers: map[string]string{serviceProp: c.service + "\n", persistProp: c.persist + "\r\n", "usb": "restarting in USB mode\n"}}
+		ran, err := ensureRan(f, c.keep)
+		usb := false
+		for _, call := range f.calls {
+			usb = usb || call == "usb"
+		}
+		if err != nil || ran != c.wantUSB || usb != c.wantUSB {
+			t.Errorf("%s: ran %v usb %v err %v (calls %q)", c.name, ran, usb, err, f.calls)
+		}
+	}
+}
+
+// A persist property that cannot be read leaves the port unknown, never
+// closed: an error, and no `adb usb` (as with the service property).
+func TestEnsureNoTCPPortPersistUnreadable(t *testing.T) {
+	for _, service := range []string{"", "0", "5555"} {
+		f := &fakeADB{answers: map[string]string{serviceProp: service + "\n", "usb": ""}, stderr: map[string]string{persistProp: "error: device offline\x1b[2J"}}
+		ran, err := ensureRan(f, "")
+		if err == nil || ran || strings.ContainsRune(err.Error(), 0x1b) {
+			t.Errorf("service %q: ran %v err %v", service, ran, err)
+		}
+		for _, c := range f.calls {
+			if c == "usb" {
+				t.Errorf("service %q: adb usb ran with persist unknown", service)
+			}
 		}
 	}
 }

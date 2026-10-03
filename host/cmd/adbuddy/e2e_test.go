@@ -240,7 +240,7 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	calls := h.adbCalls()
-	want := []string{"devices", "shell getprop service.adb.tcp.port", "shell dumpsys package tech.hybriq.adbuddy", "shell getprop ro.product.model", "shell cat", "shell settings get global window_animation_scale", "shell settings put global window_animation_scale 0.5"}
+	want := []string{"devices", "shell getprop service.adb.tcp.port", "shell getprop persist.adb.tcp.port", "shell dumpsys package tech.hybriq.adbuddy", "shell getprop ro.product.model", "shell cat", "shell settings get global window_animation_scale", "shell settings put global window_animation_scale 0.5"}
 	if strings.Join(calls, "|") != strings.Join(want, "|") {
 		t.Fatalf("adb calls:\n%q\nwant\n%q", calls, want)
 	}

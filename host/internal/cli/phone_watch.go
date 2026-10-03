@@ -12,6 +12,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
@@ -63,6 +64,14 @@ type phoneWatch struct {
 	Every   time.Duration
 	Misses  int
 	TryWait time.Duration
+
+	// Port is the last read of adbd's TCP port already said (serve's
+	// invariant at its start) and Seen gets each new read (the remote
+	// controller's Note); both optional. ReadWait bounds each read (zero:
+	// device.ReadTCPWait, read when the watcher is made).
+	Port     device.TCP
+	Seen     func(device.TCP)
+	ReadWait time.Duration
 }
 
 // watchPhone keeps the connection to the phone: when it disappears from
@@ -70,7 +79,9 @@ type phoneWatch struct {
 // another name, or at the candidate addresses) and switches the active phone
 // to it, but ONLY once its identity has been verified (ro.serialno against
 // its guid). It never opens or closes a port (no applyInvariant): that is the
-// remote mode's job. It ends with ctx.
+// remote mode's job. When the phone comes back it reads the port again
+// (recheckPort: the phone may have restarted and taken persist.adb.tcp.port,
+// VB-41) and warns. It ends with ctx.
 func watchPhone(ctx context.Context, w phoneWatch) {
 	wt := newWatcher(w)
 	t := time.NewTicker(wt.every)
@@ -96,10 +107,16 @@ type watcher struct {
 	count    int             // looks in a row without the phone
 	warned   bool            // "not reachable" was said and the phone has not come back
 	wrong    map[string]bool // addresses said to be another phone since the phone was last listed
+	readWait time.Duration
+	said     device.TCP // the last read of the port that was said
+	unknown  bool       // "could not read persist" was said and no read worked since
 }
 
 func newWatcher(w phoneWatch) *watcher {
-	wt := &watcher{phoneWatch: w, every: w.Every, misses: w.Misses, tryWait: w.TryWait, wrong: map[string]bool{}}
+	wt := &watcher{phoneWatch: w, every: w.Every, misses: w.Misses, tryWait: w.TryWait, wrong: map[string]bool{}, readWait: w.ReadWait, said: w.Port}
+	if wt.readWait <= 0 {
+		wt.readWait = device.ReadTCPWait
+	}
 	if wt.every <= 0 {
 		wt.every = watchEvery
 	}
@@ -130,11 +147,15 @@ func (w *watcher) step(ctx context.Context) {
 		return // adb itself failing says nothing about the phone
 	}
 	if hasSerial(online, w.Active.Serial()) {
+		back := w.count > 0 || w.warned // it was missing at least once
 		if w.warned {
 			tell(w.Log, "phone_watch.the_phone_is_reachable_again")
 		}
 		w.count, w.warned = 0, false
 		clear(w.wrong)
+		if back {
+			w.recheckPort(ctx)
+		}
 		return
 	}
 	w.count++
@@ -158,7 +179,7 @@ func (w *watcher) step(ctx context.Context) {
 			return
 		}
 		if err == nil && verified {
-			w.switchTo(d.Serial, d.Serial)
+			w.switchTo(ctx, d.Serial, d.Serial)
 			return
 		}
 		w.skip(d.Serial, err)
@@ -173,7 +194,7 @@ func (w *watcher) step(ctx context.Context) {
 			return
 		}
 		if err == nil && verified {
-			w.switchTo(active, addr)
+			w.switchTo(ctx, active, addr)
 			return
 		}
 		switch {
@@ -193,11 +214,60 @@ func (w *watcher) step(ctx context.Context) {
 }
 
 // switchTo makes serial the active phone. Only called with a verified one.
-func (w *watcher) switchTo(serial, where string) {
+func (w *watcher) switchTo(ctx context.Context, serial, where string) {
 	w.Active.Switch(serial)
 	w.count, w.warned = 0, false
 	clear(w.wrong)
 	tell(w.Log, "phone_watch.the_phone_is_now_at", where)
+	w.recheckPort(ctx)
+}
+
+// recheckPort reads adbd's TCP port again once the phone is back (VB-41: it
+// may have restarted and taken persist.adb.tcp.port, which serve's invariant
+// only reads when serve starts). It never opens or closes a port: `adb usb`
+// in the middle of the session would cut the phone again and race with the
+// remote mode. It says what changed since the last time it was said, once: a
+// port open with the remote mode off (run `adbuddy remote off`), the persist
+// port, or a read that failed. Seen (the controller's Note) may be crossed by
+// a read of the controller itself (an off): the older read can overwrite the
+// newer one under pmu. It is benign: same property, and the next read of
+// either corrects it.
+func (w *watcher) recheckPort(ctx context.Context) {
+	rctx, cancel := context.WithTimeout(ctx, w.readWait)
+	t, err := device.ReadTCP(rctx, w.Active.Runner())
+	cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	if err != nil {
+		if !w.unknown {
+			w.unknown = true
+			// Forget what was said: the next good read says what persist holds
+			// again, which closes this warning. If that read finds persist empty
+			// nothing is said and the warning stays up (the safe side).
+			w.said = device.TCP{}
+			tellPersist(w.Log, "", true)
+		}
+		return
+	}
+	w.unknown = false
+	if w.Seen != nil {
+		w.Seen(t)
+	}
+	if t == w.said {
+		return
+	}
+	prev := w.said
+	w.said = t
+	// RemoteOn is read after the port: Enable saves the expiry before
+	// `adb tcpip`, so a 5555 it opened is seen with the mode on.
+	if t.Now != "" && t.Now != prev.Now && !(t.Now == remote.Port && w.RemoteOn()) {
+		tell(w.Log, "phone_watch.port_open", t.Now)
+	}
+	// Persist only when it changed (or the last read failed, prev is zero then).
+	if t.Persist != prev.Persist {
+		tellPersist(w.Log, t.Persist, false)
+	}
 }
 
 func (w *watcher) warnOnce(msg i18n.Msg) {

@@ -52,15 +52,17 @@ func (e *emu) withPersist(t *testing.T) func() string {
 }
 
 // closedAfterOff is what this test asks of the host's "off" with a persist
-// port set: persist.adb.tcp.port emptied, service.adb.tcp.port closed (empty
-// or 0: the values measured after adb usb and at boot, and the host's own
-// criterion, portClosed; -1 is not measured and the host would take it as
-// open, the safe side) and adbd restarted (a new pid that stays: it cannot
-// still be listening on the persist port it took when it started).
+// port set (plan 2026-10-04-adbuddy-vb41-persist-port, ruling 4): the host
+// cannot empty persist.adb.tcp.port (the shell user may not, and it never
+// runs su), so it leaves it as it was; service.adb.tcp.port closed (empty or
+// 0: the values measured after adb usb and at boot, and the host's own
+// criterion; -1 is not measured and the host would take it as open, the safe
+// side) and adbd restarted (a new pid that stays: it cannot still be
+// listening on the persist port it took when it started).
 func (e *emu) closedAfterOff(t *testing.T, persist func() string, before string) {
 	t.Helper()
-	if p := persist(); p != "" {
-		t.Errorf("persist.adb.tcp.port = %q after off, want it emptied: adbd takes it again at its next start with service.adb.tcp.port empty (a reboot)", p)
+	if p := persist(); p != persistPort {
+		t.Errorf("persist.adb.tcp.port = %q after off, want %s as it was: the host never sets it", p, persistPort)
 	}
 	pid, port, ok := e.adbdNow()
 	if !ok {
@@ -76,30 +78,31 @@ func (e *emu) closedAfterOff(t *testing.T, persist func() string, before string)
 	e.sameAdbd(t, pid, port)
 }
 
-// Security of VB-41 (supervisor's ruling): "off" must leave adbd without a
-// TCP port, persist.adb.tcp.port included. The host's two "off" paths, the
-// real remote controller's Disable (mode off) and device.EnsureNoTCPPort (the
+// Security of VB-41 (plan 2026-10-04-adbuddy-vb41-persist-port): "off" must
+// leave adbd without a TCP port now, and never report a plain "closed" while
+// persist.adb.tcp.port names a port. The host's two "off" paths, the real
+// remote controller's Disable (mode off) and device.EnsureNoTCPPort (the
 // invariant at serve's start), run against the emulator's adbd with
-// persist.adb.tcp.port=5555. RED EXPECTED TODAY: remote.go and device.go read
-// only service.adb.tcp.port and never touch persist, so persist stays 5555
-// (and with service.adb.tcp.port empty they do not even restart adbd). A red
-// run is the finding: the fix goes in its own branch and plan; this test is
-// its acceptance test.
+// persist.adb.tcp.port=5555. The host reads persist as the shell user (no
+// su): this test is also the measurement that the shell user can read it.
+// Without root the host cannot empty it, so the test wants it reported, not
+// emptied (ruling 4 of the plan).
 func TestOffClosesAPersistTCPPort(t *testing.T) {
 	adbdTests(t)
 	e := newEmu(t)
 	e.closedAtStartAndEnd(t)
 
 	// persist set and the port opened by hand (adb tcpip): Disable with the
-	// mode off sees 5555 and runs adb usb, which leaves persist as it was.
+	// mode off sees 5555 and runs adb usb, which leaves persist as it was;
+	// the state it returns says so.
 	t.Run("Disable after adb tcpip", func(t *testing.T) {
 		persist := e.withPersist(t)
 		pid, _ := e.adbd(t)
 		e.run(t, "tcpip", remote.Port)
 		pid = e.restartedTo(t, pid, remote.Port)
 		ctl := remote.New(e.adb, &memStore{}, nil)
-		if s, err := ctl.Disable(e.ctx); err != nil || s != (remote.State{}) {
-			t.Fatalf("Disable: %+v, %v", s, err)
+		if s, err := ctl.Disable(e.ctx); err != nil || s != (remote.State{Persist: persistPort}) {
+			t.Fatalf("Disable: %+v, %v; want off with Persist %s (read as the shell user)", s, err, persistPort)
 		}
 		poll(10*time.Second, func() bool { now, _, ok := e.adbdNow(); return ok && now != pid })
 		e.closedAfterOff(t, persist, pid)
@@ -107,7 +110,7 @@ func TestOffClosesAPersistTCPPort(t *testing.T) {
 
 	// persist set and service.adb.tcp.port empty, as after a reboot: adbd took
 	// the persist port at its start (AOSP adbd reads persist only when the
-	// service property is empty), and the host reads "closed".
+	// service property is empty), and the host reads it there (device.ReadTCP).
 	t.Run("EnsureNoTCPPort with service.adb.tcp.port empty", func(t *testing.T) {
 		persist := e.withPersist(t)
 		if os.Getenv("ADBUDDY_EMULATOR_REBOOT") == "1" {
@@ -129,12 +132,19 @@ func TestOffClosesAPersistTCPPort(t *testing.T) {
 		if p := persist(); p != persistPort {
 			t.Fatalf("persist.adb.tcp.port = %q before off, want %s", p, persistPort)
 		}
-		restarted, err := device.EnsureNoTCPPort(e.ctx, e.adb, "")
-		if err != nil {
-			t.Fatalf("EnsureNoTCPPort: %v", err)
+		read, restarted, err := device.EnsureNoTCPPort(e.ctx, e.adb, "")
+		if err != nil || !restarted || read != (device.TCP{Now: persistPort, Persist: persistPort}) {
+			t.Fatalf("EnsureNoTCPPort: read %+v, ran adb usb %v, %v; want the persist port read (as the shell user) and closed", read, restarted, err)
 		}
-		t.Logf("EnsureNoTCPPort ran adb usb: %v", restarted)
 		poll(10*time.Second, func() bool { now, _, ok := e.adbdNow(); return ok && now != pid })
 		e.closedAfterOff(t, persist, pid)
+		// No loop: with service.adb.tcp.port at 0 now, the invariant reads
+		// the persist port and leaves adbd alone.
+		pid, port = e.adbd(t)
+		again, restarted, err := device.EnsureNoTCPPort(e.ctx, e.adb, "")
+		if err != nil || restarted || again != (device.TCP{Persist: persistPort}) {
+			t.Fatalf("EnsureNoTCPPort again: read %+v, ran adb usb %v, %v; want only the persist port, and no adb usb", again, restarted, err)
+		}
+		e.sameAdbd(t, pid, port)
 	})
 }
