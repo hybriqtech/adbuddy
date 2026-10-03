@@ -132,10 +132,20 @@ func (c *cdp) call(method string, params any) (json.RawMessage, error) {
 	}
 	ch := make(chan cdpAnswer, 1)
 	c.mu.Lock()
+	if c.readErr != nil {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("%s: connection closed: %w", method, c.readErr)
+	}
 	c.next++
 	id := c.next
 	c.pending[id] = ch
 	c.mu.Unlock()
+	// Whatever way this call ends, its entry does not stay in pending.
+	defer func() {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+	}()
 	msg, err := json.Marshal(map[string]any{"id": id, "method": method, "params": params})
 	if err != nil {
 		return nil, err
@@ -249,11 +259,27 @@ func outsidePrefix(urls []string, prefix string) []string {
 	return bad
 }
 
-// waitEvent waits up to d for an event with method that ok accepts (nil: any).
+// eventCount is how many events have come so far: the `from` of waitEventFrom
+// for an event that must come after this moment.
+func (c *cdp) eventCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.events)
+}
+
+// waitEvent waits up to d for an event with method that ok accepts (nil: any),
+// among all those kept.
 func (c *cdp) waitEvent(method string, d time.Duration, ok func(json.RawMessage) bool) bool {
+	return c.waitEventFrom(0, method, d, ok)
+}
+
+// waitEventFrom is waitEvent looking only at the events from index from on (an
+// eventCount taken before the action whose event is awaited: a Page.loadEventFired
+// of an earlier load does not count).
+func (c *cdp) waitEventFrom(from int, method string, d time.Duration, ok func(json.RawMessage) bool) bool {
 	deadline := time.NewTimer(d)
 	defer deadline.Stop()
-	seen := 0
+	seen := from
 	for {
 		c.mu.Lock()
 		for ; seen < len(c.events); seen++ {
@@ -316,7 +342,7 @@ func (e *emu) openCDP(t *testing.T) *cdp {
 	var unix string
 	if !poll(30*time.Second, func() bool {
 		unix = e.shell(t, "cat /proc/net/unix | grep -a devtools; true")
-		return strings.Contains(unix, "@"+sock)
+		return regexp.MustCompile(`@` + regexp.QuoteMeta(sock) + ``).MatchString(unix)
 	}) {
 		t.Fatalf("no @%s in /proc/net/unix after 30 s (the debug build opens it by itself; is the terminal on screen?): %q", sock, unix)
 	}
@@ -440,10 +466,13 @@ func TestCDPClient(t *testing.T) {
 	if _, err := c.eval("new Image().src='https://example.com/i.png'"); err != nil {
 		t.Fatal(err)
 	}
-	if !c.waitEvent("Network.requestWillBeSent", 5*time.Second, func(p json.RawMessage) bool {
-		return strings.Contains(string(p), "example.com")
-	}) {
-		t.Fatal("the request event did not arrive")
+	// Both events: the second may still be in flight when the first is seen.
+	for _, want := range []string{"example.com", termPage} {
+		if !c.waitEvent("Network.requestWillBeSent", 5*time.Second, func(p json.RawMessage) bool {
+			return strings.Contains(string(p), want)
+		}) {
+			t.Fatalf("the request event for %s did not arrive", want)
+		}
 	}
 	urls := c.requestURLs()
 	if len(urls) != 2 || urls[0] != "https://example.com/i.png" || urls[1] != termPage {

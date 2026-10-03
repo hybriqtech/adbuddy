@@ -56,7 +56,8 @@ var (
 // all means the format is not the one measured and is an error, and so is a
 // row with no rb or no tb. A uid with no block just has no traffic yet (the
 // history was empty before the chat first opened): Blocks says so, and the
-// callers decide whether that is acceptable.
+// callers decide whether that is acceptable. A uid with blocks but no readable
+// row is an error: it would read as 0 bytes for ever.
 func parseNetstatsUID(dump string, uid int) (uidBytes, error) {
 	var res uidBytes
 	anyBlock := false
@@ -89,6 +90,11 @@ func parseNetstatsUID(dump string, uid int) (uidBytes, error) {
 	}
 	if !anyBlock {
 		return res, fmt.Errorf("no block \"ident=[...] uid=N\" in the dump of netstats (format changed?): %d bytes", len(dump))
+	}
+	if res.Blocks > 0 && res.Rows == 0 {
+		// A block with no row we can read would give 0 bytes and every delta
+		// would pass on it: the format is not the measured one.
+		return res, fmt.Errorf("uid %d has %d blocks in the dump of netstats but no history row \"st=... rb=... tb=...\" (format changed?)", uid, res.Blocks)
 	}
 	return res, nil
 }
@@ -205,7 +211,10 @@ func (e *emu) setNetwork(t *testing.T, on bool) {
 	}
 }
 
-// netCleanup puts the network back at cleanup, whatever the test did.
+// netCleanup puts the network back at cleanup, whatever the test did. It
+// enables wifi and data unconditionally, whatever they were before: that is
+// right for the emulator's AVD and the CI's, which have both on (T1 §7); these
+// tests never run on a phone (newEmu refuses any serial but an emulator's).
 func (e *emu) netCleanup(t *testing.T) {
 	t.Helper()
 	e.atCleanup(t, "shell", "svc wifi enable")
@@ -249,9 +258,10 @@ func newSink(t *testing.T) *sink {
 func (s *sink) port() int { return s.ln.Addr().(*net.TCPAddr).Port }
 
 // nc sends the shell's nc a line to the sink. It returns nc's exit code: 0 when
-// the sink was reached, 1 with "Network is unreachable" without network
-// (T1 §7). `ping` says nothing: it fails with the network on too (the
-// emulator does not forward ICMP).
+// the sink was reached, 1 with "nc: connect: Network is unreachable" without
+// network (T1 §7). `ping` says nothing: it fails with the network on too (the
+// emulator does not forward ICMP). An error of adb itself (device offline, no
+// device) is not an answer of nc: it fails the test.
 func (e *emu) nc(t *testing.T, s *sink) (int, string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(e.ctx, time.Minute)
@@ -260,7 +270,27 @@ func (e *emu) nc(t *testing.T, s *sink) (int, string) {
 	if err != nil {
 		t.Fatalf("adb shell nc: %v", err)
 	}
-	return code, strings.TrimSpace(out + errOut)
+	if strings.TrimSpace(errOut) != "" || strings.Contains(out, "device offline") || strings.Contains(out, "error: ") {
+		t.Fatalf("adb itself failed running nc (exit %d): %s %s", code, strings.TrimSpace(out), strings.TrimSpace(errOut))
+	}
+	return code, strings.TrimSpace(out)
+}
+
+// ncUnreachable reports whether out, the output of a failed nc, is the
+// kernel's "Network is unreachable" (T1 §7): the proof that the failure is the
+// missing network and nothing else (a wrong address says "timed out" or
+// "refused").
+func ncUnreachable(out string) bool { return strings.Contains(out, "unreachable") }
+
+func TestNcUnreachable(t *testing.T) {
+	if !ncUnreachable("nc: connect: Network is unreachable") {
+		t.Error("the measured message was not recognised")
+	}
+	for _, out := range []string{"", "nc: connect: Connection refused", "nc: connect: Connection timed out", "error: device offline"} {
+		if ncUnreachable(out) {
+			t.Errorf("%q counted as network unreachable", out)
+		}
+	}
 }
 
 // appTraffic makes the app's own uid send n bytes to the sink (run-as ... nc:

@@ -70,8 +70,8 @@ func TestTerminalWorksOffline(t *testing.T) {
 	e.netCleanup(t)
 	e.setNetwork(t, false)
 	conns := sink.conns.Load()
-	if code, out := e.nc(t, sink); code == 0 || sink.conns.Load() != conns {
-		t.Fatalf("with wifi and data off nc still reached the PC (exit %d: %s): the network is not off", code, out)
+	if code, out := e.nc(t, sink); code == 0 || sink.conns.Load() != conns || !ncUnreachable(out) {
+		t.Fatalf("with wifi and data off nc must fail with \"Network is unreachable\" (exit %d: %q; the sink got %d new connections): the network is not off", code, out, sink.conns.Load()-conns)
 	}
 	t.Log("the network is off: Active default network none, nc to the PC fails")
 
@@ -140,10 +140,11 @@ func TestTerminalWorksOffline(t *testing.T) {
 	e.shell(t, "logcat -c")
 	before := e.readNetstats(t, uid)
 	// A reload: every request of the page again, seen by CDP's Network.
+	events := c.eventCount()
 	if _, err := c.call("Page.reload", nil); err != nil {
 		t.Fatal(err)
 	}
-	if !c.waitEvent("Page.loadEventFired", 30*time.Second, nil) {
+	if !c.waitEventFrom(events, "Page.loadEventFired", 30*time.Second, nil) {
 		t.Fatal("the page did not finish loading 30 s after Page.reload")
 	}
 	// The rest of the window: the WebView is left to itself.
