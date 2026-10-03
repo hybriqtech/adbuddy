@@ -1,0 +1,1 @@
+  mCurrentFocus=Window{4436ca u0 com.google.android.settings.intelligence/com.google.android.settings.intelligence.modules.search.SearchActivity}

@@ -11,11 +11,19 @@
 # first time only: to change the image, use another AVD name (ADBUDDY_EMU_AVD).
 # After boot, start can watch for ADBUDDY_EMU_STABLE_SECS seconds (0 = off, the
 # default) that system_server and surfaceflinger do not restart.
+# ADBUDDY_EMU_RAM is the guest's RAM in plain MB (1024-8192, empty = the AVD's
+# own), passed to the emulator as -memory. "1536M" or "2G" in the AVD's config
+# are not honoured the same way: the emulator may raise them.
+# The mem command prints one line with the emulator's working set and private
+# memory in MB (or says it is not running or that it could not be measured);
+# it is a diagnostic and always exits 0.
 #
 # Exit codes:
 #   1    the SDK or its packages are missing
-#   2    incorrect usage, or ADBUDDY_EMU_ADB_PORT invalid (empty, not a number, outside
-#        1024-65535, or 5037/5038: the adb servers of the user and of ADBuddy)
+#   2    incorrect usage, or ADBUDDY_EMU_ADB_PORT or ADBUDDY_EMU_PORT invalid (empty,
+#        not a number, outside 1024-65535 for the adb port, or 5037/5038: the adb
+#        servers of the user and of ADBuddy); for start, also an invalid
+#        ADBUDDY_EMU_RAM
 #   3    the emulator's adb server sees another device (or none: it fails closed),
 #        or the emulator on the port runs another AVD than ADBUDDY_EMU_AVD
 #
@@ -34,6 +42,11 @@ export ADB_MDNS_AUTO_CONNECT=0
 AVD="${ADBUDDY_EMU_AVD:-adbuddy-api37}"
 IMAGE="${ADBUDDY_EMU_IMAGE:-system-images;android-37.0;google_apis;x86_64}"
 PORT="${ADBUDDY_EMU_PORT:-5580}"
+# mem puts $PORT in a PowerShell command: it must be a plain number.
+if [[ ! "$PORT" =~ ^[0-9]{1,5}$ ]]; then
+  echo "ADBUDDY_EMU_PORT='$PORT' is not valid: it must be a port number" >&2
+  exit 2
+fi
 SERIAL="emulator-$PORT"
 # The adb server of the script must not be the user's (5037) or ADBuddy's
 # (5038), and must be a plain port number: anything else exits with 2.
@@ -49,7 +62,7 @@ unset ADB_SERVER_SOCKET ANDROID_ADB_SERVER_ADDRESS
 export ANDROID_ADB_SERVER_PORT="$((10#$ADB_PORT))"
 
 usage() {
-  echo "usage: $0 start|stop|env" >&2
+  echo "usage: $0 start|stop|env|mem" >&2
   exit 2
 }
 
@@ -109,6 +122,13 @@ wait_stable() {
 }
 
 start() {
+  # Validated here, not at script level: stop and mem must exit 0 whatever the
+  # environment says.
+  RAM="${ADBUDDY_EMU_RAM:-}"
+  if [[ -n "$RAM" ]] && { [[ ! "$RAM" =~ ^[0-9]{3,4}$ ]] || ((10#$RAM < 1024 || 10#$RAM > 8192)); }; then
+    echo "ADBUDDY_EMU_RAM='$RAM' is not valid: plain MB between 1024 and 8192" >&2
+    exit 2
+  fi
   # An old server of our port may have been started with mDNS on; one without
   # it is left alone (it may be serving other work).
   if ! "$ADB" mdns check 2>/dev/null | tr -d '\r' | grep -q 'discovery disabled'; then
@@ -129,6 +149,7 @@ start() {
     # 2047 MB on Windows: its emulator caps it there and exits on 4096.
     args=(-avd "$AVD" -port "$PORT" -no-window -no-audio -no-boot-anim -no-snapshot)
     if [[ "$windows" == 1 ]]; then args+=(-partition-size 2047); else args+=(-partition-size 4096); fi
+    [[ -z "$RAM" ]] || args+=(-memory "$((10#$RAM))")
     args+=(-gpu "${ADBUDDY_EMU_GPU:-swiftshader_indirect}")
     nohup "$SDK/emulator/emulator$EXE" "${args[@]}" >"${TMPDIR:-/tmp}/adbuddy-emulator.log" 2>&1 &
   fi
@@ -202,9 +223,32 @@ stop() {
   "$ADB" kill-server >/dev/null 2>&1 || true
 }
 
+# Host memory of this script's emulator (the qemu process started with -port $PORT).
+# On Linux the second number repeats RSS (ps has no private figure), and ps finds
+# nothing in Git Bash (hence the PowerShell branch). Three outcomes: not running,
+# unknown (the system could not be asked), measured. It never exits non-zero.
+mem() {
+  local line
+  if [[ "$windows" == 1 ]]; then
+    local pwsh="${SYSTEMROOT:-${SystemRoot:-}}"
+    if [[ -n "$pwsh" ]]; then pwsh="$(cygpath -u "$pwsh" 2>/dev/null || echo "$pwsh")/System32/WindowsPowerShell/v1.0/powershell.exe"; else pwsh=powershell.exe; fi
+    line=$(MSYS_NO_PATHCONV=1 "$pwsh" -NoProfile -NonInteractive -Command "\$c = Get-CimInstance Win32_Process -Filter \"Name like 'qemu%'\" | Where-Object { \$_.CommandLine -match '-port $PORT ' } | Select-Object -First 1; if (\$c) { \$p = Get-Process -Id \$c.ProcessId; '{0} {1}' -f [int](\$p.WorkingSet64/1MB), [int](\$p.PrivateMemorySize64/1MB) } else { 'none' }" 2>/dev/null | tr -d '\r') || true
+  else
+    line=$(ps -eo rss=,args= 2>/dev/null | awk -v p="-port $PORT " '$2 ~ /qemu-system/ && index($0, p) { printf "%d %d\n", $1/1024, $1/1024; exit }') || true
+  fi
+  if [[ -z "$line" ]]; then
+    echo "emulator $SERIAL host memory: unknown (could not ask the system)"
+  elif [[ "$line" == none ]]; then
+    echo "emulator $SERIAL is not running"
+  else
+    echo "emulator $SERIAL host memory: ${line% *} MB working set, ${line#* } MB private"
+  fi
+}
+
 case "${1:-}" in
   start) start ;;
   stop) stop ;;
+  mem) mem ;;
   env) print_env ;;
   *) usage ;;
 esac
