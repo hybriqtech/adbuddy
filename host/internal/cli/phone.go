@@ -128,7 +128,7 @@ var newToken = bridge.NewToken
 func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl *remote.Controller, a phoneapp.ADB, session, agentName string, fallback confirm.Confirmer) (*phoneLink, error) {
 	l := &phoneLink{log: app.Log(), agent: agentName, adb: a, termEvery: termInterval, backlog: backlogOf, lang: app.Lang}
 	l.ui = newUILink(protectedAppsPath(e), app.Log())
-	l.remote = newRemoteLink(ctx, store, ctl, a, app.Log())
+	l.remote = newRemoteLink(ctx, store, ctl, connOf(a), app.Log())
 	l.ui.deviceInfo = l.remote.onDeviceInfo
 	l.conf = bridge.NewConfirmer(noApp{}, fallback)
 	l.conf.StaleText = l.lang.T("notice.stale_reply")
