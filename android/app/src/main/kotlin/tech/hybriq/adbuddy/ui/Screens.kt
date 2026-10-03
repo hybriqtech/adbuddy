@@ -142,7 +142,10 @@ private fun ConsentScreenPreview() {
  * scrolls if long. The whole detail and up to ConfirmUi.DIALOG_MAX_COMMAND
  * characters of the command are shown, with how many more are hidden (then it
  * can only be denied, H3), and the Allow buttons wait until the text has been
- * scrolled to its end (A4-2), as in the PermissionCard; Deny never waits. It offers its buttons only while
+ * scrolled to its end (A4-2), as in the PermissionCard, and until [armed]
+ * (ConfirmHost: ConfirmUi.ARMING_MS since the question appeared or the app came
+ * back to the front; meanwhile they keep their text and read as disabled). Deny
+ * never waits. It offers its buttons only while
  * the question is open, and says why otherwise. It can always be closed (back
  * or a tap outside; Close when it has no buttons): Pause and Cut access are
  * never hidden with no way out, and the notification is still there. Touches
@@ -203,10 +206,10 @@ fun ConfirmDialog(
                     Text(stringResource(R.string.confirm_scroll), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
                 if (Decision.ALLOW in decisions) {
-                    TextButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread) { Text(stringResource(R.string.action_allow)) }
+                    TextButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread && armed) { Text(stringResource(R.string.action_allow)) }
                 }
                 if (Decision.ALLOW_SESSION in decisions) {
-                    TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }, enabled = !unread) {
+                    TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }, enabled = !unread && armed) {
                         Text(stringResource(R.string.action_allow_session))
                     }
                 }

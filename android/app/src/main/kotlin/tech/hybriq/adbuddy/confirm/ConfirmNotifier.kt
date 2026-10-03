@@ -21,7 +21,7 @@ import tech.hybriq.adbuddy.ui.Formats
  * notification cuts gets only Deny and Open (ConfirmUi.notificationDecisions):
  * it is allowed from the dialog.
  * Allowing needs the phone unlocked (setAuthenticationRequired, Android 12+,
- * and ConfirmReceiver checks it again). The notification stays on this phone
+ * and ConfirmReceiver checks it again) and Allow shown for ConfirmUi.ARMING_MS ([arming]). The notification stays on this phone
  * (setLocalOnly: not on watches nor mirrors). Questions answered elsewhere or
  * expired disappear; without buttons it says why (ConfirmUi.Status).
  */
@@ -29,7 +29,7 @@ object ConfirmNotifier {
     /** What is on screen: id → status posted. */
     private var shown = emptyMap<String, ConfirmUi.Status>()
 
-    /** RED stub. */
+    /** When each question's Allow appeared, for ConfirmReceiver (ConfirmUi.ARMING_MS). */
     internal val arming = ConfirmArming()
 
     @Synchronized
@@ -37,9 +37,7 @@ object ConfirmNotifier {
         val nm = context.getSystemService(NotificationManager::class.java)
         val clock = (context.applicationContext as AdbuddyApp).clock
         val plan = ConfirmUi.plan(shown, state, clock.now())
-        for (id in plan.cancel) nm.cancel(id, NOTIFICATION_ID)
-        for (p in plan.post) nm.notify(p.request.id, NOTIFICATION_ID, build(context, p, clock.toLocal(p.expires)))
-        shown = plan.shown
+        post(context, nm, plan, state, clock)
     }
 
     /**
@@ -52,8 +50,17 @@ object ConfirmNotifier {
         val nm = context.getSystemService(NotificationManager::class.java)
         val clock = (context.applicationContext as AdbuddyApp).clock
         val plan = ConfirmUi.repaint(shown, state, clock.now())
+        post(context, nm, plan, state, clock)
+    }
+
+    private fun post(context: Context, nm: NotificationManager, plan: ConfirmUi.Plan, state: BridgeState, clock: HostClock) {
         for (id in plan.cancel) nm.cancel(id, NOTIFICATION_ID)
-        for (p in plan.post) nm.notify(p.request.id, NOTIFICATION_ID, build(context, p, clock.toLocal(p.expires)))
+        for (p in plan.post) {
+            nm.notify(p.request.id, NOTIFICATION_ID, build(context, p, clock.toLocal(p.expires)))
+            // Allow waits from when it is posted, once; without it (sent, offline) the next Allow waits again.
+            if (Decision.ALLOW in ConfirmUi.notificationDecisions(p.request, p.status)) arming.shown(p.request.id) else arming.forget(p.request.id)
+        }
+        arming.retain(state.pending.map { it.id }.toSet())
         shown = plan.shown
     }
 
@@ -66,6 +73,7 @@ object ConfirmNotifier {
         val nm = context.getSystemService(NotificationManager::class.java)
         for (n in nm.activeNotifications) if (n.id == NOTIFICATION_ID) nm.cancel(n.tag, n.id)
         shown = emptyMap()
+        arming.clear()
     }
 
     /** The last line of a question: when it expires (in the phone's time) or why it has no buttons. */

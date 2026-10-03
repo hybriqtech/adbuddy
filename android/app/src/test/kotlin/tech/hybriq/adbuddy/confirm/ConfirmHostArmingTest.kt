@@ -4,12 +4,14 @@ import androidx.activity.ComponentActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.lifecycle.Lifecycle
 import java.time.Instant
 import org.junit.Assert.assertEquals
@@ -72,7 +74,11 @@ class ConfirmHostArmingTest {
         frame()
     }
 
-    private fun frame() = compose.mainClock.advanceTimeByFrame()
+    /** One frame: what changed is drawn (the state written from the test reaches the composition first). */
+    private fun frame() {
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeByFrame()
+    }
 
     private fun advance(ms: Long) = compose.mainClock.advanceTimeBy(ms)
 
@@ -119,8 +125,9 @@ class ConfirmHostArmingTest {
         button(R.string.action_allow).assertIsEnabled()
         compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
-        // No frame yet: the button may still be drawn as on; the answer itself checks the arming.
-        button(R.string.action_allow).performClick()
+        // No frame yet: the button is still drawn as on. Its click (as TalkBack sends it: a touch would let a frame
+        // through between down and up) reaches the answer, which checks the arming itself.
+        button(R.string.action_allow).assertIsEnabled().performSemanticsAction(SemanticsActions.OnClick)
         assertEquals("a tap as the app comes back answers nothing", emptyList<Pair<String, String>>(), replies)
         frame()
         button(R.string.action_allow).assertIsNotEnabled()

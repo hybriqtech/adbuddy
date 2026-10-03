@@ -14,8 +14,9 @@ import tech.hybriq.adbuddy.bridge.BridgeState
  * still pending, open (not answered here, not expired, the PC connected) and
  * the notification offers that decision (never Allow during the session, nor Allow for a special question
  * or a command it cuts: those are allowed from the dialog); Allow also needs the phone unlocked
- * (isDeviceLocked), besides setAuthenticationRequired. A tap
- * that arrives late or from a stale notification sends nothing.
+ * (isDeviceLocked), besides setAuthenticationRequired, and its button shown for ConfirmUi.ARMING_MS
+ * (ConfirmNotifier.arming: a stray tap as the notification pops up allows nothing; after the PIN of a locked
+ * phone it is long armed). A tap that arrives late, too soon or from a stale notification sends nothing.
  *
  * It does not remove the notification: once the answer is on its way the
  * state marks the question as answering and ConfirmNotifier posts it again
@@ -33,9 +34,12 @@ class ConfirmReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        /** RED stub. */
+        /**
+         * Whether a notification button may send decision for id: ConfirmUi.canSend, with Allow armed only once its
+         * notification has shown it for ConfirmUi.ARMING_MS ([arming]). Deny does not wait.
+         */
         internal fun mayReply(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean, arming: ConfirmArming): Boolean =
-            ConfirmUi.canSend(state, id, decision, now, locked, armed = true, notification = true)
+            ConfirmUi.canSend(state, id, decision, now, locked, armed = arming.isArmed(id), notification = true)
 
         const val ACTION_REPLY = "tech.hybriq.adbuddy.action.CONFIRM_REPLY"
         const val EXTRA_ID = "id"

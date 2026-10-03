@@ -2,12 +2,18 @@ package tech.hybriq.adbuddy.ui
 
 import android.app.KeyguardManager
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import tech.hybriq.adbuddy.bridge.Bridge
 import tech.hybriq.adbuddy.bridge.BridgeState
@@ -51,16 +57,41 @@ internal fun ConfirmHost(
             delay(ConfirmUi.nextExpiry(state.pending, now) ?: break)
         }
     }
+    // The arming (ConfirmUi.ARMING_MS): Allow waits from when a question takes the dialog or becomes answerable, and
+    // again each time the app comes to the front (ON_START, ON_RESUME: the screen woke, the person came back), so a
+    // tap meant for what was there, or a burst as the dialog pops up, is not an answer. Deny never waits.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val fronts = remember { mutableIntStateOf(0) }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_RESUME) fronts.intValue++
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    var armedFor by remember { mutableStateOf<Arming?>(null) }
     val question = ConfirmUi.question(state, focusConfirm, now, closed)
-    if (question != null) {
-        ConfirmDialog(question, ConfirmUi.status(question, state, now), clock, armed = true, onClose = { onClose(question.id) }) { decision ->
+    val status = question?.let { ConfirmUi.status(it, state, now) }
+    val front = fronts.intValue
+    val open = status == ConfirmUi.Status.OPEN
+    LaunchedEffect(question?.id, front, open) {
+        armedFor = null
+        val id = question?.id ?: return@LaunchedEffect
+        if (!open) return@LaunchedEffect
+        delay(ConfirmUi.ARMING_MS)
+        armedFor = Arming(id, front)
+    }
+    if (question != null && status != null) {
+        ConfirmDialog(question, status, clock, armed = armedFor == Arming(question.id, front), onClose = { onClose(question.id) }) { decision ->
             // The same rule as the notification buttons (ConfirmReceiver), with the
-            // current state and time, not those of this composition: a second quick
-            // tap sees the first answer (answering), and the delay stops while the
-            // phone sleeps. Allowing needs the phone unlocked here too.
+            // current state, time and arming, not those of this composition: a second
+            // quick tap sees the first answer (answering), the delay stops while the
+            // phone sleeps, and a tap as the app comes back to the front, before the
+            // dialog is drawn again, finds it not armed. Allowing needs the phone unlocked here too.
             val t = clock.now()
             val locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-            if (ConfirmUi.canSend(current(), question.id, decision, t, locked, armed = true, notification = false)) {
+            val armed = armedFor == Arming(question.id, fronts.intValue)
+            if (ConfirmUi.canSend(current(), question.id, decision, t, locked, armed, notification = false)) {
                 reply(question.id, decision)
             } else {
                 now = t
@@ -68,3 +99,6 @@ internal fun ConfirmHost(
         }
     }
 }
+
+/** What the dialog's Allow was armed for: this question, since the app's latest coming to the front. */
+private data class Arming(val id: String, val front: Int)

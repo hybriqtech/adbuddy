@@ -87,14 +87,16 @@ object ConfirmUi {
     /**
      * Whether a button may send decision for id now: the question is still open and offers that decision where
      * it was tapped (the [notification] offers less than the dialog), and allowing needs the phone unlocked (a
-     * tap can arrive late, after the bouncer, or from a stale notification). Denying is always fine.
+     * tap can arrive late, after the bouncer, or from a stale notification) and the button [armed]: shown for
+     * [ARMING_MS] ([armed] for the notification, ConfirmHost for the dialog), so a stray tap or a burst as the
+     * question appears allows nothing. Denying is always fine.
      */
     fun canSend(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean, armed: Boolean, notification: Boolean): Boolean {
         val r = state.pending.firstOrNull { it.id == id } ?: return false
         val status = status(r, state, now)
         val offered = if (notification) notificationDecisions(r, status) else decisions(r, status)
         if (decision !in offered) return false
-        return decision == Decision.DENY || !locked
+        return decision == Decision.DENY || (!locked && armed)
     }
 
     /**
@@ -188,10 +190,17 @@ object ConfirmUi {
         return Plan(cancel = shown.keys - ids, post = post, shown = next)
     }
 
-    /** Whether a button shown at [shownAt] is armed at [now]. RED stub. */
-    fun armed(shownAt: Long?, now: Long): Boolean = true
+    /**
+     * Whether an Allow button shown at [shownAt] is armed at [now] (both in the phone's elapsed time): [ARMING_MS]
+     * have passed. One not known to be shown ([shownAt] null: a notification of an earlier process) never is.
+     */
+    fun armed(shownAt: Long?, now: Long): Boolean = shownAt != null && now - shownAt >= ARMING_MS
 
-    /** How long Allow waits once shown. */
+    /**
+     * How long Allow and Allow during the session wait from when they appear (the dialog, and again when the app
+     * comes back to the front; the notification's button) before they allow: a tap meant for what was there, or a
+     * burst as the question pops up, is not an answer. Deny never waits. As PermissionUi.PROMOTE_GUARD_MS.
+     */
     const val ARMING_MS = 600L
 
     /** What the notification shows of the command; a longer one is cut there and only the dialog allows it. */
