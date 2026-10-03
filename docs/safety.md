@@ -97,7 +97,7 @@ The agent can read and act on the screen with `adbuddy screen`, `adbuddy tap`, `
 
 While the agent uses the screen, the phone shows a frame and a pill, **Agent using the screen · Pause**.
 
-**Notifications.** `adbuddy notifications` reads them through a listener you allow in the system's own screen and then confirm in ADBuddy; the agent cannot press that confirm button (ADBuddy is protected), and revoking the access in the system takes your confirmation away. The title and text of protected apps, of ADBuddy, of other users or work profiles, and of notifications marked secret never leave the phone. There is no adb fallback. Limit: a notification forwarder you install (a smartwatch companion, KDE Connect) can pass the content of a protected app on under its own name.
+**Notifications.** `adbuddy notifications` reads them through a listener you allow in the system's own screen and then confirm in ADBuddy; the agent cannot press that confirm button (ADBuddy is protected), and revoking the access in the system takes your confirmation away. So does every new start of the listener: after a reboot, an update of ADBuddy or the system killing it, you confirm again in ADBuddy before the agent can read. The title and text of protected apps, of ADBuddy, of other users or work profiles, and of notifications marked secret never leave the phone. There is no adb fallback. Limit: a notification forwarder you install (a smartwatch companion, KDE Connect) can pass the content of a protected app on under its own name.
 
 ## Pause and Cut access
 

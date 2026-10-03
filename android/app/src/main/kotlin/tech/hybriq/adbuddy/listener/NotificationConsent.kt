@@ -16,8 +16,9 @@ import kotlinx.coroutines.flow.flowOn
  * on the confirm button of ADBuddy's notification access screen sets (confirm()). Nothing sets it by seeing
  * that the system says "allowed": an agent that taps the system's switch with `adbuddy tap` still gets
  * `unavailable` until the person confirms here, and it cannot press ADBuddy's buttons (ADBuddy is protected).
- * The system revoking the access clears it: the listener itself when it is unbound (NotificationGate.onUnbound),
- * and the gate and the screen when they see it. It holds a flag, never content.
+ * The system revoking the access clears it: the listener itself when it is unbound (NotificationGate.onUnbound)
+ * and at every new binding (NotificationGate.onConnected, M5c-32 b: the system may bind it again without unbinding it
+ * first), and the gate and the screen when they see it. It holds a flag, never content.
  */
 class NotificationConsent(private val prefs: SharedPreferences) {
     fun confirmed(): Boolean = prefs.getBoolean(KEY, false)
