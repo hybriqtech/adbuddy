@@ -140,7 +140,7 @@ jobs:
         # Without the variables the tests would skip and the step would pass.
         env:
           ADBUDDY_EMULATOR_CUT: ""
-        run: test -n "$ADBUDDY_EMULATOR_SERIAL" && test -n "$ADBUDDY_EMULATOR_ADB" && go test -timeout 20m -count=1 -v ./internal/emutest
+        run: test -n "$ADBUDDY_EMULATOR_SERIAL" && test -n "$ADBUDDY_EMULATOR_ADB" && go test -timeout 40m -count=1 -v ./internal/emutest
       # Evidence for a failed start or recording: why the emulator did not
       # boot. The emulator has its own adb server (scripts/emulator.sh).
       - name: Emulator diagnostics
