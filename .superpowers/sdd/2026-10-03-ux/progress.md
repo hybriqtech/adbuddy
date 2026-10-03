@@ -14,3 +14,12 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - Ruling: C8/C9/C10/O9/O12/O21 fuera del top aunque baratos y agrupados en P5 (solo con opus) — tocan consentimiento o semantica visible de confirmacion — cuesta: mejoras de seguridad percibida tardan mas.
 - Ruling: H14 (platformtools) no se toca sin avisar al dueño del paquete — fuera de mi arbol — cuesta: mensaje de descarga sigue en ingles.
 - Esperando OK del lider a la lista antes de la fase 2 (plan con superpowers:writing-plans).
+
+## Fase 2 - P1 (barra y a11y base)
+- Lider aprueba P1-P6 en orden; O1 pasa a `seguridad`; P5 el ultimo con opus y regla "ningun cambio da al agente forma de aprobar una 🔴"; O7 fuera; H10/H14 solo si son textos/CLI sin daemon ni clasificador. ux/revision subida (05367ee).
+- Gradle: JAVA_HOME jdk-17.0.20.1+1 y /c/Users/Jose/AppData/Local/Gradle/gradle-9.8.0/bin/gradle --no-daemon --offline (desde android/); android/local.properties creado (no versionado).
+- Plan P1: docs/superpowers/plans/2026-10-03-ux-p1-barra-y-a11y.md. Revision opus (a7090bb): 2 bloqueos + 5 importantes, todos incorporados.
+- Ruling: la altura de AdbuddyTopBar sale del contenido (2*lineHeight+8, min 64) y no de un umbral de fontScale — un umbral falla en moviles estrechos con letra 1,3 — si me equivoco: lineHeight sin especificar en el tema (el test lo caza).
+- Ruling: assertTitleFitsTheTopBar mide la barra PINTADA (testTag) — una constante compartida con el codigo haria pasar un test aunque la barra no creciera — cuesta: un tag en produccion.
+- Ruling: C23 (borrar de 18 dp en chips) aplazado a P3 — cambiar el chip pide diseno — cuesta: area tactil pequeña unas semanas mas.
+- Ruling: SecondaryActionButton no se aplica a ConsentScreen aqui (Screens.kt lo toca seguridad para O1) — se completa en P5.
