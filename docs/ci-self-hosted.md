@@ -17,12 +17,14 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 | Variable | Used by | Default | What the runner needs |
 | --- | --- | --- | --- |
 | `CI_HOST_MATRIX` | `host.yml` | the three hosted cells (`ubuntu-latest`, `windows-latest`, `macos-latest`) | A JSON array of cells `{"name": ..., "runner": ...}`. A Linux cell needs `gcc` (for `go test -race`); a Windows cell needs Git for Windows. Leave a cell out of the array to drop it. |
-| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min and the app's tests about 15 min more (estimated, not measured)). |
+| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min and the app's tests about 10 min more, measured, plus 4.5-5.5 min for the emulator restart between their two groups). |
 | `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, hardware acceleration (the AVDs `adbuddy-ci-api37` for the oracle and `adbuddy-ci-api34` for the app's tests are created by `scripts/emulator.sh` when missing), and JDK 17 for the app's tests (Gradle 9.8 is downloaded by `setup-gradle`); a Linux runner needs `/dev/kvm` (see section 6). |
 | `CI_RUNNER_RELEASE` | `release-check.yml` (`scripts` and `goreleaser`) | `"ubuntu-latest"` | Linux with `shellcheck`. |
 | `CI_RUNNER_SIGN` | `release-check.yml` (`sign`) | `"ubuntu-latest"` | Linux with an Android SDK: `apksigner` and `zipalign` are Linux scripts here. |
 
 `emulator.yml` runs on `pull_request` (same path filters) and by hand with `workflow_dispatch`. It does not run on every push to `main`: merges are fast-forwards of a pull request that already passed it.
+
+qemu's memory only grows while an emulator runs and is never returned: about 3.6 GB after boot and about 7 GB after the full app suite (android-34, 2560 MB guest, one emulator alone on the PC). The job therefore restarts the android-34 emulator between the guard tests (`TestTheGuard*`) and the rest of the app's tests, and prints the emulator's memory after each stage (`scripts/emulator.sh mem`: after the oracle, after the guard tests and after the rest). The "rest" group peaks at about 5 GB (5.5 GB at the end), close to the 6 GB target. The restart adds 4.5-5.5 minutes (boot about 160 s, stability wait 120 s, stop up to 60 s); with it the job takes about 55-65 minutes and stays under its 90. `ADBUDDY_EMU_RAM` (plain MB) lowers the guest's RAM; the workflow does not set it yet. Do not write `1536M` or `2G` in an AVD's config: the emulator may raise them (a `1536M` left the effective value at 2560).
 
 The special value `"none"` skips the job of a single-job workflow.
 
@@ -64,6 +66,7 @@ For `CI_HOST_MATRIX`, `"none"` and `[]` are not valid: they break the workflow. 
 | `ADBUDDY_EMU_ADB_PORT` | Port of the script's own adb server. The CI uses `5049`. It must be a number in 1024-65535 and not `5037` (the user's adb server) nor `5038` (ADBuddy's); otherwise the script exits with 2. |
 | `ADBUDDY_EMU_GPU` | GPU mode (default `swiftshader_indirect`). |
 | `ADBUDDY_EMU_IMAGE` | System image used when the AVD is created (the AVD is created with it the first time only: to change the image, use another AVD name). |
+| `ADBUDDY_EMU_RAM` | Guest RAM in plain MB, 1024-8192 (default: empty, the AVD's own). Passed to the emulator as `-memory`; an invalid value makes `start` exit with 2. Do not write `1536M` or `2G` in the AVD's config instead: the emulator may raise them. |
 | `ADBUDDY_EMU_STABLE_SECS` | After boot, watch this many seconds that `system_server` and `surfaceflinger` do not restart. Default `0` (off); on a restart the script exits with 4. |
 
 The CI values differ from the defaults so that a job does not collide with an emulator started by hand.
@@ -72,9 +75,9 @@ The script also runs `unset ADB_SERVER_SOCKET ANDROID_ADB_SERVER_ADDRESS`: adb g
 
 The script exports `ADB_MDNS=0` and `ADB_MDNS_AUTO_CONNECT=0` so that its adb server never auto-connects a real phone found over mDNS, and it aborts (exit 3) if that server sees any other device.
 
-After boot, `start` also checks that the emulator on the port runs the AVD of `ADBUDDY_EMU_AVD` (`adb emu avd name`); if not, it stops it and exits with 3. `stop` waits, for up to 60 s, until adb no longer lists the emulator and its console port is closed, and only then stops the adb server: the emulator job stops the android-37 emulator and starts the android-34 one on the same port, and the start must not take the dying one for the new one. `stop` always exits 0 (after 60 s it warns on stderr).
+After boot, `start` also checks that the emulator on the port runs the AVD of `ADBUDDY_EMU_AVD` (`adb emu avd name`); if not, it stops it and exits with 3. `stop` waits, for up to 60 s, until adb no longer lists the emulator and its console port is closed, and only then stops the adb server: the emulator job stops the android-37 emulator and starts the android-34 one on the same port, and the start must not take the dying one for the new one. `stop` always exits 0 (after 60 s it warns on stderr). `mem` prints one line with the emulator's host memory (working set and private memory in MB; on Linux both numbers are the RSS), or says that it is not running or that the system could not be asked; it always exits 0.
 
-Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT`; `3` the adb server sees another device (or none), or the emulator on the port runs another AVD; `4` the emulator is not stable; `124` it did not boot in 10 minutes.
+Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT` (for `start`: also an invalid `ADBUDDY_EMU_RAM`); `3` the adb server sees another device (or none), or the emulator on the port runs another AVD; `4` the emulator is not stable; `124` it did not boot in 10 minutes.
 
 ## 3. Setting up a Windows runner
 
