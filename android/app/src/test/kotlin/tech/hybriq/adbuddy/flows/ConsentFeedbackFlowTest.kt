@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -54,10 +55,11 @@ class ConsentFeedbackFlowTest {
         assertEquals("denied", BridgePrefs(app).consent)
         assertEquals(text(R.string.consent_declined), ShadowToast.getTextOfLatestToast())
         compose.onNodeWithText(text(R.string.consent_accept)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.step_progress, 1, 2)).assertIsDisplayed()
     }
 
     @Test fun acceptingWithStepsPendingSaysTwoStepsRemain() {
-        assertEquals(false, Onboarding.of(app).done())
+        assertFalse(Onboarding.of(app).done())
         launchPending()
         compose.onNodeWithText(text(R.string.consent_accept)).performClick()
         assertEquals("granted", BridgePrefs(app).consent)

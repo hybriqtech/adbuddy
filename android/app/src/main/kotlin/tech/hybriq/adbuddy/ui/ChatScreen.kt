@@ -134,6 +134,7 @@ fun ChatScreen(
     }
     LaunchedEffect(listState) { snapshotFlow { !listState.canScrollForward }.collect { if (it) unseen = false } }
     val terminalOn = terminalShown && terminal != null
+    val status = LinkStatus.of(state, cut, configured)
 
     Scaffold(
         topBar = {
@@ -146,13 +147,13 @@ fun ChatScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { inner ->
         Column(Modifier.padding(inner).consumeWindowInsets(inner).imePadding().fillMaxSize()) {
-            LinkBanner(LinkStatus.of(state, cut, configured))
+            LinkBanner(status)
             remoteCard()
             if (terminalOn) {
                 TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.weight(0.45f).fillMaxSize())
             }
             val weight = if (terminalOn) 0.55f else 1f
-            if (items.isEmpty() && tools.isEmpty() && LinkStatus.of(state, cut, configured) == LinkStatus.CONNECTED) {
+            if (items.isEmpty() && tools.isEmpty() && status == LinkStatus.CONNECTED) {
                 ChatEmptyState(Modifier.weight(weight).fillMaxSize())
             } else {
                 Box(Modifier.weight(weight).fillMaxSize()) {

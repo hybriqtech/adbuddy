@@ -152,7 +152,7 @@ class ChatScrollTest {
         notice.assertDoesNotExist()
     }
 
-    private fun twoTallArrivals(second: () -> Unit) {
+    private fun twoTallArrivals(last: String, second: () -> Unit) {
         start()
         compose.mainClock.autoAdvance = false
         add(ChatMessage("30", "user", "long ".repeat(800)))
@@ -162,13 +162,14 @@ class ChatScrollTest {
         compose.mainClock.autoAdvance = true
         compose.waitForIdle()
         notice.assertDoesNotExist()
+        shown(last)
     }
 
     @Test fun twoTallArrivalsWhileTheAnimationRunsStillFollow() =
-        twoTallArrivals { add(ChatMessage("31", "assistant", "long ".repeat(800) + "end")) }
+        twoTallArrivals("long ".repeat(800) + "end") { add(ChatMessage("31", "assistant", "long ".repeat(800) + "end")) }
 
     @Test fun aTallArrivalThenTheStripWhileTheAnimationRunsStillFollows() =
-        twoTallArrivals { state = state.copy(chat = state.chat.copy(tools = running.tools), sessionState = working) }
+        twoTallArrivals("Run 1") { state = state.copy(chat = state.chat.copy(tools = running.tools), sessionState = working) }
 
     @Test fun tappingTheNoticeWithATallLastBubbleRemovesIt() {
         start()

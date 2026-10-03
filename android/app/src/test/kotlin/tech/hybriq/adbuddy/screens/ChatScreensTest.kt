@@ -4,7 +4,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
@@ -25,6 +24,10 @@ import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.ChatMessage
 import tech.hybriq.adbuddy.bridge.ChatState
+import tech.hybriq.adbuddy.bridge.SessionState
+import tech.hybriq.adbuddy.bridge.ToolActivity
+import tech.hybriq.adbuddy.chat.Outgoing
+import tech.hybriq.adbuddy.chat.SendStatus
 import tech.hybriq.adbuddy.ui.ChatActions
 import tech.hybriq.adbuddy.ui.ChatScreen
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
@@ -42,11 +45,11 @@ class ChatScreensTest(private val mode: ScreenMode) {
 
     private fun text(id: Int, vararg args: Any): String = app.getString(id, *args)
 
-    private fun show(state: BridgeState, cut: Boolean = false, configured: Boolean = true) {
+    private fun show(state: BridgeState, cut: Boolean = false, configured: Boolean = true, outgoing: List<Outgoing> = emptyList()) {
         compose.setContent {
             AdbuddyTheme(dynamic = false) {
                 ChatScreen(
-                    state, outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = cut, terminal = null,
+                    state, outgoing = outgoing, drafts = emptyList(), downloads = emptyMap(), cut = cut, terminal = null,
                     snackbar = SnackbarHostState(), actions = ChatActions.None, configured = configured, remoteCard = {},
                 )
             }
@@ -65,8 +68,8 @@ class ChatScreensTest(private val mode: ScreenMode) {
         compose.onNodeWithText(subtitle).assertIsDisplayed()
         if (banner != null) {
             compose.onNodeWithText(banner).assertIsDisplayed()
-            assertEquals(1, lineCount(subtitle))
         }
+        assertEquals(1, lineCount(subtitle))
         compose.assertTextsFit()
         compose.assertTitleFitsTheTopBar(subtitle)
         compose.shot(name, mode)
@@ -112,7 +115,6 @@ class ChatScreensTest(private val mode: ScreenMode) {
         check(short, text(R.string.status_update_app), "chat_update_app")
         // The banner is announced to TalkBack.
         compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite)).assertIsDisplayed()
-        assertEquals(1, lineCount(short))
     }
 
     @Test fun connectedAndEmptySaysWhereToWrite() {
@@ -120,6 +122,25 @@ class ChatScreensTest(private val mode: ScreenMode) {
         compose.onNodeWithText(text(R.string.chat_empty_ready)).assertIsDisplayed()
         compose.assertTextsFit()
         compose.shot("chat_connected_empty", mode)
+    }
+
+    @Test fun connectedWithOnlyTheToolStripIsNotEmpty() {
+        show(
+            BridgeState(
+                connection = BridgeState.Connection.CONNECTED, hostName = "my-pc",
+                chat = ChatState(tools = listOf(ToolActivity("t1", "", "Run 1", "running"))),
+                sessionState = SessionState(state = "working"),
+            ),
+        )
+        compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
+    }
+
+    @Test fun connectedWithAPendingOutgoingMessageIsNotEmpty() {
+        show(
+            BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"),
+            outgoing = listOf(Outgoing("o1", "Turn the volume down", emptyList(), SendStatus.SENDING)),
+        )
+        compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
     }
 
     @Test fun notSetUpSaysToRunSetup() {
