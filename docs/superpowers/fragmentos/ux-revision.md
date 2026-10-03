@@ -7,10 +7,10 @@ El controlador de integración copia lo que haga falta a `pendientes-m3-m5.md` y
 ### Qué cambió
 
 - Cuatro pantallas usan el nuevo `AdbuddyTopBar`. `assertTitleFitsTheTopBar` ahora mide la barra pintada y `KNOWN_UI_ISSUES` queda vacío.
-- `SecondaryActionButton` compartido para las acciones secundarias.
+- `SecondaryActionButton` compartido para el "Ahora no" del paso 2 de 2 y de apps protegidas (ConsentScreen queda para P5, que toca ese fichero).
 - La fila del modo remoto es accionable entera, y TalkBack la lee como un solo interruptor con nombre. El diálogo de confirmación sigue apareciendo antes de abrir o cerrar nada.
 - Pistas de TalkBack en la descarga de ficheros ("Toca para cancelar") y en la tarjeta de pregunta del agente.
-- Etiquetas de descarga en español con "fichero" en vez de "archivo".
+- Pistas de TalkBack en la descarga de ficheros ("Toca para cancelar", etiqueta de la acción según el estado) y en la tarjeta de pregunta del agente (anuncio del resumen, título como cabecera); `heading()` también en `StepHeader` y en los títulos de las barras.
 
 ### Imágenes regrabadas
 
