@@ -180,7 +180,7 @@ El `argv` del diario lo construye el daemon a partir de la operación y sus `arg
 
 - En la app: `dump` omite las ventanas de `tech.hybriq.adbuddy`. `click` sobre un nodo de ese paquete, o `--xy` sobre una de sus ventanas, da `protected`.
 - **Con una pregunta 🔴 en el móvil,** la app también rechaza `click` sobre la interfaz del sistema (`com.android.systemui`): la notificación de la pregunta tiene el botón Permitir. El daemon ya bloquea los toques mientras hay pregunta (§4.1); esto es la segunda capa, por si un toque llegara por otra vía.
-- En el host: la guarda (§4.3) trata a `tech.hybriq.adbuddy` como una app protegida más, y así también bloquea `input` con ADBuddy en primer plano.
+- En el host: la guarda (§4.3) trata a `tech.hybriq.adbuddy` como una app protegida más, y así también bloquea `input` con ADBuddy en primer plano. **Excepción (V44, ruling A, 2026-10-03):** con ADBuddy arriba pasan dos salidas que no pulsan ni leen nada suyo: `input keyevent 3` o `input keyevent KEYCODE_HOME`, exactos y solos; y, si el primer plano lo dice la app, `monkey -p <paquete> -c android.intent.category.LAUNCHER 1` exacto hacia un paquete que no es ADBuddy ni protegido. Todo lo demás sigue bloqueado, también `am start` en cualquier forma (con `-n` se elige un diálogo que dejaría ADBuddy a la vista), y el motivo le dice al agente cómo salir (plan `docs/superpowers/plans/2026-10-02-adbuddy-v44-v45.md`, ruling 2).
 
 ### 4.3 Apps protegidas
 
