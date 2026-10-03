@@ -158,3 +158,32 @@ PowerShell como administrador:
 Arrancar este runner al iniciar sesión (bloque 2) no sirve tal cual: el acceso directo tendría que pedir la contraseña de `adbuddy-ci` con `runas`. Las salidas son (a) un acceso que ejecute el `runas` y tú escribes la contraseña, o (b) una tarea programada `schtasks /Create /SC ONSTART /RU adbuddy-ci /RP * /TN adbuddy-runner /TR C:\ci\start-runner-windows.cmd` (corre sin sesión; no probado con el emulador, que podría necesitar un escritorio).
 
 Sin probar (no se ha creado ninguna cuenta ni runner): el emulador bajo la cuenta estándar, `runas /profile` con el script, la tarea programada, y que el runner pueda actualizarse solo con `bin` de solo lectura (si exige una versión nueva, reextrae el zip de la release como administrador sobre `bin` y `externals`).
+
+## 4. Segundo runner Linux en WSL (hecho el 2026-10-03)
+
+Dos runners Linux en la misma distro y con el mismo usuario `runner` (sin sudo) reparten las ráfagas de jobs de Linux. No comparten carpeta de runner ni cachés; sí el SDK de Android (`~/android-sdk`), que `sdkmanager` solo modifica si falta un paquete (la plataforma 37 ya está instalada).
+
+1. En la distro, como `runner`, copia solo la distribución del runner actual (misma versión, sin `.runner`, `.credentials` ni `_work`) y crea carpetas propias:
+
+   ```sh
+   wsl.exe -d Ubuntu -u runner --exec sh -c 'mkdir ~/actions-runner-2 && cd ~/actions-runner && cp -a bin externals config.sh env.sh run.sh run-helper.sh run-helper.sh.template run-helper.cmd.template safe_sleep.sh svc.sh .path ../actions-runner-2/ && cd ../actions-runner-2 && mkdir _work _diag _gradle _gomod _gocache && sed "s#/home/runner/actions-runner/#/home/runner/actions-runner-2/#" ../actions-runner/.env > .env'
+   ```
+
+2. Registro con el token en memoria, pasado por la entrada estándar (nunca en un fichero ni un log). Las etiquetas por defecto (`self-hosted`, `Linux`, `X64`) se añaden solas; se pone `adbuddy-local` como en el primero:
+
+   ```sh
+   TOKEN=$(gh api -X POST repos/hybriqtech/adbuddy/actions/runners/registration-token --jq .token)
+   printf '%s
+' "$TOKEN" | wsl.exe -d Ubuntu -u runner --exec sh -c 'read -r T; cd ~/actions-runner-2 && env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C.UTF-8 ./config.sh --unattended --url https://github.com/hybriqtech/adbuddy --token "$T" --name <PC>-wsl-adbuddy-local-2 --labels adbuddy-local --work _work'
+   unset TOKEN
+   ```
+
+3. Script de arranque: copia `start-runner-linux.ps1` y `.cmd` a `start-runner-linux-2.*` cambiando `~/actions-runner ` por `~/actions-runner-2 `. Para que el proceso no dependa de una consola abierta:
+
+   ```powershell
+   Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<carpeta de los start-runner-*>\start-runner-linux-2.ps1' -WindowStyle Hidden
+   ```
+
+4. Comprobar: `gh api repos/hybriqtech/adbuddy/actions/runners --jq '.runners[]|[.name,.status,.busy]|@tsv'` debe listar los dos runners Linux `online`. Para parar solo este, localiza su PID con `wsl.exe -d Ubuntu -u runner --exec ps -eo pid,args` (la línea con `actions-runner-2/bin/Runner.Listener`) y envíale `kill <pid>` solo si no está ejecutando un job (`busy=false`).
+
+Deshacer: parar el proceso, `config.sh remove --token <token nuevo>` en `~/actions-runner-2` y borrar la carpeta. Sigue sin sobrevivir a un reinicio del PC (bloque 2).
