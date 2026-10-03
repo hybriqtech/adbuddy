@@ -1,0 +1,1 @@
+  mCurrentFocus=Window{ac7c4a8 u0 tech.hybriq.adbuddy/tech.hybriq.adbuddy.ChatBubbleActivity}

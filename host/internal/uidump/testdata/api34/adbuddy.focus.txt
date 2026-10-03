@@ -1,0 +1,1 @@
+  mCurrentFocus=Window{4394a6c u0 tech.hybriq.adbuddy/tech.hybriq.adbuddy.MainActivity}
