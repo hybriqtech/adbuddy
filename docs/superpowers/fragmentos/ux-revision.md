@@ -107,7 +107,7 @@ Ninguna se pide al usuario ahora: "Parar" contra un agente real trabajando (el h
 - Task 1, aviso de la pregunta del agente: cuando el agente pide permiso (`ask`) y la app no está delante, sale un aviso propio, genérico y sin botones, con la descripción de los canales ajustada. `foreground` no parpadea al recrear la actividad por un cambio de configuración (`isChangingConfigurations`), así que girar el móvil no dispara ni cancela avisos.
 - Task 2, banner (`notifications_banner_*`): el chat muestra un banner cuando las notificaciones están bloqueadas (desactivadas en la app o canal de confirmaciones/preguntas silenciado), con atajo a los ajustes de notificaciones de la app. Si el sistema no tiene esa pantalla, abre los ajustes generales; si tampoco hay actividad, no hace nada y no cierra la app.
 - Task 3, permiso (`notifications_rationale_*`): el permiso de notificaciones se pide una sola vez, con un diálogo que explica el motivo y fuera de la pantalla de configuración. El motivo cede si llega una pregunta del agente con él abierto.
-- Task 4, limpieza de menores: import de `VisibleForTesting` en `Bridge.kt` y segundo `try/catch (ActivityNotFoundException)` en el respaldo de `openNotificationSettings`.
+- Task 4, limpieza de menores: import de `VisibleForTesting` en `Bridge.kt` y segundo `try/catch (ActivityNotFoundException)` en el respaldo de `openNotificationSettings` (la Task 2 lo dejó con un solo `try`; el segundo llegó en la Task 4).
 
 ### Imágenes nuevas
 
@@ -118,16 +118,14 @@ Ninguna se pide al usuario ahora: "Parar" contra un agente real trabajando (el h
 Este fragmento no edita esos ficheros; el controlador de integración debe actualizarlos.
 
 - Cierra el pendiente de `docs/superpowers/plans/pendientes-m3-m5.md` (~línea 325: canal alto para el aviso).
-- Deja desfasada la spec de M4, `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md` (~líneas 125-127: «el aviso es silencioso en M4…»): ahora el aviso suena y sale en pantalla.
+- Deja desfasada la spec de M4, `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md` (~líneas 125-127: «el aviso es silencioso en M4…»; y la línea ~126, «con el enlace en pausa o sin conexión no hay aviso de permiso»: P4 decide lo contrario para la pausa, el aviso SÍ sale), y la validación manual «Aviso de permiso silencioso» de `pendientes-m3-m5.md` (~línea 320), que queda desfasada: ahora el aviso suena y sale en pantalla.
 
 ### Aplazado con motivo
 
 - `CATEGORY_CALL`, la visibilidad de la 🔴 en pantalla bloqueada y el botón "Rechazar" en el bloqueo: van con P5 (opus), porque tocan la seguridad de las confirmaciones.
 - El armado del diálogo 🔴 no se hace aquí: es de `seguridad`, en su rama `fix/confirm-arming`. Hueco preexistente anotado por el revisor: en `ConfirmDialog` "Permitir" no tiene armado; lo cubre `seguridad`.
 - La fila de "notificaciones" en Ajustes que pedía O4: el banner del chat ya cubre el aviso permanente y la fila pediría un estado más en Ajustes.
-- Los iconos del sistema y de lanzador.
-- El `LinkDialog` que no sobrevive a la rotación.
-- El botón del terminal con ↑/↓.
+- Los iconos del sistema y de lanzador, el `LinkDialog` que no sobrevive a la rotación y el botón del terminal con ↑/↓ (C27, pulido sin motivo de seguridad): quedan SIN destino en P5 (P5 es de confirmaciones y consentimiento); el controlador de integración debería apuntarlos en `pendientes-m3-m5.md` para que no se pierdan.
 
 ### Notas honestas
 
@@ -140,6 +138,10 @@ Este fragmento no edita esos ficheros; el controlador de integración debe actua
 - El permiso se pide una sola vez; el banner es el recordatorio permanente.
 - No hay diálogo del motivo en la burbuja ni con una pregunta pendiente (el motivo cede si la pregunta llega con él abierto).
 - `Bridge.setStateForTest` es `internal` y `@VisibleForTesting`.
+- `foreground` podría quedarse en `true` si una actividad se para con `isChangingConfigurations` siendo la última y la nueva instancia nunca arranca (multiventana/PiP sin comprobar): validar en el emulador; arreglo barato si hiciera falta: recalcular en `onActivityDestroyed`.
+- Con la app delante en Ajustes, Actividad o un paso de bienvenida, la pregunta del agente no tiene tarjeta (solo se pinta en el chat) ni aviso (`foreground` lo retira): ya pasaba antes; solución futura: contar como "delante" solo la ruta del chat, o un banner en las otras rutas.
+- El aviso vuelve a sonar cada vez que se pliega la burbuja con la pregunta pendiente (coherente con la regla "vuelve a avisar al pasar a segundo plano"); si molesta, recordar los ids que ya sonaron y publicar sin alerta.
+- En Android 13+ el banner de "notificaciones bloqueadas" sale a la vez que el diálogo del motivo, antes de pedir el permiso (cierto pero redundante).
 - `BridgeService` no tiene test de servicio: las llamadas `cancelAsk` de `onCreate`/`onDestroy` y el colector solo se comprobaron leyendo.
 
 ### Validaciones manuales pendientes (Pixel)
