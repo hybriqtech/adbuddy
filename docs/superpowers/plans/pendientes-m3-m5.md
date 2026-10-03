@@ -485,6 +485,17 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
   - No comprobado: si la `sed` de toybox implementa la orden `e` (da igual: `sed` ya no conserva la clave) y si `bu` es accesible desde la shell de adb en Android 14+ (tampoco conserva la clave).
 - **Validación manual pendiente (nadie la ha corrido en un móvil):** con una pregunta especial y con un comando de más de 300 caracteres, la notificación solo muestra Rechazar y Abrir; ninguna notificación ofrece «Permitir durante la sesión»; el diálogo no activa Permitir hasta llegar al final, y con un comando de más de 20 000 caracteres dice cuántos oculta y solo ofrece Rechazar.
 
+### Post-v1: Permitir tras desbloquear con PIN (M2-8)
+
+- **Ruling del supervisor f3:** post-v1, no se implementa ahora. Falla seguro (no se ejecuta nada sin confirmación), es un problema de experiencia, y tocar `ConfirmReceiver`/`BridgeService` a última hora arriesga abrir el hueco que se protege.
+- **Medición (emulador API 34, 7/7 ejecuciones):** al teclear el PIN en el bouncer, SystemUI entrega el `PendingIntent` unos 300 ms antes de que `isDeviceLocked` pase a false (entrega 05:11:51.202, keyguard fuera 05:11:51.499), y `ConfirmReceiver` lo descarta en silencio: hay que pulsar Permitir otra vez.
+- **Rutas afectadas:** Permitir (medido); probablemente Responder (`BridgeService` ~113-116: se pierde el texto escrito); Enviar captura (medido 1 de 2).
+- **Test que fija el comportamiento seguro actual:** `TestAllowFromTheLockedShadeAsksToUnlock` en emutest (`authActionsMayBeDropped = true`; ponerlo a false al arreglarlo).
+- **Propuestas del revisor opus:**
+  - (a) En `ConfirmReceiver`, con decisión distinta de deny, bloqueado y API >= 31: `goAsync()` y sondear `isDeviceLocked` cada 100 ms hasta 2 s; solo si se desbloquea, reevaluar `ConfirmUi.canSend(...)` con el estado y la hora actuales y `locked=false` antes de responder. API 30 (sin `setAuthenticationRequired`) nunca espera. Rechazar no cambia. Igual con `Handler` para REPLY y CAPTURE. Riesgo residual: un SystemUI de fabricante que ignore el flag, o un desbloqueo del dueño en menos de 2 s.
+  - (b) Más robusta: Permitir como `PendingIntent.getActivity` hacia una actividad translúcida con `requestDismissKeyguard` que responde en `onDismissSucceeded`. No depende de tiempos y también saca el bouncer en API 30, a costa de cambiar la experiencia.
+- **Tests del arreglo:** Robolectric con `ShadowKeyguardManager.setIsDeviceLocked` cambiado tras la entrega; en API 30 no llega nada.
+
 ## v1 · V44-V45 (plan `docs/superpowers/plans/2026-10-02-adbuddy-v44-v45.md`)
 
 - **Diferido (ruling 6): el motivo exacto de `protected` en `foreground`.** Un campo `cause` en `UIForeground` (`notification`, `app` o `window`) dejaría al host decir cuál de las tres fue y al agente saber si esperar. Pide fixtures en `protocol/`, el tipo en `bridge` (Go), `UiExecutor.foreground` y su serializador (Kotlin), y que un host nuevo con una app anterior siga funcionando (sin el campo, el texto genérico de hoy).
