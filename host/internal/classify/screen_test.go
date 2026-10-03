@@ -1,10 +1,15 @@
 package classify
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Task 10b: screenrecord and adb bugreport are fixed protections;
 // dumpsys notification --noredact too. dumpsys itself stays green as a level
-// (testdata/habitual.jsonl): the guard closes the screen-reading cases.
+// (testdata/habitual.jsonl): the guard closes the screen-reading cases. Since
+// T2 of the manual validations, what dumps the notification service is 🔴
+// (TestDumpsysOfTheNotificationsIsRed).
 
 func TestScreenrecordIsSpecialRed(t *testing.T) {
 	c := mustNew(t, "")
@@ -49,10 +54,52 @@ func TestBugreportIsSpecialRedAndKeepsItsPCWrite(t *testing.T) {
 	}
 }
 
+// T2 of the manual validations (M5b-18, M5c-35), measured on the emulator by
+// emutest's TestNotificationReadsAndTheCodes: the redacted dump of the
+// notification service keeps the first 8 characters of a ticker longer than
+// 16 ("tickerText=G-482913..."), so dumpsys notification, with any argument,
+// and dumpsys of every service or of the CRITICAL ones (the notification
+// service's records are there) show the start of a code. They are 🔴, not
+// special: a "yes, always" rule may lower them. What does not dump the
+// notification service stays 🟢.
+func TestDumpsysOfTheNotificationsIsRed(t *testing.T) {
+	c := mustNew(t, "")
+	var cases []tc
+	for _, line := range []string{
+		"dumpsys notification", "dumpsys -t 10 notification", "dumpsys -T 500 notification",
+		"dumpsys --proto notification", "dumpsys -- notification", "dumpsys --dump notification",
+		"dumpsys --priority CRITICAL notification", "dumpsys notification --stats",
+		"dumpsys notification | grep tickerText",
+		"dumpsys", "dumpsys -t 10", "dumpsys --proto", "dumpsys --dump --pid", "dumpsys --pid --dump",
+		"dumpsys --skip meminfo", "dumpsys --skip meminfo activity", "dumpsys --skip", "dumpsys --skip --",
+		"dumpsys --priority CRITICAL", "dumpsys --priority=CRITICAL", "dumpsys -T 500 --priority CRITICAL",
+		"dumpsys --priority critical", "dumpsys --priority",
+		"dumpsys | grep -A 30 NotificationRecord",
+	} {
+		cases = append(cases, tc{sh(line), Red, "android.dumpsys", "", false})
+	}
+	for _, line := range []string{
+		"dumpsys -l", "dumpsys -l notification", "dumpsys --help", "dumpsys --help notification",
+		"dumpsys --pid", "dumpsys --pid notification", "dumpsys --thread", "dumpsys --clients", "dumpsys --stability", "dumpsys --pid --thread",
+		"dumpsys --priority HIGH", "dumpsys --priority NORMAL", "dumpsys --priority=NORMAL",
+		"dumpsys --skip notification", "dumpsys --skip meminfo notification", "dumpsys -t 10 --skip notification",
+		"dumpsys battery", "dumpsys statusbar", "dumpsys activity service com.android.systemui/.SystemUIService",
+	} {
+		cases = append(cases, tc{sh(line), Green, "android.dumpsys", "", false})
+	}
+	check(t, c, cases)
+	for _, line := range []string{"dumpsys notification", "dumpsys"} {
+		r := c.Classify(sh(line))
+		if r.Primary.Reason.EN == "" || r.Primary.Reason.ES == "" || !strings.Contains(r.Primary.Reason.EN, "ticker") {
+			t.Errorf("%s: reason %+v, want one that names the ticker", line, r.Primary.Reason)
+		}
+	}
+}
+
 func TestDumpsysLevels(t *testing.T) {
 	c := mustNew(t, "")
 	check(t, c, []tc{
-		{sh("dumpsys notification"), Green, "", "", false},
+		{sh("dumpsys notification"), Red, "", "", false},
 		{sh("dumpsys notification --noredact"), Red, "notifications.reveal", "", true},
 		{sh("dumpsys notification --noredact --proto"), Red, "notifications.reveal", "", true},
 		{sh("dumpsys -t 10 notification --noredact"), Red, "notifications.reveal", "", true},
@@ -73,9 +120,9 @@ func TestDumpsysLevels(t *testing.T) {
 		{sh("dumpsys window windows"), Green, "", "", false},
 		{sh("dumpsys activity top"), Green, "", "", false},
 		{sh("dumpsys -t 10 activity top"), Green, "", "", false},
-		{sh("dumpsys"), Green, "", "", false},
+		{sh("dumpsys"), Red, "", "", false},
 		{sh("dumpsys -l"), Green, "", "", false},
-		{sh("dumpsys --skip meminfo"), Green, "", "", false},
+		{sh("dumpsys --skip meminfo"), Red, "", "", false},
 		{sh("dumpsys battery"), Green, "", "", false},
 	})
 }

@@ -263,7 +263,9 @@ func checkDate(ws []Word) checkResult {
 // the arguments listed below are reading; anything else is 🔴.
 //
 // --noredact / --reveal (in any position, with or without a service)
-// prints the text of every app's notifications: 🔴.
+// prints the text of every app's notifications: 🔴. So is any dump of the
+// notification service (dumpsysNotifications): redacted, it still shows the
+// start of each ticker (T2 of the manual validations, M5b-18).
 func checkDumpsys(ws []Word) checkResult {
 	v := values(ws)
 	if revealsNotifications(v) {
@@ -276,6 +278,10 @@ func checkDumpsys(ws []Word) checkResult {
 			return red(reason("dumpsys option that clears data"))
 		}
 		return red(reason("unknown dumpsys option {v}", "v", bad))
+	case dumpsysNotifications(v) && svc == "notification":
+		return red(reason("dumpsys notification shows the start of each notification's ticker, codes included"))
+	case dumpsysNotifications(v):
+		return red(reason("dumpsys of every service includes the notifications, with the start of each ticker"))
 	case svc == "":
 		return ok() // every service, without arguments
 	case dumpsysVerbs[svc]:
@@ -290,6 +296,64 @@ func checkDumpsys(ws []Word) checkResult {
 		return ok()
 	}
 	return red(reason("dumpsys {value} with arguments that are not a known way of reading it", "value", svc))
+}
+
+// dumpsysNotifications reports whether a dumpsys line, with only options
+// dumpsys has, prints the notification service's dump. The redacted one keeps
+// the first 8 characters of a ticker longer than 16 ("tickerText=G-482913...",
+// measured on the API 34 emulator by emutest's TestNotificationReadsAndTheCodes:
+// T2 of the manual validations, M5b-18 / M5c-35); a code often starts it.
+// dumpsys (frameworks/native/cmds/dumpsys) reads its options up to the
+// service: --help prints its usage and -l the list of services, whatever
+// follows; --pid, --thread, --clients and --stability print that instead of
+// the dump unless --dump asks for it too; with a service it dumps that one,
+// and without one every service of --priority (all, without it) but those
+// after --skip. Measured: the notification service puts its records in its
+// CRITICAL dump, not in the HIGH or NORMAL ones. A --priority without a value
+// or with another one counts as dumping them.
+func dumpsysNotifications(v []string) bool {
+	dump, info, skip := false, false, false
+	priority := ""
+	var rest []string
+loop:
+	for i := 1; i < len(v); i++ {
+		switch a := v[i]; {
+		case a == "--":
+			rest = v[i+1:]
+			break loop
+		case !strings.HasPrefix(a, "-") || a == "-":
+			rest = v[i:]
+			break loop
+		case a == "--help" || a == "-l":
+			return false
+		case a == "--priority":
+			if i+1 < len(v) {
+				priority = v[i+1]
+			}
+			i++
+		case strings.HasPrefix(a, "--priority="):
+			priority = strings.TrimPrefix(a, "--priority=")
+		case a == "-t" || a == "-T":
+			i++
+		case a == "--skip":
+			skip = true
+		case a == "--dump":
+			dump = true
+		case a == "--pid" || a == "--thread" || a == "--clients" || a == "--stability":
+			info = true
+		}
+	}
+	switch {
+	case info && !dump:
+		return false
+	case skip:
+		if contains(rest, "notification") {
+			return false
+		}
+	case len(rest) > 0:
+		return rest[0] == "notification"
+	}
+	return priority != "HIGH" && priority != "NORMAL"
 }
 
 // dumpsysFlags are dumpsys's own options without a value; dumpsysValued take
