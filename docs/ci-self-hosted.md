@@ -17,24 +17,25 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 | Variable | Used by | Default | What the runner needs |
 | --- | --- | --- | --- |
 | `CI_HOST_MATRIX` | `host.yml` | the three hosted cells (`ubuntu-latest`, `windows-latest`, `macos-latest`) | A JSON array of cells `{"name": ..., "runner": ...}`. A Linux cell needs `gcc` (for `go test -race`); a Windows cell needs Git for Windows. Leave a cell out of the array to drop it. |
-| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min and the app's tests about 15 min more (estimated, not measured)). |
+| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min and the app's tests about 10 min more, measured, plus 4.5-5.5 min for the emulator restart between their two groups). |
 | `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, hardware acceleration (the AVDs `adbuddy-ci-api37` for the oracle and `adbuddy-ci-api34` for the app's tests are created by `scripts/emulator.sh` when missing), and JDK 17 for the app's tests (Gradle 9.8 is downloaded by `setup-gradle`); a Linux runner needs `/dev/kvm` (see section 6). |
 | `CI_RUNNER_RELEASE` | `release-check.yml` (`scripts` and `goreleaser`) | `"ubuntu-latest"` | Linux with `shellcheck`. |
 | `CI_RUNNER_SIGN` | `release-check.yml` (`sign`) | `"ubuntu-latest"` | Linux with an Android SDK: `apksigner` and `zipalign` are Linux scripts here. |
 
 `emulator.yml` runs on `pull_request` (same path filters) and by hand with `workflow_dispatch`. It does not run on every push to `main`: merges are fast-forwards of a pull request that already passed it.
 
+qemu's memory only grows while an emulator runs and is never returned: about 3.6 GB after boot and about 7 GB after the full app suite (android-34, 2560 MB guest, one emulator alone on the PC). The job therefore restarts the android-34 emulator between the guard tests (`TestTheGuard*`) and the rest of the app's tests, and prints the emulator's memory after each stage (`scripts/emulator.sh mem`: after the oracle, after the guard tests and after the rest). The "rest" group peaks at about 5 GB (5.5 GB at the end), close to the 6 GB target. The restart adds 4.5-5.5 minutes (boot about 160 s, stability wait 120 s, stop up to 60 s); with it the job takes about 55-65 minutes and stays under its 90. `ADBUDDY_EMU_RAM` (plain MB) lowers the guest's RAM; the workflow does not set it yet. Do not write `1536M` or `2G` in an AVD's config: the emulator may raise them (a `1536M` left the effective value at 2560).
+
 The special value `"none"` skips the job of a single-job workflow.
 
-Example for "only a Windows runner for now":
+Example for "only a Windows runner for now". **This is not the recommended configuration**: every variable that points at the Windows runner makes it run the code of any branch as your Windows user, with your adb server and phone in reach (section 6, "Requirement"). Until the dedicated Windows account exists (user decision pending; the user said "later"), the risk stays bounded only because the repository is private and only our own agents push branches; do not make the repository public with the runner registered.
 
 ```sh
 gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-local"]'
 gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-local"]'
 ```
 
-The Ubuntu cell of the matrix stays on a GitHub-hosted runner here; no label `linux` appears because there is no Linux runner. Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`.
+`CI_RUNNER_ANDROID` is left out on purpose: it runs Gradle and the unit tests of the branch with no isolated home, so on Windows it carries the same risk as the other two (it only belongs on the Windows runner under the same bounds or with a dedicated account). The Ubuntu cell of the matrix stays on a GitHub-hosted runner here; no label `linux` appears because there is no Linux runner. Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`.
 
 Example with both runners (Windows and the Linux runner of section 4):
 
@@ -65,6 +66,7 @@ For `CI_HOST_MATRIX`, `"none"` and `[]` are not valid: they break the workflow. 
 | `ADBUDDY_EMU_ADB_PORT` | Port of the script's own adb server. The CI uses `5049`. It must be a number in 1024-65535 and not `5037` (the user's adb server) nor `5038` (ADBuddy's); otherwise the script exits with 2. |
 | `ADBUDDY_EMU_GPU` | GPU mode (default `swiftshader_indirect`). |
 | `ADBUDDY_EMU_IMAGE` | System image used when the AVD is created (the AVD is created with it the first time only: to change the image, use another AVD name). |
+| `ADBUDDY_EMU_RAM` | Guest RAM in plain MB, 1024-8192 (default: empty, the AVD's own). Passed to the emulator as `-memory`; an invalid value makes `start` exit with 2. Do not write `1536M` or `2G` in the AVD's config instead: the emulator may raise them. |
 | `ADBUDDY_EMU_STABLE_SECS` | After boot, watch this many seconds that `system_server` and `surfaceflinger` do not restart. Default `0` (off); on a restart the script exits with 4. |
 
 The CI values differ from the defaults so that a job does not collide with an emulator started by hand.
@@ -73,9 +75,9 @@ The script also runs `unset ADB_SERVER_SOCKET ANDROID_ADB_SERVER_ADDRESS`: adb g
 
 The script exports `ADB_MDNS=0` and `ADB_MDNS_AUTO_CONNECT=0` so that its adb server never auto-connects a real phone found over mDNS, and it aborts (exit 3) if that server sees any other device.
 
-After boot, `start` also checks that the emulator on the port runs the AVD of `ADBUDDY_EMU_AVD` (`adb emu avd name`); if not, it stops it and exits with 3. `stop` waits, for up to 60 s, until adb no longer lists the emulator and its console port is closed, and only then stops the adb server: the emulator job stops the android-37 emulator and starts the android-34 one on the same port, and the start must not take the dying one for the new one. `stop` always exits 0 (after 60 s it warns on stderr).
+After boot, `start` also checks that the emulator on the port runs the AVD of `ADBUDDY_EMU_AVD` (`adb emu avd name`); if not, it stops it and exits with 3. `stop` waits, for up to 60 s, until adb no longer lists the emulator and its console port is closed, and only then stops the adb server: the emulator job stops the android-37 emulator and starts the android-34 one on the same port, and the start must not take the dying one for the new one. `stop` always exits 0 (after 60 s it warns on stderr). `mem` prints one line with the emulator's host memory (working set and private memory in MB; on Linux both numbers are the RSS), or says that it is not running or that the system could not be asked; it always exits 0.
 
-Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT`; `3` the adb server sees another device (or none), or the emulator on the port runs another AVD; `4` the emulator is not stable; `124` it did not boot in 10 minutes.
+Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT` (for `start`: also an invalid `ADBUDDY_EMU_RAM`); `3` the adb server sees another device (or none), or the emulator on the port runs another AVD; `4` the emulator is not stable; `124` it did not boot in 10 minutes.
 
 ## 3. Setting up a Windows runner
 
@@ -93,7 +95,7 @@ Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBU
    config.cmd --url https://github.com/OWNER/REPO --token TOKEN --labels self-hosted,windows,adbuddy-local
    ```
 
-4. Create `.env` in the runner folder. Use forward slashes in `ANDROID_HOME`, and keep the caches inside the runner folder so CI never touches your real ones:
+4. Create `.env` in the runner folder. Use forward slashes in `ANDROID_HOME`, and keep the caches inside the runner folder so CI never touches your real ones. **Target:** the runner has its own Android SDK, JDK and Go (inside the runner folder or the profile of the dedicated account), not the `ANDROID_HOME` or the `adb` you use every day: the `sdkmanager` steps of the workflows write into that SDK, and a branch could leave a trojan `adb.exe` or `emulator.exe` there that you or `adbuddy serve` would run later against your phone. This is not met today (see section 6):
 
    ```text
    ANDROID_HOME=C:/path/to/android-sdk
@@ -265,7 +267,7 @@ This is the procedure that was tested. The Linux runner lives in a WSL2 Ubuntu d
 
 ```sh
 # Use a self-hosted runner for a job group
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-local"]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
 
 # Skip a single-job workflow
 gh variable set CI_RUNNER_EMULATOR --body '"none"'
@@ -282,8 +284,10 @@ gh variable delete CI_RUNNER_SIGN
 
 A runner executes the code of the branches it builds, as the user that runs it. That user can reach its adb key (authorised on the phone), the adb server, SSH keys, the `gh` token and the credentials of any coding agent.
 
-- **Requirement** to keep `CI_HOST_MATRIX` or `CI_RUNNER_EMULATOR` on Windows while agents push branches to the repository: run the runner under a dedicated local Windows account that has none of those. For adb it is the only barrier (see below).
-- **Minimum:** start `run.cmd` from a clean console, without `ADBUDDY_*`, `ANDROID_SERIAL` or `ANDROID_ADB_SERVER_PORT` in the environment.
+- **Requirement** to keep `CI_HOST_MATRIX`, `CI_RUNNER_ANDROID` or `CI_RUNNER_EMULATOR` on Windows while agents push branches to the repository: run the runner under a dedicated local Windows account that has none of those. For adb it is the only barrier (see below).
+- **Open risk today (user decision pending: dedicated Windows account, the user said "later"):** while the Windows runner runs under the user's own account, the requirement is NOT met. Meanwhile the risk stays bounded because the repository is private and only our own agents push branches; do not make the repository public with the runner registered. The attack: a test or Gradle task in a branch calls the `adb` on the runner's PATH, which reaches the user's adb server (port 5037) with the phone already connected (or loads `\Users\<user>\.android\adbkey` and pairs its own server), and from there it runs anything on the phone with no classifier, journal or confirmation; it also reads SSH keys, the `gh` token and the credentials of the coding agents. The closing is the dedicated Windows account, and it is the user's decision. Until then, do not leave any `CI_*` variable pointing at the Windows runner while nobody watches (or stop `run.cmd`).
+- **Target, not met today:** the runner uses its own Android SDK, JDK and Go (section 3, step 4), never the user's `ANDROID_HOME` or `adb`. The `sdkmanager` steps of `android.yml` and `emulator.yml` write into the SDK, so a branch could replace `platform-tools/adb.exe` there and the change would persist for the user and `adbuddy serve`. Having a dedicated account does not fix it if that account is given write access to the user's SDK. Check that the `ANDROID_HOME` of the runner's `.env` is not the SDK you use with ADBuddy.
+- **Minimum:** start `run.cmd` from a clean console, without `ADBUDDY_*`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT`, `ADB_SERVER_SOCKET` or `ANDROID_ADB_SERVER_ADDRESS` in the environment (the last two would make the diagnostic `adb devices -l` of `emulator.yml` ask the user's server and write the phone's serial in the Actions log).
 
 The real barriers are:
 
@@ -315,6 +319,10 @@ Residual risk: a bug in the guest kernel gives root, and root can mount C: and r
 Phone: do not use `adb tcpip`, and reject any unexpected authorization dialog on the phone (the NAT reaches the LAN).
 
 Persistence between jobs: the runner is not ephemeral, so its jobs share the runner folder and its caches. The `runner` user can read the runner's credentials and poison `GOMODCACHE`, `GOCACHE` and Gradle in the runner folder, which affects later jobs. This is the cost of a non-ephemeral runner; `--ephemeral` with a new registration per job would avoid it.
+
+### Windows runner: persistence between jobs
+
+The Windows runner is not ephemeral either, and nothing cleans it automatically: no workflow removes `_work/_tool` (the Go and JDK that `setup-go` and `setup-java` install), `GOMODCACHE`, `GOCACHE` or `GRADLE_USER_HOME` (checked in `.github/workflows/`: no cleaning step). A branch can poison them, or the runner's `.env` and `.path` (the same user writes them), and every later job, including the `push` to `main`, then runs with those tools: a green on `main` could be fabricated or a failure hidden. What to clean by hand when you suspect a branch: stop the runner, delete `_work/_tool`, `gradle`, `gomod` and `gocache` of the runner folder, and re-check `.env` and `.path` against section 3. With a dedicated account, `.env`, `.path` and the runner's `bin/` should belong to an administrator and not be writable by that account. `--ephemeral` with a new registration per job would avoid all of it.
 
 ### Also
 
@@ -356,7 +364,7 @@ What is applied today (replace `OWNER/REPO`):
 What is not applied, and why:
 
 - **The guard in the workflows and the private repository** are what stop forks, besides the setting above.
-- **The `release` environment does not exist yet.** Create it with required reviewers before releases depend on it.
+- **The `release` environment does not exist yet.** Create it with required reviewers before releases depend on it, and do not create the signing secrets before those reviewers are effective (see `docs/releasing.md`, "Before creating the secrets"). On a tag push GitHub uses the `release.yml` of the tagged commit, so a branch can edit that file and drop its "tag is on main" check; the environment rule `v*` only looks at the tag name. Without a required reviewer that really stops the job, the secrets are readable from any branch.
 - **Rulesets and branch protection are not available** in the free plan for a private repository. When the repository goes public, create the `release` environment with a reviewer and protect `main` in the same step.
 
 ## 7. What is not covered locally

@@ -509,6 +509,21 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
   - (b) Más robusta: Permitir como `PendingIntent.getActivity` hacia una actividad translúcida con `requestDismissKeyguard` que responde en `onDismissSucceeded`. No depende de tiempos y también saca el bouncer en API 30, a costa de cambiar la experiencia.
 - **Tests del arreglo:** Robolectric con `ShadowKeyguardManager.setIsDeviceLocked` cambiado tras la entrega; en API 30 no llega nada.
 
+### CI y runners (A5, revisión de seguridad 2026-10-03)
+
+Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
+
+- **Documentado (`docs/ci-self-hosted.md` y `docs/releasing.md`), sin cierre técnico:**
+  - A5-1: decisión del usuario pendiente (cuenta de Windows dedicada, el usuario dijo "más adelante"); mientras tanto el riesgo se mantiene acotado porque el repositorio es privado y solo empujan ramas nuestros agentes; no hacer público el repositorio con el runner registrado. Riesgo: el runner Windows corre con su cuenta (una rama llama al `adb` del PATH y llega al servidor 5037 con el móvil). El cierre es la cuenta dedicada de Windows. El requisito nombra ya `CI_RUNNER_ANDROID` y el ejemplo con el runner Windows deja de recomendarlo.
+  - A5-2: no crear los secretos de release/firma hasta tener un revisor obligatorio efectivo en el environment `release` (nunca como secretos del repositorio); antes de aprobar `sign`, comprobar que el commit está en `main` y revisar el diff de `release.yml`.
+  - A5-3: objetivo documentado, runner con SDK de Android, JDK y Go propios; hoy no se cumple (decisión del usuario, junto a la cuenta dedicada).
+  - A5-5: persistencia entre jobs en el runner Windows (`_work/_tool`, cachés, `.env`/`.path`); ningún workflow lo limpia, se limpia a mano.
+  - A5-7: `ADB_SERVER_SOCKET` y `ANDROID_ADB_SERVER_ADDRESS` en la lista mínima del entorno del runner. El `unset` en los pasos de diagnóstico de `emulator.yml` lo hace puffin.
+- **Post-v1 (aplazado):**
+  - A5-4: `gradle/verification-metadata.xml` (`gradle --write-verification-metadata sha256 ...`), versionado y actualizado por una persona al cambiar `libs.versions.toml`; hoy `release.yml` firma con la clave real un APK construido sin verificación de dependencias.
+  - A5-6 (lo pasa puffin): `concurrency` de `emulator.yml` por `github.ref` con puertos y AVD fijos; con dos runners en la misma máquina una PR se validaría contra el emulador de otra. Un grupo por runner (`vars.CI_RUNNER_EMULATOR`) o un grupo fijo con `cancel-in-progress: false`; mientras tanto, un solo runner de emulador por máquina.
+  - A5-8: `dependabot.yml` solo para `github-actions` (las acciones fijadas por SHA no reciben correcciones) y excluir `dependabot[bot]` en la guarda de los jobs con runner propio (`github.actor != 'dependabot[bot]'`).
+
 ## v1 · V44-V45 (plan `docs/superpowers/plans/2026-10-02-adbuddy-v44-v45.md`)
 
 - **Diferido (ruling 6): el motivo exacto de `protected` en `foreground`.** Un campo `cause` en `UIForeground` (`notification`, `app` o `window`) dejaría al host decir cuál de las tres fue y al agente saber si esperar. Pide fixtures en `protocol/`, el tipo en `bridge` (Go), `UiExecutor.foreground` y su serializador (Kotlin), y que un host nuevo con una app anterior siga funcionando (sin el campo, el texto genérico de hoy).
