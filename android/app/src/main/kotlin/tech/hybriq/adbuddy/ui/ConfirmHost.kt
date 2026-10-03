@@ -74,15 +74,20 @@ internal fun ConfirmHost(
     val status = question?.let { ConfirmUi.status(it, state, now) }
     val front = fronts.intValue
     val open = status == ConfirmUi.Status.OPEN
+    // Each start over of the arming is a new generation, counted as the dialog is composed (not when its coroutine
+    // runs): from the first frame a question is answerable again (open, not open, open), an earlier arming is stale.
+    val generations = remember { Generations() }
+    val generation = remember(question?.id, front, open) { ++generations.last }
     LaunchedEffect(question?.id, front, open) {
         armedFor = null
         val id = question?.id ?: return@LaunchedEffect
         if (!open) return@LaunchedEffect
         delay(ConfirmUi.ARMING_MS)
-        armedFor = Arming(id, front)
+        armedFor = Arming(id, front, generation)
     }
     if (question != null && status != null) {
-        ConfirmDialog(question, status, clock, armed = armedFor == Arming(question.id, front), onClose = { onClose(question.id) }) { decision ->
+        val armedNow = armedFor == Arming(question.id, front, generation)
+        ConfirmDialog(question, status, clock, armed = armedNow, onClose = { onClose(question.id) }) { decision ->
             // The same rule as the notification buttons (ConfirmReceiver), with the
             // current state, time and arming, not those of this composition: a second
             // quick tap sees the first answer (answering), the delay stops while the
@@ -90,7 +95,7 @@ internal fun ConfirmHost(
             // dialog is drawn again, finds it not armed. Allowing needs the phone unlocked here too.
             val t = clock.now()
             val locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-            val armed = armedFor == Arming(question.id, fronts.intValue)
+            val armed = armedFor == Arming(question.id, fronts.intValue, generations.last)
             if (ConfirmUi.canSend(current(), question.id, decision, t, locked, armed, notification = false)) {
                 reply(question.id, decision)
             } else {
@@ -100,5 +105,10 @@ internal fun ConfirmHost(
     }
 }
 
-/** What the dialog's Allow was armed for: this question, since the app's latest coming to the front. */
-private data class Arming(val id: String, val front: Int)
+/** What the dialog's Allow was armed for: this question, since the app's latest coming to the front, in this generation. */
+private data class Arming(val id: String, val front: Int, val generation: Int)
+
+/** The latest generation of the arming; not state: only the tap and the next start over read it. */
+private class Generations {
+    var last = 0
+}
