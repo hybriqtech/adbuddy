@@ -68,7 +68,7 @@ go test ./internal/classify
 ../scripts/emulator.sh stop
 ```
 
-The `emulator` workflow records it again on every pull request that touches the classifier and fails if the result differs from the files in the repository.
+The `emulator-oracle` workflow records it again on every pull request that touches the oracle's inputs (`host/internal/classify/testdata/**`, `differential_test.go`, `corpus_test.go`, `scripts/emulator.sh`) and weekly on `main`, and fails if the result differs from the files in the repository. A change of the evaluator's code alone does not re-record it: the offline tests check the evaluator against the recorded oracle.
 
 ### The skills' read-only examples on the emulator
 
@@ -78,7 +78,7 @@ The read-only examples of the skills (`# green`, `shell ...`) also run on the em
 go test -timeout 20m -count=1 -run TestSkillsReadOnlyOnEmulator ./internal/cli
 ```
 
-It fails if the phone says a program or an option does not exist, and it refuses any serial that is not `emulator-*`. The `emulator` workflow runs it too.
+It fails if the phone says a program or an option does not exist, and it refuses any serial that is not `emulator-*`. The `emulator-oracle` workflow runs it too.
 
 ### The app on the emulator
 
@@ -94,7 +94,7 @@ eval "$(scripts/emulator.sh start)"   # from the repository root
 cd host && go test -timeout 15m -count=1 ./internal/emutest
 ```
 
-Without `ADBUDDY_EMULATOR_SERIAL` the tests skip; they refuse a serial that is not `emulator-*` and an `ANDROID_ADB_SERVER_PORT` that is unset or adb's default 5037. `TestInstrumentedSuite` also runs the app's instrumented tests (`TokenProviderTest`, `AdbWifiObserverTest`, `LocalesTest`) with `am instrument`, and fails on any failure, missing class or skipped test other than `CutAccessOnEmulatorTest`, which must be skipped there. They uninstall what they installed. The `emulator` workflow is meant to run them (first run pending).
+Without `ADBUDDY_EMULATOR_SERIAL` the tests skip; they refuse a serial that is not `emulator-*` and an `ANDROID_ADB_SERVER_PORT` that is unset or adb's default 5037. `TestInstrumentedSuite` also runs the app's instrumented tests (`TokenProviderTest`, `AdbWifiObserverTest`, `LocalesTest`) with `am instrument`, and fails on any failure, missing class or skipped test other than `CutAccessOnEmulatorTest`, which must be skipped there. They uninstall what they installed. The `emulator-app` workflow is meant to run them (first run pending).
 
 ### Claude Code with a real agent
 

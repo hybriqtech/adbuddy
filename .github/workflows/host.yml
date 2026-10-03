@@ -1,16 +1,30 @@
 name: host
+# Trust rule: a pull request opened by anyone but the repository owner
+# (Dependabot, other bots, collaborators) never reaches a self-hosted runner;
+# it runs on GitHub-hosted runners whatever the CI_* variables say. See
+# docs/ci-self-hosted.md section 6.
 # Runners come from repository variables (docs/ci-self-hosted.md); with none
 # set, GitHub-hosted runners are used.
 
+# docs/superpowers/** (specs, plans, validation notes) is design material that no test reads
+# (the Pages test excludes it); a change that touches only it runs no CI. host.yml is not a
+# required check (no branch protection on a private free repository), so skipping is safe.
 on:
   pull_request:
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
   push:
     branches: [main]
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
 
 permissions:
   contents: read
+
+# A newer push to a pull request cancels the run it supersedes (one group per
+# workflow and ref). A push to main gets a group of its own (the run id) and
+# never cancels, nor is cancelled by, anything: main and tags are never cut.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -21,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(vars.CI_HOST_MATRIX || '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":"windows-latest"},{"name":"macos-latest","runner":"macos-latest"}]') }}
+        include: ${{ fromJSON(!(github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && '[{"name":"ubuntu-latest","runner":"ubuntu-latest"}]' || vars.CI_HOST_MATRIX || '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":"windows-latest"},{"name":"macos-latest","runner":"macos-latest"}]') }}
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
