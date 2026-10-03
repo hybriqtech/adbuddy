@@ -115,7 +115,7 @@ func newServeCmd(app *App) *cobra.Command {
 			// Tailscale address, the remote mode's expiry).
 			store := newCfgStore(e.dirs.ConfigFile(), e.cfg)
 			runner := adb.Runner{Path: adbPath, ServerPort: e.cfg.ADBServerPort}
-			fmt.Fprintln(app.Stderr, app.T("serve.waiting_for_the_phone_on", e.cfg.ADBServerPort))
+			fmt.Fprintln(app.Stderr, app.T("serve.waiting_for_the_phone_on", int(deviceWait/time.Second)))
 			// The phone that mDNS does not find (Tailscale, another network) is
 			// tried at the address that worked last time.
 			// The addresses are those of the phone in config.toml. The remote

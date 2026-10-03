@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
@@ -54,7 +55,7 @@ func TestJournalEmptyJSON(t *testing.T) {
 	t.Setenv("ADBUDDY_CONFIG_DIR", t.TempDir())
 	t.Setenv("ADBUDDY_DATA_DIR", t.TempDir())
 	out, _, code := run(t, "journal", "--json", "--workspace", t.TempDir())
-	if code != 0 || strings.TrimSpace(out) != `{"ok":true,"data":{"entries":[],"skippedLines":0}}` {
+	if code != 0 || strings.TrimSpace(out) != `{"ok":true,"data":{"entries":[],"skippedLines":0,"total":0,"truncated":false}}` {
 		t.Fatalf("exit %d, stdout %q", code, out)
 	}
 }
@@ -443,4 +444,65 @@ func TestServeReleasesTheLockWhenItFails(t *testing.T) {
 		t.Fatalf("the lock is still held after serve ended: %v", err)
 	}
 	lock.Close()
+}
+
+func journalOf(t *testing.T, n int) string {
+	t.Helper()
+	isolate(t)
+	ws := t.TempDir()
+	var es []journal.Entry
+	for i := 0; i < n; i++ {
+		es = append(es, journal.Entry{ID: "j_" + strings.Repeat("x", 1) + string(rune('a'+i%26)) + string(rune('a'+i/26)), Level: "green", Status: "ok",
+			Description: "d", Argv: []string{"shell", "true"}})
+	}
+	appendEntries(t, ws, nil, es...)
+	return ws
+}
+
+func TestJournalSaysWhenItTruncates(t *testing.T) {
+	ws := journalOf(t, 60)
+	out, errOut, code := run(t, "journal", "--limit", "50", "--workspace", ws)
+	if code != 0 || strings.Count(out, "\n") != 50 || !strings.Contains(errOut, "Showing the last 50 of 60 entries (use --limit 0 for all).") {
+		t.Fatalf("exit %d, lines %d, stderr %q", code, strings.Count(out, "\n"), errOut)
+	}
+	out, errOut, code = run(t, "journal", "--limit", "0", "--workspace", ws)
+	if code != 0 || strings.Count(out, "\n") != 60 || strings.Contains(errOut, "Showing the last") {
+		t.Fatalf("exit %d, lines %d, stderr %q", code, strings.Count(out, "\n"), errOut)
+	}
+	out, _, _ = run(t, "journal", "--limit", "50", "--workspace", ws, "--json")
+	if !strings.Contains(out, `"total":60`) || !strings.Contains(out, `"truncated":true`) {
+		t.Fatalf("json %q", out[len(out)-80:])
+	}
+	out, _, _ = run(t, "journal", "--limit", "0", "--workspace", ws, "--json")
+	if !strings.Contains(out, `"total":60`) || !strings.Contains(out, `"truncated":false`) {
+		t.Fatalf("json %q", out[len(out)-80:])
+	}
+	t.Setenv("ADBUDDY_LANG", "es")
+	_, errOut, _ = run(t, "journal", "--limit", "50", "--workspace", ws)
+	if !strings.Contains(errOut, "Mostrando las últimas 50 de 60 entradas (usa --limit 0 para verlas todas).") {
+		t.Fatalf("stderr %q", errOut)
+	}
+}
+
+func TestServeWaitingTextIsAboutThePhone(t *testing.T) {
+	for _, l := range []i18n.Lang{i18n.EN, i18n.ES} {
+		app := &App{Lang: l, Getenv: func(string) string { return "" }}
+		got := app.T("serve.waiting_for_the_phone_on", 45)
+		if strings.Contains(got, "adb server") || strings.Contains(got, "servidor adb") || strings.Contains(got, "5038") || !strings.Contains(got, "45 s") {
+			t.Errorf("%v: %q", l, got)
+		}
+	}
+	src, err := os.ReadFile("serve.go")
+	if err != nil || !strings.Contains(string(src), `app.T("serve.waiting_for_the_phone_on", int(deviceWait/time.Second))`) {
+		t.Fatalf("serve must pass the seconds of deviceWait (%v)", err)
+	}
+}
+
+func TestSetupCodeWithoutTerminalHasItsOwnFix(t *testing.T) {
+	e := newSetupEnv(t, phoneRules())
+	_, errOut, code := runWithInput(t, "", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitUsage || !strings.Contains(errOut, "Error: USAGE — no answer on stdin") ||
+		!strings.Contains(errOut, "Run it in a terminal, or give the answers on stdin, one per line.") || strings.Contains(errOut, "--help") {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
 }
