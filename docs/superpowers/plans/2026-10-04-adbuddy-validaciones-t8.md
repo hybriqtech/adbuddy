@@ -1,97 +1,119 @@
 # ADBuddy · T8 del inventario de validaciones · adb, modo remoto y release en la API 34 · Plan de implementación
 
-> **Para quien ejecute:** REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`. Los pasos usan casillas (`- [ ]`). Implementador y re-revisiones en Sonnet (`adbuddy-implementer`, `adbuddy-rereviewer`; si BLOCKED o ronda 4-5, `adbuddy-implementer-opus`). Las tres tareas de código tocan el modo remoto y la confianza de la app (🔒): las revisa `adbuddy-reviewer-opus`; la tarea de docs, `adbuddy-reviewer`. Nunca Haiku. **Antes de la Tarea 1, `adbuddy-reviewer-opus` revisa este plan completo, código incluido** (CLAUDE.md), y el plan se corrige con sus hallazgos.
+> **Plan v2:** incorpora la revisión opus del plan (`.superpowers/sdd/2026-10-03-adbuddy-validaciones-t8/plan-review.md`: 0 críticos, 7 importantes, 7 menores) y las decisiones del controlador: I1 `sameAdbd` muestrea 5 s; I2 los tests que reinician adbd van detrás de `ADBUDDY_EMULATOR_ADBD=1` y se dice qué corre en la CI; I3 M5b-13 medido con honestidad (respuesta perdida de verdad, RED en el producto `RemoteCard.kt:69`, pendiente de ejecutar); I4 el reinicio de VB-41 entra en la ejecución prevista; I5 la Tarea 4 solo marca "hecha" lo que tenga GREEN y RED en el ledger, con filas completas en dos variantes; I6 la única RED de producto de M6a-2 es la del shrink; I7 fuera `TestTheHostRejectsTheSection5Attacks` (lo cubre `phoneapp/apksig_test.go`); menores 1-7.
+>
+> **Para quien ejecute:** REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`. Los pasos usan casillas (`- [ ]`). Implementador y re-revisiones en Sonnet (`adbuddy-implementer`, `adbuddy-rereviewer`; si BLOCKED o ronda 4-5, `adbuddy-implementer-opus`). Las tres tareas de código tocan el modo remoto y la confianza de la app (🔒): las revisa `adbuddy-reviewer-opus`; la tarea de docs, `adbuddy-reviewer`. Nunca Haiku.
 
-**Meta:** cerrar en el emulador propio API 34 la tarea T8 del inventario (`docs/superpowers/plans/2026-10-03-validaciones-manuales.md`): las filas **M5b-12, M5b-13, VB-37, VB-41** (modo remoto y puertos de adbd) y **M6a-2, M6a-3** (la app de release con R8 y lo que la spec M6a da por hecho de Android). Son tres tests de host en `host/internal/emutest/` (`remote_test.go`, `release_test.go`, `install_test.go`) que juegan el papel de `serve` sobre el adbd real del emulador, más una tarea de docs que pasa a "Automatizado" en el inventario solo lo que de verdad lo queda. **No se toca código de producción.** Si un test descubriera un defecto, se registra como hallazgo para el controlador (ver "Hallazgos para el controlador"); no se arregla aquí.
+**Meta:** cerrar en el emulador propio API 34 la tarea T8 del inventario (`docs/superpowers/plans/2026-10-03-validaciones-manuales.md`): las filas **M5b-12, M5b-13, VB-37, VB-41** (modo remoto y puertos de adbd) y **M6a-2, M6a-3** (la app de release con R8 y lo que la spec M6a da por hecho de Android). Son tests de host en `host/internal/emutest/` (`remote_test.go`, `release_test.go`, `install_test.go`) que hacen de `serve` sobre el adbd real del emulador, y una tarea de docs que pasa a "Automatizado" en el inventario **solo lo que tenga evidencia** GREEN y RED en el ledger. **No se toca código de producción.** Si un test descubre un defecto, se registra como hallazgo para el controlador ("Hallazgos para el controlador"); no se arregla aquí.
 
-**Arquitectura.** Los tests reutilizan el arnés que ya existe en `host/internal/emutest/` y no duplican nada:
+**Arquitectura.** Los tests reutilizan el arnés de `host/internal/emutest/` y no duplican nada:
 
-- `emulator_test.go`: `newEmu(t)` (salta sin `ADBUDDY_EMULATOR_SERIAL`, rechaza todo serial que no sea `emulator-*` y los puertos 5037/5038), `e.run`/`e.shell`/`e.state`/`e.waitState`, `installApp`, `uninstallAtCleanup`, `readAPK`, los constantes `appAPK`/`testsAPK`/`buildHint`.
-- `link_test.go` (T3): `openLink(t)` abre el canal real (bridge en 127.0.0.1, `adb reverse`, `phoneapp.Handshake`) y devuelve un `*link` con `send`/`reply`/`publishRID`/`waitFor`/`take`/`drain`/`Hellos`/`uiRequest`, y para la pantalla `e.screen`/`e.waitNode`/`e.tap`/`l.openChat`/`poll`/`payload`/`notificationRecord`/`atCleanup`. La **única** firma que cambia es un refactor de una línea de `openLink` para poder enlazar un APK que no sea el de debug (`linkTo`), descrito en la Tarea 2.
+- `emulator_test.go`: `newEmu(t)` (salta sin `ADBUDDY_EMULATOR_SERIAL`, rechaza todo serial que no sea `emulator-*` y los puertos 5037/5038), `e.run`/`e.shell`/`e.state`/`e.waitState`, `installApp`, `uninstallAtCleanup`, `readAPK`, `appAPK`.
+- `link_test.go` (T3): `openLink(t)` abre el canal real (bridge en 127.0.0.1, `adb reverse`, `phoneapp.Handshake`) y da `send`/`publishRID`/`waitFor`/`waitHellos`/`Hellos`/`uiRequest`, y para la pantalla `e.screen`/`e.waitNode`/`e.tap`/`l.openChat`/`poll`/`payload`/`notificationRecord`/`atCleanup`, además de `pidRe`. Lo único que cambia es un refactor de `openLink` en `openLink` + `linkTo` (Tarea 1, Step 1) para enlazar un APK que no sea el de debug; la firma de `openLink` y sus 12 llamadas no cambian.
 
-Cada test habla con el adbd del emulador **directamente, como `serve`**, nunca por el shim. El controlador del modo remoto es el de producción (`remote.New(e.adb, store, clock)`) con un `Store` y un reloj en memoria propios de los tests: así `remote.go` no se toca y se ejercita su comportamiento real (`Enable`, `Disable`, `Reconcile`, `Expire`, `State`). Los puertos se leen de **`service.adb.tcp.port`**, nunca del socket: en el emulador adbd escucha siempre en el 5555 del guest (es su propio transporte, M2.5b S2/S5), así que el socket no distingue "modo tcpip encendido" de "apagado"; lo que cambia es la propiedad. Para saber si una orden reinició adbd (lo que `adb tcpip` y `adb usb` hacen, con el emulador fuera de `device` ~2 s) se compara el **pid de adbd** antes y después, más fiable que muestrear `adb devices` cada segundo.
+Cada test habla con el adbd del emulador **directamente, como `serve`**, nunca por el shim. El controlador del modo remoto es el de producción (`remote.New(e.adb, store, clock)`) con un `Store` y un reloj en memoria de los tests: `remote.go` no se toca y se ejercita su comportamiento real. Los puertos se leen de **`service.adb.tcp.port`**, nunca del socket: el emulador escucha siempre en el 5555 del guest (su propio transporte, M2.5b S5), así que el socket no distingue el modo tcpip. Para saber si una orden reinició adbd (`adb tcpip` y `adb usb` lo hacen; el emulador sale de `device` ~2 s) se compara el **pid de adbd**; y para afirmar que **no** se reinició, se vigila el pid **5 s** (adb usb contesta antes de que adbd se reinicie).
 
-El APK de release se construye con Gradle **offline** (R8 y shrink de recursos, como `release-check.yml`) y se firma con una **clave de usar y tirar** creada en `t.TempDir()` con `keytool` del JDK (RSA 2048, un día), exactamente como hace el job `sign` de `release-check.yml`: **nunca la clave de release, nunca el keystore ni los secretos**. El host lee quién firmó con su propio parser (`phoneapp.Signers`/`CheckSigner`) y verifica la app instalada con `phoneapp.Verifier`, confiando en el certificado de esa clave temporal como si fuera el de release solo dentro del test.
+El APK de release se construye con Gradle **offline** (R8 y shrink, como `release-check.yml`) y se firma con una **clave de usar y tirar** creada en `t.TempDir()` con el `keytool` del JDK (RSA 2048, un día), como el job `sign` de `release-check.yml`: **nunca la clave de release, nunca el keystore ni los secretos**. El host lee quién firmó con su propio parser (`phoneapp.Signers`/`CheckSigner`) y verifica la app instalada con `phoneapp.Verifier`, confiando en el certificado de esa clave temporal como si fuera el de release solo dentro del test.
 
-**Tecnologías:** Go 1.27 (`host/`). Nada nuevo en `go.mod`. Android SDK build-tools (aapt2, zipalign, apksigner) y un JDK 17 (keytool, java) para las dos tareas que firman o compilan APK; los tests que los necesitan **se saltan limpiamente** si no están.
+**Tecnologías:** Go 1.27 (`host/`). Nada nuevo en `go.mod`. Android SDK build-tools (aapt2, zipalign, apksigner) y un JDK 17 (keytool, java) para lo que firma o compila APK; sin ellos esos tests **se saltan** con un mensaje que dice qué falta.
 
-**Fuentes:** encargo `.superpowers/sdd/2026-10-03-adbuddy-validaciones-t8/plan-brief.md` · inventario `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` ("Datos medidos", T8 línea ~404, filas M5b-12/13, VB-37, VB-41, M6a-2/3, "Hallazgos de la T1") · spec M6a `docs/superpowers/specs/2026-10-01-adbuddy-m6a-releases-design.md` (§5 parser, §6 confianza, §9 release-check, §11 ruling de la validación 3) · `docs/releasing.md` · `.github/workflows/release-check.yml` · plan de M5b `docs/superpowers/plans/2026-10-01-adbuddy-m5b-modo-remoto.md` (validaciones 12-13) · diferidos B `docs/superpowers/plans/2026-10-02-adbuddy-v1-diferidos-b.md` (VB-37 = 37, VB-41 = 41) · `host/internal/remote/remote.go` y `host/internal/cli/cut_test.go` (patrón de reinicio de adbd en el emulador).
+**Fuentes:** encargo `.superpowers/sdd/2026-10-03-adbuddy-validaciones-t8/plan-brief.md` · revisión `.superpowers/sdd/2026-10-03-adbuddy-validaciones-t8/plan-review.md` · inventario `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` ("Datos medidos", T8, filas M5b-12/13, VB-37, VB-41, M6a-2/3) · spec M6a `docs/superpowers/specs/2026-10-01-adbuddy-m6a-releases-design.md` (§5, §6, §9, §11) · `docs/releasing.md` · `.github/workflows/release-check.yml` y `.github/workflows/emulator.yml` · plan de M5b (validaciones 12-13 y ruling 3) · diferidos B (validaciones 37 y 41) · `host/internal/remote/remote.go`, `host/internal/device/device.go`, `host/internal/emutest/cut_test.go`, `android/.../ui/RemoteCard.kt`.
 
-**Verificación del plan (réplica acumulada).** Los tres ficheros de test de este plan se escribieron y se aplicaron paso a paso sobre un `git archive` de `origin/main` 2b8c07d en el scratchpad, y en esa copia: `GOOS=windows go build ./...`, `gofmt -l internal/emutest` (vacío), `GOOS=windows go vet ./internal/emutest/...` y `go test ./internal/emutest/` (todos los tests que no necesitan emulador en verde; los que lo necesitan `SKIP` limpiamente). Para el APK de release se compiló con Gradle offline (`:app:assembleRelease`, 1 min 20 s), y la RED del shrink se vio de verdad: con `isMinifyEnabled=false` el test falla (la clase `RemoteUi` sigue en el dex) y con `isMinifyEnabled=true` pasa. El APK de conflicto (aapt2 link + zipalign + apksigner con clave temporal) se construyó y firmó en la réplica; el host lo lee con `Signers`. **Las ejecuciones con el emulador encendido no se hicieron:** quedan descritas en cada tarea (comandos, puertos, RED por mutación) para cuando el controlador diga que hay emulador libre. Las salidas citadas son las de esa réplica.
+**Verificación del plan (réplica acumulada).** La v2 se aplicó desde el texto de este plan sobre un `git archive` limpio de `origin/main` (2b8c07d; `git fetch` hecho, `main` no había avanzado) en el scratchpad, **tarea a tarea** (tras T1, tras T1+T2, tras T1+T2+T3): en cada etapa `GOOS=windows go build ./...`, `gofmt -l internal/emutest` vacío, `GOOS=windows go vet ./internal/emutest/...` y `go test -count=1 -timeout 5m ./internal/emutest/` en `ok` (los tests que piden emulador, `SKIP`). Con los APK construidos (Gradle offline, `:app:assembleDebug :app:assembleRelease`), `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey` pasa; la RED del shrink (`isMinifyEnabled = false`) se vio fallar en la réplica de la v1 (salida en "Réplica acumulada"). El APK de conflicto (aapt2 link, zipalign, apksigner con clave temporal) se construyó y firmó. **Nada se ejecutó con el emulador:** las ejecuciones (GREEN, RED, el reinicio de VB-41) quedan descritas en cada tarea, para cuando el controlador diga que hay emulador libre.
 
 ## Global Constraints
 
-- Rama `test/validaciones-t8`, desde `origin/main` 2b8c07d. Commits con identidad local hybriqtech (nunca `git config --global`) y trailer **exacto** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (comprobarlo con `git log -1 --format=%B`). Nunca `--no-verify` ni `--force`; sin `git stash` (usa un commit WIP). Sin push ni PR salvo que lo pida el controlador; a `main` integra el usuario. `git grep` de seriales e IPs antes de cualquier push.
-- **Sin IPs RFC 1918** ni Tailscale reales en código, tests ni docs: la única IP es `100.64.0.5` (Tailscale de documentación; el modo remoto solo la necesita para no negarse por `ErrNoTailscale`, nunca se conecta a ella). Sin seriales reales: los tests usan el `emulator-<port>` que da `scripts/emulator.sh`.
-- **El móvil del usuario no se toca.** Todo corre contra el AVD `adbuddy-dev34` y su servidor adb propio, nunca el 5037/5038. La guarda de `emutest` (`checkEmuEnv`) ya lo impone.
-- **NUNCA matar procesos por nombre de imagen.** Prohibido `taskkill /IM`, `Stop-Process -Name`, `pkill`/`killall` por nombre (`java`, `adb`, `emulator`, `qemu`, `node`, `python`…): apagarían el emulador de otra sesión o el adb del móvil del usuario. Solo se mata por **PID que hayas lanzado tú y comprobado** con CIM/`CommandLine` (PowerShell: `Get-CimInstance Win32_Process -Filter "ProcessId=<pid>"` y mirar `CommandLine`), o por el mecanismo del propio emulador por serial (`scripts/emulator.sh stop`, que hace `adb -s <serial> emu kill`). Ningún test ni script de este plan apaga el emulador por nombre: el apagado es el de `scripts/emulator.sh stop` con las mismas `ADBUDDY_EMU_*`, y los tests solo dejan el adbd como estaba (cierre del puerto con `adb usb`, nunca matando nada).
-- **Reglas de emulador (del supervisor).** UN solo emulador a la vez en el PC. AVD propio `adbuddy-dev34` (imagen `system-images;android-34;google_apis;x86_64`); consola **≥ 5630**; servidor adb propio en el **5090** (`ANDROID_ADB_SERVER_PORT=5090`, `-P 5090`), nunca 5037/5038; `ADB_MDNS=0`. Arrancar solo cuando skimmer/puffin/tern avisen de que está libre y haya **≥ 12 GB de RAM** libres. **Apagar al terminar** con `scripts/emulator.sh stop` (mismas variables) y verificar con `tasklist`/`Get-Process` que no queda su `qemu` (por su PID/ventana, no matando por nombre). **No hay que arrancar el emulador para escribir ni replicar el plan:** la réplica se limita a compilar y a los tests que no lo necesitan.
-- **Cada tarea compila y pasa sus tests por sí sola.** Los tres ficheros son independientes entre sí (comparten solo el arnés ya existente y, release/install, los ayudantes de `sdkTools` que define `release_test.go`: por eso `release_test.go` va antes que `install_test.go`).
-- **Go:** `cd host && GOOS=windows go build ./... && gofmt -l internal/emutest && GOOS=windows go vet ./internal/emutest/...`; los tests sin emulador con `go test -count=1 -timeout 5m ./internal/emutest/`. Este PC no corre `-race`: la concurrencia se razona y la corre la CI.
-- `docs/**` está en **CRLF** en el árbol de trabajo (`core.autocrlf=true`, sin regla en `.gitattributes`): las ediciones del inventario usan anclas de **una sola línea**. `host/**` es LF (`.gitattributes`); los tres `*_test.go` se escriben con LF.
-- No se tocan `doctor.go`, los catálogos i18n (`host/internal/i18n/catalog/*`), `host/internal/classify/`, `scripts/emulator.sh` ni el emulador de otras sesiones. **Ningún texto nuevo de cara al usuario.**
+- Rama `test/validaciones-t8`, desde `origin/main` 2b8c07d. Commits con identidad local hybriqtech (nunca `git config --global`) y trailer **exacto** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (comprobarlo con `git log -1 --format=%B`). Nunca `--no-verify` ni `--force`; sin `git stash` (un commit WIP si hace falta apartar algo). Sin push ni PR salvo que lo pida el controlador; a `main` integra el usuario. `git grep` de seriales e IPs antes de cualquier push.
+- **Sin IPs RFC 1918** ni de Tailscale reales: la única IP es `100.64.0.5` (de documentación; el controlador del modo remoto solo la necesita para no negarse con `ErrNoTailscale`, nunca se conecta a ella). Sin seriales reales: el `emulator-<puerto>` que da `scripts/emulator.sh`.
+- **El móvil del usuario no se toca.** Todo corre contra el AVD `adbuddy-dev34` y su servidor adb propio, nunca el 5037/5038; la guarda de `emutest` (`checkEmuEnv`) lo impone.
+- **NUNCA matar procesos por nombre de imagen.** Prohibido `taskkill /IM`, `Stop-Process -Name`, `pkill`/`killall` por nombre (`java`, `adb`, `emulator`, `qemu-system-*`, `node`, `python`…): apagarían el emulador de otra sesión o el adb del móvil del usuario. Solo se mata por **PID que hayas lanzado tú y comprobado** con CIM/`CommandLine` (PowerShell: `Get-CimInstance Win32_Process -Filter "ProcessId=<pid>" | Select-Object CommandLine`), o se apaga el emulador por su serial con `scripts/emulator.sh stop` (que hace `adb -s <serial> emu kill`). Ningún test de este plan mata procesos: solo dejan adbd como estaba (`adb usb`, `persist.adb.tcp.port` vacío).
+- **Reglas de emulador (del supervisor).** UN solo emulador a la vez en el PC. AVD propio `adbuddy-dev34` (`system-images;android-34;google_apis;x86_64`); consola **≥ 5630**; servidor adb propio en el **5090** (nunca 5037/5038); `ADB_MDNS=0`. Arrancar solo cuando skimmer, puffin o tern avisen de que está libre y haya **≥ 12 GB de RAM** libres. **Apagar al terminar** con `scripts/emulator.sh stop` (mismas variables) y comprobar con `tasklist /FI "PID eq <pid>"` (el PID del emulador que lanzaste) que ya no está. **No hace falta arrancar el emulador para escribir ni replicar el plan.**
+- **Variables de entorno de las ejecuciones con emulador** (bloque que repiten las tareas):
+  ```bash
+  export ADBUDDY_EMU_AVD=adbuddy-dev34 ADBUDDY_EMU_IMAGE='system-images;android-34;google_apis;x86_64' \
+         ADBUDDY_EMU_PORT=5630 ADBUDDY_EMU_ADB_PORT=5090 ADBUDDY_EMU_STABLE_SECS=120 JAVA_HOME="$JDK17"
+  eval "$(scripts/emulator.sh start)"   # exporta ADBUDDY_EMULATOR_SERIAL=emulator-5630, ADBUDDY_EMULATOR_ADB y ANDROID_ADB_SERVER_PORT=5090
+  ```
+  `$JDK17` y `$GRADLE_BIN` son el JDK 17 y la carpeta `bin` de Gradle 9.8 de este PC (están en la sección de entorno del ledger y del CLAUDE.md del usuario); el plan no fija rutas personales.
+- **Gradle:** siempre `--offline`, **nunca `gradle --stop`**: `cd android && JAVA_HOME="$JDK17" "$GRADLE_BIN/gradle" --offline …`.
+- **Cada tarea compila y pasa sus tests por sí sola** (comprobado en la réplica tras T1, T1+T2 y T1+T2+T3). La Tarea 2 usa `linkTo` (Tarea 1) y define `sdkTools`; la Tarea 3 usa `sdkTools`: van en orden.
+- **Go:** `cd host && GOOS=windows go build ./... && gofmt -l internal/emutest && GOOS=windows go vet ./internal/emutest/...` y `go test -count=1 -timeout 5m ./internal/emutest/`. Las ejecuciones con emulador, con `-timeout 30m`. Este PC no corre `-race`; la CI sí.
+- `docs/**` está en **CRLF** en el árbol de trabajo (`core.autocrlf=true`): las ediciones del inventario usan anclas de **una sola línea** (cada fila de tabla es una línea). `host/**` es LF (`.gitattributes`).
+- No se tocan `doctor.go`, los catálogos i18n, `host/internal/classify/`, `scripts/emulator.sh`, `.github/` ni el emulador de otras sesiones. **Ningún texto nuevo de cara al usuario.** Las mutaciones de RED se revierten siempre (`git diff` vacío fuera de lo que la tarea añade).
 - Pasar a los revisores límites de tiempo (`go test -timeout`, tope de 30 min por revisión).
-- Windows con Git Bash: sin `sleep` en primer plano; comandos largos con timeout amplio o en segundo plano. Gradle: `JAVA_HOME=/c/Users/Jose/AppData/Local/Android/jdk-17.0.20.1+1`, gradle en `/c/Users/Jose/AppData/Local/Gradle/gradle-9.8.0/bin`, **siempre `--offline`**, **nunca `gradle --stop`**.
+- Windows con Git Bash: sin `sleep` en primer plano; lo largo con timeout amplio o en segundo plano.
 
-## Qué es automatizable de verdad (parte del plan)
+## Qué corre en la CI y qué no
 
-Para cada fila, qué parte se automatiza en el emulador API 34, con qué órdenes/API, y qué NO y por qué. Lo que no es automatizable se queda en la checklist del Pixel (ver "Paso mínimo del usuario" del inventario); no se fuerza.
+`emulator.yml` corre `go test -timeout 20m -count=1 -v ./internal/emutest` en la API 34 con el AVD conservado entre jobs y solo compila el APK de **debug** (`:app:assembleDebug :app:assembleDebugAndroidTest`). Con este plan:
+
+| Test | ¿En la CI? | Por qué |
+|---|---|---|
+| `TestTheRemoteModeOpensAndClosesThePort`, `TestOffWithTheModeOffOnlyClosesAnOpenPort`, `TestPersistTCPPortAgainstUSBAndRestarts`, `TestTheCardSaysUnknownWhenTheAnswerIsLost` | **No** (`SKIP`) | Reinician adbd, usan `adb tcpip 7777` (sin medir: puede dejar el emulador sin transporte) o `su 0 setprop persist.adb.tcp.port` (si la limpieza falla, sobrevive en el AVD conservado). Solo con `ADBUDDY_EMULATOR_ADBD=1`, como `TestCutAccessAndReactivate` con `ADBUDDY_EMULATOR_CUT=1`. El reinicio de VB-41 pide además `ADBUDDY_EMULATOR_REBOOT=1`. |
+| `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey`, `TestTheReleaseAppTalksOverTheLink` | **No** (`SKIP`) | La CI no compila el APK de release (`releaseHint`). `TestVersionLess` sí corre (es puro). |
+| `TestTheInstalledAppReadsBackByteForByte` | **Sí** | Instala y desinstala el APK de debug; no deja nada. |
+| `TestASecondProviderOnTheAuthorityIsRefused` | **Sí, si** el runner tiene build-tools y JDK (si no, `SKIP`) | Instala el debug, desactiva su provider (lo reactiva y desinstala en el cleanup) e intenta instalar un APK de aapt2 que Android rechaza. |
+
+Ninguno añade clases a la suite instrumentada: son tests de host, así que `requiredClasses`, `allowedSkips` y `minInstrumentedTests` (`instrumented_test.go`) no cambian.
+
+## Qué es automatizable de verdad
+
+Lo que no es automatizable se queda en la checklist del Pixel ("Paso mínimo del usuario" del inventario); no se fuerza.
 
 ### M5b-12 · `tcpip 5555` por Tailscale con solo datos; `remote on`/`off`; caducidad
-- **Automatizable (T8, `remote_test.go`, `TestTheRemoteModeOpensAndClosesThePort`):** el **controlador real** `remote.New(e.adb, store, clock)` contra el adbd del emulador. `Enable` guarda la caducidad y abre el puerto (`adb tcpip 5555`); `service.adb.tcp.port` pasa a `5555` y el pid de adbd cambia. `Reconcile` con la caducidad por delante la conserva y no reinicia adbd. `Disable` cierra (`adb usb`), deja `service.adb.tcp.port` en `0`/vacío y borra la caducidad. Con la caducidad pasada (reloj falso +12 h) el estado es `Enabled && Closing`, **nunca "off"**, y `Expire` cierra. Una caducidad rancia con el puerto cerrado se borra **sin** `adb usb`; una caducidad pasada con el puerto abierto la cierra `Reconcile`. Todo leyendo `service.adb.tcp.port` (medido en M2.5b S5), nunca el socket.
-- **NO automatizable (queda en el Pixel):** Tailscale con **datos móviles** y que `serve` **reconecte** por `<ip-tailscale>:5555` con el Wi-Fi apagado. Necesita red real y la VPN; el emulador no tiene Tailscale ni datos móviles. La IP de Tailscale del test (`100.64.0.5`) es de documentación.
-- **Falso positivo evitado:** en el emulador adbd escucha siempre en 5555 (su transporte), así que **no** se afirma que el modo tcpip "abra el socket"; solo se comprueba la propiedad `service.adb.tcp.port`, que es lo que mira el host. adbd del emulador vuelve en ~2 s y el transporte no cambia: distinto de un móvil real, donde `adb tcpip` cambia el transporte. El test no presenta esto como validación del móvil.
+- **Automatizable (`TestTheRemoteModeOpensAndClosesThePort`):** el **controlador real** `remote.New(e.adb, store, clock)` contra el adbd del emulador. `Enable` guarda la caducidad y abre el puerto (`adb tcpip 5555`: `service.adb.tcp.port` a `5555`, pid nuevo). `Reconcile` con la caducidad por delante la conserva sin reiniciar adbd. `Disable` cierra (`adb usb`: `0` o vacío) y borra la caducidad. Con el reloj falso 12 h después: `Enabled && Closing`, **nunca "off"**, y `Expire` cierra. Una caducidad rancia con el puerto cerrado se borra sin `adb usb`; una pasada con el puerto abierto la cierra `Reconcile`.
+- **No automatizable (Pixel):** Tailscale con **datos móviles** y que `serve` **reconecte** por `<ip-tailscale>:5555` con el Wi-Fi apagado. Red real y VPN.
+- **Lo que el emulador no demuestra:** que el socket se abra o se cierre (escucha siempre en 5555), ni el cambio de transporte de un móvil (el del emulador no cambia y adbd vuelve en ~2 s). Solo se comprueba `service.adb.tcp.port`, que es lo que mira el host.
 
 ### M5b-13 · segundos hasta ver el estado tras `adb tcpip`; "desconocido" nunca como "apagado"
-- **Automatizable (T8, `remote_test.go`, `TestTheCardIsNeverOffWhileTheModeTurnsOn`):** por el canal real (arnés T3) la app muestra la tarjeta del modo remoto; al tocar el interruptor manda `remote.set`; el arnés hace de `serve` (ejecuta `Enable` real, que reinicia adbd y tira el túnel) y contesta con `remote.state` por `publishRID` (ruling 3 de M5b: la respuesta puede perderse). Hasta que vuelve el estado la tarjeta dice "Working…", "Not connected" o "Unknown", **nunca "Off"** (se comprueba leyendo los nodos con `uiautomator`), y se registra con `t.Logf` cuántos segundos tarda en pasar a "Until …". adbd vuelve en ~2 s y el arnés reabre el `adb reverse` al momento conservando el token.
-- **NO automatizable / falso positivo:** la **cifra real de segundos del Pixel** es informativa y distinta: en `serve` el vigilante del túnel mira cada 15 s y entrega un **token nuevo**, y el móvil vuelve por Wi-Fi/datos. Los segundos del emulador son una **cota inferior**, no la del móvil; el test lo dice en su `t.Logf` y no afirma ninguna cifra de producto.
+- **Ya cubierto en la JVM:** "nunca Off" como lógica (`RemoteUiTest`, `BridgeStateTest`).
+- **Automatizable como integración (`TestTheCardSaysUnknownWhenTheAnswerIsLost`):** la tarjeta manda `remote.set`, el arnés ejecuta el `Enable` real (adbd se reinicia y el túnel cae) y **no contesta**, que es el caso de la respuesta perdida (ruling 3 de M5b). Al volver la app, durante 5 s, la tarjeta debe decir "Unknown", **nunca el "Off"** que conservaba (es lo que pone `mark = UnknownMark(...)`, `RemoteCard.kt:69`); luego el `remote.state` del host la pasa a "Until …". Registra los segundos hasta que vuelve la app.
+- **RED de producto:** quitar `mark = UnknownMark(latest.remote)` en `RemoteCard.kt:69`. Ningún test de la JVM ejercita esa rama (`SettingsScreensTest` solo pinta la tarjeta), así que la RED **solo se puede ver en el emulador** y está **pendiente de ejecutar**; si al ejecutarla el test no se pone rojo, se anota en el ledger y la fila queda sin marcar.
+- **Lo que no demuestra:** la cifra del Pixel. Los segundos del emulador son una **cota inferior** (adbd vuelve en ~2 s y el arnés reabre el túnel al momento con el mismo token; `serve` mira el túnel cada 15 s y entrega un token nuevo).
 
 ### VB-37 · "off" con el modo apagado no corta la conexión; un 5555/7777 abierto a mano se cierra
-- **Automatizable (T8, `remote_test.go`, `TestOffWithTheModeOffOnlyClosesAnOpenPort`):** con el modo apagado y el puerto cerrado, `Disable` **no** reinicia adbd (el pid no cambia): en un móvil eso evita cortar su conexión para nada. Con el 5555 abierto a mano (`adb tcpip 5555`) o con otro puerto (`adb tcpip 7777`) y el modo apagado, `Disable` lo cierra con `adb usb` (pid nuevo, `service.adb.tcp.port` a `0`). El pid de adbd es lo que distingue "no tocó adbd" de "lo reinició".
-- **Falso positivo evitado:** no se mira el socket (siempre 5555 en el emulador); se mira pid + `service.adb.tcp.port`. "Que no se corte la conexión real del móvil" no se puede ver en el emulador (su transporte no cambia): se comprueba el **invariante del host** (no lanzar `adb usb` con el puerto ya cerrado), que es lo que de verdad protege al móvil.
+- **Automatizable (`TestOffWithTheModeOffOnlyClosesAnOpenPort`):** con el modo apagado y el puerto cerrado, `Disable` **no** reinicia adbd (mismo pid y puerto durante 5 s); con el 5555 o el 7777 abiertos a mano, los cierra con `adb usb` (pid nuevo, `service.adb.tcp.port` a `0`).
+- **Lo que no demuestra:** que la conexión real de un móvil no se corte (el transporte del emulador no cambia). Se comprueba el **invariante del host** (no lanzar `adb usb` con el puerto ya cerrado), que es lo que protege al móvil. El caso 7777 no está medido en el emulador: va el último y, si el emulador no vuelve, el mensaje dice cómo recuperarlo (`restartHint`).
 
 ### VB-41 · `persist.adb.tcp.port` frente a `adb usb` y al reinicio de adbd
-- **Automatizable (T8, `remote_test.go`, `TestPersistTCPPortAgainstUSBAndRestarts`):** con `su 0 setprop persist.adb.tcp.port 5555` (su funciona en la imagen userdebug, M2.5b): se registra si fijarlo reinicia adbd, qué deja `service.adb.tcp.port` tras `su 0 setprop ctl.restart adbd`, tras `adb tcpip`/`adb usb`, y que con `service.adb.tcp.port=0` un reinicio de adbd lo mantiene en 0 y `Disable` con el modo apagado no toca adbd. El paso de **reinicio del emulador** (`adb reboot`, con `-no-snapshot` conserva datos, T1-9) solo con `ADBUDDY_EMULATOR_REBOOT=1`.
-- **NO automatizable / falso positivo:** el emulador siempre escucha en 5555, así que **qué puerto abre adbd de verdad** no se ve; el test **graba** las propiedades y qué hace el host con ellas, no afirma el comportamiento de red. Y el host (`remote`, `device.EnsureNoTCPPort`) **no lee** `persist.adb.tcp.port` (solo `service.adb.tcp.port`): si tras un reinicio con `persist` fijado `service.adb.tcp.port` queda vacío, el host toma el puerto como "cerrado". Eso es un posible **hallazgo** (ver "Hallazgos para el controlador"), no un arreglo de esta tarea. En un móvil sin root no hay `su`, así que fijar `persist` es cosa del emulador; además `setprop persist.adb…` es 🔴 en el clasificador.
+- **Medible (`TestPersistTCPPortAgainstUSBAndRestarts`):** si el usuario `shell` puede fijar la propiedad (se registra y se vacía al momento), si fijarla con `su 0` reinicia adbd, qué deja `service.adb.tcp.port` tras `su 0 setprop ctl.restart adbd`, tras `adb tcpip`/`adb usb`, que con `service.adb.tcp.port=0` otro reinicio lo deja en 0 y `Disable` con el modo apagado no toca adbd, y, con `ADBUDDY_EMULATOR_REBOOT=1`, qué queda tras `adb reboot` y qué hace el host.
+- **Lo que no demuestra:** qué puerto abre adbd de verdad (el emulador escucha siempre en 5555). El test **graba** propiedades y comportamiento del host, no afirma nada de la red.
+- **Hipótesis que mide el reinicio:** el host (`remote.go:167,184,204,246`, `device.go:220`) solo lee `service.adb.tcp.port`. Si tras reiniciar con `persist` fijado `service.adb.tcp.port` queda vacío, el host tomaría por cerrado un puerto que adbd de AOSP abriría con el `persist`. Si se mide así, es un **hallazgo para adjudicar**, no un arreglo de T8.
 
 ### M6a-2 · la app de release (R8) funciona: la serialización con kotlinx
-- **Automatizable (T8, `release_test.go`):** el APK de `:app:assembleRelease` (R8 + shrink, versión de prueba `0.0.1-rc.1`/`101` como `release-check.yml`) firmado con **clave temporal** en `t.TempDir()`; el host lo lee con `Signers`/`CheckSigner` (parser §5) y comprueba que R8 **sí** encogió (la clase `RemoteUi`, que ninguna keep rule nombra, ya no está en el dex). Instalado en la API 34 y verificado con `phoneapp.Verifier` confiando en el certificado de esa clave como release: por el canal real (arnés T3) la app dice `hello` y manda `device.info` (kotlinx app→host), muestra un `chat.message` (host→app), contesta un `ui.request` con su id (los dos sentidos con rid) y publica un `confirm.request` como notificación. Esto ejercita la serialización bajo R8, que es el riesgo real.
-- **NO automatizable:** la **clave de release** y los secretos nunca se tocan (spec M6a §10, solo el usuario). El APK de release **público** (firmado con la clave real) se prueba en la primera release; aquí es un APK de release **funcionalmente idéntico** firmado con clave de prueba, que es lo que mide "R8 no rompió la app".
+- **Automatizable:** `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey` (sin emulador: el APK de `:app:assembleRelease` firmado con clave temporal; el host lee su firma y R8 lo encogió: `RemoteUi` ya no está en el dex, y sí en el de debug) y `TestTheReleaseAppTalksOverTheLink` (instalado y verificado como release; `hello` y `device.info` de la app al host, un `chat.message` en pantalla, un `ui.request` contestado con su id y un `confirm.request` como notificación, por el arnés T3).
+- **RED:** la del shrink (`isMinifyEnabled = false`), **la única de producto**: demostrada en la réplica de la v1. No se ha encontrado una regla de R8 realista que rompa kotlinx (las reglas de consumo de kotlinx y los serializadores que genera el compilador lo impiden), así que la parte de la serialización es una **guarda de regresión sin RED**; se dice así en la fila.
+- **No automatizable:** la clave de release y los secretos (spec M6a §10, solo el usuario). Lo que se prueba es un APK de release funcionalmente idéntico firmado con otra clave.
 
 ### M6a-3 · lo que la spec M6a da por hecho de Android
-- **Automatizable (T8, `install_test.go`):** en la API 34, `pm path` (una línea `package:/data/app/<…>/base.apk`), `stat -c '%s %i %Y'` (forma que parsea `phoneapp.statKey`), `base64` (toybox) que devuelve el APK **byte a byte** idéntico al fichero (porque `Install` usa `--no-incremental`), y que un `install -r` cambia el `stat` de `base.apk` (la clave de la caché del `Verifier`). La **autoridad duplicada**: se construye con aapt2 un APK mínimo que declara `tech.hybriq.adbuddy.bridge`, se firma con clave temporal, y Android lo rechaza con `INSTALL_FAILED_CONFLICTING_PROVIDER` **también con el provider de ADBuddy desactivado** (`pm disable`), que es lo que garantiza §6.3. Los **APK de ataque de §5** (hueco antes del EOCD, localizador ZIP64, comentario, firma v1) se construyen con `apktest` y se comprueba que el **host los rechaza** (`Signers` da error) — esto no necesita emulador y complementa `apksig_test.go`.
-- **NO automatizable (queda para la validación 3 manual, spec §11):** instalar un **ataque real** y ver que **Android** vuelve a v1 e instala al atacante mientras el host lee otro bloque necesita **API 30 y `targetSdk` 29** (imagen no instalada), y la 37 está rota (M2.5b). Las API 30/33 las decide el usuario; la última sirve-para-nada hasta que haya imagen que funcione. El test lo dice y deja esa parte fuera.
-
-**Resumen de categorías tras T8:** M5b-12 Parcial→con parte **Automatizada** (lógica real contra el emulador); M5b-13 **Automatizada** la lógica y la cota, la cifra del Pixel queda; VB-37 **Automatizada**; VB-41 **Automatizada** lo observable (graba lo demás, con un posible hallazgo); M6a-2 **Automatizada**; M6a-3 **Automatizada** en API 34, el ataque real y API 30/33 quedan para el Pixel/validación 3.
+- **Automatizable en API 34:** `TestTheInstalledAppReadsBackByteForByte` (`pm path` da una línea `package:/data/app/<…>/base.apk`; `stat -c '%s %i %Y'` tiene la forma que parsea `statKey`; `base64` devuelve el APK byte a byte, porque `Install` usa `--no-incremental`; `install -r` mueve el `stat`, la clave de la caché del `Verifier`) y `TestASecondProviderOnTheAuthorityIsRefused` (un APK de aapt2 con la autoridad `tech.hybriq.adbuddy.bridge`: `INSTALL_FAILED_CONFLICTING_PROVIDER`, también con el provider de ADBuddy desactivado, §6.3 Me-4).
+- **Ya cubierto, no es avance de T8:** que el host rechaza las formas de ataque de §5 (hueco, ZIP64, comentario, firma v1) está en `phoneapp/apksig_test.go`.
+- **No automatizable aquí:** instalar un **ataque real** y ver que Android vuelve a v1 necesita API 30 y `targetSdk` 29; las API 30 y 33 no tienen imagen instalada (decide el usuario) y la 37 está rota. Queda en la validación 3 de `docs/releasing.md`.
 
 ## Hallazgos para el controlador (no se arreglan aquí)
 
-- **VB-41 (posible, a confirmar en el emulador):** `remote` y `device.EnsureNoTCPPort` solo leen `service.adb.tcp.port`, no `persist.adb.tcp.port`. Si tras un reinicio con `persist.adb.tcp.port=5555` la imagen deja `service.adb.tcp.port` vacío (adbd de AOSP toma el `persist` solo cuando la propiedad de servicio está vacía), el host tomaría el puerto como "cerrado" y `Disable` no lanzaría `adb usb`. Ya estaba anotado como validación 41 de los diferidos B (misma suposición que `Reconcile`/`Enable` desde M5b). El test lo registra con un `t.Logf("FINDING (VB-41)…")` y una constante `hostReadsPersistPort = false`: si el controlador decide que el host debe mirar `persist`, se pone a `true` y el paso del reinicio exige que `Disable` cierre el puerto. **No se arregla en T8.**
+- **VB-41 (hipótesis, la mide el reinicio):** ver arriba. Si se confirma, el test escribe `FINDING (VB-41) …` y deja `hostReadsPersistPort = false`; con un arreglo del host, se pone a `true` y el paso del reinicio exige que `Disable` cierre el puerto.
 
 ## Mapa de ficheros
 
 | Fichero | Tarea | Cambio |
 |---|---|---|
-| `host/internal/emutest/link_test.go` | 1 | refactor de `openLink` en `openLink`+`linkTo` (una función nueva; firma de `openLink` intacta) |
-| `host/internal/emutest/remote_test.go` | 1 | nuevo: `memStore`, `fakeClock`, ayudantes de adbd, `TestTheRemoteModeOpensAndClosesThePort`, `TestOffWithTheModeOffOnlyClosesAnOpenPort`, `TestPersistTCPPortAgainstUSBAndRestarts`, `TestTheCardIsNeverOffWhileTheModeTurnsOn` |
-| `host/internal/emutest/release_test.go` | 2 | nuevo: `sdkTools` y ayudantes, `TestVersionLess`, `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey`, `TestTheReleaseAppTalksOverTheLink` |
-| `host/internal/emutest/install_test.go` | 3 | nuevo: `TestTheInstalledAppReadsBackByteForByte`, `TestASecondProviderOnTheAuthorityIsRefused`, `TestTheHostRejectsTheSection5Attacks` y ayudantes |
-| `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` | 4 | filas M5b-12/13, VB-37, VB-41, M6a-2/3 a "Automatizado"; T8 marcada hecha |
-
-**Sobre `instrumented_test.go` (`requiredClasses`/`allowedSkips`):** los tres tests nuevos son **de host** (Go), no instrumentados de la app (`am instrument`), así que **no** añaden clases a la suite instrumentada ni tocan `requiredClasses`/`allowedSkips`/`minInstrumentedTests`. Se saltan solos (`newEmu`, `findTools`, `releaseSigned`) sin emulador o sin APK. No hay que tocar `instrumented_test.go`.
+| `host/internal/emutest/link_test.go` | 1 | `openLink` → `openLink` + `linkTo` |
+| `host/internal/emutest/remote_test.go` | 1 | nuevo: `memStore`, `fakeClock`, ayudantes de adbd, `adbdTests`, cuatro tests |
+| `host/internal/emutest/release_test.go` | 2 | nuevo: `sdkTools` y ayudantes, `installRelease`, tres tests |
+| `host/internal/emutest/install_test.go` | 3 | nuevo: dos tests y ayudantes |
+| `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` | 4 | seis filas y la entrada T8, según la evidencia del ledger |
+| `.superpowers/sdd/2026-10-03-adbuddy-validaciones-t8/progress.md` | 1-3 | evidencia GREEN/RED de cada ejecución (fuera de git) |
 
 ---
 
 ### Task 1: modo remoto y puertos de adbd (M5b-12, M5b-13, VB-37, VB-41) 🔒
 
-**Files:** `host/internal/emutest/link_test.go` (refactor de una función), `host/internal/emutest/remote_test.go` (nuevo).
+**Files:** `host/internal/emutest/link_test.go`, `host/internal/emutest/remote_test.go` (nuevo).
 
-- Produces: `TestTheRemoteModeOpensAndClosesThePort`, `TestOffWithTheModeOffOnlyClosesAnOpenPort`, `TestPersistTCPPortAgainstUSBAndRestarts`, `TestTheCardIsNeverOffWhileTheModeTurnsOn`, y `func (e *emu) linkTo(t *testing.T, v phoneapp.Verified) *link`.
-- Reutiliza: `remote.New`/`State`/`Port`/`Lifetime` (sin tocar `remote.go`), el arnés de `link_test.go` y `emulator_test.go`.
+- Produces: `func (e *emu) linkTo(t *testing.T, v phoneapp.Verified) *link`, `func adbdTests(t *testing.T)`, `TestTheRemoteModeOpensAndClosesThePort`, `TestOffWithTheModeOffOnlyClosesAnOpenPort`, `TestPersistTCPPortAgainstUSBAndRestarts`, `TestTheCardSaysUnknownWhenTheAnswerIsLost`.
 
-- [ ] **Step 1: refactor de `openLink` para poder enlazar otro APK.** La Tarea 2 instala el APK de release y necesita el canal con esa app ya instalada. Se parte `openLink` en dos sin cambiar su firma ni su comportamiento.
-
-Edit en `host/internal/emutest/link_test.go`:
+- [ ] **Step 1: refactor de `openLink`.** Edit en `host/internal/emutest/link_test.go`:
 
 **Reemplazar:**
 ```go
@@ -116,9 +138,9 @@ func (e *emu) linkTo(t *testing.T, v phoneapp.Verified) *link {
 	t.Helper()
 	if err := phoneapp.AllowBackground(e.ctx, e.adb, v); err != nil {
 ```
-(El resto de `openLink` queda como cuerpo de `linkTo`: usa `e` y `v`, que ahora son el receptor y el parámetro. No se cambia ninguna otra línea.)
+El resto del cuerpo de `openLink` queda como cuerpo de `linkTo` sin cambiar ninguna línea (usa `e` y `v`, ahora receptor y parámetro).
 
-- [ ] **Step 2: `remote_test.go`.** Escribir el fichero completo:
+- [ ] **Step 2: `host/internal/emutest/remote_test.go`,** completo:
 
 ```go
 package emutest
@@ -234,12 +256,38 @@ func (e *emu) restartedTo(t *testing.T, before string, want ...string) string {
 	return pid
 }
 
-// sameAdbd checks that adbd still has pid and port: nothing restarted it.
+// sameFor is how long sameAdbd watches adbd: adb usb answers before adbd
+// restarts (1-2 s later), so one read right after an order could still see
+// the old pid.
+const sameFor = 5 * time.Second
+
+// sameAdbd checks, every half second for sameFor, that adbd keeps pid and
+// port and answers: nothing restarted it.
 func (e *emu) sameAdbd(t *testing.T, pid, port string) {
 	t.Helper()
-	now, p, ok := e.adbdNow()
-	if !ok || now != pid || p != port {
-		t.Errorf("adbd has pid %q and service.adb.tcp.port %q (read ok %v), want the same %s and %q: something restarted it", now, p, ok, pid, port)
+	deadline := time.Now().Add(sameFor)
+	for {
+		now, p, ok := e.adbdNow()
+		if !ok || now != pid || p != port {
+			t.Errorf("adbd has pid %q and service.adb.tcp.port %q (read ok %v), want the same %s and %q for %v: something restarted it", now, p, ok, pid, port, sameFor)
+			return
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// adbdTests skips the tests that restart the emulator's adbd (adb tcpip, adb
+// usb, ctl.restart, persist.adb.tcp.port) unless ADBUDDY_EMULATOR_ADBD=1, as
+// TestCutAccessAndReactivate asks for ADBUDDY_EMULATOR_CUT: the CI keeps its
+// AVD between jobs, and a port other than 5555 or a persist property left
+// behind would outlive the job. They run on a development emulator only.
+func adbdTests(t *testing.T) {
+	t.Helper()
+	if os.Getenv("ADBUDDY_EMULATOR_ADBD") != "1" {
+		t.Skip("set ADBUDDY_EMULATOR_ADBD=1 to run it, on a development emulator only (it restarts adbd)")
 	}
 }
 
@@ -284,6 +332,7 @@ func (e *emu) closedAtStartAndEnd(t *testing.T) {
 // counts is service.adb.tcp.port, never the socket. Tailscale with mobile
 // data, and serve reconnecting through it, stay on the Pixel.
 func TestTheRemoteModeOpensAndClosesThePort(t *testing.T) {
+	adbdTests(t)
 	e := newEmu(t)
 	e.closedAtStartAndEnd(t)
 	st, clk := &memStore{}, &fakeClock{t: time.Now().UTC()}
@@ -362,6 +411,7 @@ func TestTheRemoteModeOpensAndClosesThePort(t *testing.T) {
 // its connection for nothing), and closes a port opened by hand, 5555 or any
 // other (7777), with adb usb. adbd's pid tells a restart (adbdNow).
 func TestOffWithTheModeOffOnlyClosesAnOpenPort(t *testing.T) {
+	adbdTests(t)
 	e := newEmu(t)
 	e.closedAtStartAndEnd(t)
 	ctl := remote.New(e.adb, &memStore{}, nil)
@@ -388,11 +438,13 @@ func TestOffWithTheModeOffOnlyClosesAnOpenPort(t *testing.T) {
 }
 
 // hostReadsPersistPort says whether remote and device.EnsureNoTCPPort read
-// persist.adb.tcp.port. They do not (pendientes, diferidos B, T2): after a
-// reboot with it set, service.adb.tcp.port is empty, adbd listens on the
-// persist port (AOSP adbd: persist only counts when the service property is
-// empty) and the host reads "closed". Finding of T8 for the controller; set it
-// to true with the fix, and the reboot step then wants Disable to close it.
+// persist.adb.tcp.port. They do not (remote.go and device.go read only
+// service.adb.tcp.port; pendientes, diferidos B, T2). Hypothesis the reboot
+// step measures: after a reboot with persist set, service.adb.tcp.port reads
+// empty while adbd listens on the persist port (AOSP adbd reads persist only
+// when the service property is empty), and the host reads "closed". If it is
+// measured so, it is a finding for the controller; with a fix, set this to
+// true and the reboot step then wants Disable to close the port.
 const hostReadsPersistPort = false
 
 // rebootAndWait reboots the emulator and waits up to 3 min for it to boot
@@ -416,6 +468,7 @@ func (e *emu) rebootAndWait(t *testing.T) {
 // the test records the properties and what the host does with them. The
 // reboot step runs only with ADBUDDY_EMULATOR_REBOOT=1 (a minute or two more).
 func TestPersistTCPPortAgainstUSBAndRestarts(t *testing.T) {
+	adbdTests(t)
 	e := newEmu(t)
 	e.closedAtStartAndEnd(t)
 	persist := func() string { return e.shell(t, "su 0 getprop persist.adb.tcp.port") }
@@ -425,11 +478,15 @@ func TestPersistTCPPortAgainstUSBAndRestarts(t *testing.T) {
 	// Cleanups run last first: this one before closedAtStartAndEnd's adb usb.
 	e.atCleanup(t, "shell", "su 0 setprop persist.adb.tcp.port ''")
 
-	// Can the shell user set it without root? Recorded, not required: a phone
-	// without root has only the shell user (and the classifier makes
-	// `setprop persist.adb…` 🔴).
+	// Can the shell user set it without su? Measured and logged, not
+	// required (the classifier makes `setprop persist.adb…` 🔴 anyway). It is
+	// emptied again at once, so the measurement below starts from nothing.
 	out, _, code, _ := e.adb.Output(e.ctx, "shell", "setprop persist.adb.tcp.port 5555")
 	t.Logf("setprop persist.adb.tcp.port 5555 as shell: exit %d %s; persist now %q", code, strings.TrimSpace(out), persist())
+	e.shell(t, "su 0 setprop persist.adb.tcp.port ''")
+	if p := persist(); p != "" {
+		t.Fatalf("persist.adb.tcp.port = %q after emptying it", p)
+	}
 
 	pid, port := e.adbd(t)
 	e.shell(t, "su 0 setprop persist.adb.tcp.port 5555")
@@ -505,16 +562,21 @@ func cardText(nodes []uiNode) string {
 	return ""
 }
 
-// Validation 13 of M5b, on the emulator: the remote card's switch sends
-// remote.set; the harness, as serve, runs the real Enable (adb tcpip 5555,
-// which restarts adbd and drops the tunnel) and answers with remote.state
-// (M5b ruling 3: the answer may be lost). Until the state comes back the card
-// says Working…, Not connected or Unknown, never Off; the seconds until it
-// says "Until …" are logged. They are the emulator's (adbd back in ~2 s, the
-// harness reopens the tunnel at once and keeps the token), a lower bound of
-// the Pixel's: serve looks at the tunnel every 15 s and hands over a new
-// token, and a phone comes back over Wi-Fi.
-func TestTheCardIsNeverOffWhileTheModeTurnsOn(t *testing.T) {
+// Validation 13 of M5b, on the emulator, with the answer lost (M5b ruling
+// 3): the remote card's switch sends remote.set; the harness, as serve, runs
+// the real Enable (adb tcpip 5555 restarts adbd and drops the tunnel) and does
+// not answer, as when the answer is lost with the tunnel. The app gets no
+// reply and marks the state unknown (RemoteCard.kt:69); once it is back, for
+// 5 s, the card must say Unknown, never the "Off" it kept through the
+// disconnection; then the host's remote.state (serve republishes it on
+// attach, M5b-20) turns it to "Until …". It logs the seconds from adb tcpip
+// until the app is back: the emulator's, a lower bound of the Pixel's (adbd is
+// back in ~2 s here and the harness reopens the tunnel at once, keeping the
+// token; serve looks every 15 s and hands over a new one, and a phone comes
+// back over Wi-Fi). "Never Off" as logic is RemoteUiTest's and
+// BridgeStateTest's on the JVM; this is the integration with a real drop.
+func TestTheCardSaysUnknownWhenTheAnswerIsLost(t *testing.T) {
+	adbdTests(t)
 	l := openLink(t)
 	e := l.e
 	e.closedAtStartAndEnd(t)
@@ -531,14 +593,12 @@ func TestTheCardIsNeverOffWhileTheModeTurnsOn(t *testing.T) {
 	}
 
 	start := time.Now()
+	hellos := len(l.Hellos())
 	pid, _ := e.adbd(t)
 	s, err := ctl.Enable(e.ctx)
 	if err != nil || !s.Enabled {
 		t.Fatalf("Enable: %+v, %v", s, err)
 	}
-	// serve's answer (phone_remote.go, run): the tunnel may drop before it
-	// reaches the app; the server keeps it for the app's return.
-	l.publishRID(t, req, bridge.TypeRemoteState, bridge.RemoteState{Enabled: true, Address: s.Address, ExpiresAt: s.ExpiresAt})
 	e.restartedTo(t, pid, remote.Port)
 	// adbd's restart takes the reverse with it: reopened as serve's tunnel
 	// check does (phone.go), without its new token.
@@ -548,48 +608,65 @@ func TestTheCardIsNeverOffWhileTheModeTurnsOn(t *testing.T) {
 			t.Fatalf("adb reverse: %v", err)
 		}
 	}
+	l.waitHellos(t, hellos+1, 90*time.Second)
+	t.Logf("M5b-13 on the emulator: the app was back %.1f s after adb tcpip", time.Since(start).Seconds())
+
+	// Back, and no state from the host yet: unknown, never the old off.
 	var seen []string
-	if !poll(90*time.Second, func() bool {
+	note := func() string {
 		text := cardText(e.screen(t))
 		if text != "" && (len(seen) == 0 || seen[len(seen)-1] != text) {
 			seen = append(seen, text)
 		}
-		return strings.HasPrefix(text, "Until ")
-	}) {
-		t.Fatalf("the card did not say Until … 90 s after adb tcpip; it said %q", seen)
+		return text
 	}
-	t.Logf("M5b-13 on the emulator: %.1f s from adb tcpip to the card's %q; the card said %q", time.Since(start).Seconds(), seen[len(seen)-1], seen)
+	poll(5*time.Second, func() bool { note(); return false })
 	if slices.Contains(seen, "Off") {
-		t.Errorf("the card said Off while the mode turned on: %q", seen)
+		t.Errorf("after the lost answer the card said Off: %q", seen)
+	}
+	if len(seen) == 0 || !strings.HasPrefix(seen[len(seen)-1], "Unknown:") {
+		t.Errorf("after the lost answer the card said %q, want Unknown", seen)
+	}
+
+	// The host speaks: the card says Until …
+	l.send(t, bridge.TypeRemoteState, bridge.RemoteState{Enabled: true, Address: s.Address, ExpiresAt: s.ExpiresAt})
+	if !poll(20*time.Second, func() bool { return strings.HasPrefix(note(), "Until ") }) {
+		t.Errorf("the card did not say Until … 20 s after remote.state; it said %q", seen)
 	}
 }
 ```
 
 - [ ] **Step 3: compila y los tests sin emulador pasan.**
-```
+```bash
 cd host && GOOS=windows go build ./... && gofmt -l internal/emutest && GOOS=windows go vet ./internal/emutest/...
-go test -count=1 -timeout 5m ./internal/emutest/   # sin ADBUDDY_EMULATOR_SERIAL: todo SKIP o pasa
+go test -count=1 -timeout 5m ./internal/emutest/
 ```
+Esperado: `ok`; los cuatro tests nuevos `SKIP` (sin emulador, o sin `ADBUDDY_EMULATOR_ADBD=1`).
 
-- [ ] **Step 4: RED → GREEN en el emulador** (cuando el controlador diga que hay emulador libre). Arrancar con `scripts/emulator.sh start` (AVD `adbuddy-dev34`, `ADBUDDY_EMU_PORT=5630`, `ADBUDDY_EMU_ADB_PORT=5090`, `ADBUDDY_EMU_IMAGE='system-images;android-34;google_apis;x86_64'`, `JAVA_HOME` al JDK 17) y exportar lo que imprime (`ADBUDDY_EMULATOR_SERIAL`, `ADBUDDY_EMULATOR_ADB`, `ANDROID_ADB_SERVER_PORT=5090`). Construir los APK de debug una vez (`cd android && gradle --offline :app:assembleDebug :app:assembleDebugAndroidTest`). Luego:
-  - **GREEN:** `go test -count=1 -timeout 20m -v -run 'TestTheRemoteModeOpensAndClosesThePort|TestOffWithTheModeOffOnlyClosesAnOpenPort|TestPersistTCPPortAgainstUSBAndRestarts|TestTheCardIsNeverOffWhileTheModeTurnsOn' ./internal/emutest/`.
-  - **RED por mutación (una cada vez, revertir después):**
-    - en `remote.go`, en `Disable`, quitar la guarda `if c.st.Until().IsZero() { if port … portClosed(port) { return State{}, nil } }` (que siempre llame a `disable`): `TestOffWithTheModeOffOnlyClosesAnOpenPort/closed` ve un pid nuevo y falla (adbd reiniciado sin motivo). Es la VB-37.
-    - en `remote.go`, en `Reconcile`, cambiar `case port != Port:` por `case false:` (nunca borra la caducidad rancia): `TestTheRemoteModeOpensAndClosesThePort` falla en "Reconcile with the port closed" (la caducidad sigue guardada).
-    - en el test, cambiar `l.publishRID(...)` de `TestTheCardIsNeverOffWhileTheModeTurnsOn` por un `remote.state` con `Enabled:false`: la tarjeta pasaría a "Off" mientras enciende y el test falla ("the card said Off while the mode turned on"). (Mutación del propio test, para demostrar que vigila el invariante "nunca Off".)
-  - Al terminar: apagar con `scripts/emulator.sh stop` (mismas variables) y verificar con `tasklist`/`Get-Process` que no queda su `qemu` (por PID/ventana del emulador, **nunca** matando por nombre).
+- [ ] **Step 4: GREEN y RED en el emulador** (solo cuando el controlador diga que hay emulador libre). Con el bloque de variables de "Global Constraints" y los APK de debug (`cd android && JAVA_HOME="$JDK17" "$GRADLE_BIN/gradle" --offline :app:assembleDebug :app:assembleDebugAndroidTest`):
+  - **GREEN** (una ejecución, con el reinicio de VB-41 incluido; guardar la salida entera de `-v` en el ledger):
+    ```bash
+    cd host && ADBUDDY_EMULATOR_ADBD=1 ADBUDDY_EMULATOR_REBOOT=1 go test -count=1 -timeout 30m -v \
+      -run 'TestTheRemoteModeOpensAndClosesThePort|TestOffWithTheModeOffOnlyClosesAnOpenPort|TestPersistTCPPortAgainstUSBAndRestarts|TestTheCardSaysUnknownWhenTheAnswerIsLost' ./internal/emutest/
+    ```
+    Del ledger salen: los `t.Logf` de VB-41 (si `shell` pudo fijar `persist`, si fijarlo reinició adbd, `persist` tras `adb usb`, las propiedades tras el reinicio y, si aparece, el `FINDING (VB-41)`) y los segundos de M5b-13.
+  - **RED por mutación** (una cada vez, cada una con su salida en el ledger, y revertida con `git checkout -- <fichero>`):
+    1. `host/internal/remote/remote.go`, en `Disable`, borrar el bloque `if c.st.Until().IsZero() { … }` (que siempre llame a `c.disable`): `TestOffWithTheModeOffOnlyClosesAnOpenPort/closed` falla con `adbd has pid … want the same …: something restarted it` (VB-37).
+    2. `host/internal/remote/remote.go`, en `Reconcile`, cambiar `case port != Port:` por `case false:`: con la caducidad por delante y el puerto cerrado, `Reconcile` devuelve el estado guardado y `TestTheRemoteModeOpensAndClosesThePort` falla en `Reconcile with the port closed: state {Enabled:true Closing:false Address:100.64.0.5:5555 …}, <nil>; want {Enabled:false …}`.
+    3. `android/app/src/main/kotlin/tech/hybriq/adbuddy/ui/RemoteCard.kt:69`, cambiar `reply == null -> mark = UnknownMark(latest.remote)` por `reply == null -> {}`, reconstruir el APK de debug y correr `TestTheCardSaysUnknownWhenTheAnswerIsLost`: debe fallar con `after the lost answer the card said Off` (M5b-13). **Si no falla**, anotarlo en el ledger tal cual: la fila M5b-13 se queda en "test escrito, sin RED de producto" (Tarea 4, variante B).
+  - Apagar el emulador al terminar con `scripts/emulator.sh stop` (mismas variables) y comprobar por PID que no queda.
 
-- [ ] **Step 5: commit.** `test(emutest): modo remoto y puertos de adbd en la API 34 (M5b-12/13, VB-37, VB-41)` con el trailer exacto.
+- [ ] **Step 5: commit.** `test(emutest): modo remoto y puertos de adbd en la API 34 (M5b-12/13, VB-37, VB-41)`, con el trailer exacto.
 
 ---
 
 ### Task 2: la app de release (R8) en la API 34 (M6a-2) 🔒
 
-**Files:** `host/internal/emutest/release_test.go` (nuevo). Depende de la Tarea 1 (usa `linkTo`, `memStore` no; usa `cardText` no; usa `poll`, `payload`, `notificationRecord`, `openChat`, `e.waitNode` del arnés). Puede ir en paralelo con la Tarea 3 solo si una de las dos define `sdkTools`: **`release_test.go` define `sdkTools` y sus ayudantes**; `install_test.go` los usa. Por eso la Tarea 2 va antes que la 3.
+**Files:** `host/internal/emutest/release_test.go` (nuevo). Usa `linkTo` (Tarea 1) y el arnés.
 
-- Produces: `sdkTools` (+ `findTools`, `newKey`, `sign`, `run`, `exe`, `sdkRoot`, `versionLess`, `newest`, `exists`, `dexHas`, `releaseSigned`), `TestVersionLess`, `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey`, `TestTheReleaseAppTalksOverTheLink`, `installRelease`.
+- Produces: `sdkTools` (`findTools`, `run`, `newKey`, `sign`), `exe`, `sdkRoot`, `versionLess`, `newest`, `exists`, `dexHas`, `releaseSigned`, `installRelease`, `TestVersionLess`, `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey`, `TestTheReleaseAppTalksOverTheLink`.
 
-- [ ] **Step 1: `release_test.go`.** Escribir el fichero completo:
+- [ ] **Step 1: `host/internal/emutest/release_test.go`,** completo:
 
 ```go
 package emutest
@@ -934,30 +1011,30 @@ func TestTheReleaseAppTalksOverTheLink(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: construir el APK de release y comprobar RED/GREEN del shrink (no necesita emulador).**
+- [ ] **Step 2: APK de release y su prueba sin emulador.**
+```bash
+cd android && JAVA_HOME="$JDK17" "$GRADLE_BIN/gradle" --offline :app:assembleDebug :app:assembleRelease \
+  -Padbuddy.versionName=0.0.1-rc.1 -Padbuddy.versionCode=101
+cd ../host && go test -count=1 -timeout 5m -v -run 'TestVersionLess|TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey' ./internal/emutest/
 ```
-cd android && JAVA_HOME=/c/Users/Jose/AppData/Local/Android/jdk-17.0.20.1+1 \
-  /c/Users/Jose/AppData/Local/Gradle/gradle-9.8.0/bin/gradle --offline \
-  :app:assembleRelease -Padbuddy.versionName=0.0.1-rc.1 -Padbuddy.versionCode=101
-cd ../host && go test -count=1 -timeout 5m -run 'TestVersionLess|TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey' ./internal/emutest/
-```
-  - **RED del shrink (demostrada en la réplica):** con `isMinifyEnabled = false` e `isShrinkResources = false` en `android/app/build.gradle.kts`, reconstruir el APK de release y correr `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey`: **falla** (`Ltech/hybriq/adbuddy/ui/RemoteUi; is in the release APK's dex: it was not shrunk by R8`). **GREEN:** revertir a `true`, reconstruir, pasa. **Revertir siempre `build.gradle.kts`** (no se toca código de producción).
+Esperado: los dos `PASS`.
+  - **RED del shrink (la única RED de producto de M6a-2):** en `android/app/build.gradle.kts` poner `isMinifyEnabled = false` e `isShrinkResources = false`, reconstruir el release y correr el test: `FAIL` con `Ltech/hybriq/adbuddy/ui/RemoteUi; is in the release APK's dex: it was not shrunk by R8`. Revertir (`git checkout -- android/app/build.gradle.kts`), reconstruir, `PASS`. Salidas al ledger.
 
 - [ ] **Step 3: compila y tests sin emulador.** `cd host && GOOS=windows go build ./... && gofmt -l internal/emutest && GOOS=windows go vet ./internal/emutest/... && go test -count=1 -timeout 5m ./internal/emutest/`.
 
-- [ ] **Step 4: GREEN con emulador.** Con el emulador arrancado (como en la Tarea 1) y el APK de release construido: `go test -count=1 -timeout 20m -v -run 'TestTheReleaseAppTalksOverTheLink' ./internal/emutest/`. **RED por mutación en el emulador:** firmar con `--v2-signing-enabled false --v3-signing-enabled false --v1-signing-enabled true` (solo v1) en `releaseSigned`: `phoneapp.Signers` da error y `releaseSigned` falla (el host no lee bloque de firma), lo que confirma que el test exige la firma por esquema. Apagar el emulador al terminar (`scripts/emulator.sh stop`, verificar con `tasklist`, nunca por nombre).
+- [ ] **Step 4: GREEN con emulador** (con el bloque de variables y el APK de release construido): `cd host && go test -count=1 -timeout 30m -v -run TestTheReleaseAppTalksOverTheLink ./internal/emutest/`, salida al ledger. No hay RED de producto para la serialización bajo R8 (ver "Qué es automatizable"); el ledger lo dice. Apagar el emulador al terminar (por serial, comprobado por PID).
 
 - [ ] **Step 5: commit.** `test(emutest): la app de release con R8 en la API 34 (M6a-2)`.
 
 ---
 
-### Task 3: pm path/stat/base64, install -r, autoridad duplicada y ataques §5 (M6a-3) 🔒
+### Task 3: pm path, stat, base64, install -r y la autoridad duplicada (M6a-3) 🔒
 
-**Files:** `host/internal/emutest/install_test.go` (nuevo). Depende de la Tarea 2 (usa `sdkTools`/`findTools`/`newKey`/`sign`/`exe`/`exists`).
+**Files:** `host/internal/emutest/install_test.go` (nuevo). Usa `sdkTools` (Tarea 2).
 
-- Produces: `TestTheInstalledAppReadsBackByteForByte`, `TestASecondProviderOnTheAuthorityIsRefused`, `TestTheHostRejectsTheSection5Attacks`, `buildConflictAPK` y ayudantes (`base64`, `nonEmptyLines`, `basePath`, `firstPath`, `threeInts`).
+- Produces: `TestTheInstalledAppReadsBackByteForByte`, `TestASecondProviderOnTheAuthorityIsRefused`, `buildConflictAPK` y los ayudantes `base64`, `nonEmptyLines`, `basePath`, `firstPath`, `threeInts`.
 
-- [ ] **Step 1: `install_test.go`.** Escribir el fichero completo:
+- [ ] **Step 1: `host/internal/emutest/install_test.go`,** completo:
 
 ```go
 package emutest
@@ -974,7 +1051,6 @@ import (
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
-	"github.com/hybriqtech/adbuddy/host/internal/phoneapp/apktest"
 	"github.com/hybriqtech/adbuddy/host/internal/shq"
 )
 
@@ -983,9 +1059,10 @@ import (
 // /data/app; stat -c '%s %i %Y' has the shape the host parses; base64 reads
 // the APK back byte for byte (--no-incremental: adb does not keep reading the
 // file after the check); an update in place (install -r) changes base.apk's
-// stat (the cache key). The attack APKs of §5 and the two older images (API
-// 30 and 33, not installed) stay for the manual check before the first
-// release (docs/releasing.md).
+// stat (the cache key). The host's refusal of the §5 attack shapes is
+// phoneapp/apksig_test.go's; installing a real attacker (API 30, targetSdk 29)
+// and the two older images (API 30 and 33, not installed) stay for the manual
+// check before the first release (docs/releasing.md).
 func TestTheInstalledAppReadsBackByteForByte(t *testing.T) {
 	e := newEmu(t)
 	abs, want := readAPK(t, appAPK)
@@ -1057,28 +1134,6 @@ func TestASecondProviderOnTheAuthorityIsRefused(t *testing.T) {
 	e.atCleanup(t, "shell", shq.Join("pm", "enable", providerComponent))
 	e.shell(t, shq.Join("pm", "disable", providerComponent))
 	refused("with ADBuddy's provider disabled")
-}
-
-// Validation 3 of M6a, the host's side of the §5 attacks: the parser refuses
-// the shapes an attacker would use to make Android read a block it did not
-// read (a v1 signature with a gap before the EOCD, a ZIP64 locator, a
-// comment). Installing a crafted attacker and seeing Android fall back to v1
-// needs API 30 and targetSdk 29 (not an installed image): the manual check
-// before the first release (docs/releasing.md). Here the host rejects each,
-// so none would ever be trusted.
-func TestTheHostRejectsTheSection5Attacks(t *testing.T) {
-	v2 := apktest.Block{ID: apktest.V2, Signers: []apktest.Signer{{Cert: apktest.Cert("attacker")}}}
-	cases := map[string][]byte{
-		"a gap before the EOCD":    apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Gap: 32}),
-		"a ZIP64 locator":          apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Zip64Locator: true}),
-		"a comment in the EOCD":    apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Comment: "x"}),
-		"a v1 signature (CERT.SF)": apktest.Build(apktest.Options{Blocks: []apktest.Block{v2}, Files: []string{"AndroidManifest.xml", "META-INF/CERT.SF"}}),
-	}
-	for name, apk := range cases {
-		if _, err := phoneapp.Signers(apk); err == nil {
-			t.Errorf("the host accepted an APK with %s", name)
-		}
-	}
 }
 
 // base64 reads the n bytes of path on the emulator and decodes them.
@@ -1183,63 +1238,146 @@ func threeInts(s string) (a, b, c int64, ok bool) {
 }
 ```
 
-- [ ] **Step 2: compila y tests sin emulador.** `cd host && GOOS=windows go build ./... && gofmt -l internal/emutest && GOOS=windows go vet ./internal/emutest/... && go test -count=1 -timeout 5m -run 'TestTheHostRejectsTheSection5Attacks' ./internal/emutest/` (este test no necesita emulador y pasa en la réplica).
+- [ ] **Step 2: compila y tests sin emulador.** `cd host && GOOS=windows go build ./... && gofmt -l internal/emutest && GOOS=windows go vet ./internal/emutest/... && go test -count=1 -timeout 5m ./internal/emutest/` (los dos tests nuevos, `SKIP` sin emulador).
 
-- [ ] **Step 3: GREEN con emulador.** `go test -count=1 -timeout 20m -v -run 'TestTheInstalledAppReadsBackByteForByte|TestASecondProviderOnTheAuthorityIsRefused' ./internal/emutest/`.
-  - **RED por mutación (en el emulador):**
-    - en el test, cambiar `sha256.Sum256(got) != sha256.Sum256(want)` por `len(got) != len(want)+1`: pasaría en falso; mejor demostración: truncar `want` (`want = want[:len(want)-1]`) y ver que falla — prueba que compara byte a byte. (Mutación del test.)
-    - para la autoridad: construir el APK de conflicto con **otra** autoridad (cambiar `phoneapp.Authority` por `"tech.hybriq.other.bridge"` en `conflictManifest`): Android lo instala y `TestASecondProviderOnTheAuthorityIsRefused` falla (no hay `INSTALL_FAILED_CONFLICTING_PROVIDER`), lo que prueba que es la autoridad lo que choca.
-  - **RED del rechazo §5 (sin emulador):** quitar una de las comprobaciones de `apksig.go` (p. ej. la del comentario del EOCD, condición 1) haría que `TestTheHostRejectsTheSection5Attacks/a comment in the EOCD` dejara de ver el error. No se deja aplicada: es del parser, que no se toca.
-  - Apagar el emulador al terminar (`scripts/emulator.sh stop`, verificación por PID/ventana, nunca por nombre).
+- [ ] **Step 3: GREEN y RED en el emulador.** `cd host && go test -count=1 -timeout 30m -v -run 'TestTheInstalledAppReadsBackByteForByte|TestASecondProviderOnTheAuthorityIsRefused' ./internal/emutest/`, salida al ledger. RED (una cada vez, revertida):
+  1. En `TestTheInstalledAppReadsBackByteForByte`, justo después de `abs, want := readAPK(t, appAPK)`, añadir `want = want[:len(want)-1]`: falla `stat size … local APK … bytes` y la comparación byte a byte. Prueba que compara el contenido y el tamaño.
+  2. En `conflictManifest`, cambiar `phoneapp.Authority` por `"tech.hybriq.other.bridge"`: Android instala el APK y `TestASecondProviderOnTheAuthorityIsRefused` falla en los dos casos (sin `INSTALL_FAILED_CONFLICTING_PROVIDER`). Prueba que choca la autoridad y nada más. (El cleanup desinstala ese paquete.)
+  - Apagar el emulador al terminar (por serial, comprobado por PID).
 
-- [ ] **Step 4: commit.** `test(emutest): adb, pm path/stat/base64, autoridad duplicada y ataques §5 en la API 34 (M6a-3)`.
+- [ ] **Step 4: commit.** `test(emutest): pm path, stat, base64, install -r y la autoridad duplicada en la API 34 (M6a-3)`.
 
 ---
 
-### Task 4: pasar las filas del inventario a "Automatizado"
+### Task 4: el inventario, según la evidencia
 
-**Files:** `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` (CRLF, anclas de una sola línea).
+**Files:** `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` (CRLF). Cada fila es una sola línea: el "Reemplazar" es la línea entera de hoy.
 
-- [ ] **Step 1: editar las seis filas y la T8.** Ediciones (cada "Reemplazar" es una línea única del fichero):
+**Regla (decisión del controlador):** una fila pasa a "hecha" (variante **A**) solo si el ledger tiene, para cada test que cita, la salida GREEN **y** la RED indicada en su tarea. Si falta algo, la fila usa la variante **B** ("test escrito, pendiente de ejecutar en emulador"). `<fecha>` es la fecha real de la ejecución que está en el ledger (`AAAA-MM-DD`); `<resultado del reinicio>` es lo que registró el GREEN de VB-41. No se mezclan variantes dentro de una fila.
 
-En la fila **M5b-12** (tabla M5b), sustituir el estado `| Parcial, lógica hecha (adb falso) |` y la celda "Cómo" para que diga la parte automatizada:
-- Estado → `Parcial; lógica contra el emulador (T8)`.
-- Cómo → `T8 (hecha): \`TestTheRemoteModeOpensAndClosesThePort\` corre el controlador real \`remote.New(adb.Runner{Serial: emu})\` contra el adbd del emulador (\`Enable\`/\`Disable\`/\`Reconcile\`/\`Expire\`) leyendo \`service.adb.tcp.port\` (nunca el socket: el emulador escucha siempre en 5555).`
-- Por qué no → dejar lo de Tailscale con datos y la reconexión por \`<ip>:5555\` en el Pixel.
+- [ ] **Step 1: fila M5b-12.**
 
-En la fila **M5b-13**: estado → `Automatizada la lógica y la cota (T8)`; Cómo → `T8 (hecha): \`TestTheCardIsNeverOffWhileTheModeTurnsOn\` por el canal real; la tarjeta nunca dice "Off" mientras enciende y registra los segundos (cota inferior; la cifra del Pixel queda).`
+**Reemplazar:**
+```
+| M5b-12 | `tcpip 5555` por Tailscale con solo datos; `remote on` y `off`; caducidad | Parcial, lógica hecha (adb falso) | T8: `remote.New(adb.Runner{Serial: emu})`, `Enable` y `Disable`, leyendo `service.adb.tcp.port` (medido en S5). | Tailscale con datos móviles. Paso: fuera de casa o con el Wi-Fi apagado, `remote on`, y `serve` reconecta. | medio | T8 + Pixel |
+```
+**por (A):**
+```
+| M5b-12 | `tcpip 5555` por Tailscale con solo datos; `remote on` y `off`; caducidad | Parcial; lo del emulador, hecho (T8) | T8: `TestTheRemoteModeOpensAndClosesThePort` (con `ADBUDDY_EMULATOR_ADBD=1`; la CI no lo corre): el controlador real `remote.New` contra el adbd del emulador (`Enable`, `Reconcile`, `Disable` y `Expire` con reloj falso), leyendo `service.adb.tcp.port` y el pid de adbd, nunca el socket (el emulador escucha siempre en 5555). GREEN y RED en el ledger de T8 (<fecha>). | Tailscale con datos móviles y que `serve` reconecte por `<ip-tailscale>:5555`. Paso: fuera de casa o con el Wi-Fi apagado, `remote on`, y `serve` reconecta. | medio | T8 (hecha) + Pixel |
+```
+**o por (B):**
+```
+| M5b-12 | `tcpip 5555` por Tailscale con solo datos; `remote on` y `off`; caducidad | Parcial, lógica hecha (adb falso); test de emulador escrito (T8), pendiente de ejecutar | T8: test escrito, pendiente de ejecutar en emulador: `TestTheRemoteModeOpensAndClosesThePort` (con `ADBUDDY_EMULATOR_ADBD=1`), el controlador real `remote.New` contra el adbd del emulador, leyendo `service.adb.tcp.port` (medido en S5). | Tailscale con datos móviles. Paso: fuera de casa o con el Wi-Fi apagado, `remote on`, y `serve` reconecta. | medio | T8 (pendiente de ejecutar) + Pixel |
+```
 
-En la fila **VB-37** (tabla v1 Diferidos): estado `Sí` → `Sí, hecha (T8)`; Cómo → `T8 (hecha): \`TestOffWithTheModeOffOnlyClosesAnOpenPort\`: \`Disable\` con el modo apagado no reinicia adbd (pid igual) y cierra un 5555/7777 abierto a mano con \`adb usb\`.`
+- [ ] **Step 2: fila M5b-13.**
 
-En la fila **VB-41**: estado `Sí` → `Sí, hecha (T8)`; Cómo → `T8 (hecha): \`TestPersistTCPPortAgainstUSBAndRestarts\` con \`su 0 setprop persist.adb.tcp.port\`, \`adb usb\`, \`ctl.restart adbd\` y (con \`ADBUDDY_EMULATOR_REBOOT=1\`) \`adb reboot\`; graba lo que el emulador no distingue y señala el posible hallazgo del host que no lee \`persist\`.`; Por qué no → añadir que el host no lee `persist.adb.tcp.port` (posible hallazgo, ver el plan de T8).
+**Reemplazar:**
+```
+| M5b-13 | Segundos que tarda en verse el estado tras `adb tcpip`; "desconocido" nunca se muestra como "apagado" | Parcial, lógica hecha (`BridgeStateTest`) | T8: medido con el arnés. | La cifra del Pixel, informativa. Sin paso. | bajo | T8 |
+```
+**por (A):**
+```
+| M5b-13 | Segundos que tarda en verse el estado tras `adb tcpip`; "desconocido" nunca se muestra como "apagado" | Parcial; la lógica en la JVM (`BridgeStateTest`, `RemoteUiTest`) y la integración en el emulador, hecha (T8) | T8: `TestTheCardSaysUnknownWhenTheAnswerIsLost` (con `ADBUDDY_EMULATOR_ADBD=1`): `remote.set` desde la tarjeta, el `Enable` real y la respuesta perdida; al volver la app la tarjeta dice "Unknown" 5 s, nunca "Off", y luego "Until …". RED de producto: sin `mark = UnknownMark(...)` (`RemoteCard.kt:69`) dice "Off". Segundos hasta que vuelve la app en el emulador: <segundos> (cota inferior: el arnés reabre el túnel al momento; `serve` mira cada 15 s). GREEN y RED en el ledger de T8 (<fecha>). | La cifra del Pixel, informativa. Sin paso. | bajo | T8 (hecha) |
+```
+**o por (B):**
+```
+| M5b-13 | Segundos que tarda en verse el estado tras `adb tcpip`; "desconocido" nunca se muestra como "apagado" | Parcial, lógica hecha (`BridgeStateTest`, `RemoteUiTest`); test de emulador escrito (T8), pendiente de ejecutar | T8: test escrito, pendiente de ejecutar en emulador: `TestTheCardSaysUnknownWhenTheAnswerIsLost` (con `ADBUDDY_EMULATOR_ADBD=1`), la respuesta perdida tras el `Enable` real; su RED de producto (`RemoteCard.kt:69`) solo se ve en el emulador. | La cifra del Pixel, informativa. Sin paso. | bajo | T8 (pendiente de ejecutar) |
+```
 
-En la fila **M6a-2** (tabla M6a): estado `Sí` → `Sí, hecha (T8)`; Cómo → `T8 (hecha): \`TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey\` (R8 encoge; firma por esquema con clave temporal) y \`TestTheReleaseAppTalksOverTheLink\` (instalada y verificada, habla por el canal real; kotlinx bajo R8).`
+- [ ] **Step 3: fila M6a-2.**
 
-En la fila **M6a-3**: estado `Parcial` se mantiene; Cómo → `T8 (hecha en API 34): \`TestTheInstalledAppReadsBackByteForByte\` (\`pm path\`, \`stat\`, \`base64\` byte a byte, \`install -r\` mueve el stat), \`TestASecondProviderOnTheAuthorityIsRefused\` (autoridad duplicada, con el provider propio desactivado) y \`TestTheHostRejectsTheSection5Attacks\` (el host rechaza los ataques §5).`; Por qué no → mantener API 30/33 y el ataque real instalado en el Pixel (validación 3).
+**Reemplazar:**
+```
+| M6a-2 | La app de release (R8) funciona: la serialización con kotlinx | Sí | T8: el APK de `release-check` firmado con una clave de prueba solo para el emulador (nunca la de release), instalado en la API 34; el arnés (T3) comprueba el saludo y los mensajes. | — | alto | T8 |
+```
+**por (A):**
+```
+| M6a-2 | La app de release (R8) funciona: la serialización con kotlinx | Sí, hecha (T8) | T8: `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey` (sin emulador: R8 encogió el APK y el host lee su firma; RED: `isMinifyEnabled = false`) y `TestTheReleaseAppTalksOverTheLink` (APK de `:app:assembleRelease` firmado con una clave temporal en `t.TempDir()`, nunca la de release, instalado y verificado como release: `hello`, `device.info`, `chat.message`, `ui.request` y `confirm.request` por el arnés T3). La serialización bajo R8 no tiene RED de producto: es una guarda de regresión. La CI no los corre (no compila el release). GREEN y RED en el ledger de T8 (<fecha>). | — | alto | T8 (hecha) |
+```
+**o por (B):**
+```
+| M6a-2 | La app de release (R8) funciona: la serialización con kotlinx | Sí; la parte del PC hecha (T8), la del emulador escrita y pendiente de ejecutar | T8: `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey` (R8 encogió el APK y el host lee su firma; RED `isMinifyEnabled = false` vista en la réplica del plan); `TestTheReleaseAppTalksOverTheLink`, test escrito, pendiente de ejecutar en emulador (el saludo y los mensajes del APK de release por el arnés T3). | — | alto | T8 (parte del emulador pendiente de ejecutar) |
+```
 
-En el **"Plan de automatización propuesto"**, en la entrada **T8**, añadir al final `**Hecha el 2026-10-04** (rama test/validaciones-t8): host-only tests en host/internal/emutest/ (remote_test.go, release_test.go, install_test.go); RED/GREEN por mutación en el informe; un posible hallazgo VB-41 (el host no lee persist.adb.tcp.port) para el controlador.`
+- [ ] **Step 4: fila M6a-3.**
 
-- [ ] **Step 2: commit.** `docs(validaciones): T8 (modo remoto, release e instalación) automatizada en la API 34`.
+**Reemplazar:**
+```
+| M6a-3 | Lo que la spec da por hecho de Android: APK de ataque, salidas de `pm path`/`stat`/`base64`, `install -r`, `base.apk` idéntico, autoridad duplicada | Parcial | T8: todo en la API 34. | Las API 30 y 33 piden imágenes no instaladas (decide el usuario), y la última es la 37 rota. | alto | T8 |
+```
+**por (A):**
+```
+| M6a-3 | Lo que la spec da por hecho de Android: APK de ataque, salidas de `pm path`/`stat`/`base64`, `install -r`, `base.apk` idéntico, autoridad duplicada | Parcial; lo de la API 34, hecho (T8) | T8: `TestTheInstalledAppReadsBackByteForByte` (`pm path`, `stat -c '%s %i %Y'`, `base64` byte a byte con `--no-incremental`, `install -r` mueve el `stat`) y `TestASecondProviderOnTheAuthorityIsRefused` (un APK de aapt2 con la autoridad del provider: `INSTALL_FAILED_CONFLICTING_PROVIDER`, también con el de ADBuddy desactivado); los dos corren en la CI (el segundo si hay build-tools y JDK). Que el host rechaza las formas de ataque de §5 ya lo cubre `phoneapp/apksig_test.go`. GREEN y RED en el ledger de T8 (<fecha>). | Instalar un ataque real (vuelta a v1 con `targetSdk` 29) y las API 30 y 33, sin imagen instalada (decide el usuario); la 37 está rota. Paso: la validación 3 de `docs/releasing.md`, antes de la primera release pública. | alto | T8 (API 34) + validación 3 |
+```
+**o por (B):**
+```
+| M6a-3 | Lo que la spec da por hecho de Android: APK de ataque, salidas de `pm path`/`stat`/`base64`, `install -r`, `base.apk` idéntico, autoridad duplicada | Parcial; tests de la API 34 escritos (T8), pendientes de ejecutar | T8: tests escritos, pendientes de ejecutar en emulador: `TestTheInstalledAppReadsBackByteForByte` y `TestASecondProviderOnTheAuthorityIsRefused`. Que el host rechaza las formas de ataque de §5 ya lo cubre `phoneapp/apksig_test.go`. | Instalar un ataque real (API 30, `targetSdk` 29) y las API 30 y 33, sin imagen instalada (decide el usuario); la 37 está rota. Paso: la validación 3 de `docs/releasing.md`. | alto | T8 (pendiente de ejecutar) + validación 3 |
+```
+
+- [ ] **Step 5: fila VB-37.**
+
+**Reemplazar:**
+```
+| VB-37 | "Apagar" con el modo remoto apagado no corta la conexión; un 5555 o un 7777 abiertos a mano se cierran | Sí | T8: `remote` contra el emulador; el registro de estados (`device` o `gone`) muestra si adbd se reinició, porque `adb usb` lo reinicia en ~1 s (S5). | — | medio | T8 |
+```
+**por (A):**
+```
+| VB-37 | "Apagar" con el modo remoto apagado no corta la conexión; un 5555 o un 7777 abiertos a mano se cierran | Sí, hecha (T8) | T8: `TestOffWithTheModeOffOnlyClosesAnOpenPort` (con `ADBUDDY_EMULATOR_ADBD=1`; la CI no lo corre): con el puerto cerrado `Disable` no reinicia adbd (mismo pid durante 5 s); con el 5555 o el 7777 abiertos a mano los cierra con `adb usb` (pid nuevo, `service.adb.tcp.port` a 0). GREEN y RED en el ledger de T8 (<fecha>). | — | medio | T8 (hecha) |
+```
+**o por (B):**
+```
+| VB-37 | "Apagar" con el modo remoto apagado no corta la conexión; un 5555 o un 7777 abiertos a mano se cierran | Sí; test escrito (T8), pendiente de ejecutar | T8: test escrito, pendiente de ejecutar en emulador: `TestOffWithTheModeOffOnlyClosesAnOpenPort` (con `ADBUDDY_EMULATOR_ADBD=1`), el pid de adbd dice si `Disable` lo reinició. | — | medio | T8 (pendiente de ejecutar) |
+```
+
+- [ ] **Step 6: fila VB-41.**
+
+**Reemplazar:**
+```
+| VB-41 | `persist.adb.tcp.port` frente a `adb usb` y al reinicio de adbd | Sí | T8: `su 0 setprop persist.adb.tcp.port 5555` (`su 0` medido), `adb usb`, reinicio de adbd y `service.adb.tcp.port`. | — | medio | T8 |
+```
+**por (A):**
+```
+| VB-41 | `persist.adb.tcp.port` frente a `adb usb` y al reinicio de adbd | Sí, medida (T8) | T8: `TestPersistTCPPortAgainstUSBAndRestarts` (con `ADBUDDY_EMULATOR_ADBD=1` y, para el reinicio, `ADBUDDY_EMULATOR_REBOOT=1`): `su 0 setprop persist.adb.tcp.port 5555`, `ctl.restart adbd`, `adb tcpip` y `adb usb`, y `adb reboot`; graba las propiedades (el emulador escucha siempre en 5555: qué puerto abre adbd no se ve). Resultado del reinicio, en el ledger de T8 (<fecha>): <resultado del reinicio>. | Si el reinicio dejó `service.adb.tcp.port` vacío con `persist` fijado: hallazgo pendiente de adjudicar (el host no lee `persist.adb.tcp.port`). | medio | T8 (medida); hallazgo pendiente de adjudicar si se confirmó |
+```
+**o por (B):**
+```
+| VB-41 | `persist.adb.tcp.port` frente a `adb usb` y al reinicio de adbd | Sí; test escrito (T8), pendiente de ejecutar | T8: test escrito, pendiente de ejecutar en emulador: `TestPersistTCPPortAgainstUSBAndRestarts` (con `ADBUDDY_EMULATOR_ADBD=1` y `ADBUDDY_EMULATOR_REBOOT=1`); mide la hipótesis de que el host toma por cerrado un puerto de `persist` tras un reinicio. | — | medio | T8 (pendiente de ejecutar) |
+```
+
+- [ ] **Step 7: la entrada T8 del "Plan de automatización propuesto".**
+
+**Reemplazar:**
+```
+- RED por mutación: un `Disable` que lanza siempre `adb usb` hace que la VB-37 vea `gone`. GREEN: con el código de hoy.
+```
+**por (si las seis filas quedaron en A):**
+```
+- **Hecha el <fecha>** (rama `test/validaciones-t8`, plan `docs/superpowers/plans/2026-10-04-adbuddy-validaciones-t8.md`): `remote_test.go`, `release_test.go` e `install_test.go`, con GREEN y RED de cada test en el ledger. Los que reinician adbd van con `ADBUDDY_EMULATOR_ADBD=1` y la CI no los corre. VB-41: <resultado del reinicio>.
+```
+**o por (si alguna quedó en B):**
+```
+- Plan `docs/superpowers/plans/2026-10-04-adbuddy-validaciones-t8.md` (rama `test/validaciones-t8`): tests escritos; ejecutados con GREEN y RED: <filas en A>; pendientes de ejecutar en emulador: <filas en B>. Los que reinician adbd van con `ADBUDDY_EMULATOR_ADBD=1` y la CI no los corre.
+```
+
+- [ ] **Step 8: comprobar y commit.** `git diff --stat` (solo el inventario), CRLF conservado (`git diff` sin cambios de fin de línea en otras líneas). Commit `docs(validaciones): filas de la T8 según la evidencia del ledger`.
 
 ---
 
 ## Réplica acumulada (resultado)
 
-Sobre `git archive origin/main` (2b8c07d) en el scratchpad, aplicando las Tareas 1-3:
+Sobre `git archive origin/main` (2b8c07d, tras `git fetch`; `main` no había avanzado), aplicando el texto de este plan:
 
-- `GOOS=windows go build ./...` → sin salida (OK).
-- `gofmt -l internal/emutest` → vacío.
-- `GOOS=windows go vet ./internal/emutest/...` → OK.
-- `go test -count=1 -timeout 5m ./internal/emutest/` (sin emulador) → `ok`, con los tests que necesitan emulador en `SKIP` y los de host puros en verde (`TestVersionLess`, `TestTheHostRejectsTheSection5Attacks`, `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey`, más los ya existentes `TestUINodes`, `TestSearchField`, `TestCheckEmuEnv`, `TestParseInstrument`, …).
-- APK de release: `gradle --offline :app:assembleRelease -Padbuddy.versionName=0.0.1-rc.1 -Padbuddy.versionCode=101` → `BUILD SUCCESSFUL in 1m 20s`, `app-release-unsigned.apk` (3,2 MB).
-- **RED del shrink demostrada:** con `isMinifyEnabled=false`/`isShrinkResources=false`, `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey` → `FAIL` (`Ltech/hybriq/adbuddy/ui/RemoteUi; is in the release APK's dex`). Con `true`/`true` (revertido) → `ok`. `build.gradle.kts` restaurado idéntico a `origin/main`.
-- APK de conflicto: `aapt2 link` (manifiesto con la autoridad `tech.hybriq.adbuddy.bridge`) + `zipalign` + `apksigner` con clave temporal → firmado; `aapt2 dump badging` confirma `package: name='tech.hybriq.adbuddy.conflict'` y el provider; el host lo lee con `Signers`.
-
-Las partes que necesitan el emulador encendido (GREEN y las RED por mutación de adbd/instalación) **no se ejecutaron**: quedan descritas en los Steps 4/3 de cada tarea.
+- **Tras T1** (`link_test.go` + `remote_test.go`), **tras T1+T2** (+ `release_test.go`) y **tras T1+T2+T3** (+ `install_test.go`), cada una en su propia copia: `GOOS=windows go build ./...` sin salida, `gofmt -l internal/emutest` vacío, `GOOS=windows go vet ./internal/emutest/...` sin salida y `go test -count=1 -timeout 5m ./internal/emutest/` → `ok` en las tres etapas (sin emulador: los tests que lo piden, `SKIP`; los de `ADBUDDY_EMULATOR_ADBD`, también).
+- **APK:** `gradle --offline -q :app:assembleDebug :app:assembleRelease -Padbuddy.versionName=0.0.1-rc.1 -Padbuddy.versionCode=101` → exit 0. Con ellos, `go test -v -run 'TestVersionLess|TestTheReleaseAPKIsShrunk' ./internal/emutest/` → `--- PASS: TestVersionLess`, `--- PASS: TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey (1.82s)` (el de debug como control: `RemoteUi` sí está en su dex).
+- **RED del shrink** (réplica de la v1, mismo test): con `isMinifyEnabled = false` e `isShrinkResources = false`, `--- FAIL: TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey … Ltech/hybriq/adbuddy/ui/RemoteUi; is in the release APK's dex: it was not shrunk by R8`; revertido y reconstruido, `ok`. `build.gradle.kts` quedó idéntico a `origin/main`.
+- **APK de conflicto** (la cadena de `buildConflictAPK`, a mano): `aapt2 link` del manifiesto con la autoridad `tech.hybriq.adbuddy.bridge` → APK de 799 bytes (`AndroidManifest.xml`, `resources.arsc`); `zipalign` y `apksigner` con una clave temporal de `keytool` → firmado; `aapt2 dump badging` → `package: name='tech.hybriq.adbuddy.conflict'`.
+- **Sin emulador** no se ejecutó: ningún GREEN ni RED de adbd, de la tarjeta (incluida la RED de producto de `RemoteCard.kt:69`), del release instalado ni de la instalación. La RED de `RemoteCard.kt:69` no tiene camino en la JVM (ningún test ejercita la rama `reply == null`): queda pendiente de ejecutar en el emulador.
 
 ## Validaciones manuales pendientes (lo que T8 deja en el Pixel)
 
-- **M5b-12/15/16:** Tailscale con datos móviles, el cambio de red en sesión y la reconexión por `<ip-tailscale>:5555`. Red real.
+- **M5b-12, M5b-15 y M5b-16:** Tailscale con datos móviles, el cambio de red en sesión y la reconexión por `<ip-tailscale>:5555`.
 - **M5b-13:** la cifra de segundos del Pixel (informativa).
-- **M6a-3:** los APK de ataque §5 **instalados** y el fallback a v1 de Android, y las API 30/33 (imágenes no instaladas) y la última (37 rota): la validación 3 de `docs/releasing.md`, antes de la primera release pública.
-- **M6a (release real):** la clave, el environment, los secretos y la primera etiqueta (M6a-4): solo el usuario.
+- **M6a-3:** los APK de ataque de §5 **instalados** y la vuelta a v1, en las API 30 y 33 (imágenes no instaladas) y en la última cuando haya una que funcione: la validación 3 de `docs/releasing.md`, antes de la primera release pública.
+- **M6a-4:** la clave, el environment, los secretos y la primera etiqueta: solo el usuario.
+- **Todas las filas que la Tarea 4 deje en la variante B:** su ejecución en el emulador, cuando haya uno libre.
