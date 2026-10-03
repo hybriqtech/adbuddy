@@ -40,7 +40,7 @@ Ninguna se pide al usuario ahora; el resto está cubierto por tests de semántic
 
 - Task 1, pie del onboarding: los botones del pie se apilan con letra grande en vez de comprimirse. El paso 2 ya no pinta un "Listo" falso con el acceso apagado: el recordatorio ("cómo retomarlo", `access_later_hint`) va en el cuerpo y "Listo" solo aparece con el acceso activo.
 - Task 2, tarjeta de ajustes restringidos: la pantalla de acceso a las notificaciones explica el aviso de "ajustes restringidos" de Android (`access_restricted_hint`) cuando el acceso está apagado o sin determinar.
-- Task 3, consentimiento: al responder (aceptar o rechazar) un aviso dice qué se hizo y qué queda (`consent_done_steps`, `consent_done`, `consent_declined`); tras rechazar la app vuelve al paso 1 de 2.
+- Task 3, consentimiento: al responder (aceptar o rechazar) un aviso dice qué se hizo y qué queda (`consent_done_steps`, `consent_done`, `consent_declined`); tras rechazar la app sigue con el paso 1 de 2.
 - Task 4, cabecera del chat: el subtítulo es de una línea (versión corta del estado) y el detalle completo va en un banner bajo la barra, anunciado una vez a TalkBack (live region cortés). Estado nuevo `NOT_SET_UP`: sin enlace del host ni canal, el banner dice que ejecutes `adbuddy setup`.
 - Task 5, chat vacío: conectado y sin mensajes, sin tira de herramientas y sin mensaje saliente pendiente, el chat dice dónde escribir (`chat_empty_ready`).
 - Task 6, scroll que no arrastra: el chat sigue lo que llega solo si el lector está al final; si no, muestra "Mensajes nuevos" y se queda donde está.

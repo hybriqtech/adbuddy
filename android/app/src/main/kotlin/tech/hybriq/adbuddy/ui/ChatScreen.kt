@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -135,6 +136,15 @@ fun ChatScreen(
     LaunchedEffect(listState) { snapshotFlow { !listState.canScrollForward }.collect { if (it) unseen = false } }
     val terminalOn = terminalShown && terminal != null
     val status = LinkStatus.of(state, cut, configured)
+    // Reconnecting flips WAITING -> CONNECTING -> WAITING every retry: the banner keeps the last state that had one during
+    // CONNECTING, so it neither leaves and returns (the list jumping, TalkBack announcing it again) nor shows on a cold start.
+    var lastBanner by remember { mutableStateOf<LinkStatus?>(null) }
+    val bannerStatus = when {
+        status.bannerWorthy -> status
+        status == LinkStatus.CONNECTING -> lastBanner
+        else -> null
+    }
+    SideEffect { lastBanner = bannerStatus }
 
     Scaffold(
         topBar = {
@@ -147,7 +157,7 @@ fun ChatScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { inner ->
         Column(Modifier.padding(inner).consumeWindowInsets(inner).imePadding().fillMaxSize()) {
-            LinkBanner(status)
+            if (bannerStatus != null) LinkBanner(bannerStatus)
             remoteCard()
             if (terminalOn) {
                 TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.weight(0.45f).fillMaxSize())

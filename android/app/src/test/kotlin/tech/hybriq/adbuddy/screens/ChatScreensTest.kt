@@ -1,6 +1,9 @@
 package tech.hybriq.adbuddy.screens
 
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -141,6 +144,35 @@ class ChatScreensTest(private val mode: ScreenMode) {
             outgoing = listOf(Outgoing("o1", "Turn the volume down", emptyList(), SendStatus.SENDING)),
         )
         compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
+    }
+
+    @Test fun theBannerKeepsItsStateWhileTheLinkRetries() {
+        var bridge by mutableStateOf(BridgeState())
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                ChatScreen(
+                    bridge, outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = true, remoteCard = {},
+                )
+            }
+        }
+        val waiting = text(R.string.status_waiting)
+        compose.onNodeWithText(waiting).assertIsDisplayed()
+        bridge = BridgeState(connection = BridgeState.Connection.CONNECTING)
+        compose.waitForIdle()
+        compose.onNodeWithText(waiting).assertIsDisplayed()
+        bridge = BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc")
+        compose.waitForIdle()
+        compose.onNodeWithText(waiting).assertDoesNotExist()
+        // Connected forgot it: connecting again (a cold start in effect) shows none.
+        bridge = BridgeState(connection = BridgeState.Connection.CONNECTING)
+        compose.waitForIdle()
+        compose.onNodeWithText(waiting).assertDoesNotExist()
+    }
+
+    @Test fun aColdStartConnectingHasNoBanner() {
+        show(BridgeState(connection = BridgeState.Connection.CONNECTING))
+        compose.onNodeWithText(text(R.string.status_waiting)).assertDoesNotExist()
     }
 
     @Test fun notSetUpSaysToRunSetup() {
