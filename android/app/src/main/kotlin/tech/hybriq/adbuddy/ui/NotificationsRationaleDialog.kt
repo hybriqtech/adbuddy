@@ -11,12 +11,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.DialogProperties
 import tech.hybriq.adbuddy.R
 
-/** Title and body of the reason, apart from the dialog's window so they can be drawn and measured on their own. */
+/** The body of the reason: what the dialog shows under its title, and what the image measures. */
+@Composable
+fun NotificationsRationaleBody() {
+    Text(stringResource(R.string.notifications_rationale_body), style = MaterialTheme.typography.bodyMedium)
+}
+
+/** Title and body, apart from the dialog's window so they can be drawn and measured on their own (same pieces as the dialog). */
 @Composable
 fun NotificationsRationaleContent(modifier: Modifier = Modifier) {
     Column(modifier) {
         Text(stringResource(R.string.notifications_rationale_title), style = MaterialTheme.typography.headlineSmall)
-        Text(stringResource(R.string.notifications_rationale_body), style = MaterialTheme.typography.bodyMedium)
+        NotificationsRationaleBody()
     }
 }
 
@@ -26,7 +32,7 @@ fun NotificationsRationaleDialog(onContinue: () -> Unit, onSkip: () -> Unit) {
     AlertDialog(
         onDismissRequest = onSkip,
         title = { Text(stringResource(R.string.notifications_rationale_title)) },
-        text = { Text(stringResource(R.string.notifications_rationale_body)) },
+        text = { NotificationsRationaleBody() },
         confirmButton = { TextButton(onClick = onContinue) { Text(stringResource(R.string.notifications_rationale_continue)) } },
         dismissButton = { TextButton(onClick = onSkip) { Text(stringResource(R.string.onboarding_skip)) } },
         properties = DialogProperties(dismissOnClickOutside = false),

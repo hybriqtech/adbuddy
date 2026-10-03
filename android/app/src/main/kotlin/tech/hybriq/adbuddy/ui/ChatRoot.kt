@@ -180,7 +180,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     var asked by remember { mutableStateOf(prefs.notificationsAsked) }
     val requestPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifications = NotificationsStatus.of(context) }
     // Composed BEFORE ConfirmHost and never with a question open: the reason must not sit over a decision.
-    val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     val questionPending = state.pending.isNotEmpty() || state.chat.permissions.isNotEmpty()
     if (askForNotifications && route == Route.CHAT && NotificationPermission.shouldAsk(Build.VERSION.SDK_INT, granted, asked, stepShown = step != null, questionPending = questionPending)) {
         NotificationsRationaleDialog(

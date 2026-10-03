@@ -27,9 +27,9 @@ import tech.hybriq.adbuddy.a11y.Packages
 import tech.hybriq.adbuddy.a11y.ProtectedApps
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.BridgePrefs
+import tech.hybriq.adbuddy.bridge.ConfirmRequest
 import tech.hybriq.adbuddy.bridge.ChatState
 import tech.hybriq.adbuddy.bridge.PermissionRequest
-import kotlinx.coroutines.flow.MutableStateFlow
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.screens.PHONE
 import tech.hybriq.adbuddy.ui.Onboarding
@@ -118,13 +118,14 @@ class NotificationsRationaleFlowTest {
 
     private fun skip() = compose.onNodeWithText(text(R.string.onboarding_skip)).performClick()
 
-    /** The channel's state, as the host would have left it (the bridge keeps it in a private flow). */
-    @Suppress("UNCHECKED_CAST")
+    /** The channel's state, as the host would have left it. */
     private fun setBridgeState(s: BridgeState) {
-        val f = tech.hybriq.adbuddy.bridge.Bridge::class.java.getDeclaredField("_state").apply { isAccessible = true }
-        compose.runOnUiThread { (f.get((app as AdbuddyApp).bridge) as MutableStateFlow<BridgeState>).value = s }
+        compose.runOnUiThread { (app as AdbuddyApp).bridge.setStateForTest(s) }
         compose.waitForIdle()
     }
+
+    private fun connected(chat: ChatState = ChatState(), pending: List<ConfirmRequest> = emptyList()) =
+        BridgeState(connection = BridgeState.Connection.CONNECTED, chat = chat, pending = pending)
 
     @Test fun notOverTheStepsButAfterThemOnceOnly() {
         compose.onNodeWithText(text(R.string.step_progress, 1, 2)).assertIsDisplayed()
@@ -147,15 +148,37 @@ class NotificationsRationaleFlowTest {
         title.assertDoesNotExist()
     }
 
-    @Test fun neverOverAQuestionOfTheAgent() {
+    private fun reachTheChatWithTheReason() {
         skip()
         skip()
         title.assertIsDisplayed()
+    }
+
+    @Test fun aRedQuestionThatArrivesWithTheReasonOpenReplacesIt() {
+        reachTheChatWithTheReason()
+        // No recreation: the question comes in while the dialog is on screen.
+        setBridgeState(connected(pending = listOf(ConfirmRequest("r1", title = "Delete it", rawCommand = "rm x", expiresAt = "2099-01-01T00:00:00Z"))))
+        title.assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.confirm_label)).assertIsDisplayed()
+        assertFalse(BridgePrefs(app).notificationsAsked)
+    }
+
+    @Test fun aQuestionOfTheAgentThatArrivesWithTheReasonOpenReplacesIt() {
+        reachTheChatWithTheReason()
+        val q = PermissionRequest("a", "Bash", "Clean the build folder", "detail", "2099-01-01T00:00:00Z", true)
+        setBridgeState(connected(chat = ChatState(permissions = listOf(q))))
+        title.assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.perm_title)).assertIsDisplayed()
+        assertFalse(BridgePrefs(app).notificationsAsked)
+    }
+
+    @Test fun neverOverAQuestionOfTheAgent() {
+        reachTheChatWithTheReason()
         // Start over in a fresh state: the permission was never asked and a question is waiting.
         compose.onNode(hasText(text(R.string.onboarding_skip)) and hasAnyAncestor(isDialog())).performClick()
         BridgePrefs(app).notificationsAsked = false
-        val q = PermissionRequest("a", "Bash", "Clean the build folder", "detail", "2026-10-01T10:10:00Z", true)
-        setBridgeState(BridgeState(connection = BridgeState.Connection.CONNECTED, chat = ChatState(permissions = listOf(q))))
+        val q = PermissionRequest("a", "Bash", "Clean the build folder", "detail", "2099-01-01T00:00:00Z", true)
+        setBridgeState(connected(chat = ChatState(permissions = listOf(q))))
         compose.activityRule.scenario.recreate()
         compose.waitForIdle()
         title.assertDoesNotExist()
