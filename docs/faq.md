@@ -50,7 +50,7 @@ It lowers the risk of letting an agent drive your phone: it ranks every command,
 
 ## Does it collect telemetry?
 
-No. ADBuddy has no telemetry, no analytics and no server of its own. During `adbuddy setup` the host downloads Google's platform-tools from `dl.google.com`, and, once there is a release, the phone app from GitHub. Your agent talks to its own provider, which ADBuddy does not control. The terminal in the app is drawn by Android's system WebView, which may contact Google's servers on its own when it first starts; ADBuddy neither sends nor controls that. See [Privacy](safety.md#privacy).
+No. ADBuddy has no telemetry, no analytics and no server of its own. During `adbuddy setup` the host downloads Google's platform-tools from `dl.google.com`, and, once there is a release, the phone app from GitHub. Your agent talks to its own provider, which ADBuddy does not control. The terminal in the app is drawn by Android's system WebView, which runs inside the app and may contact Google's servers on its own (we measured it doing so at first start); ADBuddy neither sends nor controls that, and Android counts that traffic under ADBuddy's data use. See [Privacy](safety.md#privacy).
 
 ## Is it from Google, Anthropic or OpenAI?
 
