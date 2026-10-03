@@ -59,7 +59,10 @@ class ChatScrollTest {
     }
 
     private fun add(vararg m: ChatMessage) {
-        state = state.copy(chat = state.chat.copy(messages = state.chat.messages.map { old -> m.firstOrNull { it.id == old.id } ?: old } + m.filter { n -> state.chat.messages.none { it.id == n.id } }))
+        val current = state.chat.messages
+        val replaced = current.map { old -> m.firstOrNull { it.id == old.id } ?: old }
+        val appended = m.filter { n -> current.none { it.id == n.id } }
+        state = state.copy(chat = state.chat.copy(messages = replaced + appended))
         compose.waitForIdle()
     }
 
@@ -108,11 +111,78 @@ class ChatScrollTest {
         notice.assertDoesNotExist()
     }
 
+    private val running = ChatState(messages = messages(30), tools = listOf(ToolActivity("t1", "", "Run 1", "running")))
+    private val working = SessionState(state = "working")
+
+    private fun stripGoes(vararg arriving: ChatMessage) {
+        val gone = state.chat.copy(tools = emptyList(), messages = state.chat.messages + arriving)
+        state = state.copy(chat = gone, sessionState = SessionState(state = "idle"))
+        compose.waitForIdle()
+    }
+
     @Test fun theToolStripGoingIsNotNews() {
-        val working = SessionState(state = "working")
-        start(ChatState(messages = messages(30), tools = listOf(ToolActivity("t1", "", "Run 1", "running"))), working)
+        start(running, working)
+        shown("Run 1")
         scrollUp()
-        state = state.copy(chat = state.chat.copy(tools = emptyList()), sessionState = SessionState(state = "idle"))
+        stripGoes()
+        notice.assertDoesNotExist()
+    }
+
+    @Test fun theToolStripAppearingIsNotNews() {
+        start()
+        scrollUp()
+        state = state.copy(chat = running, sessionState = working)
+        compose.waitForIdle()
+        notice.assertDoesNotExist()
+    }
+
+    @Test fun theStripGoingAndAMessageArrivingWithTheReaderAboveNotices() {
+        start(running, working)
+        scrollUp()
+        stripGoes(ChatMessage("30", "user", "message 30"))
+        notice.assertIsDisplayed()
+    }
+
+    @Test fun theStripGoingAndAMessageArrivingAtTheEndFollows() {
+        start(running, working)
+        shown("Run 1")
+        stripGoes(ChatMessage("30", "user", "message 30"))
+        shown("message 30")
+        notice.assertDoesNotExist()
+    }
+
+    @Test fun twoArrivalsWhileTheAnimationRunsStillFollow() {
+        start()
+        compose.mainClock.autoAdvance = false
+        add(ChatMessage("30", "user", "message 30"))
+        compose.mainClock.advanceTimeBy(1)
+        add(ChatMessage("31", "assistant", "message 31"))
+        compose.mainClock.advanceTimeBy(1)
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        shown("message 31")
+        notice.assertDoesNotExist()
+    }
+
+    @Test fun aMessageThenTheStripWhileTheAnimationRunsStillFollows() {
+        start()
+        compose.mainClock.autoAdvance = false
+        add(ChatMessage("30", "user", "message 30"))
+        compose.mainClock.advanceTimeBy(1)
+        state = state.copy(chat = state.chat.copy(tools = running.tools), sessionState = working)
+        compose.mainClock.advanceTimeBy(1)
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        shown("Run 1")
+        notice.assertDoesNotExist()
+    }
+
+    @Test fun tappingTheNoticeWithATallLastBubbleRemovesIt() {
+        start()
+        scrollUp()
+        add(ChatMessage("30", "user", "long ".repeat(800)))
+        notice.assertIsDisplayed()
+        notice.performClick()
         compose.waitForIdle()
         notice.assertDoesNotExist()
     }

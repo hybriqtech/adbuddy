@@ -2,6 +2,7 @@ package tech.hybriq.adbuddy.ui
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -106,24 +107,42 @@ fun ChatScreen(
     val rows = items.size + if (tools.isEmpty()) 0 else 1
     // Follows what arrives only while the reader is at the end. New rows go below and do not move the viewport, so "was at
     // the end" is "the row that was last is (at least partly) in the viewport": a last bubble that grew in place now
-    // ends below it, and its reader was at the end all the same; a drop in rows (the tool strip going) is not news.
-    // Coming back from Settings the chat recomposes with seen = 0 and jumps to the end, as it already did.
+    // ends below it, and its reader was at the end all the same. A drop in rows (the tool strip going) is not news, and
+    // news is a new LAST MESSAGE (its key), not more rows: the strip appearing is not news and the strip going while a
+    // message arrives (same row count) is. Coming back from Settings the chat recomposes with seen = 0 and jumps to
+    // the end, as it already did.
+    // `following`: the effect decided to follow and its animation has not finished. Two changes in a row evaluate the
+    // viewport while it is mid-animation, so while following the reader counts as at the end. It ends when the animation
+    // completes or when the reader drags the list (a DragInteraction: programmatic scrolls emit none, unlike
+    // isScrollInProgress, which an animation also sets).
     var seen by remember { mutableIntStateOf(0) }
+    var seenKey by remember { mutableStateOf<String?>(null) }
+    var following by remember { mutableStateOf(false) }
     var unseen by remember { mutableStateOf(false) }
-    LaunchedEffect(rows) {
+    // Outside the notice: hiding it must not cancel the scroll its tap started.
+    val scope = rememberCoroutineScope()
+    val lastKey = items.lastOrNull()?.key
+    LaunchedEffect(rows, lastKey) {
         val info = listState.layoutInfo
-        val wasAtEnd = seen == 0 || info.visibleItemsInfo.any { it.index == seen - 1 && it.offset < info.viewportEndOffset }
-        val grew = rows > seen
+        val wasAtEnd = seen == 0 || following ||
+            info.visibleItemsInfo.any { it.index == seen - 1 && it.offset < info.viewportEndOffset }
+        val grew = lastKey != null && lastKey != seenKey
         seen = rows // before animating: a cancelled animation does not leave the old count
+        seenKey = lastKey
         if (rows == 0) return@LaunchedEffect
         if (wasAtEnd) {
             unseen = false
+            following = true
             listState.animateScrollToItem(rows - 1)
+            following = false
         } else if (grew) {
             unseen = true
         }
     }
     LaunchedEffect(listState) { snapshotFlow { !listState.canScrollForward }.collect { if (it) unseen = false } }
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) following = false }
+    }
     val terminalOn = terminalShown && terminal != null
 
     Scaffold(
@@ -163,9 +182,8 @@ fun ChatScreen(
                         if (tools.isNotEmpty()) item(key = "tools") { ToolStripView(tools) }
                     }
                     if (unseen) {
-                        val scope = rememberCoroutineScope()
                         FilledTonalButton(
-                            onClick = { scope.launch { listState.animateScrollToItem(rows - 1) } },
+                            onClick = { unseen = false; scope.launch { listState.animateScrollToItem(rows - 1) } },
                             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
                         ) { Text(stringResource(R.string.chat_new_messages)) }
                     }
