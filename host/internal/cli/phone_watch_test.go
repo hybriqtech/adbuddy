@@ -373,15 +373,23 @@ func TestWatchPhoneOtherSessionPhoneDoesNotUseTheSavedAddresses(t *testing.T) {
 	}
 }
 
-// The watcher never opens or closes a port.
+// The watcher never opens or closes a port: it only reads it (getprop) when
+// the phone comes back (VB-41).
 func TestWatchPhoneNeverTouchesThePort(t *testing.T) {
 	r := newRig(t, devicesRule(tsAddr), connectRule(tsAddr), serialnoIs("AAAA1111"))
 	w, _, _ := watcherFor(t, r, tsConfig(), true, phoneSerial)
 	steps(w, 6)
+	read := 0
 	for _, c := range r.calls(t) {
-		if strings.HasPrefix(c, "tcpip") || strings.Contains(c, "adb.tcp.port") || strings.Contains(c, "setprop") {
+		if strings.HasPrefix(c, "tcpip") || c == "usb" || strings.Contains(c, "setprop") {
 			t.Fatalf("the watcher touched the port: %q", c)
 		}
+		if strings.HasPrefix(c, "shell getprop") && strings.Contains(c, "adb.tcp.port") {
+			read++
+		}
+	}
+	if read == 0 {
+		t.Fatalf("the port was not read after the switch: %q", r.calls(t))
 	}
 }
 
@@ -465,4 +473,129 @@ func TestWatchPhoneSwitchBudget(t *testing.T) {
 	if got != worstCase {
 		t.Fatalf("the worst case of the switch is %v (misses %d * every %v + %d candidates * (try %v + identity %v)), pinned at %v", got, watchMisses, watchEvery, n, watchTryWait, identityWait, worstCase)
 	}
+}
+
+// VB-41 (review I1): a phone that comes back may have restarted and taken
+// persist.adb.tcp.port. The watcher reads the port again (it never closes it
+// mid-session) and says once what changed: a port open with the remote mode
+// off, and the persist port.
+func TestWatchPhoneRereadsThePortWhenThePhoneComesBack(t *testing.T) {
+	back := func(t *testing.T, r *rig) {
+		r.set(t, devicesRule(phoneSerial), testutil.FakeRule{Match: tcpPortRule, Stdout: "\n"},
+			testutil.FakeRule{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: "5555\n"})
+	}
+	t.Run("remote mode off", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr))
+		w, _, log := watcherFor(t, r, tsConfig(), false, phoneSerial)
+		steps(w, 2)
+		back(t, r)
+		steps(w, 2)
+		if strings.Count(log.String(), "adb listens on network port 5555 on the phone again") != 1 || strings.Count(log.String(), "persist.adb.tcp.port is 5555") != 1 {
+			t.Fatalf("log %q", log.String())
+		}
+		if r.count(t, "usb") != 0 || r.count(t, "tcpip") != 0 {
+			t.Fatalf("the watcher closed or opened a port: %q", r.calls(t))
+		}
+		// Lost and back again with the same port: nothing new to say.
+		r.set(t, devicesRule(), failRule(tsAddr))
+		steps(w, 2)
+		back(t, r)
+		steps(w, 1)
+		if n := strings.Count(log.String(), "persist.adb.tcp.port is 5555"); n != 1 {
+			t.Fatalf("said %d times: %q", n, log.String())
+		}
+	})
+	t.Run("remote mode on", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr), failRule(tsHome))
+		w, _, log := watcherFor(t, r, tsConfig(), true, phoneSerial)
+		steps(w, 2)
+		back(t, r)
+		steps(w, 1)
+		if strings.Contains(log.String(), "adb listens on network port") || strings.Count(log.String(), "persist.adb.tcp.port is 5555") != 1 {
+			t.Fatalf("log %q", log.String())
+		}
+	})
+}
+
+// VB-41 (review round 1): what the watcher re-reads and says, and how often.
+func TestWatchPhoneRecheckSaysOnlyWhatChanged(t *testing.T) {
+	persistIs := func(v string) testutil.FakeRule {
+		return testutil.FakeRule{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: v + "\n"}
+	}
+	persistFails := testutil.FakeRule{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stderr: "error: closed\n", Exit: 1}
+	serviceIs := func(v string) testutil.FakeRule { return testutil.FakeRule{Match: tcpPortRule, Stdout: v + "\n"} }
+	lost := func(t *testing.T, r *rig, w *watcher) {
+		r.set(t, devicesRule(), failRule(tsAddr))
+		steps(w, 2)
+	}
+	back := func(t *testing.T, r *rig, w *watcher, rules ...testutil.FakeRule) {
+		r.set(t, append([]testutil.FakeRule{devicesRule(phoneSerial)}, rules...)...)
+		steps(w, 1)
+	}
+	const unknownMsg = "Could not read persist.adb.tcp.port"
+	const persistMsg = "persist.adb.tcp.port is 5555"
+
+	t.Run("persist unreadable twice in a row says it once", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr))
+		w, _, log := watcherFor(t, r, tsConfig(), false, phoneSerial)
+		steps(w, 2)
+		back(t, r, w, serviceIs(""), persistFails)
+		lost(t, r, w)
+		back(t, r, w, serviceIs(""), persistFails)
+		if n := strings.Count(log.String(), unknownMsg); n != 1 {
+			t.Fatalf("said %d times: %q", n, log.String())
+		}
+	})
+	t.Run("a stable phone is not read again", func(t *testing.T) {
+		r := newRig(t, devicesRule(phoneSerial))
+		w, _, _ := watcherFor(t, r, tsConfig(), false, phoneSerial)
+		steps(w, 8)
+		if n := r.count(t, "shell getprop"); n != 0 {
+			t.Fatalf("%d getprop with the phone listed all the time: %q", n, r.calls(t))
+		}
+	})
+	t.Run("a change of the service port alone does not repeat persist", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr))
+		w, _, log := watcherFor(t, r, tsConfig(), false, phoneSerial)
+		steps(w, 2)
+		back(t, r, w, serviceIs(""), persistIs("5555"))
+		lost(t, r, w)
+		back(t, r, w, serviceIs("7777"), persistIs("5555"))
+		if n := strings.Count(log.String(), persistMsg); n != 1 {
+			t.Fatalf("persist said %d times: %q", n, log.String())
+		}
+		if !strings.Contains(log.String(), "network port 7777 on the phone again") {
+			t.Fatalf("the new port was not said: %q", log.String())
+		}
+	})
+	t.Run("a persist that appears with the service port fixed says the port once", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr))
+		w, _, log := watcherFor(t, r, tsConfig(), false, phoneSerial)
+		steps(w, 2)
+		back(t, r, w, serviceIs("7777"), persistIs(""))
+		lost(t, r, w)
+		back(t, r, w, serviceIs("7777"), persistIs("5555"))
+		if n := strings.Count(log.String(), "network port 7777 on the phone again"); n != 1 {
+			t.Fatalf("port_open said %d times: %q", n, log.String())
+		}
+		if n := strings.Count(log.String(), persistMsg); n != 1 {
+			t.Fatalf("persist said %d times: %q", n, log.String())
+		}
+	})
+	t.Run("a good read after an unreadable one says what it holds", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr))
+		w, _, log := watcherFor(t, r, tsConfig(), false, phoneSerial)
+		steps(w, 2)
+		back(t, r, w, serviceIs(""), persistIs("5555"))
+		lost(t, r, w)
+		back(t, r, w, serviceIs(""), persistFails)
+		lost(t, r, w)
+		back(t, r, w, serviceIs(""), persistIs("5555"))
+		if n := strings.Count(log.String(), persistMsg); n != 2 {
+			t.Fatalf("persist said %d times, want 2 (before and after the unreadable one): %q", n, log.String())
+		}
+		if n := strings.Count(log.String(), unknownMsg); n != 1 {
+			t.Fatalf("unreadable said %d times: %q", n, log.String())
+		}
+	})
 }

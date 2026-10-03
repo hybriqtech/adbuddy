@@ -69,8 +69,15 @@ func TestCheckEmuEnv(t *testing.T) {
 
 // newEmu returns the emulator, or skips the test without one. It refuses a
 // serial that is not an emulator and a missing adb server port: nothing here
-// runs on a real phone or on the adb server a phone is on.
+// runs on a real phone or on the adb server a phone is on. The test has 10
+// minutes with it (e.ctx).
 func newEmu(t *testing.T) *emu {
+	t.Helper()
+	return newEmuTimeout(t, 10*time.Minute)
+}
+
+// newEmuTimeout is newEmu for a test that needs d with the emulator.
+func newEmuTimeout(t *testing.T, d time.Duration) *emu {
 	t.Helper()
 	serial, path := os.Getenv("ADBUDDY_EMULATOR_SERIAL"), os.Getenv("ADBUDDY_EMULATOR_ADB")
 	if serial == "" || path == "" {
@@ -84,7 +91,7 @@ func newEmu(t *testing.T) *emu {
 	// passes the environment on).
 	t.Setenv("ADB_MDNS", "0")
 	t.Setenv("ADB_MDNS_AUTO_CONNECT", "0")
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), d)
 	t.Cleanup(cancel)
 	e := &emu{
 		ctx:    ctx,

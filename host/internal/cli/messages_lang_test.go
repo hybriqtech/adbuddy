@@ -111,6 +111,8 @@ func TestRemoteTextInSpanish(t *testing.T) {
 		"closing":           {Enabled: true, Closing: true, ExpiresAt: &at, Serve: true},
 		"closing no serve":  {Enabled: true, Closing: true, ExpiresAt: &at},
 		"off without serve": {Serve: false},
+		"off with persist":  {Serve: true, PersistPort: "5555"},
+		"persist unknown":   {Serve: true, PersistUnknown: true},
 	}
 	for name, info := range infos {
 		for _, op := range []string{"on", "off", "status"} {
@@ -139,6 +141,13 @@ func TestRemoteTextInSpanish(t *testing.T) {
 	}
 	if got := remoteTextIn(i18n.ES, "off", infos["off"]); got != "El modo remoto está desactivado: el puerto 5555 está cerrado." {
 		t.Errorf("off: %q", got)
+	}
+	// VB-41: off with a persist port never says "cerrado" alone.
+	if got := remoteTextIn(i18n.ES, "off", infos["off with persist"]); got != "El modo remoto está desactivado. Pero el puerto de red de adb no queda cerrado del todo: persist.adb.tcp.port vale 5555 (ADBuddy no la fijó), y adb vuelve a escuchar en ese puerto cada vez que el móvil se reinicia. `adbuddy doctor` explica cómo quitarla." {
+		t.Errorf("off with persist: %q", got)
+	}
+	if got := remoteTextIn(i18n.ES, "status", infos["persist unknown"]); !strings.HasPrefix(got, "Modo remoto: desactivado. Pero no se pudo leer persist.adb.tcp.port") {
+		t.Errorf("status, persist unknown: %q", got)
 	}
 	// What serve says when it starts and when it stops.
 	s := remote.State{Enabled: true, ExpiresAt: at}

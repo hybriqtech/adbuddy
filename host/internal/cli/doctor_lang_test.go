@@ -36,6 +36,8 @@ func TestDoctorInSpanish(t *testing.T) {
 			"✗ identidad: el móvil en ", "no es el que configuraste", "ejecuta `adbuddy connect <ip:puerto>`"}, []string{"adbuddy connect <ip:port>", "adbuddy connect <ip:puerto>"}},
 		{"app without its settings", doctorRules(testutil.FakeRule{Match: `^shell dumpsys deviceidle whitelist$`, Stdout: "user,com.other,10124\n"}), []string{
 			"⚠ app del móvil: 0.2.0 instalada, pero sin: la exención de batería", "    Qué hacer: Acepta la pantalla de consentimiento"}, []string{"adbuddy setup"}},
+		{"persist port", doctorRules(testutil.FakeRule{Match: `^shell getprop service\.adb\.tcp\.port$`, Stdout: "0\n"}, testutil.FakeRule{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: "5555\n"}), []string{
+			"⚠ puerto de red: cerrado por ahora, pero persist.adb.tcp.port vale 5555", "    Qué hacer: ADBuddy no la fijó"}, nil},
 		{"adb server down", doctorRules(noServer), []string{
 			"✗ servidor adb: el servidor adb de ADBuddy (puerto ", "no responde: ", "    Ejecuta: adbuddy doctor --fix", "· móvil: no comprobado: el servidor adb está caído"}, []string{"adbuddy doctor --fix"}},
 	}
