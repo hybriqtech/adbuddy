@@ -37,7 +37,7 @@ func TestHelpKnownTopicStillWorks(t *testing.T) {
 		t.Fatalf("help tap: exit %d %q", exit, out)
 	}
 	exit, out, _ = runCLI(t, "help")
-	if exit != 0 || !strings.Contains(out, "Available Commands:") {
+	if exit != 0 || !strings.Contains(out, "Getting started:") {
 		t.Fatalf("help: exit %d %q", exit, out)
 	}
 }

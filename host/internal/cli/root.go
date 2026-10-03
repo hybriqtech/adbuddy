@@ -34,6 +34,7 @@ func NewRoot(app *App) *cobra.Command {
 		Use:           "adbuddy",
 		Short:         app.T("help.root.short"),
 		Long:          app.T("help.root.long"),
+		Example:       app.T("help.root.example"),
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -44,12 +45,27 @@ func NewRoot(app *App) *cobra.Command {
 	root.SetVersionTemplate("adbuddy {{.Version}}\n")
 	root.PersistentFlags().BoolVar(&app.JSON, "json", false, app.T("help.root.flag.json"))
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return UsageError(err.Error()) })
+	root.AddGroup(
+		&cobra.Group{ID: "start", Title: app.T("help.group.start")},
+		&cobra.Group{ID: "daily", Title: app.T("help.group.daily")},
+		&cobra.Group{ID: "agent", Title: app.T("help.group.agent")},
+	)
 	setup := newSetupCmd(app)
 	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app), newConnectCmd(app), newDoctorCmd(app), setup)
 	root.AddCommand(newAttachCmd(app), newNewCmd(app), newStopCmd(app))
 	root.AddCommand(newSendCmd(app), newRemoteCmd(app))
 	root.AddCommand(newHookCmd(app))
 	root.AddCommand(newHelperCmds(app)...)
+	groupOf := map[string]string{
+		"setup": "start", "doctor": "start", "serve": "start",
+		"run": "daily", "attach": "daily", "new": "daily", "stop": "daily", "journal": "daily",
+		"undo": "daily", "connect": "daily", "remote": "daily", "env": "daily", "version": "daily",
+		"screen": "agent", "tap": "agent", "type": "agent", "screenshot": "agent",
+		"foreground": "agent", "notifications": "agent", "send": "agent",
+	}
+	for _, c := range root.Commands() {
+		c.GroupID = groupOf[c.Name()]
+	}
 	root.SetHelpCommand(&cobra.Command{
 		Use: "help [command]",
 		ValidArgsFunction: func(c *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {

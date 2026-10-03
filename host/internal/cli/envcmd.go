@@ -18,6 +18,7 @@ func newEnvCmd(app *App) *cobra.Command {
 	initCmd := &cobra.Command{
 		Use:     "init",
 		Short:   app.T("help.init.short"),
+		Long:    app.T("help.init.long"),
 		Example: "  adbuddy env init\n  adbuddy env init --force\n  adbuddy env init --dir ~/ADBuddy/pixel --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
