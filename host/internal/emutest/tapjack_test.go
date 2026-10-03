@@ -23,7 +23,7 @@ import (
 // grants (ConsentScreen, the notification access screen, the 🔴 dialog, the
 // chat's menu) must refuse them (ObscuredTouchGuard). The overlay is
 // TapjackOverlayActivity of the instrumented tests' APK
-// (android/app/src/androidTest/…/TapjackOverlayActivity.kt): another package,
+// (android/app/src/androidTest/…/TapjackOverlayActivity.java): another package,
 // so another uid (a window of the app's own uid never obscures it), faint
 // enough (alpha 0.3) for Android 12+ to let the touch through instead of
 // dropping it. Each refusal has its positive control: the same tap on the same
