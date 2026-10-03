@@ -4,10 +4,10 @@
 # Prints one TSV line: name, boot_s, ws_mb_stable, priv_mb_stable, ws_mb_peak_load, priv_mb_peak_load, ws_mb_end, test_result
 set -u
 NAME=$1 W=$2 H=$3 DPI=$4 RAM=$5 CORES=$6 GPU=$7 TESTRUN=${8:-TestInstrumentedSuite}
-REPO=/c/Users/Jose/orca/workspaces/adbuddy/puffin
-SDK=/c/Users/Jose/AppData/Local/Android/Sdk
+REPO=$(git rev-parse --show-toplevel)
+SDK=${ANDROID_HOME:?set ANDROID_HOME to the Android SDK}
 export ANDROID_HOME=$SDK ANDROID_SDK_ROOT=$SDK
-export JAVA_HOME=/c/Users/Jose/AppData/Local/Android/jdk-17.0.20.1+1
+export JAVA_HOME=${JAVA_HOME:?set JAVA_HOME to a JDK 17}
 export PATH="$JAVA_HOME/bin:$PATH"
 OUT=${MEASURE_OUT:-$REPO/../.measure}; mkdir -p "$OUT"
 export ADBUDDY_EMU_IMAGE='system-images;android-34;google_apis;x86_64' ADBUDDY_EMU_AVD="adbuddy-puffin-$NAME" \
