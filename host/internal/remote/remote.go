@@ -154,6 +154,8 @@ func (c *Controller) readTCP(ctx context.Context) (device.TCP, error) {
 // start, the watcher when the phone comes back) for State, as if the
 // controller had made it: `adbuddy remote status` says what
 // persist.adb.tcp.port holds from serve's start. It takes only pmu.
+// A read of the watcher may cross one of the controller (an off) and
+// overwrite the newer; benign: same property, the next read corrects it.
 func (c *Controller) Note(t device.TCP) {
 	c.pmu.Lock()
 	c.persist, c.persistUnknown = t.Persist, false

@@ -228,7 +228,10 @@ func (w *watcher) switchTo(ctx context.Context, serial, where string) {
 // in the middle of the session would cut the phone again and race with the
 // remote mode. It says what changed since the last time it was said, once: a
 // port open with the remote mode off (run `adbuddy remote off`), the persist
-// port, or a read that failed.
+// port, or a read that failed. Seen (the controller's Note) may be crossed by
+// a read of the controller itself (an off): the older read can overwrite the
+// newer one under pmu. It is benign: same property, and the next read of
+// either corrects it.
 func (w *watcher) recheckPort(ctx context.Context) {
 	rctx, cancel := context.WithTimeout(ctx, w.readWait)
 	t, err := device.ReadTCP(rctx, w.Active.Runner())
@@ -239,6 +242,9 @@ func (w *watcher) recheckPort(ctx context.Context) {
 	if err != nil {
 		if !w.unknown {
 			w.unknown = true
+			// Forget what was said: the next good read says what persist holds
+			// again, which closes this warning.
+			w.said = device.TCP{}
 			tellPersist(w.Log, "", true)
 		}
 		return
@@ -250,13 +256,17 @@ func (w *watcher) recheckPort(ctx context.Context) {
 	if t == w.said {
 		return
 	}
+	prev := w.said
 	w.said = t
 	// RemoteOn is read after the port: Enable saves the expiry before
 	// `adb tcpip`, so a 5555 it opened is seen with the mode on.
-	if t.Now != "" && !(t.Now == remote.Port && w.RemoteOn()) {
+	if t.Now != "" && t.Now != prev.Now && !(t.Now == remote.Port && w.RemoteOn()) {
 		tell(w.Log, "phone_watch.port_open", t.Now)
 	}
-	tellPersist(w.Log, t.Persist, false)
+	// Persist only when it changed (or the last read failed, prev is zero then).
+	if t.Persist != prev.Persist {
+		tellPersist(w.Log, t.Persist, false)
+	}
 }
 
 func (w *watcher) warnOnce(msg i18n.Msg) {
