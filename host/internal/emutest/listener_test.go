@@ -619,3 +619,93 @@ func TestTheListenerStaysBound(t *testing.T) {
 		t.Errorf("after the kills: the gate reads %q, want Ok", g["gate"])
 	}
 }
+
+// resumedActivity returns the resumed activity of `dumpsys activity
+// activities` (its component), or "".
+func resumedActivity(dump string) string {
+	m := resumedRe.FindStringSubmatch(dump)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+var resumedRe = regexp.MustCompile(`(?m)(?:topResumedActivity|mResumedActivity)[=:].*? (\S+/\S+)[ }]`)
+
+func TestResumedActivity(t *testing.T) {
+	dump := "  ResumedActivity: ActivityRecord{1 u0 x/.Y t1}\n" +
+		"    topResumedActivity=ActivityRecord{a1b2 u0 com.android.settings/.Settings$NotificationAccessDetailsActivity t42}\n"
+	if got := resumedActivity(dump); got != "com.android.settings/.Settings$NotificationAccessDetailsActivity" {
+		t.Errorf("resumedActivity = %q", got)
+	}
+	if got := resumedActivity("nothing"); got != "" {
+		t.Errorf("resumedActivity of nothing = %q", got)
+	}
+}
+
+// accessSwitch returns the system's "Allow notification access" switch on
+// screen, if any.
+func accessSwitch(nodes []uiNode) (uiNode, bool) {
+	for _, n := range nodes {
+		if n.ID == "android:id/switch_widget" {
+			return n, true
+		}
+	}
+	return uiNode{}, false
+}
+
+// M5c-24, on API 34: the screen's shortcut ("Open system settings",
+// NotificationAccessStatus.openSystemSettings) opens ADBuddy's own entry of
+// the system's notification access, not the list, with its switch usable (an
+// adb install is not restricted on API 34, T1-6). Then, once, whether
+// `appops set … ACCESS_RESTRICTED_SETTINGS ignore` greys it out as a
+// restricted setting does (measured: it does). The app's hint for that case
+// is on its screen while the access is not allowed.
+func TestTheShortcutOpensADBuddysEntry(t *testing.T) {
+	e := listenerEmu(t)
+	e.atCleanup(t, "shell", "am force-stop com.android.settings")
+	open := func() []uiNode {
+		t.Helper()
+		e.openAccessStep(t)
+		// Not allowed: the screen says what to do with a greyed-out switch.
+		e.waitNode(t, "the restricted settings hint", 15*time.Second, func(n uiNode) bool { return strings.HasPrefix(n.Text, accessRestrictedHint) })
+		e.tap(t, e.waitNode(t, accessOpenSystem, 15*time.Second, func(n uiNode) bool { return n.Text == accessOpenSystem }))
+		var nodes []uiNode
+		if !poll(15*time.Second, func() bool {
+			nodes = e.screen(t)
+			_, ok := accessSwitch(nodes)
+			return ok
+		}) {
+			t.Fatalf("no notification access switch on screen 15 s after %q: %+v", accessOpenSystem, nodes)
+		}
+		return nodes
+	}
+	nodes := open()
+	act := resumedActivity(e.shell(t, "dumpsys activity activities"))
+	t.Logf("the shortcut opens %s", act)
+	if !strings.HasPrefix(act, "com.android.settings/") || !strings.Contains(act, "Detail") {
+		t.Errorf("the shortcut opens %q, want Settings' detail of one listener", act)
+	}
+	var adbuddy, others bool
+	for _, n := range nodes {
+		adbuddy = adbuddy || n.Text == "ADBuddy"
+		// The list shows a row per app that has a listener: the launcher's is one.
+		others = others || strings.Contains(n.Text, "Launcher") || strings.Contains(n.Text, "Pixel")
+	}
+	if !adbuddy || others {
+		t.Errorf("the shortcut's screen names ADBuddy %v and other apps %v, want only ADBuddy's entry: %+v", adbuddy, others, nodes)
+	}
+	if sw, _ := accessSwitch(nodes); !sw.Enabled {
+		t.Errorf("ADBuddy's switch is greyed out after an adb install on API 34 (T1-6 measured it enabled): %+v", sw)
+	}
+
+	// The restricted case, simulated once.
+	e.atCleanup(t, "shell", "appops set "+phoneapp.Package+" ACCESS_RESTRICTED_SETTINGS default")
+	e.shell(t, "appops set "+phoneapp.Package+" ACCESS_RESTRICTED_SETTINGS ignore")
+	e.shell(t, "am force-stop com.android.settings")
+	nodes = open()
+	// Measured on 2026-10-03: greyed out, as a restricted setting is.
+	if sw, _ := accessSwitch(nodes); sw.Enabled {
+		t.Errorf("with ACCESS_RESTRICTED_SETTINGS ignore, ADBuddy's switch is still enabled (measured greyed out): %+v", sw)
+	}
+}
