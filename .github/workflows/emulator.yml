@@ -143,7 +143,7 @@ jobs:
           ADBUDDY_EMU_STABLE_SECS: "120"
           ADBUDDY_EMULATOR_CUT: ""
         run: scripts/emulator.sh start | sed "s/^export //; s/'//g" >> "$GITHUB_ENV"
-      # qemu's memory only grows while the emulator runs (about 4 GB per 10 min of
+      # qemu's memory only grows while the emulator runs (about 3-4 GB per 10 min of
       # these tests, never returned), so the screen-driven guard tests run first
       # on a fresh emulator and the rest on another fresh one.
       - name: The host against the app on the emulator (guard tests)
@@ -152,9 +152,11 @@ jobs:
         env:
           ADBUDDY_EMULATOR_CUT: ""
         run: |
-          test -n "$ADBUDDY_EMULATOR_SERIAL" && test -n "$ADBUDDY_EMULATOR_ADB"
+          test -n "$ADBUDDY_EMULATOR_SERIAL"
+          test -n "$ADBUDDY_EMULATOR_ADB"
           # A split that finds nothing is stale (a renamed test): fail, do not pass silently.
-          go test -list '^TestTheGuard' ./internal/emutest | grep -q '^TestTheGuard' || { echo "no guard tests: the split of emutest is stale" >&2; exit 1; }
+          out=$(go test -list '^TestTheGuard' ./internal/emutest) || exit 1
+          grep -q '^TestTheGuard' <<<"$out" || { echo "no guard tests: the split of emutest is stale" >&2; exit 1; }
           go test -timeout 20m -count=1 -v -run '^TestTheGuard' ./internal/emutest
       - name: Emulator memory after the guard tests
         if: always()
@@ -177,7 +179,7 @@ jobs:
           scripts/emulator.sh stop
           scripts/emulator.sh start | sed "s/^export //; s/'//g" >> "$GITHUB_ENV"
       - name: The host against the app on the emulator (the rest)
-        if: (success() || failure()) && steps.start34.outcome == 'success'
+        if: (success() || failure()) && steps.restart34.outcome == 'success'
         working-directory: host
         # Without the variables the tests would skip and the step would pass.
         env:
