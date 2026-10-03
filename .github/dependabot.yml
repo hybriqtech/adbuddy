@@ -1,0 +1,95 @@
+# Dependabot version updates. Weekly, grouped, one-week cooldown, NO auto-merge
+# (nothing here or in the workflows enables it; keep it that way).
+#
+# Pull requests opened by Dependabot run their CI on GitHub-hosted runners, never
+# on the self-hosted ones, and the emulator job is skipped: the owner reviews the
+# diff and runs `emulator` by hand (workflow_dispatch). The rule and the process
+# are in docs/ci-self-hosted.md section 6. Do not enable "Dependabot on
+# self-hosted runners" in the repository settings.
+#
+# Dependabot only raises versions of actions already used by the workflows, so
+# it adds none that the repository's Actions policy has not allowed. Labels that
+# do not exist in the repository are ignored by GitHub.
+#
+# Not managed by Dependabot (no ecosystem sees them): the Gradle version
+# (`gradle-version:` in the workflows, there is no wrapper), the Go toolchain
+# (`go-version-file: host/go.mod`) and the goreleaser version in release-check.yml.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 3
+    # A version published days ago may still be compromised; security updates ignore the cooldown.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "ci(deps)"
+    labels: [dependencies, ci]
+
+  - package-ecosystem: gomod
+    directory: /host
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    groups:
+      go:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps)"
+    labels: [dependencies, go]
+
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Madrid
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
+    # A package goes to the first group that matches it, so android-toolchain
+    # comes first. AGP (plugin com.android.application) and Kotlin (its compose
+    # and serialization plugins, versions.kotlin in libs.versions.toml) move
+    # together and a major of either is a decision for a person, not a PR.
+    groups:
+      android-toolchain:
+        patterns:
+          - "com.android.application*"
+          - "org.jetbrains.kotlin.*"
+          - "org.jetbrains.kotlin:*"
+        update-types: [minor, patch]
+      android:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Toolchain majors, until someone decides (AGP, Kotlin and Compose are tied together).
+      # Patterns stop at org.jetbrains.kotlin(.|:) so kotlinx-serialization, which has its own versioning, is not caught.
+      - dependency-name: "com.android.application*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.jetbrains.kotlin.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.jetbrains.kotlin:*"
+        update-types: ["version-update:semver-major"]
+      # robolectricAndroidAll ("14-robolectric-...") is the Android 14 jar (SDK 34) that
+      # src/test/resources/robolectric.properties pins; it moves with robolectric and
+      # the SDK, by hand (see the comment in libs.versions.toml).
+      - dependency-name: "org.robolectric:android-all-instrumented"
+    commit-message:
+      prefix: "chore(deps)"
+    labels: [dependencies, android]

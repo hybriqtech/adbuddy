@@ -1,4 +1,8 @@
 name: android
+# Trust rule: a pull request opened by anyone but the repository owner
+# (Dependabot, other bots, collaborators) never reaches a self-hosted runner;
+# it runs on GitHub-hosted runners whatever the CI_* variables say. See
+# docs/ci-self-hosted.md section 6.
 # Runners come from repository variables (docs/ci-self-hosted.md); with none
 # set, GitHub-hosted runners are used.
 
@@ -18,7 +22,7 @@ jobs:
   unit:
     # Fork pull requests never reach a self-hosted runner.
     if: ${{ vars.CI_RUNNER_ANDROID != '"none"' && (vars.CI_RUNNER_ANDROID == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_ANDROID || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && vars.CI_RUNNER_ANDROID || '"ubuntu-latest"') }}
     timeout-minutes: 45
     defaults:
       run:
