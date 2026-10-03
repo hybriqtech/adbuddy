@@ -67,6 +67,8 @@
     <string name="consent_accept">Accept</string>
     <string name="consent_decline">Not now</string>
     <string name="consent_done">Done. You can go back to the PC.</string>
+    <string name="consent_done_steps">Done. Two quick steps remain here; then go back to the PC.</string>
+    <string name="consent_declined">Nothing was set up. To try again, run adbuddy setup on the PC.</string>
 
     <string name="home_title" translatable="false">ADBuddy</string>
     <string name="home_activity">Activity</string>

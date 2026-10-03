@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import tech.hybriq.adbuddy.bridge.BridgePrefs
 import tech.hybriq.adbuddy.bridge.BridgeService
 import tech.hybriq.adbuddy.ui.ConsentScreen
+import tech.hybriq.adbuddy.ui.Onboarding
 import tech.hybriq.adbuddy.ui.ChatRoot
 
 class MainActivity : ComponentActivity() {
@@ -54,7 +55,13 @@ class MainActivity : ComponentActivity() {
                         host = prefs.consentHost,
                         onAnswer = { accepted ->
                             prefs.consent = if (accepted) "granted" else "denied"
-                            if (accepted) Toast.makeText(this, R.string.consent_done, Toast.LENGTH_LONG).show()
+                            // The first-run steps follow in the app only when they have not been done: the message says what comes next.
+                            val message = when {
+                                !accepted -> R.string.consent_declined
+                                Onboarding.of(this).done() -> R.string.consent_done
+                                else -> R.string.consent_done_steps
+                            }
+                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                             showConsent = false
                         },
                     )

@@ -66,6 +66,8 @@
     <string name="consent_accept">Aceptar</string>
     <string name="consent_decline">Ahora no</string>
     <string name="consent_done">Listo. Puedes volver al PC.</string>
+    <string name="consent_done_steps">Listo. Quedan dos pasos rápidos aquí; después vuelve al PC.</string>
+    <string name="consent_declined">No se ha configurado nada. Para repetirlo, ejecuta adbuddy setup en el PC.</string>
 
     <string name="home_activity">Actividad</string>
     <string name="home_empty">Nada todavía. Aquí aparecerá cada comando adb del agente.</string>
