@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
+	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 )
 
 // activePhone is the phone serve works with. Its serial changes when the
@@ -30,6 +31,14 @@ func (p *activePhone) Runner() adb.Runner {
 }
 
 func (p *activePhone) Serial() string { return p.Runner().Serial }
+
+// Host runs adb's host commands (mdns services, devices): the current runner
+// without the phone's serial.
+func (p *activePhone) Host() pairing.ADB {
+	r := p.Runner()
+	r.Serial = ""
+	return r
+}
 
 func (p *activePhone) Switch(serial string) {
 	p.mu.Lock()

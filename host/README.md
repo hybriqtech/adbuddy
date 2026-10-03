@@ -80,6 +80,21 @@ go test -timeout 20m -count=1 -run TestSkillsReadOnlyOnEmulator ./internal/cli
 
 It fails if the phone says a program or an option does not exist, and it refuses any serial that is not `emulator-*`. The `emulator` workflow runs it too.
 
+### The app on the emulator
+
+`internal/emutest` reaches the app over adb, as the host reaches a phone: the provider answers the shell user, the handshake on stdin reaches it, `BridgeService` goes to the foreground after it, and Cut access closes the emulator's adb until Reactivar brings it back (validations 1, 2, 3 and 6 of the M2 plan). The cut runs inside the app (`CutAccessOnEmulatorTest`, started without waiting for it), so a failure can leave the emulator without adb: `scripts/emulator.sh stop` still stops it. It only runs with `ADBUDDY_EMULATOR_CUT=1`, and only on a development emulator: a run that fails half way leaves `adb_enabled=0` in the AVD, which then boots without adb (delete the AVD's `userdata-qemu.img*` to recover it). The CI does not run it. On the emulator adbd always listens on 5555 (its own adb transport), so the tcpip half shows that the cut closes adbd, not that it closes tcpip mode in particular: on a phone that stays a manual check. It installs the debug APKs, so build them first; with the emulator's variables loaded:
+
+Use the android-34 image (install it with `sdkmanager "system-images;android-34;google_apis;x86_64"`): android-37 does not work for this, its surfaceflinger loops. `stop` needs the same `ADBUDDY_EMU_*` variables as `start`; it waits, for up to 60 s, until the emulator is gone, so a `start` right after it boots a new one (and `start` exits with 3 if the emulator on the port runs another AVD).
+
+```sh
+(cd android && gradle :app:assembleDebug :app:assembleDebugAndroidTest)
+export ADBUDDY_EMU_IMAGE='system-images;android-34;google_apis;x86_64' ADBUDDY_EMU_AVD=adbuddy-dev34 ADBUDDY_EMU_STABLE_SECS=120
+eval "$(scripts/emulator.sh start)"   # from the repository root
+cd host && go test -timeout 15m -count=1 ./internal/emutest
+```
+
+Without `ADBUDDY_EMULATOR_SERIAL` the tests skip; they refuse a serial that is not `emulator-*` and an `ANDROID_ADB_SERVER_PORT` that is unset or adb's default 5037. `TestInstrumentedSuite` also runs the app's instrumented tests (`TokenProviderTest`, `AdbWifiObserverTest`, `LocalesTest`) with `am instrument`, and fails on any failure, missing class or skipped test other than `CutAccessOnEmulatorTest`, which must be skipped there. They uninstall what they installed. The `emulator` workflow is meant to run them (first run pending).
+
 ### Claude Code with a real agent
 
 This test runs the real Claude Code. It spends a few cents and never touches the phone or your `~/.claude` settings:

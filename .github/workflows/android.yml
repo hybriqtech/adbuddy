@@ -43,7 +43,7 @@ jobs:
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" "platforms;android-37.0"
-      - name: "Unit tests, debug build, lint, and the instrumented tests compile (they run on an emulator by hand: see android/README.md)"
+      - name: "Unit tests, debug build, lint, and the instrumented tests compile (emulator.yml runs them)"
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest
       # The screen tests' golden images that came out different (android/README.md, "Screen tests"): verify fails on
       # Windows, compare only reports elsewhere, so it is said in the run's summary too. The folder exists only when

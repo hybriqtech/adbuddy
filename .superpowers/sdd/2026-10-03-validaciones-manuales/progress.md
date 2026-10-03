@@ -1,0 +1,4 @@
+# Ledger — validaciones manuales (rama docs/validaciones-manuales, sin push por orden de f3)
+- Inventario: commit 7519c6f. T1 (mediciones, 12 puntos): commit 1032eb0 (t1-mediciones.md). AVD adbuddy-dev34 limpio, emulador parado.
+- Defectos de producto hallados por T1 (a adjudicar): (a) la notificación de conversación de ADBuddy, al ser la del servicio en primer plano, no puede ser burbuja en API 34 (M3b-5/8, M5c-34, VB-38); (b) shell no puede leer `service.adb.tls.port` (SELinux) → readTLSPort=0 y tailscale_port nunca se guarda (M5b-11/12).
+- PAUSA por uso pedida por f3 (2026-10-03 ~01:30). Reanudar al aviso (~03:50): T2 primero (ticker `dumpsys notification` posible fuga de códigos → 🔴; `cmd notification post` NO sirve para ticker/BigText: usar notificación propia por instrumentado), luego T3, T4, T5, T6; T7/T8 después. Reglas: un subagente a la vez, emulador 5600/5060 propio, apagar y tasklist; no instalar imágenes (android-36 solo con confirmación del usuario).

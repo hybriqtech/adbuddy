@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
@@ -55,18 +58,67 @@ func (f *fakeRemoteSrv) messages() []sentMsg {
 	return append([]sentMsg{}, f.sent...)
 }
 
-// tlsADB answers `getprop service.adb.tls.port`. gate, when set, makes each
-// call wait for it to close before answering; block makes each call wait for
-// its context to end.
-type tlsADB struct {
-	mu    sync.Mutex
-	port  string
-	calls []string
-	gate  chan struct{}
-	block bool
+// rigInstance is the mDNS instance of phoneSerial's connect service.
+const rigInstance = "adb-AAAA1111-bbb"
+
+// mdnsLine is one line of `adb mdns services` for a connect service.
+func mdnsLine(name, addr string) string {
+	return name + "\t" + pairing.ConnectType + "\t" + addr + "\n"
 }
 
-func (a *tlsADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, stdout, _ io.Writer) (int, error) {
+// connADB is the phone as the remote link sees it: the serial adb lists it
+// with, and adb's commands. `devices` lists serial in state (device when
+// empty; "absent" leaves it out); `mdns services` lists mdns; `shell getprop
+// service.adb.tls.port` answers empty with code 0, as on a real phone (SELinux
+// keeps the shell from reading it, validation M5b-11). fail makes every
+// command fail; gate, when set, makes each one wait for it to close before
+// answering; block makes each one wait for its context to end.
+type connADB struct {
+	mu     sync.Mutex
+	serial string
+	state  string
+	mdns   string
+	fail   bool
+	calls  []string
+	gate   chan struct{}
+	block  bool
+}
+
+// newConnADB is the rig's phone, connected by mDNS: port is the one its
+// connect service announces ("" announces none, "fail" makes adb fail).
+func newConnADB(port string) *connADB {
+	a := &connADB{serial: phoneSerial}
+	switch port {
+	case "":
+	case "fail":
+		a.fail = true
+	default:
+		a.mdns = mdnsLine(rigInstance, "192.0.2.10:"+port)
+	}
+	return a
+}
+
+func (a *connADB) Serial() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.serial
+}
+
+func (a *connADB) Host() pairing.ADB { return a }
+
+func (a *connADB) set(serial, mdns string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.serial, a.mdns = serial, mdns
+}
+
+func (a *connADB) setState(state string, fail bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.state, a.fail = state, fail
+}
+
+func (a *connADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, stdout, _ io.Writer) (int, error) {
 	if a.block {
 		<-ctx.Done()
 		return -1, ctx.Err()
@@ -76,15 +128,29 @@ func (a *tlsADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, 
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.calls = append(a.calls, strings.Join(args, " "))
-	if a.port == "fail" {
+	cmd := strings.Join(args, " ")
+	a.calls = append(a.calls, cmd)
+	if a.fail {
 		return 1, errors.New("adb down")
 	}
-	io.WriteString(stdout, a.port+"\n")
+	switch cmd {
+	case "devices":
+		io.WriteString(stdout, "List of devices attached\n")
+		if state := a.state; state != "absent" {
+			if state == "" {
+				state = "device"
+			}
+			io.WriteString(stdout, a.serial+"\t"+state+"\n")
+		}
+	case "mdns services":
+		io.WriteString(stdout, "List of discovered mdns services\n"+a.mdns)
+	case "shell getprop service.adb.tls.port":
+		io.WriteString(stdout, "\n")
+	}
 	return 0, nil
 }
 
-func (a *tlsADB) called() []string {
+func (a *connADB) called() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]string{}, a.calls...)
@@ -172,7 +238,7 @@ type remoteRig struct {
 	r      *remoteLink
 	store  *cfgStore
 	srv    *fakeRemoteSrv
-	adb    *tlsADB
+	adb    *connADB
 	phone  *ctlADB
 	clock  *testClock
 	ctl    *remote.Controller
@@ -185,7 +251,7 @@ type remoteRig struct {
 
 func newRemoteRig(t *testing.T, cfg config.Config, port string) *remoteRig {
 	t.Helper()
-	rig := &remoteRig{adb: &tlsADB{port: port}, srv: &fakeRemoteSrv{}, log: &syncBuffer{}, path: filepath.Join(t.TempDir(), "config.toml"),
+	rig := &remoteRig{adb: newConnADB(port), srv: &fakeRemoteSrv{}, log: &syncBuffer{}, path: filepath.Join(t.TempDir(), "config.toml"),
 		phone: &ctlADB{fail: map[string]bool{}, hang: map[string]bool{}}, clock: &testClock{t: time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)}}
 	rig.ctx, rig.cancel = context.WithCancel(context.Background())
 	t.Cleanup(rig.cancel)
@@ -264,7 +330,7 @@ func TestDeviceInfoSavesTheAddressAndThePort(t *testing.T) {
 	if c.TailscaleIP != "100.101.102.103" || c.TailscalePort != 41234 {
 		t.Fatalf("saved %q %d", c.TailscaleIP, c.TailscalePort)
 	}
-	if calls := g.adb.called(); len(calls) != 1 || calls[0] != "shell getprop service.adb.tls.port" {
+	if calls := g.adb.called(); len(calls) != 1 || calls[0] != "mdns services" {
 		t.Fatalf("adb calls %v", calls)
 	}
 }
@@ -313,29 +379,117 @@ func TestDeviceInfoPortFallbacks(t *testing.T) {
 	}
 }
 
-// Validation 11: what `getprop service.adb.tls.port` says becomes a port only
-// when, trimmed, it is a number from 1 to 65535.
-func TestReadTLSPortParses(t *testing.T) {
+// Validation M5b-11: the phone's shell cannot read service.adb.tls.port
+// (connADB answers it empty with code 0, like a real phone), so the port comes
+// from the connection the host already has: the serial adb lists the phone
+// with (ip:port, only while `adb devices` lists it online), or the phone's
+// connect service in `adb mdns services`. Only a wireless debugging port is
+// saved (1-65535, never the remote mode's 5555, never from a loopback,
+// unspecified or multicast address), the connection's IP never becomes
+// tailscale_ip, and a port that is not known keeps the saved one (40000).
+func TestDeviceInfoTakesThePortFromTheConnection(t *testing.T) {
+	const other = "adb-CCCC2222-ddd"
 	for _, c := range []struct {
-		out  string
-		want int
+		name, serial, mdns string
+		state              string // how `adb devices` lists serial ("" device, "absent" not at all)
+		fail               bool   // adb fails
+		app                int    // the port the app reports (wifiAdbPort)
+		want               int    // 0: the saved port stays
 	}{
-		{"41234", 41234},
-		{"41234", 41234}, // adb on Windows ends lines with CRLF
-		{" 41234 ", 41234},
-		{"1", 1},
-		{"65535", 65535},
-		{"0", 0},
-		{"abc", 0},
-		{"", 0},
-		{"65536", 0},
-		{"70000", 0},
-		{"-5", 0},
+		{name: "connected by a LAN address", serial: "192.0.2.10:41234", want: 41234},
+		{name: "connected over Tailscale", serial: "100.101.102.103:41234", want: 41234},
+		{name: "connected by IPv6", serial: "[2001:db8::10]:41234", want: 41234},
+		{name: "the address wins over the app", serial: "192.0.2.10:41234", app: 41000, want: 41234},
+		{name: "the address is offline", serial: "192.0.2.10:41234", state: "offline"},
+		{name: "the address is unauthorized", serial: "192.0.2.10:41234", state: "unauthorized"},
+		{name: "the address is no longer listed", serial: "192.0.2.10:41234", state: "absent"},
+		{name: "adb devices fails", serial: "192.0.2.10:41234", fail: true},
+		{name: "the app's port when the address is offline", serial: "192.0.2.10:41234", state: "offline", app: 41000, want: 41000},
+		{name: "a loopback forward", serial: "127.0.0.1:15555"},
+		{name: "an IPv6 loopback forward", serial: "[::1]:15555"},
+		{name: "an unspecified address", serial: "0.0.0.0:41234"},
+		{name: "a multicast address", serial: "224.0.0.1:41234"},
+		{name: "an emulator", serial: "emulator-5554"},
+		{name: "through the remote mode's 5555", serial: "100.101.102.103:5555"},
+		{name: "5555 from the app is not wireless debugging", serial: "100.101.102.103:5555", app: 5555},
+		{name: "the app's port when the connection has none", serial: "100.101.102.103:5555", app: 41000, want: 41000},
+		{name: "by mDNS", serial: phoneSerial, mdns: mdnsLine(rigInstance, "192.0.2.10:41234"), want: 41234},
+		{name: "renamed by mDNS: only its own instance", serial: rigInstance + " (2)." + pairing.ConnectType,
+			mdns: mdnsLine(rigInstance, "192.0.2.10:39999") + mdnsLine(rigInstance+" (2)", "192.0.2.10:41234"), want: 41234},
+		{name: "one port on two interfaces", serial: phoneSerial,
+			mdns: mdnsLine(rigInstance, "192.0.2.10:41234") + mdnsLine(rigInstance, "[2001:db8::10]:41234"), want: 41234},
+		{name: "mDNS announces two ports", serial: phoneSerial,
+			mdns: mdnsLine(rigInstance, "192.0.2.10:41234") + mdnsLine(rigInstance, "192.0.2.66:41235")},
+		{name: "mDNS announces 5555", serial: phoneSerial, mdns: mdnsLine(rigInstance, "192.0.2.10:5555")},
+		{name: "mDNS announces a loopback address", serial: phoneSerial, mdns: mdnsLine(rigInstance, "127.0.0.1:41234")},
+		{name: "another phone's service", serial: phoneSerial, mdns: mdnsLine(other, "192.0.2.20:41234")},
+		{name: "the pairing service", serial: phoneSerial, mdns: rigInstance + "\t" + pairing.PairingType + "\t192.0.2.10:41234\n"},
+		{name: "mDNS does not list it", serial: phoneSerial},
+		{name: "by USB", serial: "AAAA1111"},
+		{name: "port out of range", serial: "192.0.2.10:70000"},
+		{name: "port 0", serial: "192.0.2.10:0"},
+		{name: "not an IP", serial: "phone.example:41234"},
 	} {
-		g := newRemoteRig(t, config.Default(), c.out)
-		if got := g.r.readTLSPort(); got != c.want {
-			t.Errorf("getprop says %q: port %d, want %d", c.out, got, c.want)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			g := newRemoteRig(t, withTailscale(), "")
+			g.adb.set(c.serial, c.mdns)
+			g.adb.setState(c.state, c.fail)
+			g.r.onDeviceInfo(bridge.Message{}, bridge.DeviceInfo{TailscaleIP: "100.101.102.104", WifiADBPort: c.app})
+			g.idle(t)
+			want := c.want
+			if want == 0 {
+				want = 40000
+			}
+			if s := g.saved(t); s.TailscaleIP != "100.101.102.104" || s.TailscalePort != want {
+				t.Errorf("saved %s:%d, want 100.101.102.104:%d", s.TailscaleIP, s.TailscalePort, want)
+			}
+			for _, call := range g.adb.called() {
+				if strings.Contains(call, "getprop") {
+					t.Errorf("asked the phone's shell: %q", call)
+				}
+			}
+		})
+	}
+}
+
+// The defect of M5b-11 seen from the watcher: once the port is saved, the
+// phone's Tailscale address at its wireless debugging port is a candidate.
+func TestTheSavedPortIsACandidateAddress(t *testing.T) {
+	g := newRemoteRig(t, config.Default(), "")
+	g.adb.set("192.0.2.10:41234", "")
+	g.r.onDeviceInfo(bridge.Message{}, bridge.DeviceInfo{TailscaleIP: "100.101.102.103"})
+	g.idle(t)
+	if got := candidateAddrs(g.store.Config(), false); !slices.Contains(got, "100.101.102.103:41234") {
+		t.Fatalf("candidates %v", got)
+	}
+}
+
+// serve hands startPhoneLink its activePhone, and the link finds the port
+// through it (the serial it has now, adb without -s for mdns services). The
+// fake phones of other tests have no connection: only the app's port counts.
+func TestConnOfIsTheActivePhone(t *testing.T) {
+	p := newActivePhone(adb.Runner{Path: "adb", ServerPort: 5038, Serial: phoneSerial})
+	c := connOf(p)
+	if c == nil || c.Serial() != phoneSerial {
+		t.Fatalf("conn %v", c)
+	}
+	p.Switch("100.101.102.103:41234")
+	if c.Serial() != "100.101.102.103:41234" {
+		t.Fatalf("serial after a switch %q", c.Serial())
+	}
+	if h, ok := c.Host().(adb.Runner); !ok || h != (adb.Runner{Path: "adb", ServerPort: 5038}) || p.Serial() != "100.101.102.103:41234" {
+		t.Fatalf("host %#v, phone %q", c.Host(), p.Serial())
+	}
+	if c := connOf(&appPhone{}); c != nil {
+		t.Fatalf("a fake phone has a connection: %v", c)
+	}
+	g := newRemoteRig(t, config.Default(), "")
+	g.r = newRemoteLink(g.ctx, g.store, g.ctl, nil, g.log)
+	g.r.setServer(g.srv)
+	g.r.onDeviceInfo(bridge.Message{}, bridge.DeviceInfo{TailscaleIP: "100.101.102.103", WifiADBPort: 41000})
+	g.idle(t)
+	if s := g.saved(t); s.TailscaleIP != "100.101.102.103" || s.TailscalePort != 41000 {
+		t.Fatalf("without a connection saved %s:%d", s.TailscaleIP, s.TailscalePort)
 	}
 }
 
@@ -366,9 +520,7 @@ func TestDeviceInfoWithTheSameValueDoesNotRewrite(t *testing.T) {
 		t.Fatalf("saved %d times, want 1", n)
 	}
 	// A new port is a change.
-	g.adb.mu.Lock()
-	g.adb.port = "41235"
-	g.adb.mu.Unlock()
+	g.adb.set(phoneSerial, mdnsLine(rigInstance, "192.0.2.10:41235"))
 	g.r.onDeviceInfo(bridge.Message{}, info)
 	g.idle(t)
 	if c := g.saved(t); g.saves.Load() != 2 || c.TailscalePort != 41235 {
@@ -713,7 +865,7 @@ func TestStillOnNotice(t *testing.T) {
 
 // Task 4 findings.
 
-func TestReadTLSPortFollowsTheLinkContext(t *testing.T) {
+func TestTLSPortFollowsTheLinkContext(t *testing.T) {
 	g := newRemoteRig(t, config.Default(), "")
 	g.adb.block = true
 	g.cancel()

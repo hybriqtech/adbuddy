@@ -89,6 +89,21 @@ tasks.withType<Test>().configureEach {
     systemProperty("roborazzi.test.compare", (screens == "compare").toString())
 }
 
+// The instrumented tests never run through Gradle's connected* tasks (plan M2.5b, rulings de la Tarea 2): AGP 9.4.1's test engine (UTP)
+// runs `adb` in a Gradle worker with an empty environment on Windows, so it always talks to the default adb server
+// (5037), which on a developer PC is the one that holds the user's phone, and it fails silently (BUILD SUCCESSFUL, 0
+// tests) on an emulator behind another server. They run with `am instrument` against one emulator and its own adb
+// server (host/internal/emutest, scripts/emulator.sh). Checked when the task graph is built, before any task runs and
+// so before anything is installed (the install tasks that connected tasks depend on would install on every device).
+gradle.taskGraph.whenReady {
+    val connected = allTasks.filter { it.name.startsWith("connected") }.map { it.path }
+    check(connected.isEmpty()) {
+        "connected tests are not run through Gradle (they would reach the adb server of the user's phone): " +
+            "build the APKs (:app:assembleDebug :app:assembleDebugAndroidTest) and run them with " +
+            "`am instrument` on the emulator (android/README.md); refused: $connected"
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

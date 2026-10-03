@@ -31,7 +31,7 @@ type Config struct {
 	Language       string   `toml:"language"`        // "en" or "es"; empty = from LANG
 	ChatPort       int      `toml:"chat_port"`       // port of the app channel on 127.0.0.1 (PC and phone); 0 = chosen on first use
 	TailscaleIP    string   `toml:"tailscale_ip"`    // the phone's Tailscale IPv4, as its app reported it; empty = unknown
-	TailscalePort  int      `toml:"tailscale_port"`  // wireless debugging port read from the phone over the same connection; 0 = unknown
+	TailscalePort  int      `toml:"tailscale_port"`  // wireless debugging port, from the host's connection to the phone (its ip:port or its mDNS service); 0 = unknown
 	RemoteUntil    string   `toml:"remote_until"`    // RFC 3339: remote mode (adb tcpip 5555) is on until then; empty = off
 }
 
