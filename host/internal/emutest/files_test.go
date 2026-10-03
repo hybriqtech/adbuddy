@@ -37,6 +37,8 @@ import (
 //	count-part    the cache test measures with the .part included          (TestCacheTrimsTheOldestAndKeepsTheParts)
 //	no-trigger    no download comes by the channel, so nothing trims       (TestCacheTrimsTheOldestAndKeepsTheParts)
 //	reverse-age   the oldest cache file is made the newest                 (TestCacheTrimsTheOldestAndKeepsTheParts)
+//	inject-request the page asks for an image outside TermWebPolicy.PREFIX (TestTerminalWorksOffline)
+//	app-traffic   the app's uid sends bytes to the PC before the second netstats reading (TestTerminalWorksOffline)
 //
 //	ADBUDDY_EMUTEST_MUTATE=corrupt-byte go test -count=1 -run TestUploadSendsTheRealBytes ./internal/emutest
 //
@@ -54,7 +56,7 @@ func mutation(t *testing.T, taken ...string) string {
 	case "":
 		return ""
 	case "corrupt-byte", "skip-frame", "ready-zero", "corrupt-frame", "ignore-offset", "heal-on-retry",
-		"pdf-as-octet", "expect-write", "count-part", "no-trigger", "reverse-age":
+		"pdf-as-octet", "expect-write", "count-part", "no-trigger", "reverse-age", "inject-request", "app-traffic":
 	default:
 		t.Fatalf("%s=%q: unknown mutation", mutateEnv, m)
 	}
