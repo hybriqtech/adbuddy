@@ -135,7 +135,7 @@ fun NotificationAccessContent(
                         Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
                     ) {
-                        if (effective != Effective.ON) OutlinedButton(onClick = onSkip) { Text(stringResource(R.string.onboarding_skip)) }
+                        if (effective != Effective.ON) SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip)
                         Button(onClick = onDone) { Text(stringResource(R.string.onboarding_done)) }
                     }
                 }

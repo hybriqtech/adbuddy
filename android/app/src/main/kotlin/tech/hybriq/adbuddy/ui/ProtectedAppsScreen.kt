@@ -3,7 +3,6 @@ package tech.hybriq.adbuddy.ui
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,7 +28,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -198,7 +196,7 @@ fun ProtectedAppsContent(
                         )
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                        if (step != null) OutlinedButton(onClick = onSkip, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) { Text(stringResource(R.string.onboarding_skip), color = MaterialTheme.colorScheme.onSurface) }
+                        if (step != null) SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip)
                         Button(onClick = onSave, enabled = canSave) {
                             Text(stringResource(if (proposal) R.string.protected_confirm else R.string.protected_save))
                         }
