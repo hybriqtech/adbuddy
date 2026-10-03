@@ -28,6 +28,8 @@ Sustituir la línea 158 por:
 - **M5c-32 (b): con la app muerta, revocar no borraba la marca. CERRADO** (rama `fix/listener-consent-after-revoke`, plan `2026-10-03-m5c-reconfirmar-al-enlazar.md`; ver `pendientes-m3-m5.md`, «CERRADA: consentimiento del listener (M5c-32 b)»). Medido en la API 34 (2026-10-03, `TestRevokingClearsTheMark/b_dead`) antes del arreglo; hoy el test exige `mark=false` y `NotConfirmed`.
 ```
 
+Las líneas 164-165 («Escenario realista…» y «Atenuantes…») se ponen en pasado: «Escenario que había (revisor opus): …; la puerta leía sin otro toque» y «Atenuantes que había: …», o se borran, porque el hueco está cerrado.
+
 Y en las viñetas de detalle que siguen (líneas 163 y 166), sustituir «El arreglo barato funcionaría aquí: … El test de la (b) fija hoy el comportamiento como riesgo conocido.» por «El arreglo (borrar la marca también en `onListenerConnected`) se aplicó: cuesta un toque tras cada reenlace (reinicio, actualización, `kill`, y también cada `am instrument` de los tests) y cambió lo que esperan `TestTheListenerStaysBound` y M5c-29; `b_dead` exige ahora `mark=false`.» y la línea 166 por «Arreglo y tests: en «CERRADA: consentimiento del listener (M5c-32 b)» de `pendientes-m3-m5.md`.»
 
 ### 2b. Fila M5c-29 (línea 277)
