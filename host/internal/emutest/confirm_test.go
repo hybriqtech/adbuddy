@@ -345,7 +345,7 @@ func TestAQuestionExpires(t *testing.T) {
 	if !poll(45*time.Second, func() bool {
 		return confirmRecord(l.e.shell(t, "dumpsys notification --noredact"), r.ID) == ""
 	}) {
-		t.Error("the question is still notified 25 s after its expiry")
+		t.Error("the question is still notified 45 s after its 20 s expiry was set")
 	}
 	if m, ok := l.take(bridge.TypeConfirmReply, time.Second); ok {
 		t.Errorf("an expired question answered: %s", m.Payload)
@@ -367,8 +367,16 @@ func (e *emu) noLock(ctx context.Context) (bool, string) {
 // an emulator left with a PIN would lock every later test out.
 func (e *emu) lockWithPIN(t *testing.T) {
 	t.Helper()
-	if ok, out := e.noLock(e.ctx); !ok {
-		t.Fatalf("the emulator already has a lock credential (%s): clear it by hand before these tests", out)
+	if ok, _ := e.noLock(e.ctx); !ok {
+		// A leftover PIN of a run that died by -timeout: clear only the test's own.
+		_, _, _, _ = e.adb.Output(e.ctx, "shell", "locksettings clear --old "+testPIN)
+		if ok, out := e.noLock(e.ctx); !ok {
+			t.Fatalf("the emulator already has a lock credential (%s) that is not the test's PIN: clear it by hand before these tests", out)
+		}
+	}
+	// The cleanup needs up to 2 min and the test itself some minutes.
+	if d, ok := t.Deadline(); ok && time.Until(d) < 4*time.Minute {
+		t.Skipf("only %s left before the test timeout: not setting a PIN that the cleanup might not get to clear", time.Until(d).Round(time.Second))
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(e.ctx), 2*time.Minute)
@@ -612,6 +620,14 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 	// unlocked notification shows ("Connected to emutest").
 	prevPrivate := e.shell(t, "settings get secure lock_screen_allow_private_notifications")
 	e.restoreAtCleanup(t, "secure", "lock_screen_allow_private_notifications", prevPrivate)
+	// Positive control: with the setting on, the lock screen does show the PC's
+	// name; without it, "emutest" being absent below would prove nothing.
+	e.shell(t, "settings put secure lock_screen_allow_private_notifications 1")
+	e.lock(t)
+	e.waitNodes(t, "the PC's name on the lock screen with private notifications allowed", 10*time.Second, func(nodes []uiNode) bool {
+		return slices.ContainsFunc(nodes, func(n uiNode) bool { return strings.Contains(n.Text+n.Desc, "emutest") })
+	})
+	e.unlock(t)
 	e.shell(t, "settings put secure lock_screen_allow_private_notifications 0")
 	e.lock(t)
 	nodes = e.waitNodes(t, "Connected on the lock screen", 10*time.Second, func(nodes []uiNode) bool { return hasText(nodes, "Connected") })
@@ -637,7 +653,7 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 	}) {
 		t.Fatalf("the conversation's notification does not say %q 20 s after the permission.request:\n%s", txtAsking, rec)
 	}
-	if !strings.Contains(rec, "importance=2") {
+	if !lowImportanceRe.MatchString(rec) {
 		t.Errorf("the agent's question is not on a silent (LOW) channel:\n%s", rec)
 	}
 	if strings.Contains(rec, secret) {
@@ -655,6 +671,10 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 		t.Error("the lock screen shows the agent's question")
 	}
 }
+
+// lowImportanceRe anchors the channel's importance field (IMPORTANCE_LOW = 2)
+// in a notification record: "importance=2" or "mImportance=2", not "…=20".
+var lowImportanceRe = regexp.MustCompile(`(?:^|[\s,{])m?[Ii]mportance=(?:2|LOW)\b`)
 
 // spanishExpiryRe is the last line of a question in Spanish: "Caduca: 17:05:03".
 var spanishExpiryRe = regexp.MustCompile(`\nCaduca: \d{1,2}:\d{2}:\d{2}$`)
