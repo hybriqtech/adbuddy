@@ -23,7 +23,7 @@ const instrumentTimeout = 5 * time.Minute
 
 // requiredClasses must show up in the output: a suite that silently lost one
 // of them is not green.
-// NotificationListenerOnEmulatorTest only reports its skip here: it is
+// NotificationListenerOnEmulatorTest only reports its two skips here: it is
 // required so that a build that lost it does not go unseen.
 var requiredClasses = []string{"TokenProviderTest", "AdbWifiObserverTest", "LocalesTest", "NotificationListenerOnEmulatorTest"}
 
@@ -35,8 +35,8 @@ var requiredClasses = []string{"TokenProviderTest", "AdbWifiObserverTest", "Loca
 // GuardOnEmulatorTest holds a heads-up or a bubble for the guard's tests
 // (guard_test.go), with -e adbuddyGuard; NotificationListenerOnEmulatorTest
 // reads the listener and the gate for listener_test.go, with -e
-// adbuddyListener gate: this suite passes none of them.
-var allowedSkips = map[string]bool{cutTest: true, tickerTest: true, guardTest: true, listenerGateTest: true}
+// adbuddyListener gate or content: this suite passes none of them.
+var allowedSkips = map[string]bool{cutTest: true, tickerTest: true, guardTest: true, listenerGateTest: true, listenerContentTest: true}
 
 // tickerTest is the app's instrumented half of TestNotificationReadsAndTheCodes
 // (android/app/src/androidTest/…/TickerOnEmulatorTest.kt).
@@ -108,14 +108,14 @@ func parseInstrument(out string) (tests int, classes, skipped []string, failed b
 }
 
 // minInstrumentedTests is how many tests the app's APK has (the cut, the
-// ticker, the guard's and the listener's gate, skipped here, included): fewer
+// ticker, the guard's and the listener's two, skipped here, included): fewer
 // means a class was dropped from the run.
-const minInstrumentedTests = 19
+const minInstrumentedTests = 20
 
 func enoughInstrumentedTests(n int) bool { return n >= minInstrumentedTests }
 
 func TestEnoughInstrumentedTests(t *testing.T) {
-	for n, want := range map[int]bool{0: false, 18: false, 19: true, 20: true} {
+	for n, want := range map[int]bool{0: false, 19: false, 20: true, 21: true} {
 		if got := enoughInstrumentedTests(n); got != want {
 			t.Errorf("%d tests: enough = %v, want %v", n, got, want)
 		}

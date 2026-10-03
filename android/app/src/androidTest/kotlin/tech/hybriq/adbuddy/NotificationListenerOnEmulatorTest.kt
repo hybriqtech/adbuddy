@@ -130,6 +130,125 @@ class NotificationListenerOnEmulatorTest {
         out.putString("$KEY.${prefix}markAfter", consent.confirmed().toString())
     }
 
+    @Test fun content() {
+        val args = InstrumentationRegistry.getArguments()
+        assumeTrue("only host/internal/emutest runs it", args.getString(ARG) == "content")
+        onlyOnAnEmulator()
+        val nm = context.getSystemService(NotificationManager::class.java)
+        assertTrue("notifications are off for the app: the host grants POST_NOTIFICATIONS first", nm.areNotificationsEnabled())
+        // After the force-stop of am instrument the system binds it again 10 s later (the binding died).
+        assertTrue("the listener is not bound 30 s after the start: the host allows it first", awaitConnected(true, 30_000L))
+        // Low importance: no heads-up nor sound for what this test posts.
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Listener test", NotificationManager.IMPORTANCE_LOW))
+        val guarded = ProtectedApps.of(context)::isProtected
+        try {
+            val before = System.currentTimeMillis()
+            post(nm, BIG_ID, builder().setContentTitle(BIG_TITLE).setContentText(SHORT_TEXT).setStyle(Notification.BigTextStyle().bigText(BIG_TEXT)).build())
+            post(nm, LONG_ID, builder().setContentTitle(BIG_TITLE).setContentText(SHORT_TEXT).setStyle(Notification.BigTextStyle().bigText(LONG_TEXT)).build())
+            // A group chat: MessagingStyle fills EXTRA_TEXT with the last message itself (Notification.MessagingStyle,
+            // as T1-2 saw with `cmd notification post -S messaging`); an app that leaves it out is the case.
+            val ana = Person.Builder().setName("Ana").build()
+            val chat = builder().setStyle(
+                Notification.MessagingStyle(Person.Builder().setName("Me").build())
+                    .setConversationTitle(CHAT_TITLE)
+                    .setGroupConversation(true)
+                    .addMessage(CHAT_MESSAGE, before, ana),
+            ).build()
+            chat.extras.remove(Notification.EXTRA_TEXT)
+            post(nm, CHAT_ID, chat)
+            post(nm, SECRET_ID, builder().setContentTitle(SECRET_TITLE).setContentText(SECRET_TEXT).setVisibility(Notification.VISIBILITY_SECRET).build())
+            post(nm, ONGOING_ID, builder().setContentTitle(ONGOING_TITLE).setContentText("Still going").setOngoing(true).build())
+            post(nm, PLAIN_ID, builder().setContentTitle(PLAIN_TITLE).setContentText(PLAIN_TEXT).build())
+            // The 🔴 question as the app posts it (ConfirmNotifier, the real builder), here without the PC connected.
+            ConfirmNotifier.sync(context, BridgeState(pending = listOf(QUESTION)))
+            val after = System.currentTimeMillis()
+
+            val raws = awaitRead("the six notifications and the question") { r -> MINE.all { id -> mine(r, id) != null } && question(r) != null }
+            val chatPosted = nm.activeNotifications.single { it.id == CHAT_ID }
+            assertEquals("the chat notification still has EXTRA_TEXT once posted: the case is not tested", null,
+                chatPosted.notification.extras.getCharSequence(Notification.EXTRA_TEXT))
+
+            // BigText: the whole big text, never the short line; cut to 1024 code points in the report.
+            val big = mine(raws, BIG_ID)!!
+            assertFalse("a plain notification of the app's own channel reads as secret: everything would come out empty", big.secret)
+            assertEquals("BigText: the listener did not read the whole big text", BIG_TEXT, big.text)
+            val bigOut = asOther(big, guarded)
+            assertEquals(BIG_TITLE, bigOut.title)
+            assertEquals("BigText in the report: not the whole big text", BIG_TEXT, bigOut.text)
+            // Longer than 1024: Android's Notification keeps its first 1024 characters (measured on API 34), the
+            // same limit as the report's: the listener reads those 1024 and the report keeps them all.
+            val long = mine(raws, LONG_ID)!!
+            assertEquals("a big text of ${LONG_TEXT.length}: not its first ${UiLimits.MAX_NOTIFICATION_TEXT} characters", LONG_TEXT.substring(0, UiLimits.MAX_NOTIFICATION_TEXT), long.text)
+            assertEquals(LONG_TEXT.substring(0, UiLimits.MAX_NOTIFICATION_TEXT), asOther(long, guarded).text)
+
+            // MessagingStyle without EXTRA_TEXT: the text comes out empty (the messages are not read), never the message.
+            val chatRead = mine(raws, CHAT_ID)!!
+            assertEquals("MessagingStyle without EXTRA_TEXT: text", "", chatRead.text)
+            assertFalse("the message's text reached the listener's title", chatRead.title.contains(CHAT_MESSAGE))
+            assertEquals("", asOther(chatRead, guarded).text)
+
+            // VISIBILITY_SECRET: secret in the read, and empty in the report whatever the app.
+            val secret = mine(raws, SECRET_ID)!!
+            assertTrue("a VISIBILITY_SECRET notification is not read as secret", secret.secret)
+            val secretOut = asOther(secret, guarded)
+            assertEquals("the SECRET notification's title left the phone", "", secretOut.title)
+            assertEquals("the SECRET notification's text left the phone", "", secretOut.text)
+            assertTrue("the SECRET notification's key (with its tag) left the phone: ${secretOut.key.length} chars", secretOut.key.startsWith("hidden-"))
+
+            // ongoing and postedAt: the system's post time, in UTC, to the second.
+            val ongoing = mine(raws, ONGOING_ID)!!
+            assertTrue("an ongoing notification read as not ongoing", ongoing.ongoing)
+            assertFalse("a plain notification read as ongoing", mine(raws, PLAIN_ID)!!.ongoing)
+            assertTrue("ongoing in the report", asOther(ongoing, guarded).ongoing)
+            for (id in MINE) {
+                val n = mine(raws, id)!!
+                assertTrue("notification $id: postedAt ${n.postedAtMs} is not between $before and $after (+1 s)", n.postedAtMs in before..after + 1000)
+                val at = asOther(n, guarded).postedAt
+                assertTrue("notification $id: postedAt $at is not UTC", at.endsWith("Z"))
+                assertEquals("notification $id: postedAt $at is not its post time to the second", n.postedAtMs / 1000, Instant.parse(at).epochSecond)
+            }
+            val plain = asOther(mine(raws, PLAIN_ID)!!, guarded)
+            assertEquals(PLAIN_TITLE, plain.title)
+            assertEquals(PLAIN_TEXT, plain.text)
+
+            // The 🔴 question has words to hide (the read has them), and the real report leaves them out, like
+            // everything of ADBuddy's.
+            assertTrue("the question's read has no title: nothing to hide", question(raws)!!.title.contains(QUESTION.title))
+            assertTrue("these reads already pass ${UiLimits.MAX_NOTIFICATIONS}: the rest of the test needs fewer", raws.size <= UiLimits.MAX_NOTIFICATIONS)
+            val report = NotificationReport.build(raws, guarded)
+            assertFalse("${raws.size} notifications came out truncated", report.truncated)
+            val adbuddy = report.notifications.filter { it.`package` == Packages.ADBUDDY }
+            assertEquals("ADBuddy's notifications in the report", raws.count { it.pkg == Packages.ADBUDDY }, adbuddy.size)
+            for (n in adbuddy) {
+                assertTrue("an ADBuddy notification came out with its title, text or key", n.title.isEmpty() && n.text.isEmpty() && n.key.startsWith("hidden-"))
+            }
+            // The host's fillers (`cmd notification post`, com.android.shell): another app's come out with their words.
+            val shell = report.notifications.filter { it.`package` == "com.android.shell" && it.title == FILLER_TITLE }
+            assertTrue("no filler of the host's (cmd notification post -t '$FILLER_TITLE') in the report with its text", shell.isNotEmpty() && shell.all { it.text.startsWith("filler ") })
+
+            // More than 50 at once: the newest 50 and truncated. A package may have 50 at most (NotificationManagerService):
+            // the host's fillers make up the rest, so this app posts 49 at most.
+            var next = FLOOD_ID
+            var all = raws
+            while (all.size <= UiLimits.MAX_NOTIFICATIONS) {
+                assertTrue("50 notifications are not reached with 49 of this app's own (${all.size} now)", all.count { it.pkg == Packages.ADBUDDY } < 49)
+                post(nm, next++, builder().setContentTitle("Filler of the listener test").setContentText("filler").build())
+                // Under the system's rate of 5 a second per app, or it drops them.
+                SystemClock.sleep(300)
+                all = AgentNotificationListener.read().orEmpty()
+            }
+            all = awaitRead("more than ${UiLimits.MAX_NOTIFICATIONS}") { it.size > UiLimits.MAX_NOTIFICATIONS }
+            val full = NotificationReport.build(all, guarded)
+            assertTrue("${all.size} notifications did not come out truncated", full.truncated)
+            assertEquals("${all.size} notifications: the report's size", UiLimits.MAX_NOTIFICATIONS, full.notifications.size)
+            assertEquals("the report is not the newest first", full.notifications.sortedByDescending { it.postedAt }, full.notifications)
+        } finally {
+            nm.cancelAll()
+            ConfirmNotifier.clear(context)
+            nm.deleteNotificationChannel(CHANNEL)
+        }
+    }
+
     private fun onlyOnAnEmulator() {
         // Never on a phone, whoever starts it: the emulator's hardware is ranchu (goldfish before it).
         assertTrue("not an emulator (Build.HARDWARE=${Build.HARDWARE}): the listener's tests only run on one",

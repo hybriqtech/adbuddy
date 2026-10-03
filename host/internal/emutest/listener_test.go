@@ -536,3 +536,35 @@ func TestTheListenerGateStates(t *testing.T) {
 		t.Error("with the app's process dead, the listener is no longer in enabled_notification_listeners")
 	}
 }
+
+// fillerCommand posts the host's five fillers of another app
+// (com.android.shell), one by one under the system's rate of 5 a second per app.
+const fillerCommand = `for i in 1 2 3 4 5; do cmd notification post -t '` + fillerTitle + `' t6fill$i "filler $i" >/dev/null; sleep 0.3; done`
+
+// M5c-26: what the listener reads of the app's own notifications and what
+// the report makes of it (listenerContentTest), with five fillers of another
+// app posted by the host (`cmd notification post`). The fillers go with a
+// force-stop of com.android.shell, which cancels its notifications.
+func TestTheListenerContent(t *testing.T) {
+	e := listenerEmu(t)
+	e.allowListener(t, true)
+	e.atCleanup(t, "shell", "am force-stop com.android.shell")
+	e.shell(t, fillerCommand)
+	ctx, cancel := context.WithTimeout(e.ctx, instrumentTimeout)
+	defer cancel()
+	out, errOut, code, err := e.adb.Output(ctx, "shell", "am instrument -w -r -e class "+listenerContentTest+" -e adbuddyListener content "+instrumentRunner)
+	out = strings.ReplaceAll(out, "\r", "")
+	if err != nil || code != 0 {
+		t.Fatalf("am instrument: exit %d, %v: %s\n%s", code, err, strings.TrimSpace(errOut), out)
+	}
+	if tests, _, _, failed := parseInstrument(out); failed || tests != 1 {
+		t.Fatalf("%s did not pass (%d tests ran):\n%s", listenerContentTest, tests, out)
+	}
+	if list := e.shell(t, "cmd notification list"); strings.Contains(list, "|"+phoneapp.Package+"|74") {
+		t.Errorf("notifications of the test are still posted after it:\n%s", list)
+	}
+	e.shell(t, "am force-stop com.android.shell")
+	if list := e.shell(t, "cmd notification list"); strings.Contains(list, "t6fill") {
+		t.Errorf("the host's fillers are still posted after force-stop of com.android.shell:\n%s", list)
+	}
+}
