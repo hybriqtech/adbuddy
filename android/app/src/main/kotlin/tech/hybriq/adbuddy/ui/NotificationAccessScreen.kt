@@ -131,18 +131,14 @@ fun NotificationAccessContent(
         bottomBar = {
             if (step != null) {
                 Surface(tonalElevation = 3.dp) {
-                    Column(
-                        Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        if (effective == Effective.ON) {
-                            ActionFooter(main = { m -> Button(onClick = onDone, modifier = m) { Text(stringResource(R.string.onboarding_done)) } })
-                        } else {
-                            // Nothing is on yet: "Done" would only look like it. The way out says so, and where to turn it on later.
-                            Text(stringResource(R.string.access_later_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            ActionFooter(main = { m -> SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip, m) })
-                        }
-                    }
+                    ActionFooter(
+                        modifier = Modifier.navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
+                        main = { m ->
+                            // Nothing is on yet: "Done" would only look like it.
+                            if (effective == Effective.ON) Button(onClick = onDone, modifier = m) { Text(stringResource(R.string.onboarding_done)) }
+                            else SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip, m)
+                        },
+                    )
                 }
             }
         },
@@ -161,6 +157,14 @@ fun NotificationAccessContent(
                 if (confirmed) OutlinedButton(onClick = onWithdraw) { Text(stringResource(R.string.access_withdraw)) }
             }
             FilledTonalButton(onClick = onOpen) { Text(stringResource(R.string.access_open)) }
+            // The way out of the step says it is later, and where to turn it on.
+            if (step != null && effective != Effective.ON) {
+                Text(
+                    stringResource(R.string.access_later_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (!checking && (effective == Effective.OFF || effective == Effective.UNKNOWN)) {
                 Text(
                     stringResource(R.string.access_restricted_hint),

@@ -183,7 +183,7 @@
     <string name="access_withdraw">Que el agente deje de leerlas</string>
     <string name="access_open">Abrir los ajustes del sistema</string>
     <string name="access_restricted_hint">Si el interruptor sale en gris, abre la Información de la app de ADBuddy, toca los tres puntos y elige \"Permitir ajustes restringidos\".</string>
-    <string name="access_later_hint">Podrás activarlo después en los ajustes de ADBuddy (menú ⋮), en Acceso a las notificaciones.</string>
+    <string name="access_later_hint">Podrás activarlo luego en Ajustes de ADBuddy, en Acceso a las notificaciones.</string>
     <string name="menu_settings">Ajustes</string>
     <string name="settings_title">Ajustes</string>
     <string name="settings_protected_proposed">Lista propuesta (%1$d). Revísala y confírmala.</string>
