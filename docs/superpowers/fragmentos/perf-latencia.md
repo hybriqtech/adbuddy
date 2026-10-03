@@ -1,0 +1,7 @@
+## Latencia del agente (`perf/latencia`)
+
+Fila para `pendientes-m3-m5.md`. Plan: `docs/superpowers/plans/2026-10-03-latencia.md` e `…-latencia-impl.md`.
+
+- **Hecho:** `tap --screen`, `type --screen` y `screen --settle` (el daemon sondea el `dump` hasta que dos lecturas iguales pasan `settleMin` y devuelve la pantalla, cada lectura con la misma guarda que `screen`; una lectura bloqueada tras un tap deja la nota «la acción ya se hizo, no la repitas» y sale 0); plantillas del agente (`@NOTES.md`, encadenar, `adb crudo && screen --settle`); `--model`/`--effort` opcionales en `adbuddy serve` (por defecto los del usuario). Banco: tests con `ADBUDDY_LATENCY=1` (`latbench`, `emutest/latency*_test.go`, `cmd/adbuddy/latency*_test.go`). Resultado: turnos 6,4 → 3,8; el modelo no cambia la latencia.
+- **Pendiente con dispositivo (emulador y móvil real con permiso):** medir el arnés de dispositivo (etapas de la guarda); P4 consultas de la guarda en paralelo; P5 `foreground` ligero en la app (`Screen.windows()` copia todo el árbol de todas las ventanas); P6 cliente del protocolo adb sin proceso por orden; ajustar `settleFirst/Gap/Min/Max` con transiciones reales (hoy cada `--screen` cuesta ≥0,5 s aunque se asiente al instante); comprobar la nota de bloqueo con una notificación entrante tras abrir una app.
+- **No hacer:** captura en flujo (`screenrecord`/scrcpy) para el agente; caché de primer plano (abre un hueco de la guarda).
