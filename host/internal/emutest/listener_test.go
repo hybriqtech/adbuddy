@@ -341,11 +341,61 @@ func (e *emu) pidNow() string {
 	return pid
 }
 
+// markTrueRe is the user's mark set, as SharedPreferences writes it in
+// shared_prefs/notification_consent.xml (NotificationConsent's KEY).
+var markTrueRe = regexp.MustCompile(`<boolean\s+name="confirmed"\s+value="true"\s*/>`)
+
+// markInPrefs reports whether the preferences file xml holds the user's mark
+// set. No file, or no key, is no mark.
+func markInPrefs(xml string) bool { return markTrueRe.MatchString(xml) }
+
+func TestMarkInPrefs(t *testing.T) {
+	for _, c := range []struct {
+		xml  string
+		want bool
+	}{
+		{"<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n    <boolean name=\"confirmed\" value=\"true\" />\n</map>\n", true},
+		{"<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n    <boolean name=\"confirmed\" value=\"false\" />\n</map>\n", false},
+		{"<map><boolean name=\"other\" value=\"true\" /></map>", false},
+		{"", false},
+	} {
+		if got := markInPrefs(c.xml); got != c.want {
+			t.Errorf("markInPrefs(%q) = %v, want %v", c.xml, got, c.want)
+		}
+	}
+}
+
+// markOnDisk reports the user's mark as the app's own file holds it (run-as:
+// the debug build allows it), WITHOUT starting or restarting the app's
+// process. That is the way to see whether something cleared the mark: every
+// gateRead restarts the process (am instrument), the system binds the
+// listener again inside it and that binding clears the mark
+// (onListenerConnected), whatever happened before. revoke() writes with
+// commit(), and confirm()'s apply() is on disk once confirmOnScreen returns.
+func (e *emu) markOnDisk(t *testing.T) bool {
+	t.Helper()
+	return markInPrefs(e.shell(t, "run-as "+phoneapp.Package+" cat shared_prefs/notification_consent.xml 2>/dev/null; true"))
+}
+
+// waitMarkCleared waits up to 10 s for the app's file to lose the user's mark
+// (the listener's callback runs a moment after the system binds or unbinds
+// it), and fails the step if it does not.
+func (e *emu) waitMarkCleared(t *testing.T, step string) {
+	t.Helper()
+	if !poll(10*time.Second, func() bool { return !e.markOnDisk(t) }) {
+		t.Errorf("%s: the user's mark is still set in the app's file 10 s later (no new tap was made)", step)
+	}
+}
+
 // M5c-32: revoking the access clears the user's mark even when nobody is
-// looking (no screen open, no `adbuddy notifications`). (a) With the app
-// alive: the listener is unbound in a live process and clears the mark
-// itself (onListenerDisconnected, onDestroy). (b) With the app dead: the
-// process is gone when the access is revoked.
+// looking (no screen open, no `adbuddy notifications`), and allowed again it
+// takes a new tap. (a) With the app alive: the listener is unbound in a live
+// process and clears the mark itself (onListenerDisconnected, onDestroy).
+// (b) With the app dead: the process is gone when the access is revoked, and
+// the restart the system had scheduled binds the listener again without
+// unbinding it (measured on API 34): the new binding clears the mark
+// (onListenerConnected). The mark is read from the app's file (markOnDisk)
+// and over the real channel, never by a gateRead, which restarts the process.
 func TestRevokingClearsTheMark(t *testing.T) {
 	t.Run("a_alive", func(t *testing.T) {
 		e := listenerEmu(t)
