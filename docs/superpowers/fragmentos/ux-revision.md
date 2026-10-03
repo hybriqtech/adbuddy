@@ -65,3 +65,35 @@ C13 (tarjeta compacta del modo remoto apagado: pide diseño propio); indicador d
 ### Validaciones manuales pendientes (Pixel)
 
 Ninguna se pide al usuario ahora: el banner del chat con TalkBack (se anuncia una vez al aparecer), los avisos `consent_done_steps` y `consent_declined` en el flujo real de `adbuddy setup`, y que `BridgePrefs.link` se rellena al terminar `setup` y el estado "sin configurar" desaparece con la app abierta. Lo demás está cubierto por tests de semántica y por las imágenes en la JVM.
+
+## P3 · chat, adjuntos, terminal y diario
+
+### Qué cambió
+
+- Task 1, "Parar" (C5): con el agente trabajando y la barra vacía (sin texto ni adjunto listo), el botón de enviar pasa a ser "Parar" y envía `agent.interrupt`. Con texto o un adjunto listo sigue siendo "Enviar". Tras pulsarlo queda deshabilitado 3 s y se rehabilita antes si `working` cambia.
+- Task 2, chips de adjuntos (C17, C23): un adjunto que se está preparando muestra una barra de progreso (indeterminada si aún no se sabe el tamaño); el botón de quitar tiene tamaño táctil de 48 dp y el reintento de un adjunto fallido está solo en la etiqueta, nunca en la X.
+- Task 3, terminal sin conexión (C18): el terminal avisa de que no hay conexión con el PC en vez de quedarse mudo, y las teclas rápidas se desactivan.
+- Task 4, avisos largos (C11): `notify` elige la duración por el texto: los largos duran más y los que llevan acción no desaparecen solos (botón de cerrar).
+- Task 5, diario (C26): el filtro y cada entrada dicen el nivel con palabras (`level_chip`), cada entrada lleva su hora (solo la hora si es de hoy, fecha y hora si no) y hay dos vacíos distintos (sin entradas / ningún aviso de ese nivel).
+- Task 6, burbuja con el terminal plegado (C12): la burbuja arranca con el terminal plegado (es de ~600 dp de alto); el chat a pantalla completa lo sigue desplegando por defecto (blindado por un test del flujo).
+- Task 7, limpieza de menores: orden de imports, zona táctil del reintento sin cambiar el aspecto, tests de reposo/reinicio de "Parar", aviso con acción que sigue tras 60 s, aviso de deshacer solo con estado `ok` e id válido, frontera de día por zona.
+
+### Imágenes nuevas
+
+`chat_working_*`, `draft_chips_*`, `activity_entries_*` y `activity_empty_*` (claro, oscuro, 200 % y 200 % en español). Ninguna imagen existente cambia.
+
+### Aplazado con motivo
+
+C19 (accesibilidad, tamaño del terminal y teclas ←, →, Shift+Tab) pide ajustes en el JS del terminal y en las teclas rápidas; C16 (la captura que se hace de ADBuddy mismo) pide decidir el comportamiento; C12 en lo que falta (persistir la preferencia del terminal y uno solo a la vez con poca altura) pide diseño; la acción "Restaurar" tras `cut_done` de C11 toca el corta-accesos y va con P5.
+
+### Notas honestas
+
+- "Parar" se deshabilita 3 s tras pulsarse: `agent.interrupt` no tiene respuesta, y el reposo evita enviar un segundo Esc seguido.
+- El aviso de deshacer del diario solo sale con estado `ok`, inverso presente y no deshecho, e id con la forma `j_<alfanumérico>`: `adbuddy undo <id>` (sin id, deshace lo último, no esa entrada).
+- Scroll de avisos: cada aviso va en su corrutina y una ráfaga de avisos largos se encola (aceptado).
+- Las imágenes en español del diario muestran la hora en formato inglés porque la JVM de test usa `Locale.getDefault()` inglés; no es del producto.
+- El aviso del terminal sin conexión y el cableado de `connected` en `ChatScreen` no se pintan en la JVM (el WebView no se pinta); lo cubren los tests de semántica.
+
+### Validaciones manuales pendientes (Pixel)
+
+Ninguna se pide al usuario ahora: "Parar" contra un agente real trabajando (el host recibe `agent.interrupt` y la sesión lo refleja), el aviso de "sin conexión" sobre el terminal real (el WebView no se pinta en la JVM) y las teclas desactivadas, y las horas del diario con zonas horarias reales. Lo demás está cubierto por tests de semántica y por las imágenes en la JVM.
