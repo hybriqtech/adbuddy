@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.LinkAnnotation
@@ -261,11 +262,19 @@ fun AttachmentCard(a: Attachment, state: DownloadState?, onTap: () -> Unit) {
             null
         }
     }
+    val tapLabel = stringResource(
+        when (state) {
+            null -> R.string.file_action_download
+            is DownloadState.Running -> R.string.file_action_cancel
+            is DownloadState.Done -> R.string.file_action_open
+            is DownloadState.Failed -> R.string.file_action_retry
+        },
+    )
     Surface(
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onTap),
+        modifier = Modifier.fillMaxWidth().clickable(onClickLabel = tapLabel, role = Role.Button, onClick = onTap),
     ) {
         Column {
             if (thumb != null) {
@@ -280,6 +289,7 @@ fun AttachmentCard(a: Attachment, state: DownloadState?, onTap: () -> Unit) {
                         val p = if (state.size > 0) (state.done.toFloat() / state.size).coerceIn(0f, 1f) else 0f
                         LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
                         Text(stringResource(R.string.file_downloading, (p * 100).toInt()), style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.file_tap_cancel), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     }
                     is DownloadState.Done -> Text(stringResource(R.string.file_open), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     // The host's own text when it refused; a lost connection has none, and tapping goes on.
