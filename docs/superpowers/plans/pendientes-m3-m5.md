@@ -494,6 +494,8 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
   - **Hecho:** el título largo está en `fixedSystemUI` (sin quitar el corto) y los tests están invertidos, sin `TODO(adjudicar)`. `TestTheWallpaperUnblocksOnlyWhatItAloneBlocked` comprueba en todas las muestras de la API 34 que solo se desbloquea lo que bloqueaba el fondo. Lo de `mIsWallpaper` sigue siendo post-v1. Falta volver a correr `emutest` en el emulador (CI).
 - **(b) Hueco ya existente:** las superposiciones de terceros (`TYPE_APPLICATION_OVERLAY`) no las ve `ParseSystemUIWindows`, porque filtra por paquete. Confirmarlo en la T7 con una app de pruebas, y también con una superposición con `package=com.android.systemui` y ese título.
 - **(c) Falta una muestra del foco `StatusBar`** (solo hay `NotificationShade`) para Android 17.
+- **(d) Post-v1: el teclado.** La ventana `InputMethod` no es de systemui y nunca contó (tampoco con la app conectada). La barra de sugerencias de Gboard puede mostrar el chip del portapapeles (p. ej. un código copiado desde una app protegida) o sugerencias de autorrelleno, y una captura con una app sin proteger delante lo recogería. El fondo de pantalla lo tapaba por accidente en el respaldo sin app en la API 34; el arreglo de (a) restaura el comportamiento de diseño.
+- **(e) Post-v1: proteger Ajustes no protege su búsqueda** (`com.google.android.settings.intelligence`, otro paquete).
 
 ### Post-v1: Permitir tras desbloquear con PIN (M2-8)
 
