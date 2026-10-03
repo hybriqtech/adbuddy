@@ -71,7 +71,8 @@ class TokenProviderTest {
     @Test fun getTypeAndReadingFromAnAppAreRefused() {
         val u = Uri.parse("content://tech.hybriq.adbuddy.bridge/handshake")
         try {
-            context.contentResolver.getType(u)
+            // Through a client: ContentResolver.getType logs the provider's exception and returns null.
+            context.contentResolver.acquireContentProviderClient(u)!!.use { it.getType(u) }
             fail("getType from an app was not refused")
         } catch (e: SecurityException) {
             // expected

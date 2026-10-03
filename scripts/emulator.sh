@@ -16,7 +16,11 @@
 #   1    the SDK or its packages are missing
 #   2    incorrect usage, or ADBUDDY_EMU_ADB_PORT invalid (empty, not a number, outside
 #        1024-65535, or 5037/5038: the adb servers of the user and of ADBuddy)
-#   3    the emulator's adb server sees another device (or none: it fails closed)
+#   3    the emulator's adb server sees another device (or none: it fails closed),
+#        or the emulator on the port runs another AVD than ADBUDDY_EMU_AVD
+#
+# stop kills the emulator and waits (up to 60 s) until it is gone before it
+# stops the adb server; it always exits 0.
 #   4    the emulator is not stable: system_server or surfaceflinger restarted
 #   124  the emulator did not boot in 10 minutes
 set -euo pipefail
@@ -133,6 +137,17 @@ start() {
     echo "the emulator did not finish booting in 10 minutes; its log: ${TMPDIR:-/tmp}/adbuddy-emulator.log" >&2
     exit 124
   fi
+  # The emulator on $SERIAL must run the AVD asked for: one of another AVD still
+  # on the port (a stop that did not wait) passes wait-for-device as well. The
+  # console answers with the name and then OK.
+  local running
+  running=$(MSYS_NO_PATHCONV=1 timeout 20 "$ADB" -s "$SERIAL" emu avd name </dev/null 2>/dev/null | tr -d '\r') || true
+  running=${running%%$'\n'*}
+  if [[ "$running" != "$AVD" ]]; then
+    stop
+    echo "$SERIAL runs the AVD '${running:-?}', not '$AVD' (an emulator of a previous run still on port $PORT?): refusing to continue" >&2
+    exit 3
+  fi
   wait_stable
   # Safety net: this adb server must see the emulator and nothing else.
   local line devices other="" seen=""
@@ -151,8 +166,39 @@ start() {
   print_env
 }
 
+# True while this adb server lists $SERIAL, in any state (offline too). The
+# output is read whole before grep: with pipefail, an early grep -q exit could
+# turn a match into a SIGPIPE failure.
+serial_listed() {
+  local devices
+  devices=$("$ADB" devices </dev/null 2>/dev/null | tr -d '\r') || true
+  grep -q "^$SERIAL[[:space:]]" <<<"$devices"
+}
+
+# True while something listens on the emulator's console port: its process is
+# still alive, even when adb no longer lists it (adbd cut, or the server just
+# restarted). bash makes the connection itself, so it works in Git Bash too.
+console_open() {
+  timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/$PORT" </dev/null 2>/dev/null
+}
+
+# Kills the emulator and waits, for up to 60 s, until adb no longer lists it
+# and its console port is closed; only then the adb server is killed. Without
+# the wait a start right after (the CI stops one AVD and starts another on the
+# same port) could take the dying emulator for the new one. It exits 0 even
+# if the emulator outlives the wait: stop must be safe to run any time.
 stop() {
-  "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
+  local waited=0
+  while true; do
+    "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 </dev/null || true
+    serial_listed || console_open || break
+    if ((waited >= 60)); then
+      echo "warning: $SERIAL (console port $PORT) is still alive 60 s after emu kill; stopping its adb server anyway" >&2
+      break
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
   "$ADB" kill-server >/dev/null 2>&1 || true
 }
 

@@ -17,8 +17,8 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 | Variable | Used by | Default | What the runner needs |
 | --- | --- | --- | --- |
 | `CI_HOST_MATRIX` | `host.yml` | the three hosted cells (`ubuntu-latest`, `windows-latest`, `macos-latest`) | A JSON array of cells `{"name": ..., "runner": ...}`. A Linux cell needs `gcc` (for `go test -race`); a Windows cell needs Git for Windows. Leave a cell out of the array to drop it. |
-| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min). |
-| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, hardware acceleration (the AVD `adbuddy-ci-api37` is created by `scripts/emulator.sh` when it is missing); a Linux runner needs `/dev/kvm` (see section 6). |
+| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min and the app's tests about 15 min more (estimated, not measured)). |
+| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, hardware acceleration (the AVDs `adbuddy-ci-api37` for the oracle and `adbuddy-ci-api34` for the app's tests are created by `scripts/emulator.sh` when missing), and JDK 17 for the app's tests (Gradle 9.8 is downloaded by `setup-gradle`); a Linux runner needs `/dev/kvm` (see section 6). |
 | `CI_RUNNER_RELEASE` | `release-check.yml` (`scripts` and `goreleaser`) | `"ubuntu-latest"` | Linux with `shellcheck`. |
 | `CI_RUNNER_SIGN` | `release-check.yml` (`sign`) | `"ubuntu-latest"` | Linux with an Android SDK: `apksigner` and `zipalign` are Linux scripts here. |
 
@@ -73,7 +73,9 @@ The script also runs `unset ADB_SERVER_SOCKET ANDROID_ADB_SERVER_ADDRESS`: adb g
 
 The script exports `ADB_MDNS=0` and `ADB_MDNS_AUTO_CONNECT=0` so that its adb server never auto-connects a real phone found over mDNS, and it aborts (exit 3) if that server sees any other device.
 
-Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT`; `3` the adb server sees another device (or none); `4` the emulator is not stable; `124` it did not boot in 10 minutes.
+After boot, `start` also checks that the emulator on the port runs the AVD of `ADBUDDY_EMU_AVD` (`adb emu avd name`); if not, it stops it and exits with 3. `stop` waits, for up to 60 s, until adb no longer lists the emulator and its console port is closed, and only then stops the adb server: the emulator job stops the android-37 emulator and starts the android-34 one on the same port, and the start must not take the dying one for the new one. `stop` always exits 0 (after 60 s it warns on stderr).
+
+Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT`; `3` the adb server sees another device (or none), or the emulator on the port runs another AVD; `4` the emulator is not stable; `124` it did not boot in 10 minutes.
 
 ## 3. Setting up a Windows runner
 

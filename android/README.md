@@ -25,8 +25,28 @@ gradle :app:assembleDebug         # app/build/outputs/apk/debug/app-debug.apk
 adbuddy setup --apk app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Instrumented tests (`gradle :app:connectedDebugAndroidTest`) need an emulator:
-never run them on your own phone.
+Instrumented tests run only on an emulator, never on your own phone, through
+`am instrument` on the emulator's own adb server (`TestInstrumentedSuite` in
+`host/internal/emutest`).
+
+Use the android-34 image (install it with `sdkmanager "system-images;android-34;google_apis;x86_64"`): android-37 does not work for this, its surfaceflinger loops. `stop` needs the same `ADBUDDY_EMU_*` variables as `start`. From the repository root:
+
+```sh
+(cd android && gradle :app:assembleDebug :app:assembleDebugAndroidTest)
+export ADBUDDY_EMU_IMAGE='system-images;android-34;google_apis;x86_64' ADBUDDY_EMU_AVD=adbuddy-dev34 ADBUDDY_EMU_STABLE_SECS=120
+eval "$(scripts/emulator.sh start)"   # the emulator, with an adb server of its own
+cd host && go test -count=1 -timeout 15m -run TestInstrumentedSuite ./internal/emutest
+cd .. && scripts/emulator.sh stop
+```
+
+Not `connected*` tasks: AGP's test engine (UTP) runs `adb` without the server
+port of the environment (on Windows Gradle gives its workers an empty
+environment), so it reaches adb server 5037, where your phone may be. The
+guard in `app/build.gradle.kts` refuses every `connected*` task.
+
+They check that the provider answers only the shell user (`TokenProviderTest`),
+that the app hears changes of `adb_wifi_enabled` (`AdbWifiObserverTest`) and the
+strings in both languages (`LocalesTest`). The `emulator` workflow is meant to run them (first run pending).
 
 ### Screen tests
 
@@ -136,7 +156,7 @@ they are validated by hand on a device (see "M4" in
 
 The app is in English and Spanish and follows the language of the phone (on Android 13 and later you can also set it for ADBuddy alone in the system settings, Apps, ADBuddy, Language). Every string is in `res/values/strings.xml` and `res/values-es/strings.xml`, in the same commit, with positional markers (`%1$s`) and `<plurals>` where a number is shown; no composable, notification or `contentDescription` has a literal text.
 
-`./gradlew :app:testDebugUnitTest` checks it: `StringsParityTest` (same keys, same markers and plurals in both files, escaping, a string for every `ErrorCode`) and `NoHardcodedTextTest` (a literal text in Kotlin fails; the few that are on purpose are in `src/test/resources/i18n-exceptions.txt`, with their reason). `lintDebug` fails on a missing translation. `LocalesTest` (`connectedDebugAndroidTest`, on the emulator) checks the language itself.
+`./gradlew :app:testDebugUnitTest` checks it: `StringsParityTest` (same keys, same markers and plurals in both files, escaping, a string for every `ErrorCode`) and `NoHardcodedTextTest` (a literal text in Kotlin fails; the few that are on purpose are in `src/test/resources/i18n-exceptions.txt`, with their reason). `lintDebug` fails on a missing translation. `LocalesTest` (instrumented, on the emulator: see above) checks the language itself.
 
 An error of the host is shown by its `code` (`ErrorText`), not by its English `text`.
 

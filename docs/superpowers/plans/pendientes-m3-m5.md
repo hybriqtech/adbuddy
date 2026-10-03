@@ -4,14 +4,30 @@ Notas que hay que incorporar cuando se escriban esos planes (desde el 2026-09-29
 
 ## M2.5b · La app en el emulador
 
-Spec: `docs/superpowers/specs/2026-09-30-adbuddy-m2.5-clasificador-lista-blanca-design.md` (§7). M2.5a (clasificador con lista blanca, corpus como datos, oráculo de mksh y arnés del emulador) está hecho.
+**HECHO en M2.5b** (plan `docs/superpowers/plans/2026-10-03-adbuddy-m2.5b-app-emulador.md`): los instrumentados corren en el emulador **Android 14 (API 34, imagen `android-34`)** con `am instrument` desde `TestInstrumentedSuite` (nunca `connected*`: UTP habla con el servidor adb 5037, el del móvil, y la guarda de Gradle lo niega), y `host/internal/emutest` prueba el host contra la app; el job `emulator` de la CI ejecuta el oráculo en `android-37` y luego `emutest` en `android-34`. La imagen `android-37.0` no sirve para la app: `surfaceflinger` aborta cada 5-10 s (`Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma`, hilo `RegionSampling`) con `swiftshader_indirect`, `swangle_indirect` y `host`, y Android reinicia su sistema en bucle (el oráculo lo esquiva porque solo usa el shell). Validaciones de M2 automatizadas en Android 14: 1, 2, 3, 10 y la 6 solo en local (`ADBUDDY_EMULATOR_CUT=1`, ver el plan de M2). Siguen manuales: 4, 5, 7, 8, 9 y lo que depende de Android 17 (lista siguiente).
 
-- **La imagen `android-37.0` google_apis no sirve para los tests de la app:** con el emulador 37.1.11, `surfaceflinger` aborta cada 9-15 s desde el arranque (`Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma`, hilo `RegionSampling`) y Android reinicia su sistema en bucle; pasa con `-gpu swiftshader_indirect`, `host` y `guest` y desactivando GLDMA/GLDMA2. El oráculo de M2.5a lo esquiva parando el sistema (`su 0 stop`), pero la app necesita el sistema en marcha. Hay que probar otra imagen (por ejemplo `android-36` google_apis o una `*_atd`), y eso es una instalación que decide el usuario.
-- **Tests instrumentados** (`connectedDebugAndroidTest`) y **tests del host contra el emulador** (paquete `host/internal/emutest`, con `ADBUDDY_EMULATOR_SERIAL`, que `scripts/emulator.sh start` ya exporta).
-- **Validaciones manuales de M2 que se automatizan:** 1 (`TokenProvider` y el uid del shell), 2 (`content write` por stdin), 3 (servicio en primer plano desde el proveedor), 6 (Cortar acceso y Reactivar) y 10 (`ContentObserver` de `adb_wifi_enabled`). La 7 (extremo a extremo), solo si sale sin tocar el protocolo ni la app.
-- **Primera tarea del plan:** comprobar si el emulador sobrevive a `adb_enabled=0` y vuelve al reactivar; de eso depende cómo se automatiza la 6.
-- **El job `emulator` de la CI** ya existe: M2.5b le añade los tests de la app y `android/**` a sus rutas.
+- **El emulador de desarrollo** usa el AVD `adbuddy-dev34` (imagen `android-34`), consola 5600 y servidor adb 5060 (`ADBUDDY_EMU_*` de `scripts/emulator.sh`); la CI, `adbuddy-ci-api37` (oráculo, 5590 y 5049) y `adbuddy-ci-api34` (app). Nunca dos a la vez en el PC del runner (~5 GB de RAM cada uno). Los puertos están fuera del rango que escanea adb (5555-5585): tras perder `adbd`, el emulador vuelve a su servidor solo por los reintentos de adb, y Cortar acceso espera 15 s antes de Reactivar (vuelve a ~17 s del corte).
+- **Cortar acceso solo en local:** tras un corte que nadie deshace, el AVD arranca con `adb_enabled=0` y `emulator.sh start` acaba en 124 a los 10 min; hay que borrar `userdata-qemu.img` y `.qcow2` del AVD. Por eso la CI no ejecuta `TestCutAccessAndReactivate`. La prueba de `tcpip` es débil: en el emulador `adbd` escucha siempre en 5555 (es su transporte), así que `listening before/after` salen igual con y sin `tcpip`.
+- **Cada PR que toca `android/**` lanza también el oráculo** (es un solo job). Si pesa, separar los tests de la app en otro job del mismo workflow con sus rutas.
+- **Post-v1: partir `emulator.yml` en dos workflows** (oráculo / app), cada uno con sus `paths`, para que un cambio de `android/**` no grabe el oráculo y uno del clasificador no pruebe la app. Al hacerlo, que no corran a la vez en el mismo runner (un emulador cabe en la RAM; mismo puerto 5590): un `concurrency` común o puertos y AVD distintos (de puffin, revisión de CI de M2.5b).
+- `scripts/emulator.sh` escribe el log del emulador en `${TMPDIR:-/tmp}/adbuddy-emulator.log` sea cual sea el AVD: dos emuladores a la vez se pisan el log (de puffin).
 - `android/local.properties` no se versiona: crearlo con `sdk.dir=C\:/Users/<usuario>/AppData/Local/Android/Sdk`.
+
+### Validaciones que solo se pueden hacer en el Pixel (Android 17)
+
+Lo medido en Android 14 no vale para Android 15-17. Siguen manuales, con permiso explícito del usuario:
+
+- **Corte de la depuración inalámbrica real (`adb_wifi_enabled` y el puerto `tcpip`):** en el emulador `adb_wifi_enabled` vale 0 antes y después y el 5555 es su transporte; en Android 17 las redes de confianza pueden apagar la depuración o pedir confirmación al reactivarla, y el puerto `tcpip` debe quedar cerrado tras Cortar acceso.
+- **Que la app lea `adb_wifi_enabled` en Android 17 con targetSdk 37:** lo decide la plataforma (anotaciones `@Readable` de los ajustes); que en 34 se lea no dice nada de 37. `CutAccess` trata un `SecurityException` como "nunca escrito" (0), así que no distingue "leído 0" de "no se puede leer".
+- **Ajustes restringidos** para apps instaladas fuera de una tienda (accesibilidad y similares): Android 13 los introdujo y 15-17 los endurecieron (afecta a la validación 4 de M2).
+- **Servicio en primer plano desde el proveedor en Android 17:** las restricciones de arranque en segundo plano y de tipos de servicio cambian en 15-17 (validación 3 de M2).
+- **`content write` por stdin en Android 17** (validación 2 de M2; y en Android 11-13, que exige otra imagen y la decide el usuario).
+- **Edge-to-edge y permiso de red local:** comportamientos ligados a targetSdk 37 que solo se activan en una plataforma 37.
+- **Lo que sigue manual de M2 (4, 5, 7, 8, 9):** 4 necesita un móvil de otro fabricante con otro servicio de accesibilidad activo; 5 y 8, la pantalla de bloqueo y el bouncer con una persona; 7, el extremo a extremo con agente real (ruling: cuesta mucho y demuestra poco más); 9, un reloj Wear o Phone Link.
+
+### Validaciones ampliadas aún no hechas: pendientes de automatizar (tareas T3b/T4b, a decidir)
+
+Son las de "Validaciones manuales pendientes (M5c)" del plan `docs/superpowers/plans/2026-10-02-adbuddy-m5c-notificaciones.md` que ninguna sesión ha automatizado ni corrido; su estado no se ha revisado aquí: 22, 23, 24, 25 y 33, 26, 28, 29, 30, 31, 32 y 35. Si se automatizan en el emulador, valen solo para Android 14 y las que dependen de Android 17 siguen en el Pixel.
 
 ### Ampliaciones de la lista blanca, si el uso real las pide
 
@@ -351,7 +367,7 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
 ### Validaciones manuales pendientes (nadie las ha corrido en un móvil ni en el PC del usuario)
 
 - **Las de la spec §10:** Pixel con Android 17 en español (onboarding, chat, actividad, tarjetas de permiso y de confirmación 🔴, consentimiento, errores forzados, textos largos sin cortar); idioma por app desde los ajustes del sistema, sin reiniciar el proceso (pantallas, notificación fija y canales); notificaciones con la pantalla bloqueada y desbloqueada, hora en 24 horas; plurales (1 y 2 permisos esperando); PC con Windows en español **sin** `language` ni `LANG` (`doctor`, `setup`, `serve`, una pregunta 🔴; acentos y `ñ` en Windows Terminal y en `cmd.exe`); PC y móvil en idiomas distintos; una pregunta 🔴 con razón en el móvil y en la terminal, en español.
-- **`LocalesTest` en el emulador:** `emulator.yml` solo ejecuta el oráculo del clasificador, no los `androidTest`; `android.yml` solo los compila. `scripts/emulator.sh start` y `gradle :app:connectedDebugAndroidTest` con el emulador arrancado.
+- **HECHO en M2.5b:** `LocalesTest` corre en el emulador (Android 14) con el resto de los instrumentados (`TestInstrumentedSuite`; `emulator.yml`).
 - **Cambio de idioma con una pregunta 🔴 descartada a mano:** al cambiar el idioma del móvil la pregunta pendiente se repinta y puede reaparecer (`BridgeService.onConfigurationChanged` no sabe que se descartó). Comprobarlo en el móvil; no hay test unitario (sin Robolectric).
 
 ### Decisiones y límites (spec §12)
