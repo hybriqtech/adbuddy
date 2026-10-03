@@ -32,6 +32,9 @@ import (
 //	heal-on-retry the host stops damaging frames on the app's retry     (TestDownloadRetriesOnceThenFails)
 //	pdf-as-octet  the host announces the PDF as application/octet-stream (TestOpenAndShare)
 //	expect-write  the test expects a write grant, which is not given    (TestOpenAndShare)
+//	count-part    the cache test measures with the .part included          (TestCacheTrimsTheOldestAndKeepsTheParts)
+//	no-trigger    no download comes by the channel, so nothing trims       (TestCacheTrimsTheOldestAndKeepsTheParts)
+//	reverse-age   the oldest cache file is made the newest                 (TestCacheTrimsTheOldestAndKeepsTheParts)
 //
 //	ADBUDDY_EMUTEST_MUTATE=corrupt-byte go test -count=1 -run TestUploadSendsTheRealBytes ./internal/emutest
 //
@@ -48,7 +51,7 @@ func mutation(t *testing.T, taken ...string) string {
 	case "":
 		return ""
 	case "corrupt-byte", "skip-frame", "ready-zero", "corrupt-frame", "ignore-offset", "heal-on-retry",
-		"pdf-as-octet", "expect-write":
+		"pdf-as-octet", "expect-write", "count-part", "no-trigger", "reverse-age":
 	default:
 		t.Fatalf("%s=%q: unknown mutation", mutateEnv, m)
 	}
