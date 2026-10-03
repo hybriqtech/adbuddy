@@ -144,7 +144,9 @@ fun ChatScreen(
         status == LinkStatus.CONNECTING -> lastBanner
         else -> null
     }
-    SideEffect { lastBanner = bannerStatus }
+    // Only what the retry really alternates (WAITING, NOT_SET_UP) is kept: a cut, an outdated side or a pause can end and
+    // go straight to CONNECTING, and its banner would then say something that no longer holds.
+    SideEffect { lastBanner = bannerStatus.takeIf { it == LinkStatus.WAITING || it == LinkStatus.NOT_SET_UP } }
 
     Scaffold(
         topBar = {

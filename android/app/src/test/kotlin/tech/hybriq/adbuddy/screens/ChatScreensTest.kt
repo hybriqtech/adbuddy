@@ -170,6 +170,35 @@ class ChatScreensTest(private val mode: ScreenMode) {
         compose.onNodeWithText(waiting).assertDoesNotExist()
     }
 
+    private fun bannerLeavesWhenConnecting(from: BridgeState, fromCut: Boolean, toCut: Boolean, banner: String) {
+        var bridge by mutableStateOf(from)
+        var cut by mutableStateOf(fromCut)
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                ChatScreen(
+                    bridge, outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = cut, terminal = null,
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = true, remoteCard = {},
+                )
+            }
+        }
+        compose.onNodeWithText(banner).assertIsDisplayed()
+        bridge = BridgeState(connection = BridgeState.Connection.CONNECTING)
+        cut = toCut
+        compose.waitForIdle()
+        compose.onNodeWithText(banner).assertDoesNotExist()
+    }
+
+    @Test fun anOutdatedAppBannerDoesNotSurviveConnecting() =
+        bannerLeavesWhenConnecting(BridgeState().appOutdated(), false, false, text(R.string.status_update_app))
+
+    @Test fun aPausedBannerDoesNotSurviveConnecting() = bannerLeavesWhenConnecting(
+        BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc", sessionState = SessionState(paused = true)),
+        false, false, text(R.string.status_paused),
+    )
+
+    @Test fun aCutBannerDoesNotSurviveTheCutEndingWhileConnecting() =
+        bannerLeavesWhenConnecting(BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), true, false, text(R.string.status_cut))
+
     @Test fun aColdStartConnectingHasNoBanner() {
         show(BridgeState(connection = BridgeState.Connection.CONNECTING))
         compose.onNodeWithText(text(R.string.status_waiting)).assertDoesNotExist()
