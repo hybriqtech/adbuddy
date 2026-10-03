@@ -12,7 +12,7 @@ It does not replace `release.yml`: releases are built and signed on GitHub-hoste
 
 ## 2. The variables
 
-Each job reads its runner from a repository variable. The value is JSON: a string such as `"ubuntu-latest"` or an array of labels such as `["self-hosted","windows","adbuddy-local"]`. With no variable set, every workflow runs on GitHub-hosted runners exactly as before.
+Each job reads its runner from a repository variable. The value is JSON: a string such as `"ubuntu-latest"` or an array of labels such as `["self-hosted","windows","adbuddy-emulator"]`. With no variable set, every workflow runs on GitHub-hosted runners exactly as before.
 
 | Variable | Used by | Default | What the runner needs |
 | --- | --- | --- | --- |
@@ -31,8 +31,8 @@ The special value `"none"` skips the job of a single-job workflow.
 Example for "only a Windows runner for now". **This is not the recommended configuration**: every variable that points at the Windows runner makes it run the code of any branch as your Windows user, with your adb server and phone in reach (section 6, "Requirement"). The user accepted this risk on 2026-10-03 and decided not to create the dedicated Windows account (section 6, "Accepted risk"); it stays bounded only by the conditions listed there.
 
 ```sh
-gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
-gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-local"]'
+gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-host-windows"]}]'
+gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-emulator"]'
 ```
 
 `CI_RUNNER_ANDROID` is left out on purpose: it runs Gradle and the unit tests of the branch with no isolated home, so on Windows it carries the same risk as the other two (it only belongs on the Windows runner under the same bounds or with a dedicated account). The Ubuntu cell of the matrix stays on a GitHub-hosted runner here; no label `linux` appears because there is no Linux runner. Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`.
@@ -40,24 +40,46 @@ gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-loc
 Example with both runners (Windows and the Linux runner of section 4):
 
 ```sh
-gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":["self-hosted","linux","adbuddy-local"]},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
-gh variable set CI_RUNNER_RELEASE --body '["self-hosted","linux","adbuddy-local"]'
-gh variable set CI_RUNNER_SIGN --body '["self-hosted","linux","adbuddy-local"]'
-gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-local"]'
+gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":["self-hosted","linux","adbuddy-linux"]},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-host-windows"]}]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-linux"]'
+gh variable set CI_RUNNER_RELEASE --body '["self-hosted","linux","adbuddy-linux"]'
+gh variable set CI_RUNNER_SIGN --body '["self-hosted","linux","adbuddy-linux"]'
+gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-emulator"]'
 ```
 
 The emulator stays on the Windows runner (`CI_RUNNER_EMULATOR`): it has the AVD and the hardware acceleration of Windows, and the WSL2 runner has no KVM.
 
-With more than one runner per OS, give each its own labels so a job can only land where it belongs (one emulator at a time fits in the RAM, and only the first Windows runner has the Android SDK). Current layout (2026-10-03):
+Labels are capabilities, opt-in: a runner only gets the jobs whose label it carries, so a new runner takes nothing until it is given one. The runner scheme (2026-10-03):
 
-| Runner | Labels (besides `self-hosted`, OS and `X64`) | Takes |
+| Runner | Labels (besides the automatic `self-hosted`, OS and `X64`) | Jobs |
 | --- | --- | --- |
-| Windows 1 (the one with the SDK and the AVDs) | `adbuddy-local`, `adbuddy-host`, `adbuddy-emulator` | host jobs and the emulator jobs |
-| Windows 2 (host only, no SDK or JDK) | `adbuddy-host` | host jobs only |
-| Linux 1 and Linux 2 (WSL2, same user, own folders and caches) | `adbuddy-local` | the Linux cell of the host matrix, android, release-check |
+| Windows 1 (the Android SDK, the AVDs and WHPX) | `adbuddy-emulator`, `adbuddy-host-windows` | the emulator workflows; the Windows cell of `host.yml` |
+| Windows 2 (host only: Go, no SDK, no JDK) | `adbuddy-host-windows` | the Windows cell of `host.yml` |
+| Linux 1 and Linux 2 (WSL2, same user, own runner folder and caches, shared `~/android-sdk`) | `adbuddy-linux` | the Ubuntu cell of `host.yml`, `android.yml`, `release-check.yml` (`scripts`, `goreleaser`, `sign`) |
 
-`CI_RUNNER_EMULATOR` is `["self-hosted","windows","adbuddy-emulator"]` and the Windows cell of `CI_HOST_MATRIX` is `["self-hosted","windows","adbuddy-host"]`. A job queued while a variable had an older value keeps the labels it was queued with: after changing labels, cancel or let finish the old queued runs.
+| Variable | Value |
+| --- | --- |
+| `CI_RUNNER_EMULATOR` | `["self-hosted","windows","adbuddy-emulator"]` |
+| `CI_HOST_MATRIX` | `[{"name":"ubuntu-latest","runner":["self-hosted","linux","adbuddy-linux"]},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-host-windows"]}]` |
+| `CI_RUNNER_ANDROID`, `CI_RUNNER_RELEASE`, `CI_RUNNER_SIGN` | `["self-hosted","linux","adbuddy-linux"]` |
+
+Rules the scheme keeps (`python scripts/check-ci-runner-rules.py` checks the workflows; with `--live` it checks the variables and the runners of the repository too):
+- No workflow carries labels: every job takes its runner from one of those variables (or is a GitHub-hosted label). A job that runs the emulator (`scripts/emulator.sh`, `avdmanager`, `ADBUDDY_EMU_*`) reads only `CI_RUNNER_EMULATOR`.
+- `adbuddy-emulator` is on exactly one runner, a Windows one. `adbuddy-linux` only on Linux runners, `adbuddy-host-windows` only on Windows ones. No runner takes the label `dependabot`.
+- The single `adbuddy-emulator` runner guarantees one CI emulator at a time, not one emulator on the PC: emulators started by hand are outside what labels can enforce.
+- Labels set through the API are lost if a runner is registered again with `--labels`: register with the labels of the table.
+
+Add and remove a label of a runner (never `PUT` and never `DELETE .../labels` without a name: they remove every custom label, `adbuddy-emulator` included). The runner does not need to stop and a busy runner keeps its job:
+
+```sh
+gh api repos/OWNER/REPO/actions/runners --jq '.runners[] | [.id,.name,.busy,(.labels|map(.name)|join(","))] | @tsv'
+gh api -X POST   repos/OWNER/REPO/actions/runners/ID/labels -f 'labels[]=LABEL'
+gh api -X DELETE repos/OWNER/REPO/actions/runners/ID/labels/LABEL
+```
+
+Order for a change of labels without a window of risk: add the new labels to the runners, then change the variables, then check with real jobs and with `python scripts/check-ci-runner-rules.py --live`, and only then remove the old labels. A job queued before the change keeps the labels it was queued with (a re-run of an old run too): before removing an old label, check that no job that is queued, in progress, waiting, pending or requested asks for it (`gh api repos/OWNER/REPO/actions/runs?status=queued` for each status, then `.../runs/ID/jobs` and its `labels`, all pages). A job with no runner that matches is cancelled by GitHub after 24 hours. After removing, run `python scripts/check-ci-runner-rules.py --live --strict`.
+
+The retired labels are `adbuddy-local` (the first scheme, one label for everything) and `adbuddy-host`; the workflows and the checker forbid both.
 
 Never point a Linux cell at a Windows runner. The steps that only run on Linux (gofmt, `-race`) would be skipped and the cell would be green without them.
 
@@ -102,7 +124,7 @@ Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBU
 
    ```bat
    cd %USERPROFILE%\actions-runner
-   config.cmd --url https://github.com/OWNER/REPO --token TOKEN --labels self-hosted,windows,adbuddy-local
+   config.cmd --url https://github.com/OWNER/REPO --token TOKEN --labels adbuddy-emulator,adbuddy-host-windows
    ```
 
 4. Create `.env` in the runner folder. Use forward slashes in `ANDROID_HOME`, and keep the caches inside the runner folder so CI never touches your real ones. **Target:** the runner has its own Android SDK, JDK and Go (inside the runner folder or the profile of the dedicated account), not the `ANDROID_HOME` or the `adb` you use every day: the `sdkmanager` steps of the workflows write into that SDK, and a branch could leave a trojan `adb.exe` or `emulator.exe` there that you or `adbuddy serve` would run later against your phone. This is not met (accepted risk, see section 6):
@@ -242,7 +264,7 @@ This is the procedure that was tested. The Linux runner lives in a WSL2 Ubuntu d
      printf "RT='%s'\n" "$TOKEN"
      cat <<'EOF'
    cd ~/actions-runner
-   ./config.sh --unattended --url https://github.com/OWNER/REPO --token "$RT" --labels self-hosted,linux,adbuddy-local
+   ./config.sh --unattended --url https://github.com/OWNER/REPO --token "$RT" --labels adbuddy-linux
    EOF
    } | wsl.exe -d Ubuntu -u runner -- bash -s
    ```
@@ -277,7 +299,7 @@ This is the procedure that was tested. The Linux runner lives in a WSL2 Ubuntu d
 
 ```sh
 # Use a self-hosted runner for a job group
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-linux"]'
 
 # Skip a single-job workflow
 gh variable set CI_RUNNER_EMULATOR --body '"none"'
