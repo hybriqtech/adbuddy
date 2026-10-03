@@ -48,4 +48,25 @@ class LinkStatusTest {
         assertNotEquals(StatusView.of(a, cut = false), StatusView.of(a.copy(hostName = "other"), cut = false))
         assertNotEquals(StatusView.of(a, cut = false), StatusView.of(a, cut = true))
     }
+
+    @Test fun withoutALinkAndWithoutAChannelThePhoneIsNotSetUp() {
+        assertEquals(LinkStatus.NOT_SET_UP, LinkStatus.of(BridgeState(), cut = false, configured = false))
+        assertEquals("a channel means there is a configuration", LinkStatus.CONNECTED, LinkStatus.of(BridgeState(connection = BridgeState.Connection.CONNECTED), cut = false, configured = false))
+        assertEquals(LinkStatus.CUT, LinkStatus.of(BridgeState(), cut = true, configured = false))
+        assertEquals(LinkStatus.WAITING, LinkStatus.of(BridgeState(), cut = false))
+    }
+
+    @Test fun onlyTheStatesThatAskForSomethingGetABanner() {
+        assertEquals(
+            listOf(LinkStatus.CUT, LinkStatus.UPDATE_APP, LinkStatus.UPDATE_HOST, LinkStatus.PAUSED, LinkStatus.WAITING, LinkStatus.NOT_SET_UP),
+            LinkStatus.entries.filter { it.bannerWorthy },
+        )
+    }
+
+    @Test fun everyStatusHasALongAndAShortText() {
+        for (st in LinkStatus.entries) {
+            assertNotEquals(st.name, 0, st.text)
+            assertNotEquals(st.name, 0, st.shortText)
+        }
+    }
 }

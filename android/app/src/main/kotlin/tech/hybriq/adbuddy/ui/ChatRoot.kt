@@ -30,6 +30,7 @@ import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Attachment
+import tech.hybriq.adbuddy.bridge.BridgePrefs
 import tech.hybriq.adbuddy.chat.Composer
 import tech.hybriq.adbuddy.control.CutAccess
 import tech.hybriq.adbuddy.files.Downloads
@@ -125,6 +126,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     }
 
     val holder = rememberSaveableStateHolder()
+    val configured = remember(state.connection) { BridgePrefs(context).link != null }
     val back = { route = route.parent ?: Route.CHAT }
     val first = step
     if (first != null) {
@@ -140,7 +142,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             // The chat leaves the composition under Settings and Activity: its state (the text being written,
             // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
             Route.CHAT -> holder.SaveableStateProvider("chat") {
-                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now) {
+                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured) {
                     RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
                 }
             }

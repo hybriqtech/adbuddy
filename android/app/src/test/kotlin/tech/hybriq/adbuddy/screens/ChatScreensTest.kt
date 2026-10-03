@@ -1,0 +1,124 @@
+package tech.hybriq.adbuddy.screens
+
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.text.TextLayoutResult
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.RuleChain
+import org.junit.runner.RunWith
+import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import tech.hybriq.adbuddy.AdbuddyApp
+import tech.hybriq.adbuddy.R
+import tech.hybriq.adbuddy.bridge.BridgeState
+import tech.hybriq.adbuddy.bridge.ChatMessage
+import tech.hybriq.adbuddy.bridge.ChatState
+import tech.hybriq.adbuddy.ui.ChatActions
+import tech.hybriq.adbuddy.ui.ChatScreen
+import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
+
+/** The chat screen (header, link banner, conversation) in every ScreenMode: what is wrong with the link reads whole and in a header of one line. */
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(qualifiers = PHONE)
+class ChatScreensTest(private val mode: ScreenMode) {
+    private val compose = createComposeRule()
+
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(ScreenModeRule(mode)).around(ComponentActivityRule()).around(compose)
+
+    private val app get() = RuntimeEnvironment.getApplication() as AdbuddyApp
+
+    private fun text(id: Int, vararg args: Any): String = app.getString(id, *args)
+
+    private fun show(state: BridgeState, cut: Boolean = false, configured: Boolean = true) {
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                ChatScreen(
+                    state, outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = cut, terminal = null,
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = configured, remoteCard = {},
+                )
+            }
+        }
+    }
+
+    private fun lineCount(t: String): Int {
+        val node = compose.onNodeWithText(t).fetchSemanticsNode()
+        val results = mutableListOf<TextLayoutResult>()
+        node.config[SemanticsActions.GetTextLayoutResult].action!!(results)
+        return results.first().lineCount
+    }
+
+    /** The header must fit its bar, the subtitle be one line and the banner (if any) show whole. */
+    private fun check(subtitle: String, banner: String?, name: String) {
+        compose.onNodeWithText(subtitle).assertIsDisplayed()
+        if (banner != null) {
+            compose.onNodeWithText(banner).assertIsDisplayed()
+            assertEquals(1, lineCount(subtitle))
+        }
+        compose.assertTextsFit()
+        compose.assertTitleFitsTheTopBar(subtitle)
+        compose.shot(name, mode)
+    }
+
+    @Test fun connectedWithMessagesHasNoBanner() {
+        show(
+            BridgeState(
+                connection = BridgeState.Connection.CONNECTED, hostName = "my-pc",
+                chat = ChatState(messages = listOf(ChatMessage("1", "user", "Turn the volume down"), ChatMessage("2", "assistant", "Done. The media volume is now at 20%."))),
+            ),
+        )
+        compose.onNodeWithText(text(R.string.app_name)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.session_idle)).assertIsDisplayed()
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)).assertCountEquals(0)
+        compose.assertTextsFit()
+        compose.assertTitleFitsTheTopBar(text(R.string.session_idle))
+        compose.shot("chat_connected_messages", mode)
+    }
+
+    @Test fun offlineWaitingSaysItShortInTheHeaderAndInFullInTheBanner() {
+        show(BridgeState())
+        val short = text(R.string.status_short_waiting)
+        check(short, text(R.string.status_waiting), "chat_offline_waiting")
+    }
+
+    @Test fun cutSaysSoInTheBanner() {
+        show(BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), cut = true)
+        compose.onNodeWithText(text(R.string.session_idle)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.status_cut)).assertIsDisplayed()
+        compose.assertTextsFit()
+        compose.assertTitleFitsTheTopBar(text(R.string.session_idle))
+        compose.shot("chat_cut", mode)
+    }
+
+    @Test fun updateAppShowsTheWholeCommandInTheBanner() {
+        show(BridgeState().appOutdated())
+        val short = text(R.string.status_short_update)
+        check(short, text(R.string.status_update_app), "chat_update_app")
+        // The banner is announced to TalkBack.
+        compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite)).assertIsDisplayed()
+        assertEquals(1, lineCount(short))
+    }
+
+    @Test fun notSetUpSaysToRunSetup() {
+        show(BridgeState(), configured = false)
+        check(text(R.string.status_short_not_set_up), text(R.string.status_not_set_up), "chat_not_set_up")
+    }
+
+    companion object {
+        @JvmStatic
+        @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
+        fun modes() = screenModes()
+    }
+}

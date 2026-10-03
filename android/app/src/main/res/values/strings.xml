@@ -27,6 +27,14 @@
     <string name="status_update_app">This app is too old for the ADBuddy on your PC: install a newer build with adbuddy setup --apk &lt;file&gt; on the PC (plain setup does not replace an installed app)</string>
     <string name="status_update_host">The ADBuddy on your PC is too old for this app: update it on the PC</string>
     <string name="status_cut">ADB access is cut</string>
+    <string name="status_not_set_up">This phone is not set up yet: on the PC, run adbuddy setup</string>
+    <string name="status_short_cut">Access cut</string>
+    <string name="status_short_update">Update needed</string>
+    <string name="status_short_connecting">Connecting…</string>
+    <string name="status_short_waiting">Waiting for the PC</string>
+    <string name="status_short_paused">Paused</string>
+    <string name="status_short_not_set_up">Not set up</string>
+    <string name="status_short_connected">Connected</string>
 
     <string name="action_allow">Allow</string>
     <string name="action_deny">Deny</string>

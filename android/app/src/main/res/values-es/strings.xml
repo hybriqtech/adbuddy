@@ -26,6 +26,14 @@
     <string name="status_update_app">Esta app es demasiado antigua para el ADBuddy de tu PC: instala una compilación más reciente con adbuddy setup --apk &lt;fichero&gt; en el PC (setup a secas no reemplaza una app instalada)</string>
     <string name="status_update_host">El ADBuddy de tu PC es demasiado antiguo para esta app: actualízalo en el PC</string>
     <string name="status_cut">Acceso adb cortado</string>
+    <string name="status_not_set_up">Este móvil aún no está configurado: en el PC, ejecuta adbuddy setup</string>
+    <string name="status_short_cut">Acceso cortado</string>
+    <string name="status_short_update">Hay que actualizar</string>
+    <string name="status_short_connecting">Conectando…</string>
+    <string name="status_short_waiting">Esperando al PC</string>
+    <string name="status_short_paused">En pausa</string>
+    <string name="status_short_not_set_up">Sin configurar</string>
+    <string name="status_short_connected">Conectado</string>
 
     <string name="action_allow">Permitir</string>
     <string name="action_deny">Rechazar</string>

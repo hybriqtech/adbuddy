@@ -82,6 +82,8 @@ fun ChatScreen(
     /** The agent's permission cards are the controller's: with none (a preview) there are none. */
     chat: ChatController? = null,
     hostNow: () -> Long = { 0L },
+    /** The host has handed this phone a link: without it (and without a channel) the banner says to run adbuddy setup. */
+    configured: Boolean = true,
     /** The remote-mode switch (RemoteCard), shown above the conversation; a preview passes an empty one. */
     remoteCard: @Composable () -> Unit,
 ) {
@@ -103,12 +105,13 @@ fun ChatScreen(
             ChatHeader(
                 state, cut, terminalShown, onToggleTerminal = { terminalShown = !terminalShown }, onPause = actions.pause,
                 onToggleCut = actions.toggleCut, onActivity = actions.openActivity, onSettings = actions.openSettings,
-                onNewConversation = { askNew = true },
+                onNewConversation = { askNew = true }, configured = configured,
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { inner ->
         Column(Modifier.padding(inner).consumeWindowInsets(inner).imePadding().fillMaxSize()) {
+            LinkBanner(LinkStatus.of(state, cut, configured))
             remoteCard()
             if (terminalOn) {
                 TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.weight(0.45f).fillMaxSize())

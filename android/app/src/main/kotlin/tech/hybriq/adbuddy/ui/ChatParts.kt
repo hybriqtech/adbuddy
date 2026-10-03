@@ -49,6 +49,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
@@ -90,10 +92,12 @@ fun ChatHeader(
     onActivity: () -> Unit,
     onSettings: () -> Unit,
     onNewConversation: () -> Unit,
+    configured: Boolean = true,
 ) {
     var menu by remember { mutableStateOf(false) }
     val label = SessionLabel.of(state)
-    val status = LinkStatus.of(state, cut)
+    val status = LinkStatus.of(state, cut, configured)
+    val titleLine = with(LocalDensity.current) { MaterialTheme.typography.titleMedium.lineHeight.toDp() + MaterialTheme.typography.bodySmall.lineHeight.toDp() }
     TopAppBar(
         title = {
             Column {
@@ -110,26 +114,19 @@ fun ChatHeader(
                             SessionLabel.WAITING -> R.string.session_waiting
                             SessionLabel.IDLE -> R.string.session_idle
                             SessionLabel.STOPPED -> R.string.session_stopped
-                            SessionLabel.OFFLINE -> status.text
+                            // Not connected: the short state; what to do about it is in the banner under the bar.
+                            SessionLabel.OFFLINE -> status.shortText
                         },
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // The link line, when it is not the plain "connected" (cut, paused, update needed).
-                if (label != SessionLabel.OFFLINE && status != LinkStatus.CONNECTED) {
-                    Text(
-                        stringResource(status.text),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
         },
+        modifier = Modifier.testTag(TOP_BAR_TAG),
+        expandedHeight = AdbuddyTopBarSpec.height(titleLine),
         actions = {
             IconButton(onClick = onToggleTerminal) {
                 Icon(
