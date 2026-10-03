@@ -3,6 +3,7 @@ package tech.hybriq.adbuddy.ui
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +30,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.LinearProgressIndicator
@@ -39,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +56,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.LinkAnnotation
@@ -62,6 +67,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.BridgeState
@@ -335,7 +341,11 @@ fun DraftChips(drafts: List<Draft>, onRemove: (String) -> Unit, onRetry: (String
     }
 }
 
-/** + (photo, file, screenshot), the text field (up to 5 lines) and Send; Send is `enabled = Composer.canSend(text, drafts)`. */
+/**
+ * + (photo, file, screenshot), the text field (up to 5 lines) and Send; Send is `enabled = Composer.canSend(text, drafts)`.
+ * While the agent works ([working]) and nothing is being written (no text, no drafts), the button is Stop instead and calls
+ * [onStop]; it then rests a few seconds, because agent.interrupt has no reply and a second tap would send a second Esc.
+ */
 @Composable
 fun InputBar(
     text: String,
@@ -345,6 +355,8 @@ fun InputBar(
     onFile: () -> Unit,
     onCapture: () -> Unit,
     onSend: () -> Unit,
+    working: Boolean = false,
+    onStop: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -364,8 +376,23 @@ fun InputBar(
             maxLines = 5,
             shape = MaterialTheme.shapes.extraLarge,
         )
-        FilledIconButton(onClick = onSend, enabled = Composer.canSend(text, drafts)) {
-            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_send))
+        val canSend = Composer.canSend(text, drafts)
+        val stopLabel = stringResource(R.string.chat_stop)
+        // Anything being written (text, or a draft even if still uploading) keeps Send: Stop is only for an empty bar, so a person
+        // composing never interrupts the agent by mistake.
+        val hasContent = text.isNotBlank() || drafts.isNotEmpty()
+        // After a tap the button rests a moment: agent.interrupt has no reply, so a second tap would send a second Esc.
+        var stopping by remember(working) { mutableStateOf(false) }
+        LaunchedEffect(stopping) { if (stopping) { delay(3_000); stopping = false } }
+        if (working && !hasContent) {
+            FilledIconButton(onClick = { stopping = true; onStop() }, enabled = !stopping, modifier = Modifier.semantics { contentDescription = stopLabel }) {
+                // A square, the usual "stop": Icons.Default.Close already means "discard" in the draft chips, and Stop is in icons-extended (not in the app).
+                Box(Modifier.size(14.dp).background(LocalContentColor.current))
+            }
+        } else {
+            FilledIconButton(onClick = onSend, enabled = canSend) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_send))
+            }
         }
     }
 }

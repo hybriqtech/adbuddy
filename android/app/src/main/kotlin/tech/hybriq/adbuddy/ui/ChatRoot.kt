@@ -31,6 +31,8 @@ import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.BridgePrefs
+import tech.hybriq.adbuddy.bridge.Empty
+import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.chat.Composer
 import tech.hybriq.adbuddy.control.CutAccess
 import tech.hybriq.adbuddy.files.Downloads
@@ -122,6 +124,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             openActivity = { route = Route.ACTIVITY },
             openSettings = { route = Route.SETTINGS },
             newConversation = app.chat::newConversation,
+            interrupt = { app.bridge.send(Protocol.AGENT_INTERRUPT, Protocol.json.encodeToJsonElement(Empty.serializer(), Empty)) },
         )
     }
 

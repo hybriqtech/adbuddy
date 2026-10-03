@@ -96,6 +96,7 @@
     <string name="session_stopped">Parado</string>
     <string name="chat_hint">Escribe al agente</string>
     <string name="chat_send">Enviar</string>
+    <string name="chat_stop">Parar</string>
     <string name="chat_attach">Adjuntar</string>
     <string name="chat_photo">Foto</string>
     <string name="chat_file">Fichero</string>

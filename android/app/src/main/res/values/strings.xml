@@ -98,6 +98,7 @@
     <string name="session_stopped">Stopped</string>
     <string name="chat_hint">Message the agent</string>
     <string name="chat_send">Send</string>
+    <string name="chat_stop">Stop</string>
     <string name="chat_attach">Attach</string>
     <string name="chat_photo">Photo</string>
     <string name="chat_file">File</string>

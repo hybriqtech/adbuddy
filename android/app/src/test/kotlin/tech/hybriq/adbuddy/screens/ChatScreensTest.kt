@@ -11,6 +11,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.TextLayoutResult
 import org.junit.Assert.assertEquals
@@ -92,6 +93,19 @@ class ChatScreensTest(private val mode: ScreenMode) {
         compose.assertTextsFit()
         compose.assertTitleFitsTheTopBar(text(R.string.session_idle))
         compose.shot("chat_connected_messages", mode)
+    }
+
+    @Test fun workingShowsStopInTheInputBar() {
+        show(
+            BridgeState(
+                connection = BridgeState.Connection.CONNECTED, hostName = "my-pc", sessionState = SessionState(state = "working"),
+                chat = ChatState(messages = listOf(ChatMessage("1", "user", "Turn the volume down"))),
+            ),
+        )
+        compose.onNodeWithText(text(R.string.session_working)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.chat_stop)).assertIsDisplayed()
+        compose.assertTextsFit()
+        compose.shot("chat_working", mode)
     }
 
     @Test fun offlineWaitingSaysItShortInTheHeaderAndInFullInTheBanner() {

@@ -45,6 +45,7 @@ import tech.hybriq.adbuddy.bridge.ChatState
 import tech.hybriq.adbuddy.chat.ChatController
 import tech.hybriq.adbuddy.chat.Links
 import tech.hybriq.adbuddy.chat.Outgoing
+import tech.hybriq.adbuddy.chat.SessionLabel
 import tech.hybriq.adbuddy.chat.Timeline
 import tech.hybriq.adbuddy.chat.ToolStrip
 import tech.hybriq.adbuddy.files.DownloadState
@@ -70,9 +71,10 @@ class ChatActions(
     val openActivity: () -> Unit,
     val openSettings: () -> Unit,
     val newConversation: () -> Unit,
+    val interrupt: () -> Unit,
 ) {
     companion object {
-        val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+        val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
     }
 }
 
@@ -200,6 +202,7 @@ fun ChatScreen(
             InputBar(
                 text, { text = it }, drafts, actions.pickPhotos, actions.pickFile, actions.capture,
                 onSend = { actions.send(text); text = "" },
+                working = SessionLabel.of(state) == SessionLabel.WORKING, onStop = actions.interrupt,
             )
         }
     }
