@@ -1,20 +1,22 @@
 # ADBuddy M5b · El puerto de la depuración inalámbrica sale de la conexión, no de `getprop` (M5b-11/12) · Plan de implementación
 
+> Plan v2: incorpora la revisión opus del plan (`.superpowers/sdd/2026-10-03-adbuddy-m5b-tls-port/plan-review.md`: I1 el puerto TLS cambia cuando adbd se reinicia y un `ip:puerto` caído no vale, M1 bucle local/sin especificar/multidifusión, M2 texto del ruling 1, M3 emulador y bucle local en la tabla, M4 inventario) y el merge de `origin/main` 2bb199a en la rama (f399ca2).
+>
 > **Para quien ejecute:** REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`. Los pasos usan casillas (`- [ ]`). Implementador y re-revisiones en Sonnet (`adbuddy-implementer`, `adbuddy-rereviewer`; si BLOCKED o ronda 4-5, `adbuddy-implementer-opus`); la Tarea 1 es del modo remoto (🔒): la revisa `adbuddy-reviewer-opus`, y la Tarea 2 `adbuddy-reviewer`. Nunca Haiku. **Antes de la tarea 1, `adbuddy-reviewer-opus` revisa este plan completo, código incluido** (CLAUDE.md), y el plan se corrige con sus hallazgos.
 
-**Meta:** que `tailscale_port` se guarde de verdad. Hoy `remoteLink.readTLSPort` (`host/internal/cli/phone_remote.go:442`) ejecuta `adb shell getprop service.adb.tls.port`, y el usuario `shell` no puede leer esa propiedad: SELinux deniega la lectura (`adbd_prop`) y `getprop` devuelve una cadena vacía con código 0 (medido en la API 34, hallazgo T1-12 de `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`, en `origin/main` 2bb199a; con `su 0` da el puerto, pero un Pixel de producción no tiene `su`). `readTLSPort` da 0, la app no manda `wifiAdbPort` (no hay API pública), y `tailscale_port` no se guarda nunca. Efecto: `candidateAddrs` (`phone_watch.go:33`) y `findKnownPhone` no prueban `tailscale_ip:tailscale_port`, y la reconexión por Tailscale solo funciona por el 5555 del modo remoto.
+**Meta:** que `tailscale_port` se guarde de verdad. Hoy `remoteLink.readTLSPort` (`host/internal/cli/phone_remote.go:442`) ejecuta `adb shell getprop service.adb.tls.port`, y el usuario `shell` no puede leer esa propiedad: SELinux deniega la lectura (`adbd_prop`) y `getprop` devuelve una cadena vacía con código 0 (medido en la API 34, hallazgo T1-12 de `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`; con `su 0` da el puerto, pero un Pixel de producción no tiene `su`). `readTLSPort` da 0, la app no manda `wifiAdbPort` (no hay API pública), y `tailscale_port` no se guarda nunca. Efecto: `candidateAddrs` (`phone_watch.go:33`) y `findKnownPhone` no prueban `tailscale_ip:tailscale_port`, y la reconexión por Tailscale solo funciona por el 5555 del modo remoto.
 
-**Arquitectura:** el host ya conoce el puerto por la conexión que tiene con el móvil. Si adb lista el móvil como `ip:puerto` (conectado por dirección), ese es el puerto. Si lo lista por mDNS (`<instancia>._adb-tls-connect._tcp`, el caso normal en casa, ver `docs/spikes/s1-modo-remoto.md`), el puerto es el del servicio `_adb-tls-connect._tcp` con esa misma instancia en `adb mdns services` (reutiliza `pairing.Services`, `pairing.ConnectType` y el formato que ya usan `setup` y `pairing.Connect`). El `getprop` se quita. Para leer el serial vigente y lanzar órdenes de host, `remoteLink` recibe un `phoneConn` (`Serial()` y `Host()`), que es el `activePhone` de `serve`: `startPhoneLink` lo saca de su `phoneapp.ADB` con `connOf(a)`, así que su firma y la de sus 7 llamadas en tests no cambian. `save` sigue en `drain` (fuera del bucle de mensajes, un informe a la vez) y con el tope `tlsPortTimeout` sobre el contexto del enlace. **No cambian:** el protocolo con la app, `candidateAddrs`, `findKnownPhone`, el vigilante, el controlador del modo remoto, la comprobación de identidad (`verifyAt`) ni ningún texto de cara al usuario.
+**Arquitectura:** el host ya conoce el puerto por la conexión que tiene con el móvil. Si adb lista el móvil como `ip:puerto` (conectado por dirección) y `adb devices` lo da en estado `device`, ese es el puerto (adbd toma un puerto nuevo cada vez que se reinicia, y una conexión caída puede ser a un puerto viejo). Si lo lista por mDNS (`<instancia>._adb-tls-connect._tcp`, el caso normal en casa, ver `docs/spikes/s1-modo-remoto.md`), el puerto es el del servicio `_adb-tls-connect._tcp` con esa misma instancia en `adb mdns services` (reutiliza `pairing.Services`, `pairing.ConnectType` y el formato que ya usan `setup` y `pairing.Connect`). El `getprop` se quita. Para leer el serial vigente y lanzar órdenes de host, `remoteLink` recibe un `phoneConn` (`Serial()` y `Host()`), que es el `activePhone` de `serve`: `startPhoneLink` lo saca de su `phoneapp.ADB` con `connOf(a)`, así que su firma y la de sus 7 llamadas en tests no cambian. `save` sigue en `drain` (fuera del bucle de mensajes, un informe a la vez) y con el tope `tlsPortTimeout` sobre el contexto del enlace. **No cambian:** el protocolo con la app, `candidateAddrs`, `findKnownPhone`, el vigilante, el controlador del modo remoto, la comprobación de identidad (`verifyAt`) ni ningún texto de cara al usuario.
 
 **Tecnologías:** Go 1.27 (`host/`). Nada nuevo en `go.mod`.
 
-**Fuentes:** encargo `.superpowers/sdd/2026-10-03-adbuddy-m5b-tls-port/plan-brief.md` · spec M5 `docs/superpowers/specs/2026-10-01-adbuddy-m5-ayudas-remoto-design.md` §7.1 (dice que el host lee el puerto con `getprop`: la Tarea 2 la corrige) y §7.2 (reconexión, el 5555 solo como candidato con el modo encendido) · plan de M5b `docs/superpowers/plans/2026-10-01-adbuddy-m5b-modo-remoto.md` (Task 4, validaciones 11 y 12) · `docs/superpowers/plans/pendientes-m3-m5.md` ("QA automático de M5b") · inventario `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` (en `origin/main`: fila M5b-11 y "Hallazgos de la T1") · spike S1 (`service.adb.tcp.port` sí se lee como `shell`: 5555, 0; solo `service.adb.tls.port` está vetada).
+**Fuentes:** encargo `.superpowers/sdd/2026-10-03-adbuddy-m5b-tls-port/plan-brief.md` · spec M5 `docs/superpowers/specs/2026-10-01-adbuddy-m5-ayudas-remoto-design.md` §7.1 (dice que el host lee el puerto con `getprop`: la Tarea 2 la corrige) y §7.2 (reconexión, el 5555 solo como candidato con el modo encendido) · plan de M5b `docs/superpowers/plans/2026-10-01-adbuddy-m5b-modo-remoto.md` (Task 4, validaciones 11 y 12) · `docs/superpowers/plans/pendientes-m3-m5.md` ("QA automático de M5b") · inventario `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` (fila M5b-11 y "Hallazgos de la T1"; en la rama desde el merge f399ca2) · revisión opus del plan `.superpowers/sdd/2026-10-03-adbuddy-m5b-tls-port/plan-review.md` · spike S1 (`service.adb.tcp.port` sí se lee como `shell`: 5555, 0; solo `service.adb.tls.port` está vetada).
 
-**Verificación del plan (réplica acumulada):** el código se escribió paso a paso sobre una copia (`git archive`) de `origin/main` y después **se volvió a aplicar desde el texto de este plan** con un script (cada par "Reemplazar / por" de cada paso, en orden, exigiendo que el ancla sea única) sobre un `git archive` limpio de 7c4613c, la base de la rama (`origin/main` está ahora en 2bb199a, con el mismo `host/`: entre las dos solo cambian documentos de `validaciones-manuales`). Las dos copias quedaron byte a byte iguales en los cinco ficheros, y las salidas citadas en los pasos son las reales. Al final: `go build ./... && go vet ./... && gofmt -l .` limpios y `go test -count=1 -timeout 15m ./...` con todos los paquetes en `ok` (detalle en "Réplica acumulada"). Los cambios a ficheros existentes son pares "Reemplazar / por" para la herramienta Edit (cada texto "Reemplazar" es único en su fichero en el momento de aplicarlo) y, una vez, un borrado por script (dicho en su paso).
+**Verificación del plan (réplica acumulada):** la v1 se escribió paso a paso sobre una copia (`git archive`) y se volvió a aplicar desde su texto. La v2 **se aplicó entera desde el texto de este plan** con un script (cada par "Reemplazar / por" de cada paso, en orden, exigiendo que el ancla sea única) sobre un `git archive` limpio de `origin/main` 2bb199a, el commit que la rama tiene fusionado (f399ca2; su `host/` es el de 7c4613c). Las salidas citadas en los pasos son las de esa réplica. Al final: `go build ./... && go vet ./... && gofmt -l .` limpios y `go test -count=1 -timeout 15m ./...` con todos los paquetes en `ok` (detalle en "Réplica acumulada"). Los cambios a ficheros existentes son pares "Reemplazar / por" para la herramienta Edit (cada texto "Reemplazar" es único en su fichero en el momento de aplicarlo) y, una vez, un borrado por script (dicho en su paso).
 
 ## Global Constraints
 
-- Rama `fix/m5b-tls-port`, desde `origin/main` 7c4613c. Commits con identidad local hybriqtech (nunca `git config --global`) y trailer **exacto** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (comprobarlo con `git log -1 --format=%B`). Nunca `--no-verify` ni `--force`, sin `git stash`. Sin push ni PR salvo que lo pida el controlador; a `main` integra el usuario. `git grep` de seriales e IPs antes de cualquier push.
+- Rama `fix/m5b-tls-port`, desde `origin/main` 7c4613c y con `origin/main` 2bb199a fusionado (f399ca2). Commits con identidad local hybriqtech (nunca `git config --global`) y trailer **exacto** `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (comprobarlo con `git log -1 --format=%B`). Nunca `--no-verify` ni `--force`, sin `git stash`. Sin push ni PR salvo que lo pida el controlador; a `main` integra el usuario. `git grep` de seriales e IPs antes de cualquier push.
 - **Sin IPs RFC 1918** en código, tests ni docs: `100.64.0.0/10` (Tailscale, p. ej. `100.101.102.103`), `192.0.2.x`, `198.51.100.x`, `2001:db8::/32`. Sin seriales reales: los tests usan `phoneSerial` (`adb-AAAA1111-bbb._adb-tls-connect._tcp`, de `invariant_test.go`) y `AAAA1111`.
 - **El móvil del usuario no se toca.** Los tests usan adb falsos en memoria (`connADB`, `ctlADB`). Lo que necesita un móvil va a "Validaciones manuales pendientes" y solo se hace con su permiso explícito.
 - **Rulings de M5b que no se rompen:** el 5555 solo es candidato con el modo remoto encendido (spec §7.2: nunca la IP de casa con el 5555, ni el 5555 con el modo apagado); el vigilante solo cambia a un móvil verificado (`verifyAt`); `tailscale_ip` es la que manda la app (validada con `config.ValidTailscaleIP`); un `device.info` sin dirección no cambia nada; un informe de una conexión reemplazada no guarda.
@@ -27,11 +29,12 @@
 
 ## Rulings de este plan (van al ledger tal cual)
 
-1. **Ruling: el puerto sale del serial activo (`ip:puerto`) o, con el móvil conectado por mDNS, del servicio `_adb-tls-connect._tcp` de su misma instancia; nunca de `getprop` ni de `cfg.Address`.** — El serial activo es la conexión viva y verificada (`serve` y el vigilante solo pasan a un móvil verificado), y su forma decide la fuente: las dos fuentes son excluyentes (un serial `ip:puerto` no tiene instancia mDNS y un serial mDNS no trae puerto), así que no hay orden que elegir entre ellas. `cfg.Address` no es una fuente aparte: cuando funciona, `findKnownPhone` (y el vigilante) la dejan como serial activo, y ya entra por la primera regla; cuando no es el serial activo es una dirección de otro momento (el puerto cambia cada vez que se reactiva la depuración inalámbrica) y sustituiría un puerto bueno por uno caducado (además puede ser un serial y no una dirección). El `wifiAdbPort` de la app, si algún día llega, solo cuenta cuando la conexión no da puerto. — Si me equivoco: conectado por USB o por el 5555 no hay puerto nuevo y se queda el guardado; la reconexión queda como hoy, nunca peor.
+1. **Ruling: el puerto sale del serial activo (`ip:puerto`) o, con el móvil conectado por mDNS, del servicio `_adb-tls-connect._tcp` de su misma instancia; nunca de `getprop` ni de `cfg.Address`.** — El serial activo es la conexión con la que `serve` trabaja ahora: el vigilante solo cambia a un móvil verificado, y al arrancar `serve` sigue con uno sin verificar solo si su nombre guardado no trae un número de serie con el que comprobarlo (`serve.go:147-152`, `checkFound` sin guid; ya lo avisa). Para un puerto da igual: lo peor es un candidato que `verifyAt` rechaza. Su forma decide la fuente: las dos fuentes son excluyentes (un serial `ip:puerto` no tiene instancia mDNS y un serial mDNS no trae puerto), así que no hay orden que elegir entre ellas. `cfg.Address` no es una fuente aparte: cuando funciona, `findKnownPhone` (y el vigilante) la dejan como serial activo, y ya entra por la primera regla; cuando no es el serial activo es una dirección de otro momento (el puerto cambia cada vez que se reactiva la depuración inalámbrica) y sustituiría un puerto bueno por uno caducado (además puede ser un serial y no una dirección). El `wifiAdbPort` de la app, si algún día llega, solo cuenta cuando la conexión no da puerto. — Si me equivoco: conectado por USB o por el 5555 no hay puerto nuevo y se queda el guardado; la reconexión queda como hoy, nunca peor.
 2. **Ruling: en mDNS cuenta el nombre exacto de la instancia, y si sus anuncios no coinciden en el puerto no se cree a ninguno.** — Cualquiera en la red puede anunciar ese nombre, y el sufijo ` (2)` de mDNS es un choque de nombres. Se busca la instancia exacta con la que adb lista la conexión viva (no `matchName` sobre el guid, que juntaría `adb-X` y `adb-X (2)`). Varios anuncios con el mismo puerto (una IPv4 y una IPv6) valen. Un puerto falso solo produciría un candidato que el vigilante descarta al verificar la identidad, nunca un cambio a otro móvil. — Si me equivoco: con un anuncio viejo en la caché de adb tras reactivar la depuración, no se guarda nada hasta que caduca; el siguiente `device.info` lo vuelve a intentar.
-3. **Ruling: nunca se guarda el 5555 (del serial, de mDNS ni de la app) ni un puerto fuera de 1-65535, y sin puerto conocido se conserva el guardado.** — El 5555 es el `adb tcpip` del modo remoto (el móvil puede estar conectado por él, también desde la LAN), y ya tiene su candidato propio, `tailscale_ip:5555`, solo con el modo encendido; guardado como `tailscale_port` sería candidato con el modo apagado (spec §7.2). La IP de la conexión no se guarda nunca (puede ser la de casa): el puerto de la depuración inalámbrica es el mismo en todas las interfaces mientras no se apague, así que el de la LAN sirve para la dirección de Tailscale (validación 1). — Si me equivoco: un móvil cuyo puerto aleatorio fuera justo el 5555 no guarda puerto.
+3. **Ruling: nunca se guarda el 5555 (del serial, de mDNS ni de la app), ni un puerto fuera de 1-65535, ni el de una dirección de bucle local, sin especificar o de multidifusión; sin puerto conocido se conserva el guardado.** — El 5555 es el `adb tcpip` del modo remoto (el móvil puede estar conectado por él, también desde la LAN), y ya tiene su candidato propio, `tailscale_ip:5555`, solo con el modo encendido; guardado como `tailscale_port` sería candidato con el modo apagado (spec §7.2). Una conexión a `127.0.0.1`/`::1` (un túnel o un reenvío local, que `adbuddy connect` admite), a `0.0.0.0` o a una multidifusión no es una interfaz del móvil: su puerto es el del túnel. La IP de la conexión no se guarda nunca (puede ser la de casa): el puerto de la depuración inalámbrica es el mismo en todas las interfaces **mientras adbd no se reinicie**, así que el de la LAN sirve para la dirección de Tailscale (validación 1). adbd sí se reinicia, y toma otro puerto, con `adb tcpip 5555` (encender el modo remoto), con `adb usb` (apagarlo, su caducidad y el invariante al arrancar `serve`) y al reactivar la depuración: el puerto guardado vale hasta el siguiente `device.info` tras el reinicio (validación 3; releerlo tras `activePhone.Switch` y tras `remoteLink.run` queda en pendientes como mejora post-v1). — Si me equivoco: un móvil cuyo puerto aleatorio fuera justo el 5555 no guarda puerto; un puerto caducado solo es un candidato que no conecta, como hoy.
 4. **Ruling: el `getprop service.adb.tls.port` se quita, no queda como último recurso.** — En un móvil de producción da siempre vacío con código 0 (no es un fallo intermitente: es la política de SELinux para `shell`); solo responde con root, que ADBuddy no usa. Dejarlo costaría un `adb shell` y un `avc: denied` en el registro del móvil en cada `device.info`. — Si me equivoco: en un móvil cuya política sí deje leerlo se pierde esa fuente, pero la conexión da el mismo puerto.
 5. **Ruling: las órdenes de host salen del propio `activePhone` (`Host()`: su runner sin serial), y `startPhoneLink` lo recupera con `connOf(a)`.** — `serve` ya pasa `active` como `phoneapp.ADB`; así no cambia la firma de `startPhoneLink` ni sus llamadas, el serial se lee al buscar el puerto (cambia con `Switch`) y no hace falta otro runner (`hostRunner` de `serve` es el mismo con `Serial` vacío). `var _ phoneConn = (*activePhone)(nil)` lo fija al compilar y `TestConnOfIsTheActivePhone` prueba el cableado. Los adb falsos de otros tests no son `phoneConn`: con ellos el enlace solo usa el puerto de la app. — Si me equivoco: si `serve` pasara otro tipo, `connOf` daría nil y se volvería a no guardar puerto (lo de hoy); el test lo vigila para `activePhone`.
+6. **Ruling: un serial `ip:puerto` solo da su puerto si `adb devices` (orden de host, por `Host()`) lo lista en estado `device`.** — `activePhone` sigue diciendo `ip:P1` hasta que el vigilante cambia (dos miradas de 10 s), así que un `device.info` justo después de un reinicio de adbd guardaría P1, ya caducado; `offline`, `unauthorized`, ausente o un `adb devices` que falla no dan puerto. El serial mDNS no necesita la comprobación: el anuncio de mDNS lo hace el móvil con su puerto de ese momento. — Si me equivoco: una orden de adb de host más por `device.info` (dentro del mismo tope de 5 s); en la ventana entre la caída y el cambio del vigilante no se guarda nada, y el siguiente `device.info` lo intenta otra vez.
 
 ## Textos nuevos de cara al usuario
 
@@ -41,15 +44,15 @@ Ninguno. No hay claves nuevas ni cambiadas en `catalog/{en,es}.toml`; solo cambi
 
 | Fichero | Tarea | Cambio |
 |---|---|---|
-| `host/internal/cli/phone_remote.go` | 1 | `phoneConn`, `connOf`, campo `conn`, `tlsPort`/`tlsPortOf`/`addrPort`/`mdnsPort`/`wirelessPort`; fuera `readTLSPort` y el import `bytes` |
+| `host/internal/cli/phone_remote.go` | 1 | `phoneConn`, `connOf`, campo `conn`, `tlsPort`/`tlsPortOf`/`online`/`addrPort`/`mdnsPort`/`wirelessPort`; fuera `readTLSPort`; imports `net`, `net/netip`, `adb`, `pairing` |
 | `host/internal/cli/activephone.go` | 1 | `Host()` |
 | `host/internal/cli/phone.go` | 1 | línea 131: `connOf(a)` |
 | `host/internal/config/config.go` | 1 | comentario de `TailscalePort` |
 | `host/internal/cli/phone_remote_test.go` | 1 | adb falso `connADB` (en lugar de `tlsADB`), tests nuevos, fuera `TestReadTLSPortParses` |
 | `docs/superpowers/specs/2026-10-01-adbuddy-m5-ayudas-remoto-design.md` | 2 | §7.1 |
-| `docs/superpowers/plans/pendientes-m3-m5.md` | 2 | QA automático de M5b, menor T4 |
+| `docs/superpowers/plans/pendientes-m3-m5.md` | 2 | QA automático de M5b, menor T4, diferido post-v1 (releer el puerto) |
 | `docs/superpowers/plans/2026-10-01-adbuddy-m5b-modo-remoto.md` | 2 | validación 11 |
-| `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` | 2 | fila M5b-11 y hallazgo T1-12 (solo si la rama ya lo tiene) |
+| `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` | 2 | fila M5b-11 (estado y lo que falta) y hallazgo T1-12 |
 
 ---
 
@@ -57,10 +60,10 @@ Ninguno. No hay claves nuevas ni cambiadas en `catalog/{en,es}.toml`; solo cambi
 
 **Files:** los cinco de `host/` del mapa.
 
-- Produces: `type phoneConn interface { Serial() string; Host() pairing.ADB }`; `func connOf(a phoneapp.ADB) phoneConn`; `func newRemoteLink(ctx context.Context, store *cfgStore, ctl *remote.Controller, conn phoneConn, log io.Writer) *remoteLink` (antes `a phoneapp.ADB`); `func (p *activePhone) Host() pairing.ADB`; `func tlsPortOf(ctx context.Context, host pairing.ADB, serial string) int`; `func addrPort(addr string) int`; `func mdnsPort(ctx context.Context, host pairing.ADB, inst string) int`; `func wirelessPort(p int) bool`.
+- Produces: `type phoneConn interface { Serial() string; Host() pairing.ADB }`; `func connOf(a phoneapp.ADB) phoneConn`; `func newRemoteLink(ctx context.Context, store *cfgStore, ctl *remote.Controller, conn phoneConn, log io.Writer) *remoteLink` (antes `a phoneapp.ADB`); `func (p *activePhone) Host() pairing.ADB`; `func tlsPortOf(ctx context.Context, host pairing.ADB, serial string) int`; `func online(ctx context.Context, host pairing.ADB, serial string) bool`; `func addrPort(addr string) int`; `func mdnsPort(ctx context.Context, host pairing.ADB, inst string) int`; `func wirelessPort(p int) bool`.
 - Desaparece: `func (r *remoteLink) readTLSPort() int`.
 
-**Concurrencia (razonada; la CI corre `-race`):** `save` corre solo en la gorrutina de `drain` (una a la vez, `running` bajo `mu`). `tlsPort` lee `conn.Serial()` (`activePhone` toma su mutex) y `conn.Host()` (una copia del runner), y lanza `adb mdns services` con `context.WithTimeout(r.ctx, tlsPortTimeout)`: termina con `serve` o a los 5 s, como el `getprop` de antes. No toca estado compartido nuevo. En el adb falso, `serial`, `mdns` y `calls` van bajo su mutex (`set`, `Serial`, `Run`); `gate` y `block` se ponen antes de lanzar el informe, como en el `tlsADB` de hoy.
+**Concurrencia (razonada; la CI corre `-race`):** `save` corre solo en la gorrutina de `drain` (una a la vez, `running` bajo `mu`). `tlsPort` lee `conn.Serial()` (`activePhone` toma su mutex) y `conn.Host()` (una copia del runner), y lanza `adb mdns services` (serial mDNS) o `adb devices` (serial `ip:puerto`) con `context.WithTimeout(r.ctx, tlsPortTimeout)`: termina con `serve` o a los 5 s, como el `getprop` de antes. No toca estado compartido nuevo. En el adb falso, `serial`, `state`, `mdns`, `fail` y `calls` van bajo su mutex (`set`, `setState`, `Serial`, `Run`); `gate` y `block` se ponen antes de lanzar el informe, como en el `tlsADB` de hoy.
 
 - [ ] **Step 1: tests que fallan con el código de hoy.** Todos compilan con el código actual: el adb falso nuevo sirve a la vez como `phoneapp.ADB` (hoy) y como `phoneConn` (después), y los tests nuevos pasan por `onDeviceInfo`, no por funciones nuevas.
 
@@ -147,7 +150,8 @@ func mdnsLine(name, addr string) string {
 }
 
 // connADB is the phone as the remote link sees it: the serial adb lists it
-// with, and adb's commands. `mdns services` lists mdns; `shell getprop
+// with, and adb's commands. `devices` lists serial in state (device when
+// empty; "absent" leaves it out); `mdns services` lists mdns; `shell getprop
 // service.adb.tls.port` answers empty with code 0, as on a real phone (SELinux
 // keeps the shell from reading it, validation M5b-11). fail makes every
 // command fail; gate, when set, makes each one wait for it to close before
@@ -155,6 +159,7 @@ func mdnsLine(name, addr string) string {
 type connADB struct {
 	mu     sync.Mutex
 	serial string
+	state  string
 	mdns   string
 	fail   bool
 	calls  []string
@@ -190,6 +195,12 @@ func (a *connADB) set(serial, mdns string) {
 	a.serial, a.mdns = serial, mdns
 }
 
+func (a *connADB) setState(state string, fail bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.state, a.fail = state, fail
+}
+
 func (a *connADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, stdout, _ io.Writer) (int, error) {
 	if a.block {
 		<-ctx.Done()
@@ -206,6 +217,14 @@ func (a *connADB) Run(ctx context.Context, _ string, args []string, _ io.Reader,
 		return 1, errors.New("adb down")
 	}
 	switch cmd {
+	case "devices":
+		io.WriteString(stdout, "List of devices attached\n")
+		if state := a.state; state != "absent" {
+			if state == "" {
+				state = "device"
+			}
+			io.WriteString(stdout, a.serial+"\t"+state+"\n")
+		}
 	case "mdns services":
 		io.WriteString(stdout, "List of discovered mdns services\n"+a.mdns)
 	case "shell getprop service.adb.tls.port":
@@ -276,21 +295,34 @@ func TestDeviceInfoFromAReplacedConnectionIsIgnored(t *testing.T) {
 // Validation M5b-11: the phone's shell cannot read service.adb.tls.port
 // (connADB answers it empty with code 0, like a real phone), so the port comes
 // from the connection the host already has: the serial adb lists the phone
-// with (ip:port), or the phone's connect service in `adb mdns services`. Only
-// a wireless debugging port is saved (1-65535, never the remote mode's 5555),
-// the connection's IP never becomes tailscale_ip, and a port that is not known
-// keeps the saved one (40000).
+// with (ip:port, only while `adb devices` lists it online), or the phone's
+// connect service in `adb mdns services`. Only a wireless debugging port is
+// saved (1-65535, never the remote mode's 5555, never from a loopback,
+// unspecified or multicast address), the connection's IP never becomes
+// tailscale_ip, and a port that is not known keeps the saved one (40000).
 func TestDeviceInfoTakesThePortFromTheConnection(t *testing.T) {
 	const other = "adb-CCCC2222-ddd"
 	for _, c := range []struct {
 		name, serial, mdns string
-		app                int // the port the app reports (wifiAdbPort)
-		want               int // 0: the saved port stays
+		state              string // how `adb devices` lists serial ("" device, "absent" not at all)
+		fail               bool   // adb fails
+		app                int    // the port the app reports (wifiAdbPort)
+		want               int    // 0: the saved port stays
 	}{
 		{name: "connected by a LAN address", serial: "192.0.2.10:41234", want: 41234},
 		{name: "connected over Tailscale", serial: "100.101.102.103:41234", want: 41234},
 		{name: "connected by IPv6", serial: "[2001:db8::10]:41234", want: 41234},
 		{name: "the address wins over the app", serial: "192.0.2.10:41234", app: 41000, want: 41234},
+		{name: "the address is offline", serial: "192.0.2.10:41234", state: "offline"},
+		{name: "the address is unauthorized", serial: "192.0.2.10:41234", state: "unauthorized"},
+		{name: "the address is no longer listed", serial: "192.0.2.10:41234", state: "absent"},
+		{name: "adb devices fails", serial: "192.0.2.10:41234", fail: true},
+		{name: "the app's port when the address is offline", serial: "192.0.2.10:41234", state: "offline", app: 41000, want: 41000},
+		{name: "a loopback forward", serial: "127.0.0.1:15555"},
+		{name: "an IPv6 loopback forward", serial: "[::1]:15555"},
+		{name: "an unspecified address", serial: "0.0.0.0:41234"},
+		{name: "a multicast address", serial: "224.0.0.1:41234"},
+		{name: "an emulator", serial: "emulator-5554"},
 		{name: "through the remote mode's 5555", serial: "100.101.102.103:5555"},
 		{name: "5555 from the app is not wireless debugging", serial: "100.101.102.103:5555", app: 5555},
 		{name: "the app's port when the connection has none", serial: "100.101.102.103:5555", app: 41000, want: 41000},
@@ -302,6 +334,7 @@ func TestDeviceInfoTakesThePortFromTheConnection(t *testing.T) {
 		{name: "mDNS announces two ports", serial: phoneSerial,
 			mdns: mdnsLine(rigInstance, "192.0.2.10:41234") + mdnsLine(rigInstance, "192.0.2.66:41235")},
 		{name: "mDNS announces 5555", serial: phoneSerial, mdns: mdnsLine(rigInstance, "192.0.2.10:5555")},
+		{name: "mDNS announces a loopback address", serial: phoneSerial, mdns: mdnsLine(rigInstance, "127.0.0.1:41234")},
 		{name: "another phone's service", serial: phoneSerial, mdns: mdnsLine(other, "192.0.2.20:41234")},
 		{name: "the pairing service", serial: phoneSerial, mdns: rigInstance + "\t" + pairing.PairingType + "\t192.0.2.10:41234\n"},
 		{name: "mDNS does not list it", serial: phoneSerial},
@@ -313,6 +346,7 @@ func TestDeviceInfoTakesThePortFromTheConnection(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			g := newRemoteRig(t, withTailscale(), "")
 			g.adb.set(c.serial, c.mdns)
+			g.adb.setState(c.state, c.fail)
 			g.r.onDeviceInfo(bridge.Message{}, bridge.DeviceInfo{TailscaleIP: "100.101.102.104", WifiADBPort: c.app})
 			g.idle(t)
 			want := c.want
@@ -376,28 +410,28 @@ Los demás tests del fichero no cambian: los que pasan `"41234"`, `""` o `"fail"
 
 ```
 --- FAIL: TestDeviceInfoSavesTheAddressAndThePort (0.02s)
-    phone_remote_test.go:314: saved "100.101.102.103" 0
---- FAIL: TestDeviceInfoTakesThePortFromTheConnection (0.23s)
+    phone_remote_test.go:330: saved "100.101.102.103" 0
+--- FAIL: TestDeviceInfoTakesThePortFromTheConnection (0.36s)
     --- FAIL: TestDeviceInfoTakesThePortFromTheConnection/connected_by_a_LAN_address (0.01s)
-        phone_remote_test.go:412: saved 100.101.102.104:40000, want 100.101.102.104:41234
-        phone_remote_test.go:416: asked the phone's shell: "shell getprop service.adb.tls.port"
+        phone_remote_test.go:443: saved 100.101.102.104:40000, want 100.101.102.104:41234
+        phone_remote_test.go:447: asked the phone's shell: "shell getprop service.adb.tls.port"
     --- FAIL: TestDeviceInfoTakesThePortFromTheConnection/the_address_wins_over_the_app (0.01s)
-        phone_remote_test.go:412: saved 100.101.102.104:41000, want 100.101.102.104:41234
+        phone_remote_test.go:443: saved 100.101.102.104:41000, want 100.101.102.104:41234
     --- FAIL: TestDeviceInfoTakesThePortFromTheConnection/5555_from_the_app_is_not_wireless_debugging (0.01s)
-        phone_remote_test.go:412: saved 100.101.102.104:5555, want 100.101.102.104:40000
+        phone_remote_test.go:443: saved 100.101.102.104:5555, want 100.101.102.104:40000
     --- FAIL: TestDeviceInfoTakesThePortFromTheConnection/by_mDNS (0.01s)
-        phone_remote_test.go:412: saved 100.101.102.104:40000, want 100.101.102.104:41234
-    (… los 19 subtests fallan: los que esperan puerto, por el puerto; todos, por "asked the phone's shell")
+        phone_remote_test.go:443: saved 100.101.102.104:40000, want 100.101.102.104:41234
+    (… los 30 subtests fallan: los que esperan puerto, por el puerto; todos, por "asked the phone's shell")
 --- FAIL: TestTheSavedPortIsACandidateAddress (0.01s)
-    phone_remote_test.go:431: candidates []
+    phone_remote_test.go:462: candidates []
 --- FAIL: TestDeviceInfoWithTheSameValueDoesNotRewrite (0.03s)
-    phone_remote_test.go:466: saves 1 port 0
+    phone_remote_test.go:497: saves 1 port 0
 --- FAIL: TestChatPortDoesNotOverwriteTheTailscaleAddress (0.02s)
-    phone_remote_test.go:495: saved {… TailscaleIP:100.101.102.103 TailscalePort:0 …}
-FAIL	github.com/hybriqtech/adbuddy/host/internal/cli	0.481s
+    phone_remote_test.go:526: saved {… TailscaleIP:100.101.102.103 TailscalePort:0 …}
+FAIL	github.com/hybriqtech/adbuddy/host/internal/cli	0.609s
 ```
 
-Si algún test falla por otra cosa (no compila, `panic`), parar y avisar.
+Si algún test falla por otra cosa (no compila, `panic`), parar y avisar. Los casos sin puerto que esperar (offline, bucle local, emulador, USB…) fallan aquí solo por la llamada a `getprop`: con el código de hoy nunca se guarda un puerto. Su RED de comportamiento es una mutación del código del paso 3, comprobada en la réplica: sin la llamada a `online`, "the address is offline", "…unauthorized", "…no longer listed" y "adb devices fails" guardan 41234 (`saved 100.101.102.104:41234, want 100.101.102.104:40000`); sin el filtro de `IsLoopback`/`IsUnspecified`/`IsMulticast`, los cuatro casos de dirección y "mDNS announces a loopback address" guardan 15555 o 41234.
 
 - [ ] **Step 3: el código.**
 
@@ -428,6 +462,7 @@ import (
 **por:**
 ```go
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -440,6 +475,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
@@ -592,30 +628,60 @@ func (r *remoteLink) tlsPort() int {
 // tlsPortOf finds the wireless debugging port of the phone adb lists as
 // serial, without the phone's shell:
 //   - serial ip:port (connected by address, at home or over Tailscale): its
-//     port. Wireless debugging listens on every interface at the same port, so
-//     a LAN address tells the port of the Tailscale one too. Its IP is not
-//     used: tailscale_ip is only what the app reports;
+//     port, while `adb devices` lists it online (see online). Wireless
+//     debugging listens on every interface at the same port, so a LAN address
+//     tells the port of the Tailscale one too. Its IP is not used:
+//     tailscale_ip is only what the app reports;
 //   - serial "<instance>._adb-tls-connect._tcp" (connected by mDNS): the port
 //     of the connect service with exactly that instance name in `adb mdns
-//     services` (host is an ADB for host commands, with no serial);
+//     services`;
 //   - anything else (USB, an emulator): 0.
 //
-// A port that cannot be wireless debugging's (see wirelessPort) is 0 too.
+// host is an ADB for host commands, with no serial. A port that cannot be
+// wireless debugging's (see addrPort and wirelessPort) is 0 too.
 func tlsPortOf(ctx context.Context, host pairing.ADB, serial string) int {
 	if inst, ok := strings.CutSuffix(serial, "."+pairing.ConnectType); ok {
 		return mdnsPort(ctx, host, inst)
 	}
-	return addrPort(serial)
+	port := addrPort(serial)
+	if port == 0 || !online(ctx, host, serial) {
+		return 0
+	}
+	return port
 }
 
-// addrPort is the port of addr when addr is ip:port and the port can be
-// wireless debugging's; 0 otherwise.
+// online reports whether `adb devices` lists serial in state "device". adbd
+// takes a new port each time it restarts (`adb tcpip`, `adb usb`), and a
+// connection that dropped (offline, unauthorized or gone) may be to a port it
+// no longer listens on.
+func online(ctx context.Context, host pairing.ADB, serial string) bool {
+	var out, errb bytes.Buffer
+	code, err := host.Run(ctx, "", []string{"devices"}, nil, &out, &errb)
+	if err != nil || code != 0 {
+		return false
+	}
+	for _, d := range adb.ParseDevices(out.String()) {
+		if d.Serial == serial {
+			return d.State == "device"
+		}
+	}
+	return false
+}
+
+// addrPort is the port of addr when addr is ip:port, the IP can be one of
+// the phone's own (not loopback, unspecified or multicast: a tunnel or a
+// local forward has a port of its own) and the port can be wireless
+// debugging's; 0 otherwise.
 func addrPort(addr string) int {
 	h, p, err := net.SplitHostPort(addr)
 	if err != nil {
 		return 0
 	}
-	if _, err := netip.ParseAddr(h); err != nil {
+	ip, err := netip.ParseAddr(h)
+	if err != nil {
+		return 0
+	}
+	if ip = ip.Unmap(); ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
 		return 0
 	}
 	n, err := strconv.ParseUint(p, 10, 16)
@@ -699,9 +765,9 @@ Edit (paso 3) en `host/internal/cli/phone.go`:
 	l.remote = newRemoteLink(ctx, store, ctl, connOf(a), app.Log())
 ```
 
-- [ ] **Step 4: GREEN.** `cd host && go build ./... && go vet ./internal/cli/ && gofmt -l . && go test -count=1 -timeout 5m -run 'TestDeviceInfo|TestTheSavedPort|TestTLSPort|TestChatPort' ./internal/cli/` → `gofmt` sin salida y `ok  	github.com/hybriqtech/adbuddy/host/internal/cli	0.463s` (réplica).
+- [ ] **Step 4: GREEN.** `cd host && go build ./... && go vet ./internal/cli/ && gofmt -l . && go test -count=1 -timeout 5m -run 'TestDeviceInfo|TestTheSavedPort|TestTLSPort|TestChatPort' ./internal/cli/` → `gofmt` sin salida y `ok  	github.com/hybriqtech/adbuddy/host/internal/cli	0.603s` (réplica).
 
-- [ ] **Step 5: test del cableado.** Prueba una función nueva (`connOf`), así que no tiene RED propio con el código de antes (no compilaría); su RED es una mutación comprobada: con `connOf` devolviendo siempre `nil` (`_ = c; return nil`) falla con `phone_remote_test.go:443: conn <nil>`.
+- [ ] **Step 5: test del cableado.** Prueba una función nueva (`connOf`), así que no tiene RED propio con el código de antes (no compilaría); su RED es una mutación comprobada: con `connOf` devolviendo siempre `nil` (`_ = c; return nil`) falla con `phone_remote_test.go:474: conn <nil>`.
 
 Edit (paso 5) en `host/internal/cli/phone_remote_test.go`:
 
@@ -759,7 +825,7 @@ func TestConnOfIsTheActivePhone(t *testing.T) {
 func TestDeviceInfoFromAReplacedConnectionIsIgnored(t *testing.T) {
 ```
 
-`cd host && go vet ./internal/cli/ && go test -count=1 -timeout 5m -run 'TestConnOf|TestDeviceInfo|TestTheSavedPort|TestTLSPort|TestChatPort' ./internal/cli/` → `ok` (réplica: 1.351s).
+`cd host && go vet ./internal/cli/ && go test -count=1 -timeout 5m -run 'TestConnOf|TestDeviceInfo|TestTheSavedPort|TestTLSPort|TestChatPort' ./internal/cli/` → `ok` (réplica: 0.629s).
 
 - [ ] **Step 6: el comentario de `config.toml`.**
 
@@ -776,7 +842,7 @@ Edit (paso 6) en `host/internal/config/config.go`:
 
 (`gofmt` deja la línea así: el comentario va detrás de la etiqueta y no realinea las demás.)
 
-- [ ] **Step 7: verificación de la tarea.** `cd host && go build ./... && go vet ./... && gofmt -l .` (sin salida), `go test -count=1 -timeout 5m ./internal/cli/... ./internal/config/...` (réplica: `ok … cli 94.961s`, `ok … config 0.235s`) y la suite completa `go test -count=1 -timeout 15m ./...` en segundo plano (réplica: todos los paquetes `ok`, ver "Réplica acumulada"). `git grep -n "readTLSPort\|tls\.port" -- host/` solo debe dar comentarios y el adb falso (`phone_remote.go`: el comentario de `phoneConn`; `phone_remote_test.go`: `connADB` y el comentario del test). Ninguna IP RFC 1918 en las líneas añadidas: `git diff -U0 -- host/ | grep '^+' | grep -E '(^|[^0-9.])(10|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]+\.[0-9]+'` sin salida (el `"10.0.0."` de `TestDeviceInfoRemembersFewWarnedAddresses` es anterior y a propósito: una dirección que no es de Tailscale).
+- [ ] **Step 7: verificación de la tarea.** `cd host && go build ./... && go vet ./... && gofmt -l .` (sin salida), `go test -count=1 -timeout 5m ./internal/cli/... ./internal/config/...` y la suite completa `go test -count=1 -timeout 15m ./...` en segundo plano (réplica: los 34 paquetes con tests en `ok`, `cli 99.724s`). `git grep -n "readTLSPort\|tls\.port" -- host/` solo debe dar comentarios y el adb falso (`phone_remote.go`: el comentario de `phoneConn`; `phone_remote_test.go`: `connADB` y el comentario del test). Ninguna IP RFC 1918 en las líneas añadidas: `git diff -U0 -- host/ | grep '^+' | grep -E '(^|[^0-9.])(10|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]+\.[0-9]+'` sin salida (el `"10.0.0."` de `TestDeviceInfoRemembersFewWarnedAddresses` es anterior y a propósito: una dirección que no es de Tailscale).
 
 - [ ] **Step 8: commit.** `git add host/internal/cli/phone_remote.go host/internal/cli/phone_remote_test.go host/internal/cli/activephone.go host/internal/cli/phone.go host/internal/config/config.go` y `git commit` con el mensaje:
 
@@ -785,18 +851,19 @@ fix(host): el puerto de la depuración inalámbrica sale de la conexión, no de 
 
 El usuario shell no puede leer service.adb.tls.port (SELinux: getprop da
 vacío con código 0), así que tailscale_port no se guardaba nunca. Ahora sale
-del serial activo (ip:puerto) o, conectado por mDNS, del servicio
-_adb-tls-connect._tcp de la misma instancia en adb mdns services; nunca el
-5555 ni un puerto fuera de 1-65535, y sin puerto se conserva el guardado.
+del serial activo (ip:puerto, si adb devices lo da en línea) o, conectado
+por mDNS, del servicio _adb-tls-connect._tcp de la misma instancia en adb
+mdns services; nunca el 5555, un puerto fuera de 1-65535 ni el de una
+dirección de bucle local, y sin puerto se conserva el guardado.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ```
 
 ---
 
-### Task 2: la spec y los pendientes dicen de dónde sale el puerto
+### Task 2: la spec, los pendientes y el inventario dicen de dónde sale el puerto
 
-**Files:** los cuatro de `docs/` del mapa. Todos en CRLF en el árbol de trabajo: anclas de una línea.
+**Files:** los cuatro de `docs/` del mapa. Todos en CRLF en el árbol de trabajo: anclas de una línea (un "por" puede añadir una línea nueva detrás).
 
 - [ ] **Step 1: spec M5 §7.1.**
 
@@ -808,7 +875,7 @@ Edit (paso T2) en `docs/superpowers/specs/2026-10-01-adbuddy-m5-ayudas-remoto-de
 ```
 **por:**
 ```markdown
-- **El host,** con el móvil conectado, toma el puerto de la conexión que ya tiene, sin el shell del móvil: el usuario `shell` no puede leer `service.adb.tls.port` (SELinux, `adbd_prop`: `getprop` devuelve vacío con código 0; medido en la API 34, T1-12 del inventario de validaciones manuales; corregido en `fix/m5b-tls-port`). Si adb lista el móvil como `ip:puerto`, ese puerto; si lo lista por mDNS (`<instancia>._adb-tls-connect._tcp`), el del servicio `_adb-tls-connect._tcp` con esa misma instancia en `adb mdns services`, solo si todos sus anuncios dan el mismo puerto; por USB, o conectado por el 5555 del modo remoto, ninguno. Nunca guarda el 5555 ni un puerto fuera de 1-65535, y sin puerto conocido se queda el guardado. La IP de esa conexión no se guarda (puede ser la de casa): `tailscale_ip` es siempre la que manda la app, y el puerto de la depuración inalámbrica es el mismo en todas las interfaces mientras no se apague. El `wifiAdbPort` de la app solo cuenta si la conexión no da puerto, con las mismas reglas. Guarda `tailscale_ip` y `tailscale_port` en `config.toml`, como `address`. `findKnownPhone` prueba `tailscale_ip:tailscale_port` después de `address` y antes de esperar por mDNS. La comprobación de identidad (guid contra `ro.serialno`) no cambia.
+- **El host,** con el móvil conectado, toma el puerto de la conexión que ya tiene, sin el shell del móvil: el usuario `shell` no puede leer `service.adb.tls.port` (SELinux, `adbd_prop`: `getprop` devuelve vacío con código 0; medido en la API 34, T1-12 del inventario de validaciones manuales; corregido en `fix/m5b-tls-port`). Si adb lista el móvil como `ip:puerto` en estado `device`, ese puerto; si lo lista por mDNS (`<instancia>._adb-tls-connect._tcp`), el del servicio `_adb-tls-connect._tcp` con esa misma instancia en `adb mdns services`, solo si todos sus anuncios dan el mismo puerto; por USB, conectado por el 5555 del modo remoto, o con la conexión caída, ninguno. Nunca guarda el 5555, ni un puerto fuera de 1-65535, ni el de una dirección de bucle local, sin especificar o de multidifusión (un túnel tiene su propio puerto), y sin puerto conocido se queda el guardado. La IP de esa conexión no se guarda (puede ser la de casa): `tailscale_ip` es siempre la que manda la app, y el puerto de la depuración inalámbrica es el mismo en todas las interfaces mientras adbd no se reinicie. adbd se reinicia, y cambia de puerto, con `adb tcpip 5555`, con `adb usb` (apagar el modo remoto, su caducidad y el invariante) y al reactivar la depuración: el puerto guardado vale hasta el siguiente `device.info`. El `wifiAdbPort` de la app solo cuenta si la conexión no da puerto, con las mismas reglas. Guarda `tailscale_ip` y `tailscale_port` en `config.toml`, como `address`. `findKnownPhone` prueba `tailscale_ip:tailscale_port` después de `address` y antes de esperar por mDNS. La comprobación de identidad (guid contra `ro.serialno`) no cambia.
 ```
 
 - [ ] **Step 2: pendientes.**
@@ -832,7 +899,7 @@ Edit (paso T2) en `docs/superpowers/plans/pendientes-m3-m5.md`:
 ```
 **por:**
 ```markdown
-      - **Automatizado:** 11 `TestDeviceInfoTakesThePortFromTheConnection` y `TestTheSavedPortIsACandidateAddress` (desde `fix/m5b-tls-port`, plan `2026-10-03-adbuddy-m5b-tls-port.md`: el usuario shell no puede leer `service.adb.tls.port`, así que el puerto sale de la conexión del host, `ip:puerto` o mDNS; antes `TestReadTLSPortParses` probaba un `getprop` que en un móvil real da vacío);
+      - **Automatizado:** 11 `TestDeviceInfoTakesThePortFromTheConnection` y `TestTheSavedPortIsACandidateAddress` (desde `fix/m5b-tls-port`, plan `2026-10-03-adbuddy-m5b-tls-port.md`: el usuario shell no puede leer `service.adb.tls.port`, así que el puerto sale de la conexión del host, `ip:puerto` en línea o mDNS; antes `TestReadTLSPortParses` probaba un `getprop` que en un móvil real da vacío);
 ```
 
 Edit (paso T2) en `docs/superpowers/plans/pendientes-m3-m5.md`:
@@ -843,7 +910,19 @@ Edit (paso T2) en `docs/superpowers/plans/pendientes-m3-m5.md`:
 ```
 **por:**
 ```markdown
-      - **No automatizable (D, móvil o red reales):** en 11, que `tailscale_port` sea el puerto de Ajustes y que `adb connect <ip-tailscale>:<tailscale_port>` conecte (validación 1 del plan `2026-10-03-adbuddy-m5b-tls-port.md`);
+      - **No automatizable (D, móvil o red reales):** en 11, que `tailscale_port` sea el puerto de Ajustes, que `adb connect <ip-tailscale>:<tailscale_port>` conecte, y cómo cambia el puerto con `remote on`, `remote off` y el `adb usb` del invariante (validaciones 1 y 3 del plan `2026-10-03-adbuddy-m5b-tls-port.md`);
+```
+
+Edit (paso T2) en `docs/superpowers/plans/pendientes-m3-m5.md`:
+
+**Reemplazar:**
+```markdown
+      - **DIFERIDO (c), 17c:** `getRecommendedTimeoutMillis`
+```
+**por:**
+```markdown
+      - **DIFERIDO (d), puerto TLS tras reiniciar adbd (post-v1, revisión opus de `fix/m5b-tls-port`, I1):** adbd toma otro puerto de depuración inalámbrica cada vez que se reinicia (`adb tcpip 5555` al encender el modo remoto, `adb usb` al apagarlo, al caducar y en el invariante de `serve`), y `tailscale_port` solo se vuelve a leer con el siguiente `device.info` de la app. Mejora: releer el puerto tras `activePhone.Switch` (el vigilante) y tras `remoteLink.run` (cada cambio del modo), con el mismo `tlsPortOf`. Antes, medirlo (validación 3 del plan `2026-10-03-adbuddy-m5b-tls-port.md`).
+      - **DIFERIDO (c), 17c:** `getRecommendedTimeoutMillis`
 ```
 
 - [ ] **Step 3: validación 11 del plan de M5b.**
@@ -856,12 +935,23 @@ Edit (paso T2) en `docs/superpowers/plans/2026-10-01-adbuddy-m5b-modo-remoto.md`
 ```
 **por:**
 ```markdown
-11. **Puerto de depuración inalámbrica:** (**corregido en `fix/m5b-tls-port`:** el usuario shell no puede leer `service.adb.tls.port`, así que el host ya no usa `getprop` y toma el puerto de su conexión, `ip:puerto` o el servicio mDNS; lo que queda está en la validación 1 de `2026-10-03-adbuddy-m5b-tls-port.md`.) `getprop service.adb.tls.port` desde el host da el puerto vigente
+11. **Puerto de depuración inalámbrica:** (**corregido en `fix/m5b-tls-port`:** el usuario shell no puede leer `service.adb.tls.port`, así que el host ya no usa `getprop` y toma el puerto de su conexión, `ip:puerto` en línea o el servicio mDNS; lo que queda está en las validaciones 1 a 3 de `2026-10-03-adbuddy-m5b-tls-port.md`.) `getprop service.adb.tls.port` desde el host da el puerto vigente
 ```
 
-- [ ] **Step 4: inventario de validaciones (solo si la rama lo tiene).** Si `git ls-files docs/superpowers/plans/2026-10-03-validaciones-manuales.md` no da nada (la rama sale de 7c4613c y ese fichero entró en `origin/main` después, 7519c6f), no se toca y el informe lo dice para quien integre. Si la rama ya lo tiene (el controlador hizo merge de `origin/main`):
+- [ ] **Step 4: inventario de validaciones.** Está en la rama desde el merge f399ca2 (`git ls-files docs/superpowers/plans/2026-10-03-validaciones-manuales.md` lo lista).
 
-Edit (paso T2c) en `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`:
+Edit (paso T2) en `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`:
+
+**Reemplazar:**
+```markdown
+  - SELinux deniega la lectura (`adbd_prop`), y `getprop` devuelve una cadena vacía con rc 0. Por eso `readTLSPort` (`host/internal/cli/phone_remote.go`) devuelve 0.
+```
+**por:**
+```markdown
+  - SELinux deniega la lectura (`adbd_prop`), y `getprop` devuelve una cadena vacía con rc 0. Por eso `readTLSPort` (`host/internal/cli/phone_remote.go`) devolvía 0 (ya no existe desde `fix/m5b-tls-port`).
+```
+
+Edit (paso T2) en `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`:
 
 **Reemplazar:**
 ```markdown
@@ -870,10 +960,21 @@ Edit (paso T2c) en `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`:
 **por:**
 ```markdown
   - Afecta a M5b-11 y, por arrastre, a M5b-12. En un Pixel de producción no hay `su`. Falta confirmarlo en Android 17.
-  - **Corregido en `fix/m5b-tls-port`** (plan `2026-10-03-adbuddy-m5b-tls-port.md`): el host ya no usa `getprop`; toma el puerto del serial activo (`ip:puerto`) o del servicio mDNS `_adb-tls-connect._tcp` de la misma instancia.
+  - **Corregido en `fix/m5b-tls-port`** (plan `2026-10-03-adbuddy-m5b-tls-port.md`): el host ya no usa `getprop`; toma el puerto del serial activo (`ip:puerto`, solo si `adb devices` lo da como `device`) o del servicio mDNS `_adb-tls-connect._tcp` de la misma instancia. adbd cambia de puerto al reiniciarse (`adb tcpip`, `adb usb`): el guardado vale hasta el siguiente `device.info`.
 ```
 
-Edit (paso T2c) en `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`:
+Edit (paso T2) en `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`:
+
+**Reemplazar:**
+```markdown
+| Parcial, lógica hecha (`TestReadTLSPortParses`); **en la API 34 falla** |
+```
+**por:**
+```markdown
+| Parcial, lógica hecha (`TestDeviceInfoTakesThePortFromTheConnection`, `TestTheSavedPortIsACandidateAddress`); el `getprop` que fallaba en la API 34 ya no se usa (`fix/m5b-tls-port`) |
+```
+
+Edit (paso T2) en `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`:
 
 **Reemplazar:**
 ```markdown
@@ -881,13 +982,13 @@ Edit (paso T2c) en `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`:
 ```
 **por:**
 ```markdown
-| Defecto corregido en `fix/m5b-tls-port` (el puerto sale de la conexión del host, no de `getprop`); queda comprobar en el Pixel que `tailscale_port` es el de Ajustes y que `adb connect <ip-tailscale>:<tailscale_port>` conecta. Paso: la pasada de solo lectura. |
+| Defecto corregido en `fix/m5b-tls-port` (el puerto sale de la conexión del host, no de `getprop`); queda comprobar en el Pixel que `tailscale_port` es el de Ajustes, que `adb connect <ip-tailscale>:<tailscale_port>` conecta, y el puerto de Ajustes antes y después de `remote on`, `remote off` y del `adb usb` del invariante (validaciones 1 a 3 de ese plan). Paso: la pasada de solo lectura, y la parte del modo remoto junto con M5b-12. |
 ```
 
-- [ ] **Step 5: comprobar y commit.** Cada texto "Reemplazar" aparece una sola vez antes de editar (`grep -c`); después, `git diff --stat` solo lista esos ficheros y `git diff` no cambia finales de línea fuera de las líneas editadas (`git diff --ignore-cr-at-eol --stat` igual). `git commit` con el mensaje:
+- [ ] **Step 5: comprobar y commit.** Cada texto "Reemplazar" aparece una sola vez antes de editar (`grep -c`); después, `git diff --stat` solo lista esos cuatro ficheros y `git diff --ignore-cr-at-eol --stat` da lo mismo (no cambian finales de línea fuera de lo editado). `git commit` con el mensaje:
 
 ```
-docs(m5b): el puerto de la depuración inalámbrica sale de la conexión del host (spec §7.1, pendientes)
+docs(m5b): el puerto de la depuración inalámbrica sale de la conexión del host (spec §7.1, pendientes, inventario)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ```
@@ -896,44 +997,47 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 
 ## Validaciones manuales pendientes (M5b-11/12, puerto de la depuración inalámbrica)
 
-Solo con el móvil del usuario y su permiso explícito. Ninguna cambia nada en el móvil.
+Solo con el móvil del usuario y su permiso explícito. La 1 y la 2 no cambian nada en el móvil; la 3 enciende y apaga el modo remoto (lo que ya hace la validación M5b-12), así que va junto con ella.
 
 1. **El puerto guardado es el de Ajustes y llega por Tailscale.** En casa, con la depuración inalámbrica encendida (serial mDNS) y la app con Tailscale: `adbuddy serve`; `config.toml` pasa a tener `tailscale_port` igual al puerto de la pantalla "Depuración inalámbrica". Después, desde el PC, `adb connect <ip-tailscale>:<tailscale_port>` contra el servidor adb de ADBuddy conecta (comprueba la premisa del ruling 3: el puerto TLS escucha también en la interfaz de Tailscale) y `adb disconnect` lo deja como estaba. _Automatizado: la lógica, `TestDeviceInfoTakesThePortFromTheConnection` y `TestTheSavedPortIsACandidateAddress`; resto: Android 17 real y Tailscale, D (Pixel). No sirve el emulador: su serial es `emulator-*` (sin puerto ni mDNS) y su red está detrás del NAT del emulador._
 2. **`adb mdns services` del adb real** lista el servicio `_adb-tls-connect._tcp` con la misma instancia que el serial del móvil (el formato ya lo usan `setup` y `pairing.Connect`, probados en el Pixel en M1b; confirmarlo junto con la 1). _Automatizado: el formato en `TestSetupSavesTheStableSerial` y en este plan; resto: D (Pixel)._
+3. **El puerto tras reiniciar adbd (revisión opus, I1).** Anotar el puerto de Ajustes (o el de `adb mdns services`) y `tailscale_port` de `config.toml`: (a) al arrancar `serve` (tras el `adb usb` del invariante, si lo hubo); (b) tras `adbuddy remote on`; (c) tras `adbuddy remote off` (y, si se puede, tras una caducidad forzada a un minuto, como en M5b-12). Si el puerto cambia y `tailscale_port` se queda viejo hasta el siguiente `device.info`, el diferido (d) de `pendientes-m3-m5.md` (releer tras `activePhone.Switch` y `remoteLink.run`) sube de prioridad. _Automatizado: que una conexión caída no da puerto (casos offline/unauthorized/ausente de `TestDeviceInfoTakesThePortFromTheConnection`); resto: D (Pixel), junto con M5b-12._
 
 ## Réplica acumulada tarea a tarea
 
-Réplica a mano sobre `git archive origin/main host` (2bb199a; `host/` idéntico a 7c4613c) en el scratchpad:
+Sobre `git archive 2bb199a` completo (el `origin/main` fusionado en la rama, f399ca2; los tests de `bridge` y `cli` leen `protocol/` y `docs/`, así que no vale archivar solo `host/`), aplicando el plan desde su texto con un script (pares en orden, ancla única):
 
-- **Tarea 1, paso 1-2 (RED):** `go vet ./internal/cli/` limpio; `go test -count=1 -timeout 5m -run 'TestDeviceInfo|TestTheSavedPort|TestTLSPort|TestChatPort' ./internal/cli/` → `FAIL` con los fallos citados en el Step 2 (todos por el puerto no guardado o por la llamada a `getprop`; ninguno por compilación ni `panic`).
-- **Paso 3-4 (GREEN):** `go build ./...`, `go vet ./internal/cli/`, `gofmt -l .` limpios; el mismo `-run` → `ok … 0.463s`.
-- **Paso 5:** `ok … 1.351s`; mutación `connOf` → `nil`: `FAIL`, `phone_remote_test.go:443: conn <nil>`; restaurado: `ok`.
-- **Paso 6-7:** `go build ./... && go vet ./... && gofmt -l .` limpios; `go test -count=1 -timeout 5m ./internal/cli/... ./internal/config/...` → `ok … cli 94.961s`, `ok … config 0.235s`; suite completa `go test -count=1 -timeout 15m ./...` → los 34 paquetes con tests en `ok` (`cli 95.482s`), `EXIT 0`.
-- **Réplica desde el texto del plan:** sobre `git archive HEAD` completo (7c4613c; los tests de `bridge` y `cli` leen `protocol/` y `docs/`, así que no vale archivar solo `host/`), el script aplica los pasos 1, 3, 5 y 6 en orden: 24 `--- FAIL` tras el paso 1 (los del Step 2), `ok` tras el 3, `go build`/`go vet`/`gofmt -l` limpios tras el 6, y los cinco ficheros quedan byte a byte iguales a los de la réplica a mano. La suite completa citada arriba es la de este árbol.
-- **Tarea 2:** cada ancla comprobada única en el árbol de trabajo (CRLF) de la rama (`grep -c` = 1 en la spec, en `pendientes-m3-m5.md` y en el plan de M5b) y, para el paso 4, en `origin/main:docs/superpowers/plans/2026-10-03-validaciones-manuales.md`. No toca código: la suite no cambia.
+- **Tarea 1, paso 1-2 (RED):** `go vet ./internal/cli/` limpio; `go test -count=1 -timeout 5m -run 'TestDeviceInfo|TestTheSavedPort|TestTLSPort|TestChatPort' ./internal/cli/` → `FAIL`, 35 líneas `--- FAIL` (5 tests y los 30 subtests de la tabla), las citadas en el Step 2: el puerto no guardado y la llamada a `getprop`; ninguna por compilación ni `panic`.
+- **Paso 3-4 (GREEN):** `go build ./...`, `go vet ./internal/cli/`, `gofmt -l .` limpios; el mismo `-run` → `ok … 0.603s`. Mutaciones del paso 3: sin `online`, fallan los cuatro casos de conexión caída (guardan 41234); sin el filtro de direcciones, fallan los cuatro de dirección y el de mDNS de bucle local; restaurado, `ok`.
+- **Paso 5:** `ok … 0.629s`; mutación `connOf` → `nil`: `FAIL`, `phone_remote_test.go:474: conn <nil>`; restaurado: `ok`.
+- **Paso 6-7:** `go build ./... && go vet ./... && gofmt -l .` limpios; suite completa `go test -count=1 -timeout 15m ./...` → los 34 paquetes con tests en `ok` (`cli 99.724s`), `EXIT 0`.
+- **Tarea 2:** las diez anclas, únicas (`grep -c` = 1) en el árbol de trabajo de la rama tras el merge (CRLF): la spec, `pendientes-m3-m5.md`, el plan de M5b y el inventario. No toca código.
+- **v1 (antes de la revisión):** réplica a mano y desde el texto sobre 7c4613c, byte a byte iguales; suite completa en `ok`.
 
 ## Autorrevisión del plan
 
-### Cobertura frente al encargo
+### Cobertura frente al encargo y la revisión
 
-- Puerto de la conexión activa (`ip:puerto` del serial) → Tarea 1, `addrPort`; `cfg.Address` → descartado como fuente aparte con motivo (ruling 1); mDNS filtrado por la identidad del móvil y reutilizando `pairing.Services`/`ConnectType` → `mdnsPort` (instancia exacta del serial vivo, ruling 2). Orden decidido y justificado (ruling 1: la forma del serial elige la fuente; la app, después).
-- Casos adversos: 5555 del modo remoto (serial, mDNS y app), validación 1-65535 (70000, 0), serial mDNS sin puerto (va por mDNS), IP de la LAN no se guarda como `tailscale_ip` (todos los casos comprueban `100.101.102.104`, la de la app), nunca sobrescribir un puerto bueno con 0 ni con 5555 (los casos sin puerto exigen el 40000 guardado), choque de nombres mDNS, otro móvil, servicio de emparejamiento, USB, no-IP, adb que falla, contexto del enlace.
+- Puerto de la conexión activa (`ip:puerto` del serial, solo en línea) → Tarea 1, `addrPort` + `online`; `cfg.Address` → descartado como fuente aparte con motivo (ruling 1); mDNS filtrado por la identidad del móvil y reutilizando `pairing.Services`/`ConnectType` → `mdnsPort` (instancia exacta del serial vivo, ruling 2). Orden decidido y justificado (ruling 1: la forma del serial elige la fuente; la app, después).
+- Casos adversos: 5555 del modo remoto (serial, mDNS y app), validación 1-65535 (70000, 0), serial mDNS sin puerto (va por mDNS), IP de la LAN no se guarda como `tailscale_ip` (todos los casos comprueban `100.101.102.104`, la de la app), nunca sobrescribir un puerto bueno con 0 ni con 5555 (los casos sin puerto exigen el 40000 guardado), conexión caída (offline, unauthorized, ausente, `adb devices` que falla), bucle local / sin especificar / multidifusión (serial y mDNS), emulador, choque de nombres mDNS, otro móvil, servicio de emparejamiento, USB, no-IP, adb que falla, contexto del enlace.
+- Revisión opus: I1 (a) `online` + casos; (b) validación 3 aquí, en pendientes y en el inventario; (c) diferido (d) en pendientes, sin implementar; (d) ruling 3 y spec §7.1 dicen "mientras adbd no se reinicie". M1 filtro de direcciones; M2 texto del ruling 1; M3 casos de emulador y bucle local; M4 columna "Estado" y hallazgo del inventario.
 - Hilo y runner: `save` sigue en `drain`; el runner de host sale de `activePhone.Host()`, sin tocar la firma de `startPhoneLink` ni romper `phone.go:131` ni los tests (ruling 5).
 - `getprop` quitado, con motivo (ruling 4). Spec §7.1 actualizada (Tarea 2).
-- RED real con adb falso (`getprop` vacío rc 0, conexión `ip:puerto`, mDNS) en `phone_remote_test.go`.
+- RED real con adb falso (`getprop` vacío rc 0, conexión `ip:puerto`, mDNS) en `phone_remote_test.go`; los casos de "no guardar" tienen su RED en mutaciones comprobadas.
 
 ### Placeholders y tipos
 
-Sin placeholders. `phoneConn` lo implementan `*activePhone` (comprobado al compilar) y `*connADB` (tests). `pairing.ADB` y `phoneapp.ADB` tienen el mismo método `Run`: `adb.Runner` y `connADB` valen para los dos. `remote.Port` es la cadena `"5555"`: `wirelessPort` compara con `strconv.Itoa(p)`.
+Sin placeholders. `phoneConn` lo implementan `*activePhone` (comprobado al compilar) y `*connADB` (tests). `pairing.ADB` y `phoneapp.ADB` tienen el mismo método `Run`: `adb.Runner` y `connADB` valen para los dos. `online` usa `adb.ParseDevices` (paquete `adb`, ya exportado). `remote.Port` es la cadena `"5555"`: `wirelessPort` compara con `strconv.Itoa(p)`. `netip.Addr.Unmap` antes de mirar bucle local (una `::ffff:127.0.0.1` también cuenta).
 
-### Riesgos abiertos para el revisor Opus
+### Riesgos abiertos para el revisor
 
 - **Premisa de la interfaz:** que el puerto TLS escuche también por Tailscale (ruling 3) no está medido: S1 solo probó el 5555 por Tailscale. Si no escuchara, `tailscale_ip:tailscale_port` sería un candidato que falla (lo de hoy, sin peor efecto) y la validación 1 lo diría.
-- **Caché de mDNS:** tras reactivar la depuración, adb puede listar un rato el anuncio viejo junto al nuevo con la misma instancia; con puertos distintos no se guarda nada (ruling 2) hasta que caduque. Coste: un `device.info` más tarde.
+- **Puerto tras reiniciar adbd:** el guardado puede quedarse viejo entre un reinicio de adbd y el siguiente `device.info` (validación 3, diferido (d)); en ese caso es un candidato que no conecta, como hoy.
+- **Caché de mDNS:** tras reactivar la depuración, adb puede listar un rato el anuncio viejo junto al nuevo con la misma instancia; con puertos distintos no se guarda nada (ruling 2) hasta que caduque.
 - **`connOf` por aserción de tipo:** explícito en el código y vigilado por `var _ phoneConn = (*activePhone)(nil)` y `TestConnOfIsTheActivePhone`; la alternativa (un parámetro más en `startPhoneLink`) cambiaría 8 llamadas sin ganar seguridad.
 - `service.adb.tcp.port` (el del modo remoto y el invariante) **sí** se lee como `shell` (S1 en el Pixel: `5555`, `0`): este defecto no afecta al controlador del modo remoto.
 
 ### Decisiones y dudas para el controlador
 
-- El inventario `2026-10-03-validaciones-manuales.md` está en `origin/main` (2bb199a) pero no en esta rama (7c4613c): la Tarea 2 lo actualiza solo si la rama lo tiene; si no, lo hace quien integre (los dos pares están en el paso 4).
 - La app sigue sin mandar `wifiAdbPort` (no hay API pública): no se toca `android/`.
+- La validación 3 enciende y apaga el modo remoto en el Pixel: va con el permiso de M5b-12, no con la pasada de solo lectura.
