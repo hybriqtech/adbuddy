@@ -3,6 +3,7 @@ package emutest
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"html"
 	"net"
 	"regexp"
@@ -516,5 +517,236 @@ func TestSpanishAppEnglishHost(t *testing.T) {
 		if !strings.Contains(rec, want) {
 			t.Errorf("the question's notification lacks %s:\n%s", want, rec)
 		}
+	}
+}
+
+// publishRID publishes an event that confirms req, a request of the app.
+func (l *link) publishRID(t *testing.T, req bridge.Message, typ string, p any) {
+	t.Helper()
+	if err := l.srv.PublishRID(typ, req.RID, p); err != nil {
+		t.Fatalf("publish %s: %v", typ, err)
+	}
+}
+
+// uiNode is a node of a uiautomator dump.
+type uiNode struct {
+	Text, Desc, ID, Class string
+	Focused               bool
+	X, Y                  int // the middle of its bounds
+}
+
+var boundsRe = regexp.MustCompile(`^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$`)
+
+// uiNodes reads the nodes of a uiautomator dump.
+func uiNodes(dump string) []uiNode {
+	var nodes []uiNode
+	d := xml.NewDecoder(strings.NewReader(dump))
+	for {
+		tok, err := d.Token()
+		if err != nil {
+			return nodes
+		}
+		se, ok := tok.(xml.StartElement)
+		if !ok || se.Name.Local != "node" {
+			continue
+		}
+		var n uiNode
+		for _, a := range se.Attr {
+			switch a.Name.Local {
+			case "text":
+				n.Text = a.Value
+			case "content-desc":
+				n.Desc = a.Value
+			case "resource-id":
+				n.ID = a.Value
+			case "class":
+				n.Class = a.Value
+			case "focused":
+				n.Focused = a.Value == "true"
+			case "bounds":
+				if m := boundsRe.FindStringSubmatch(a.Value); m != nil {
+					l, _ := strconv.Atoi(m[1])
+					tp, _ := strconv.Atoi(m[2])
+					r, _ := strconv.Atoi(m[3])
+					b, _ := strconv.Atoi(m[4])
+					n.X, n.Y = (l+r)/2, (tp+b)/2
+				}
+			}
+		}
+		nodes = append(nodes, n)
+	}
+}
+
+func TestUINodes(t *testing.T) {
+	dump := `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0"><node text="Not now" resource-id="" class="android.widget.TextView" content-desc="" bounds="[407,2216][544,2269]"><node text="" resource-id="a:id/b" class="android.view.View" content-desc="Send &amp; go" bounds="[965,2222][1028,2285]" /></node></hierarchy>`
+	got := uiNodes(dump)
+	want := []uiNode{{Text: "Not now", Class: "android.widget.TextView", X: 475, Y: 2242}, {ID: "a:id/b", Class: "android.view.View", Desc: "Send & go", X: 996, Y: 2253}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("uiNodes = %+v, want %+v", got, want)
+	}
+}
+
+// screen returns the nodes on the emulator's screen now.
+func (e *emu) screen(t *testing.T) []uiNode {
+	t.Helper()
+	return uiNodes(e.shell(t, "uiautomator dump /sdcard/adbuddy-emutest.xml >/dev/null && cat /sdcard/adbuddy-emutest.xml; rm -f /sdcard/adbuddy-emutest.xml"))
+}
+
+// waitNode waits up to d for a node that match accepts, or fails.
+func (e *emu) waitNode(t *testing.T, what string, d time.Duration, match func(uiNode) bool) uiNode {
+	t.Helper()
+	var found uiNode
+	var last []uiNode
+	if !poll(d, func() bool {
+		last = e.screen(t)
+		for _, n := range last {
+			if match(n) {
+				found = n
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("no %s on screen in %d s: %+v", what, int(d/time.Second), last)
+	}
+	return found
+}
+
+// tap taps the middle of n.
+func (e *emu) tap(t *testing.T, n uiNode) {
+	t.Helper()
+	e.shell(t, "input tap "+strconv.Itoa(n.X)+" "+strconv.Itoa(n.Y))
+}
+
+// openChat opens the app on its chat, skipping the first-run steps (with
+// notifications already allowed, so that their dialog does not show).
+func (l *link) openChat(t *testing.T) {
+	t.Helper()
+	e := l.e
+	e.shell(t, "pm grant "+phoneapp.Package+" android.permission.POST_NOTIFICATIONS")
+	e.atCleanup(t, "shell", "input keyevent KEYCODE_HOME")
+	e.shell(t, "am start -W -n "+phoneapp.Activity)
+	for step := 1; step <= 2; step++ {
+		e.tap(t, e.waitNode(t, "Not now (step "+strconv.Itoa(step)+")", 15*time.Second, func(n uiNode) bool {
+			return n.Text == "Not now"
+		}))
+		// The next screen replaces this one: wait until its text changes.
+		want := "Step 2 of 2"
+		if step == 2 {
+			want = "Message the agent"
+		}
+		e.waitNode(t, want, 15*time.Second, func(n uiNode) bool { return n.Text == want })
+	}
+}
+
+// composer returns the chat's text field: the EditText on the row of the
+// Send button (the terminal's WebView has an EditText of its own).
+func composer(nodes []uiNode) (uiNode, bool) {
+	for _, send := range nodes {
+		if send.Desc != "Send" {
+			continue
+		}
+		for _, n := range nodes {
+			if n.Class == "android.widget.EditText" && n.Y > send.Y-100 && n.Y < send.Y+100 {
+				return n, true
+			}
+		}
+	}
+	return uiNode{}, false
+}
+
+// waitComposer waits up to d for the chat's text field to be as ok wants, or fails.
+func (e *emu) waitComposer(t *testing.T, what string, d time.Duration, ok func(uiNode) bool) uiNode {
+	t.Helper()
+	var c uiNode
+	var last []uiNode
+	if !poll(d, func() bool {
+		last = e.screen(t)
+		var found bool
+		c, found = composer(last)
+		return found && ok(c)
+	}) {
+		t.Fatalf("the chat's field is not %s in %d s: %+v", what, int(d/time.Second), last)
+	}
+	return c
+}
+
+// Validation 1 of M3b: a message of several lines written in the chat
+// reaches the host as one chat.send; with the channel cut it stays "Not
+// sent", and Retry sends it again with the same id, which the host takes as
+// the same message (onChatSend confirms it instead of typing it twice), and
+// the chat shows it once. The text is ASCII: `input text` types no other, and
+// API 34 has no clipboard command (T1); Unicode is TestTypeWritesUnicodeIntoAField's.
+func TestTheChatSendsOneMessage(t *testing.T) {
+	l := openLink(t)
+	e := l.e
+	l.openChat(t)
+
+	e.tap(t, e.waitComposer(t, "on screen", 10*time.Second, func(uiNode) bool { return true }))
+	e.waitComposer(t, "focused", 10*time.Second, func(n uiNode) bool { return n.Focused })
+	e.shell(t, "input text first%sline")
+	e.shell(t, "input keyevent KEYCODE_ENTER")
+	e.shell(t, "input text second%sline")
+	const typed = "first line\nsecond line"
+	e.waitComposer(t, "holding the two lines", 10*time.Second, func(n uiNode) bool { return n.Text == typed })
+	send := e.waitNode(t, "Send", 5*time.Second, func(n uiNode) bool { return n.Desc == "Send" })
+	l.drain()
+	e.tap(t, send)
+	m, ok := l.take(bridge.TypeChatSend, 10*time.Second)
+	if !ok {
+		t.Fatalf("no chat.send in 10 s; on screen: %+v", e.screen(t))
+	}
+	cs := payload[bridge.ChatSend](t, m)
+	if cs.Text != typed {
+		t.Errorf("chat.send text = %q, want the two lines in one message", cs.Text)
+	}
+	l.publishRID(t, m, bridge.TypeChatMessage, bridge.ChatMessage{ID: cs.ID, Role: "user", Text: cs.Text, Attachments: []bridge.Attachment{}})
+	if extra, ok := l.take(bridge.TypeChatSend, 3*time.Second); ok {
+		t.Errorf("a second chat.send for one message: %s", extra.Payload)
+	}
+
+	// A message on its way when the channel drops: Not sent, then Retry.
+	e.tap(t, e.waitComposer(t, "on screen", 10*time.Second, func(uiNode) bool { return true }))
+	e.shell(t, "input text again")
+	e.waitComposer(t, "holding the new message", 10*time.Second, func(n uiNode) bool { return n.Text == "again" })
+	e.tap(t, e.waitNode(t, "Send", 5*time.Second, func(n uiNode) bool { return n.Desc == "Send" }))
+	m = l.waitFor(t, bridge.TypeChatSend, 10*time.Second)
+	first := payload[bridge.ChatSend](t, m)
+	hellos := len(l.Hellos())
+	l.cut()
+	e.waitNode(t, "Retry", 20*time.Second, func(n uiNode) bool { return n.Text == "Retry" })
+	e.waitNode(t, "Not sent", 5*time.Second, func(n uiNode) bool { return n.Text == "Not sent" })
+	l.resume(t)
+	l.waitHellos(t, hellos+1, 40*time.Second)
+	l.drain()
+	// Found again: the screen moves when the connection comes back.
+	e.tap(t, e.waitNode(t, "Retry", 5*time.Second, func(n uiNode) bool { return n.Text == "Retry" }))
+	m, ok = l.take(bridge.TypeChatSend, 10*time.Second)
+	if !ok {
+		t.Fatalf("no chat.send 10 s after Retry; on screen: %+v", e.screen(t))
+	}
+	again := payload[bridge.ChatSend](t, m)
+	if again.ID != first.ID || again.Text != "again" {
+		t.Errorf("Retry sent id %q text %q, want the same id %q and text", again.ID, again.Text, first.ID)
+	}
+	l.publishRID(t, m, bridge.TypeChatMessage, bridge.ChatMessage{ID: again.ID, Role: "user", Text: again.Text, Attachments: []bridge.Attachment{}})
+	var shown int
+	var last []uiNode
+	if !poll(10*time.Second, func() bool {
+		last, shown = e.screen(t), 0
+		for _, n := range last {
+			if n.Text == "Not sent" || n.Text == "Retry" {
+				return false
+			}
+			if n.Text == "again" {
+				shown++
+			}
+		}
+		return shown == 1
+	}) {
+		t.Errorf("after Retry the chat shows the message %d times (want 1, without Not sent): %+v", shown, last)
+	}
+	if extra, ok := l.take(bridge.TypeChatSend, 3*time.Second); ok {
+		t.Errorf("another chat.send after Retry: %s", extra.Payload)
 	}
 }
