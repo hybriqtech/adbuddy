@@ -28,7 +28,7 @@ qemu's memory only grows while an emulator runs and is never returned: about 3.6
 
 The special value `"none"` skips the job of a single-job workflow.
 
-Example for "only a Windows runner for now". **This is not the recommended configuration**: every variable that points at the Windows runner makes it run the code of any branch as your Windows user, with your adb server and phone in reach (section 6, "Requirement"). Until the dedicated Windows account exists (user decision pending; the user said "later"), the risk stays bounded only because the repository is private and only our own agents push branches; do not make the repository public with the runner registered.
+Example for "only a Windows runner for now". **This is not the recommended configuration**: every variable that points at the Windows runner makes it run the code of any branch as your Windows user, with your adb server and phone in reach (section 6, "Requirement"). The user accepted this risk on 2026-10-03 and decided not to create the dedicated Windows account (section 6, "Accepted risk"); it stays bounded only by the conditions listed there.
 
 ```sh
 gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
@@ -48,6 +48,16 @@ gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-loc
 ```
 
 The emulator stays on the Windows runner (`CI_RUNNER_EMULATOR`): it has the AVD and the hardware acceleration of Windows, and the WSL2 runner has no KVM.
+
+With more than one runner per OS, give each its own labels so a job can only land where it belongs (one emulator at a time fits in the RAM, and only the first Windows runner has the Android SDK). Current layout (2026-10-03):
+
+| Runner | Labels (besides `self-hosted`, OS and `X64`) | Takes |
+| --- | --- | --- |
+| Windows 1 (the one with the SDK and the AVDs) | `adbuddy-local`, `adbuddy-host`, `adbuddy-emulator` | host jobs and the emulator jobs |
+| Windows 2 (host only, no SDK or JDK) | `adbuddy-host` | host jobs only |
+| Linux 1 and Linux 2 (WSL2, same user, own folders and caches) | `adbuddy-local` | the Linux cell of the host matrix, android, release-check |
+
+`CI_RUNNER_EMULATOR` is `["self-hosted","windows","adbuddy-emulator"]` and the Windows cell of `CI_HOST_MATRIX` is `["self-hosted","windows","adbuddy-host"]`. A job queued while a variable had an older value keeps the labels it was queued with: after changing labels, cancel or let finish the old queued runs.
 
 Never point a Linux cell at a Windows runner. The steps that only run on Linux (gofmt, `-race`) would be skipped and the cell would be green without them.
 
@@ -95,7 +105,7 @@ Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBU
    config.cmd --url https://github.com/OWNER/REPO --token TOKEN --labels self-hosted,windows,adbuddy-local
    ```
 
-4. Create `.env` in the runner folder. Use forward slashes in `ANDROID_HOME`, and keep the caches inside the runner folder so CI never touches your real ones. **Target:** the runner has its own Android SDK, JDK and Go (inside the runner folder or the profile of the dedicated account), not the `ANDROID_HOME` or the `adb` you use every day: the `sdkmanager` steps of the workflows write into that SDK, and a branch could leave a trojan `adb.exe` or `emulator.exe` there that you or `adbuddy serve` would run later against your phone. This is not met today (see section 6):
+4. Create `.env` in the runner folder. Use forward slashes in `ANDROID_HOME`, and keep the caches inside the runner folder so CI never touches your real ones. **Target:** the runner has its own Android SDK, JDK and Go (inside the runner folder or the profile of the dedicated account), not the `ANDROID_HOME` or the `adb` you use every day: the `sdkmanager` steps of the workflows write into that SDK, and a branch could leave a trojan `adb.exe` or `emulator.exe` there that you or `adbuddy serve` would run later against your phone. This is not met (accepted risk, see section 6):
 
    ```text
    ANDROID_HOME=C:/path/to/android-sdk
@@ -285,8 +295,8 @@ gh variable delete CI_RUNNER_SIGN
 A runner executes the code of the branches it builds, as the user that runs it. That user can reach its adb key (authorised on the phone), the adb server, SSH keys, the `gh` token and the credentials of any coding agent.
 
 - **Requirement** to keep `CI_HOST_MATRIX`, `CI_RUNNER_ANDROID` or `CI_RUNNER_EMULATOR` on Windows while agents push branches to the repository: run the runner under a dedicated local Windows account that has none of those. For adb it is the only barrier (see below).
-- **Open risk today (user decision pending: dedicated Windows account, the user said "later"):** while the Windows runner runs under the user's own account, the requirement is NOT met. Meanwhile the risk stays bounded because the repository is private and only our own agents push branches; do not make the repository public with the runner registered. The attack: a test or Gradle task in a branch calls the `adb` on the runner's PATH, which reaches the user's adb server (port 5037) with the phone already connected (or loads `\Users\<user>\.android\adbkey` and pairs its own server), and from there it runs anything on the phone with no classifier, journal or confirmation; it also reads SSH keys, the `gh` token and the credentials of the coding agents. The closing is the dedicated Windows account, and it is the user's decision. Until then, do not leave any `CI_*` variable pointing at the Windows runner while nobody watches (or stop `run.cmd`).
-- **Target, not met today:** the runner uses its own Android SDK, JDK and Go (section 3, step 4), never the user's `ANDROID_HOME` or `adb`. The `sdkmanager` steps of `android.yml` and `emulator.yml` write into the SDK, so a branch could replace `platform-tools/adb.exe` there and the change would persist for the user and `adbuddy serve`. Having a dedicated account does not fix it if that account is given write access to the user's SDK. Check that the `ANDROID_HOME` of the runner's `.env` is not the SDK you use with ADBuddy.
+- **Accepted risk (the user accepted it on 2026-10-03 and decided not to create the dedicated Windows account; it is not resolved):** the Windows runner runs under the user's own account, so the requirement above is NOT met and stays unmet. The conditions of the acceptance: the repository is private and is never made public while a runner is registered; only pull requests of the repository owner use the self-hosted runners (the allow-list by author below); no auto-merge and no "Dependabot on self-hosted"; and, as an optional mitigation, revoke the wireless-debugging authorizations on the phone when nothing is being tested. The attack: a test or Gradle task in a branch calls the `adb` on the runner's PATH, which reaches the user's adb server (port 5037) with the phone already connected (or loads `\Users\<user>\.android\adbkey` and pairs its own server), and from there it runs anything on the phone with no classifier, journal or confirmation; it also reads SSH keys, the `gh` token and the credentials of the coding agents. The only closing is the dedicated Windows account (optional steps: `docs/superpowers/plans/2026-10-03-runners-pasos-usuario.md`, block 3, decided: not done). Without it, do not make the repository public and do not point any `CI_*` variable at the Windows runner for pull requests of other authors.
+- **Target, not met (accepted risk, same decision):** the runner uses its own Android SDK, JDK and Go (section 3, step 4), never the user's `ANDROID_HOME` or `adb`. The `sdkmanager` steps of `android.yml` and `emulator.yml` write into the SDK, so a branch could replace `platform-tools/adb.exe` there and the change would persist for the user and `adbuddy serve`. Having a dedicated account does not fix it if that account is given write access to the user's SDK. Check that the `ANDROID_HOME` of the runner's `.env` is not the SDK you use with ADBuddy.
 - **Minimum:** start `run.cmd` from a clean console, without `ADBUDDY_*`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT`, `ADB_SERVER_SOCKET` or `ANDROID_ADB_SERVER_ADDRESS` in the environment (the last two would make the diagnostic `adb devices -l` of `emulator.yml` ask the user's server and write the phone's serial in the Actions log).
 
 The real barriers are:

@@ -8,26 +8,27 @@ Origen: `docs/superpowers/plans/2026-10-03-optimizar-runners-local.md` (P3 y P5)
 | 2. Arrancar runners al iniciar sesión (P5) | Tras un reinicio, los runners vuelven solos al entrar en Windows | 2 accesos directos | Borrar los accesos directos |
 | 3. Cuenta de Windows dedicada (A5-1, A5-3) | Los jobs dejan de poder leer tu adbkey, tus claves SSH, el token de `gh` y tu SDK | ~1 hora | Volver a registrar el runner en tu cuenta |
 
-Orden recomendado: 3 antes que 1 (un segundo runner en tu cuenta duplica la exposición de A5-1). El 2 con la cuenta dedicada necesita pasos propios (ver al final del bloque 3).
+Estado (2026-10-03): el bloque 1 está hecho (segundo runner Windows, con la etiqueta propia `adbuddy-host`; ver la nota de ese bloque) y el bloque 4 también (segundo runner Linux). El bloque 3 está **decidido: no se hace**: el usuario aceptó el riesgo A5-1/A5-3 el 2026-10-03 y todo sigue en su cuenta de Windows (condiciones en `docs/ci-self-hosted.md` §6, "Accepted risk"); queda aquí solo como opción por si cambia de idea. El bloque 2 sigue pendiente de decisión.
 
 Los comandos `gh` de abajo se ejecutan con la cuenta hybriqtech (`GH_CONFIG_DIR="$HOME/.config/gh-hybriqtech"`; en `gh variable` añade `-R hybriqtech/adbuddy`, `gh api` ya lleva el repositorio en la ruta). Nunca guardes el token de registro en un fichero, un log ni un commit.
 
 ## 1. Segundo runner Windows solo para `host` (P3)
 
-Primero hay que separar los runners: con las etiquetas de hoy, un job de emulador podría caer en el segundo y habría dos emuladores con los mismos puertos fijos (5590/5049 en el oráculo, 5592/5051 en la app) y sin RAM para ambos.
+Primero hay que separar los runners: con las etiquetas de hoy, un job de emulador podría caer en el segundo y habría dos emuladores con los mismos puertos fijos (5590/5049 en el oráculo, 5592/5051 en la app) y sin RAM para ambos. Por eso el segundo lleva **solo** `adbuddy-host` (no `adbuddy-local`): ningún workflow pide `adbuddy-host` salvo la celda Windows de `host.yml`. Hecho así el 2026-10-03; lo primero que ocurrió fue que el segundo recogió un job de emulador antiguo puesto en cola con la etiqueta `adbuddy-local` (se había cancelado antes de empezar), de ahí la etiqueta propia.
 
 1. Etiqueta extra en el runner actual (no hace falta pararlo). Mira su id y anótalo:
 
    ```sh
    gh api repos/hybriqtech/adbuddy/actions/runners --jq '.runners[] | [.id,.name,(.labels|map(.name)|join(","))] | @tsv'
-   gh api -X POST repos/hybriqtech/adbuddy/actions/runners/ID/labels -f 'labels[]=adbuddy-emulator'
+   gh api -X POST repos/hybriqtech/adbuddy/actions/runners/ID/labels -f 'labels[]=adbuddy-emulator' -f 'labels[]=adbuddy-host'
    ```
 
-2. Apunta el emulador solo a esa etiqueta (la variable la leen los dos workflows de emulador):
+2. Apunta el emulador solo a esa etiqueta (la variable la leen los workflows de emulador) y la celda Windows de host a `adbuddy-host` (conserva la celda Linux como esté):
 
    ```sh
    gh variable list -R hybriqtech/adbuddy
    gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-emulator"]' -R hybriqtech/adbuddy
+   gh variable set CI_HOST_MATRIX -R hybriqtech/adbuddy --body '[{"name":"ubuntu-latest","runner":["self-hosted","linux","adbuddy-local"]},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-host"]}]'
    ```
 
 3. Carpeta del segundo runner, con la misma versión que el primero (PowerShell):
@@ -40,7 +41,7 @@ Primero hay que separar los runners: con las etiquetas de hoy, un job de emulado
    Expand-Archive r.zip . ; del r.zip
    ```
 
-4. Registro (token en memoria, nombre distinto, sin la etiqueta `adbuddy-emulator`):
+4. Registro (token en memoria, nombre distinto, solo con la etiqueta `adbuddy-host`; luego, si el runner nuevo ya tenía `adbuddy-local`, quítasela con `gh api -X DELETE .../runners/ID/labels/adbuddy-local`):
 
    ```sh
    TOKEN=$(gh api -X POST repos/hybriqtech/adbuddy/actions/runners/registration-token --jq .token)
@@ -48,7 +49,7 @@ Primero hay que separar los runners: con las etiquetas de hoy, un job de emulado
 
    ```bat
    cd %USERPROFILE%\actions-runner-2
-   config.cmd --unattended --url https://github.com/hybriqtech/adbuddy --token TOKEN --name <PC>-adbuddy-host2 --labels self-hosted,windows,adbuddy-local
+   config.cmd --unattended --url https://github.com/hybriqtech/adbuddy --token TOKEN --name <PC>-adbuddy-host2 --labels adbuddy-host
    ```
 
 5. `.env` y `.path`. Un runner solo de `host` no necesita SDK ni JDK: no pongas `ANDROID_HOME`, `ANDROID_SDK_ROOT` ni `JAVA_HOME`. Con cachés propias dentro de su carpeta:
@@ -92,9 +93,9 @@ foreach ($n in 'start-runner-windows','start-runner-linux') {     # añade 'star
 
 Para probarlo sin reiniciar: `explorer shell:startup` y doble clic en un acceso. Deshacer: borrar los `.lnk` de esa carpeta. El runner Linux mantiene viva la VM de WSL con su proceso `wsl.exe`, y no sobrevive a un cierre de sesión.
 
-## 3. Cuenta de Windows dedicada (A5-1) y SDK propio (A5-3)
+## 3. Cuenta de Windows dedicada (A5-1) y SDK propio (A5-3): opcional, decidido: no se hace
 
-Objetivo: el runner corre con una cuenta estándar que no tiene tu adbkey (`C:\Users\<tú>\.android`), ni tus claves SSH, ni el token de `gh`, ni tu SDK. Es la única barrera real de la adbkey (`ci-self-hosted.md` §6).
+Decisión del usuario (2026-10-03): no se crea; el riesgo queda aceptado por el usuario, no resuelto. Lo que sigue es solo la receta por si cambia de idea. Objetivo: el runner corre con una cuenta estándar que no tiene tu adbkey (`C:\Users\<tú>\.android`), ni tus claves SSH, ni el token de `gh`, ni tu SDK. Es la única barrera real de la adbkey (`ci-self-hosted.md` §6).
 
 PowerShell como administrador:
 
@@ -128,7 +129,7 @@ PowerShell como administrador:
 
    ```bat
    cd C:\ci\actions-runner
-   config.cmd --unattended --url https://github.com/hybriqtech/adbuddy --token TOKEN --name <PC>-adbuddy-ci --labels self-hosted,windows,adbuddy-local,adbuddy-emulator
+   config.cmd --unattended --url https://github.com/hybriqtech/adbuddy --token TOKEN --name <PC>-adbuddy-ci --labels adbuddy-local,adbuddy-host,adbuddy-emulator
    ```
 
    Para no pelear con dos runners con la misma etiqueta de emulador, para el runner antiguo (o quita `adbuddy-emulator` de él con `DELETE .../runners/ID/labels/adbuddy-emulator`) antes de arrancar el nuevo.
