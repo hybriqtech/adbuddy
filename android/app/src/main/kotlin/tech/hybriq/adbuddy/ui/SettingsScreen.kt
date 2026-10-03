@@ -10,18 +10,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -29,8 +25,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -53,7 +47,6 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
  * access to notifications, and the remote-mode switch moves here too (it stays in the chat as well).
  * Language, keeping debugging on and About belong to later milestones.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit, onBack: () -> Unit, onMessage: (String) -> Unit) {
     val context = LocalContext.current
@@ -80,7 +73,6 @@ fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit,
 }
 
 /** The screen without state, so it has previews. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsContent(
     protectedCount: Int?,
@@ -92,14 +84,7 @@ fun SettingsContent(
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.settings_title), modifier = Modifier.semantics { heading() }) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                    }
-                },
-            )
+            AdbuddyTopBar(stringResource(R.string.settings_title), onBack)
         },
     ) { inner ->
         Column(Modifier.padding(inner).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {

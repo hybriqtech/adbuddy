@@ -36,6 +36,13 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels the run it supersedes (one group per
+# workflow and ref). A push to main gets a group of its own (the run id) and
+# never cancels, nor is cancelled by, anything: main and tags are never cut.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   BUILD_TOOLS: "37.0.0"
 

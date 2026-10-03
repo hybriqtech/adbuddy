@@ -5,12 +5,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -23,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import java.time.Instant
@@ -42,8 +45,8 @@ private class UnknownMark(val remote: RemoteState?)
 
 /**
  * The remote-mode switch (M5). The logic is RemoteUi; this only draws it.
- * Turning it on asks first (port 5555 open on any network); turning it off does not
- * ask, except for the note on losing access away from home.
+ * Turning it on asks first (port 5555 open on any network); turning it off asks too, with
+ * the note on losing access away from home.
  */
 @Composable
 fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: (String) -> Unit, modifier: Modifier = Modifier) {
@@ -76,8 +79,24 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
         }
     }
 
+    val on = view.kind == Kind.ON || view.kind == Kind.PENDING || view.kind == Kind.CLOSING
+
     ElevatedCard(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .then(
+                    if (view.showSwitch) {
+                        // The whole row toggles (a 52 dp switch is a small target) and TalkBack reads it as one switch named by the card.
+                        // It only asks: the confirmation dialog below is what sends anything.
+                        Modifier.toggleable(value = on, enabled = view.canToggle, role = Role.Switch, onValueChange = { ask = it })
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(stringResource(R.string.remote_title), style = MaterialTheme.typography.titleMedium)
                 val problem = view.kind == Kind.CLOSING || view.kind == Kind.UNKNOWN || view.kind == Kind.DISCONNECTED
@@ -91,11 +110,8 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
                 }
             }
             if (view.showSwitch) {
-                Switch(
-                    checked = view.kind == Kind.ON || view.kind == Kind.PENDING || view.kind == Kind.CLOSING,
-                    onCheckedChange = { ask = it },
-                    enabled = view.canToggle,
-                )
+                // With no onCheckedChange the Switch drops its own 48 dp minimum: restoring it keeps the card as tall as before (the images do not change).
+                Switch(checked = on, onCheckedChange = null, enabled = view.canToggle, modifier = Modifier.minimumInteractiveComponentSize())
             }
         }
     }

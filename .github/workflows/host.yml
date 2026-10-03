@@ -6,15 +6,25 @@ name: host
 # Runners come from repository variables (docs/ci-self-hosted.md); with none
 # set, GitHub-hosted runners are used.
 
+# docs/superpowers/** (specs, plans, validation notes) is design material that no test reads
+# (the Pages test excludes it); a change that touches only it runs no CI. host.yml is not a
+# required check (no branch protection on a private free repository), so skipping is safe.
 on:
   pull_request:
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
   push:
     branches: [main]
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
 
 permissions:
   contents: read
+
+# A newer push to a pull request cancels the run it supersedes (one group per
+# workflow and ref). A push to main gets a group of its own (the run id) and
+# never cancels, nor is cancelled by, anything: main and tags are never cut.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:

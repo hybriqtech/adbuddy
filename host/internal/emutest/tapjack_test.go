@@ -36,8 +36,6 @@ const (
 	// tapjackTag is the overlay's logcat tag and tapjackTitle its window's title.
 	tapjackTag   = "ADBuddyTapjack"
 	tapjackTitle = "ADBuddyTapjackOverlay"
-	// listenerComponent is the app's notification listener, as cmd notification takes it.
-	listenerComponent = phoneapp.Package + "/.listener.AgentNotificationListener"
 	// refusedWait is how long a refused tap is given to show an effect anyway.
 	refusedWait = 4 * time.Second
 )
@@ -375,14 +373,6 @@ func (e *emu) consentNow(t *testing.T) string {
 		t.Fatalf("getSetupConsent: %v", err)
 	}
 	return res["consent"]
-}
-
-// markOnDisk reads whether NotificationConsent's mark is in the app's file
-// (run-as: the debug build only).
-func (e *emu) markOnDisk(t *testing.T) bool {
-	t.Helper()
-	xml, _ := e.quiet("run-as " + phoneapp.Package + " cat shared_prefs/notification_consent.xml 2>/dev/null")
-	return consentMarked(xml)
 }
 
 // stillThere waits refusedWait and checks that the screen still shows the
