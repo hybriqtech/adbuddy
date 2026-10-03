@@ -271,6 +271,9 @@ func checkDumpsys(ws []Word) checkResult {
 	if revealsNotifications(v) {
 		return red(reason("dumpsys notification text of every app"))
 	}
+	if dumpsysPriorities(v) > 1 {
+		return red(reason("dumpsys with --priority repeated may include the notifications"))
+	}
 	svc, args, bad := dumpsysSplit(v)
 	switch {
 	case bad != "":
@@ -354,6 +357,20 @@ loop:
 		return rest[0] == "notification"
 	}
 	return priority != "HIGH" && priority != "NORMAL"
+}
+
+// dumpsysPriorities counts the --priority words of a dumpsys line, anywhere in
+// it. Which of several dumpsys keeps is not measured (getopt_long would leave
+// the last one), so dumpsysNotifications, which reads only the last one, is not
+// trusted with more than one: checkDumpsys makes them 🔴.
+func dumpsysPriorities(v []string) int {
+	n := 0
+	for _, a := range v[1:] {
+		if a == "--priority" || strings.HasPrefix(a, "--priority=") {
+			n++
+		}
+	}
+	return n
 }
 
 // dumpsysFlags are dumpsys's own options without a value; dumpsysValued take

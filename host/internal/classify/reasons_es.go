@@ -71,6 +71,7 @@ var reasonsES = map[string]string{
 	"dumpsys of every service includes the notifications, with the start of each ticker": "dumpsys de todos los servicios incluye las notificaciones, con el principio de cada ticker",
 	"dumpsys option that clears data":                                                    "opción de dumpsys que borra datos",
 	"dumpsys options before deviceidle":                                                  "opciones de dumpsys antes de deviceidle",
+	"dumpsys with --priority repeated may include the notifications":                     "dumpsys con --priority repetido puede incluir las notificaciones",
 	"dumpsys {value} with arguments that are not a known way of reading it":              "dumpsys {value} con argumentos que no son una forma conocida de leerlo",
 	"find {value} changes files or runs commands":                                        "find {value} cambia ficheros o ejecuta comandos",
 	"hostname changing the name":                                                         "hostname cambia el nombre",

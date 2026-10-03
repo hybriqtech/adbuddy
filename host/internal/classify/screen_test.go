@@ -74,6 +74,10 @@ func TestDumpsysOfTheNotificationsIsRed(t *testing.T) {
 		"dumpsys --skip meminfo", "dumpsys --skip meminfo activity", "dumpsys --skip", "dumpsys --skip --",
 		"dumpsys --priority CRITICAL", "dumpsys --priority=CRITICAL", "dumpsys -T 500 --priority CRITICAL",
 		"dumpsys --priority critical", "dumpsys --priority",
+		// A repeated --priority (which one dumpsys keeps is not measured).
+		"dumpsys --priority CRITICAL --priority HIGH", "dumpsys --priority HIGH --priority CRITICAL",
+		"dumpsys --priority=CRITICAL --priority=NORMAL", "dumpsys --priority HIGH --priority NORMAL",
+		"dumpsys --priority CRITICAL --priority HIGH meminfo",
 		"dumpsys | grep -A 30 NotificationRecord",
 	} {
 		cases = append(cases, tc{sh(line), Red, "android.dumpsys", "", false})

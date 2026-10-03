@@ -22,6 +22,8 @@ Medido en el emulador propio (`adbuddy-dev34`, `system-images;android-34;google_
 | `cmd notification list` (solo claves) | no | no | 🔴 (`cmd.other`, ya lo era) |
 | `cmd notification get '<clave>'` | sí | sí | 🔴 (`cmd.other`, ya lo era) |
 
+Lo verde de `dumpsys` (`--priority HIGH` o `NORMAL`, `--skip notification`, otros servicios) se midió solo en el AOSP API 34 del emulador; en otras versiones de Android o capas de fabricante puede variar, y al cambiar de imagen se vuelve a medir con `TestNotificationReadsAndTheCodes`. Un `--priority` repetido (cuál gana no está medido) es 🔴 siempre.
+
 ## Cambio en el clasificador
 
 `checkDumpsys` (`host/internal/classify/checks_read.go`, `dumpsysNotifications`) pone en 🔴, sin ser especial, todo `dumpsys` que vuelque el servicio de notificaciones, con un motivo bilingüe que nombra el ticker. Una regla del usuario puede bajarlo, como pide el brief.

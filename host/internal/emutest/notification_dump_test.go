@@ -95,7 +95,9 @@ func TestNotificationReadsAndTheCodes(t *testing.T) {
 		}
 		released = true
 		// The test cancels its notification once it gets this (or holdMs later).
-		_, _, _, _ = e.adb.Output(context.WithoutCancel(e.ctx), "shell", "am broadcast -a "+tickerDone+" -p "+phoneapp.Package)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(e.ctx), 30*time.Second)
+		defer cancel()
+		_, _, _, _ = e.adb.Output(ctx, "shell", "am broadcast -a "+tickerDone+" -p "+phoneapp.Package)
 	}
 	defer release()
 
