@@ -265,7 +265,9 @@ func checkDate(ws []Word) checkResult {
 // --noredact / --reveal (in any position, with or without a service)
 // prints the text of every app's notifications: 🔴. So is any dump of the
 // notification service (dumpsysNotifications): redacted, it still shows the
-// start of each ticker (T2 of the manual validations, M5b-18).
+// start of each ticker (T2 of the manual validations, M5b-18). And so is any
+// dump of several services (dumpsysSeveral), whatever it leaves out: another
+// service can hold a notification's whole text.
 func checkDumpsys(ws []Word) checkResult {
 	v := values(ws)
 	if revealsNotifications(v) {
@@ -285,8 +287,10 @@ func checkDumpsys(ws []Word) checkResult {
 		return red(reason("dumpsys notification shows the start of each notification's ticker, codes included"))
 	case dumpsysNotifications(v):
 		return red(reason("dumpsys of every service includes the notifications, with the start of each ticker"))
+	case dumpsysSeveral(v):
+		return red(reason("dumpsys of several services may show the text of notifications, codes included"))
 	case svc == "":
-		return ok() // every service, without arguments
+		return ok() // the list of services, the usage, or only PIDs, threads, clients or stability
 	case dumpsysVerbs[svc]:
 		return red(reason("dumpsys command that changes state"))
 	case svc == "deviceidle":
@@ -357,6 +361,39 @@ loop:
 		return rest[0] == "notification"
 	}
 	return priority != "HIGH" && priority != "NORMAL"
+}
+
+// dumpsysSeveral reports whether a dumpsys line, with only options dumpsys
+// has, dumps services without naming one: every service, those of a
+// --priority, or all but those after --skip. The CI's emulator (android-34,
+// after other tests of the suite, with a notification posted) showed the whole
+// text of the notification, code included, in dumpsys --priority NORMAL and
+// dumpsys --skip notification: another service than the notification one held
+// it, in a state the local emulator did not reproduce (2026-10-03). So no such
+// dump is 🟢 whatever it leaves out. -l and --help print the list of services
+// or the usage; --pid, --thread, --clients and --stability without --dump
+// print only that, without calling any service's dump.
+func dumpsysSeveral(v []string) bool {
+	dump, info := false, false
+	for i := 1; i < len(v); i++ {
+		switch a := v[i]; {
+		case a == "--":
+			return i+1 >= len(v)
+		case !strings.HasPrefix(a, "-") || a == "-":
+			return false
+		case a == "--help" || a == "-l":
+			return false
+		case a == "--priority" || a == "-t" || a == "-T":
+			i++
+		case a == "--skip":
+			return true
+		case a == "--dump":
+			dump = true
+		case a == "--pid" || a == "--thread" || a == "--clients" || a == "--stability":
+			info = true
+		}
+	}
+	return dump || !info
 }
 
 // dumpsysPriorities counts the --priority words of a dumpsys line, anywhere in

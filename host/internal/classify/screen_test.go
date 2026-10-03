@@ -60,8 +60,9 @@ func TestBugreportIsSpecialRedAndKeepsItsPCWrite(t *testing.T) {
 // 16 ("tickerText=G-482913..."), so dumpsys notification, with any argument,
 // and dumpsys of every service or of the CRITICAL ones (the notification
 // service's records are there) show the start of a code. They are 🔴, not
-// special: a "yes, always" rule may lower them. What does not dump the
-// notification service stays 🟢.
+// special: a "yes, always" rule may lower them. Of what does not dump the
+// notification service, only one service named, or what dumps none, stays 🟢
+// (TestDumpsysOfSeveralServicesIsRed).
 func TestDumpsysOfTheNotificationsIsRed(t *testing.T) {
 	c := mustNew(t, "")
 	var cases []tc
@@ -85,8 +86,6 @@ func TestDumpsysOfTheNotificationsIsRed(t *testing.T) {
 	for _, line := range []string{
 		"dumpsys -l", "dumpsys -l notification", "dumpsys --help", "dumpsys --help notification",
 		"dumpsys --pid", "dumpsys --pid notification", "dumpsys --thread", "dumpsys --clients", "dumpsys --stability", "dumpsys --pid --thread",
-		"dumpsys --priority HIGH", "dumpsys --priority NORMAL", "dumpsys --priority=NORMAL",
-		"dumpsys --skip notification", "dumpsys --skip meminfo notification", "dumpsys -t 10 --skip notification",
 		"dumpsys battery", "dumpsys statusbar", "dumpsys activity service com.android.systemui/.SystemUIService",
 	} {
 		cases = append(cases, tc{sh(line), Green, "android.dumpsys", "", false})
@@ -96,6 +95,43 @@ func TestDumpsysOfTheNotificationsIsRed(t *testing.T) {
 		r := c.Classify(sh(line))
 		if r.Primary.Reason.EN == "" || r.Primary.Reason.ES == "" || !strings.Contains(r.Primary.Reason.EN, "ticker") {
 			t.Errorf("%s: reason %+v, want one that names the ticker", line, r.Primary.Reason)
+		}
+	}
+}
+
+// The CI's emulator (android-34, after other tests of the suite, with the
+// notification posted) showed the whole text of a notification, code included,
+// in dumpsys --priority NORMAL and dumpsys --skip notification: some service
+// other than the notification one held it, in a state the local emulator did
+// not reproduce. So dumpsys of several services is 🔴 whatever it leaves out;
+// what stays 🟢 is one service named, the list of services, the usage and the
+// options that print only PIDs, threads, clients or stability (they never call
+// a service's dump).
+func TestDumpsysOfSeveralServicesIsRed(t *testing.T) {
+	c := mustNew(t, "")
+	var cases []tc
+	for _, line := range []string{
+		"dumpsys", "dumpsys --skip notification", "dumpsys --skip x y", "dumpsys --skip meminfo notification",
+		"dumpsys -t 10 --skip notification", "dumpsys --skip notification -- battery",
+		"dumpsys --priority NORMAL", "dumpsys --priority HIGH", "dumpsys --priority CRITICAL",
+		"dumpsys --priority=NORMAL", "dumpsys --priority=HIGH", "dumpsys -T 500 --priority HIGH",
+		"dumpsys --priority NORMAL --skip notification", "dumpsys -t 10", "dumpsys -T 500", "dumpsys --dump",
+		"dumpsys --pid --dump", "dumpsys --thread --dump",
+		"dumpsys --priority NORMAL | grep -i code",
+	} {
+		cases = append(cases, tc{sh(line), Red, "android.dumpsys", "", false})
+	}
+	for _, line := range []string{
+		"dumpsys battery", "dumpsys wifi", "dumpsys -l", "dumpsys --help", "dumpsys --pid", "dumpsys --thread",
+		"dumpsys --clients", "dumpsys --stability", "dumpsys -t 10 battery", "dumpsys --priority HIGH battery",
+	} {
+		cases = append(cases, tc{sh(line), Green, "android.dumpsys", "", false})
+	}
+	check(t, c, cases)
+	for _, line := range []string{"dumpsys --priority NORMAL", "dumpsys --skip notification", "dumpsys --priority HIGH"} {
+		r := c.Classify(sh(line))
+		if r.Primary.Reason.EN == "" || r.Primary.Reason.ES == "" || !strings.Contains(r.Primary.Reason.EN, "text of notifications") {
+			t.Errorf("%s: reason %+v, want one that names the text of notifications", line, r.Primary.Reason)
 		}
 	}
 }
