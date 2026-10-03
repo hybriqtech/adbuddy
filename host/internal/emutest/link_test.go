@@ -303,6 +303,78 @@ func TestTheLinkCarriesDeviceInfo(t *testing.T) {
 	}
 }
 
+// poll checks cond every half second until it holds or d passes.
+func poll(d time.Duration, cond func() bool) bool {
+	deadline := time.Now().Add(d)
+	for !cond() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return true
+}
+
+// pidOf returns the pid of the app's process, waiting up to 15 s for one.
+func (e *emu) pidOf(t *testing.T) string {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		out, _, _, _ := e.adb.Output(e.ctx, "shell", "pidof "+phoneapp.Package)
+		if pid := strings.TrimSpace(strings.ReplaceAll(out, "\r", "")); pid != "" && !strings.Contains(pid, " ") {
+			return pid
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no single process of %s: %q", phoneapp.Package, out)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// Validation 6 of M3b: the channel comes back with the app in the
+// background (never opened) when the host's side drops and returns; when the
+// app's process dies and the system restarts its service (su 0 kill -9: am
+// kill does not kill it, T1-9), without a new handshake, because the app kept
+// the link; and after am force-stop, with the handshake serve does again.
+func TestTheLinkComesBack(t *testing.T) {
+	l := openLink(t)
+	e := l.e
+
+	l.drain()
+	l.cut()
+	if !poll(10*time.Second, func() bool { return !l.connected() }) {
+		t.Fatal("still connected 10 s after the host's side stopped")
+	}
+	l.resume(t)
+	l.waitHellos(t, 2, 40*time.Second)
+	l.waitFor(t, bridge.TypeDeviceInfo, linkWait)
+
+	l.drain()
+	pid := e.pidOf(t)
+	e.shell(t, "su 0 kill -9 "+pid)
+	l.waitHellos(t, 3, 40*time.Second)
+	l.waitFor(t, bridge.TypeDeviceInfo, linkWait)
+	if now := e.pidOf(t); now == pid {
+		t.Errorf("the app's process is still %s after kill -9", pid)
+	}
+
+	l.drain()
+	e.shell(t, "am force-stop "+phoneapp.Package)
+	if !poll(10*time.Second, func() bool { return !l.connected() }) {
+		t.Fatal("still connected 10 s after am force-stop")
+	}
+	l.handshake(t)
+	l.waitHellos(t, 4, 20*time.Second)
+	l.waitFor(t, bridge.TypeDeviceInfo, linkWait)
+	var dump string
+	if !poll(20*time.Second, func() bool {
+		dump = e.shell(t, "dumpsys activity services "+phoneapp.Package)
+		return inForeground(dump, ".bridge.BridgeService")
+	}) {
+		t.Errorf("BridgeService is not in the foreground after the new handshake:\n%s", dump)
+	}
+}
+
 // openLink leaves no reverse behind.
 func TestTheLinkIsUndoneAtCleanup(t *testing.T) {
 	e := newEmu(t)
