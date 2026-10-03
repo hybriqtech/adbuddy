@@ -24,6 +24,23 @@ fun ConfirmHost(
     closed: Set<String>,
     onClose: (String) -> Unit,
 ) {
+    ConfirmHost(state, { bridge.state.value }, { id, decision -> bridge.reply(id, decision) }, clock, focusConfirm, closed, onClose)
+}
+
+/**
+ * [ConfirmHost] with the bridge as two functions, so a test can see what reaches it: [current] is the bridge's state
+ * now (not this composition's), [reply] sends an answer.
+ */
+@Composable
+internal fun ConfirmHost(
+    state: BridgeState,
+    current: () -> BridgeState,
+    reply: (String, String) -> Unit,
+    clock: HostClock,
+    focusConfirm: String?,
+    closed: Set<String>,
+    onClose: (String) -> Unit,
+) {
     val context = LocalContext.current
     // The clock the questions are judged by (the host's): it moves on at each
     // expiry, so a question left open on screen loses its buttons when it expires.
@@ -36,15 +53,15 @@ fun ConfirmHost(
     }
     val question = ConfirmUi.question(state, focusConfirm, now, closed)
     if (question != null) {
-        ConfirmDialog(question, ConfirmUi.status(question, state, now), clock, onClose = { onClose(question.id) }) { decision ->
+        ConfirmDialog(question, ConfirmUi.status(question, state, now), clock, armed = true, onClose = { onClose(question.id) }) { decision ->
             // The same rule as the notification buttons (ConfirmReceiver), with the
             // current state and time, not those of this composition: a second quick
             // tap sees the first answer (answering), and the delay stops while the
             // phone sleeps. Allowing needs the phone unlocked here too.
             val t = clock.now()
             val locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-            if (ConfirmUi.canSend(bridge.state.value, question.id, decision, t, locked, notification = false)) {
-                bridge.reply(question.id, decision)
+            if (ConfirmUi.canSend(current(), question.id, decision, t, locked, armed = true, notification = false)) {
+                reply(question.id, decision)
             } else {
                 now = t
             }

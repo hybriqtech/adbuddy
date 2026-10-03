@@ -29,6 +29,9 @@ object ConfirmNotifier {
     /** What is on screen: id → status posted. */
     private var shown = emptyMap<String, ConfirmUi.Status>()
 
+    /** RED stub. */
+    internal val arming = ConfirmArming()
+
     @Synchronized
     fun sync(context: Context, state: BridgeState) {
         val nm = context.getSystemService(NotificationManager::class.java)

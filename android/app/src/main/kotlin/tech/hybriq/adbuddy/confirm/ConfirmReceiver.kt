@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import tech.hybriq.adbuddy.AdbuddyApp
+import tech.hybriq.adbuddy.bridge.BridgeState
 
 /**
  * Receives the notification buttons (not exported: only this app's PendingIntents reach it).
@@ -27,11 +28,15 @@ class ConfirmReceiver : BroadcastReceiver() {
         val decision = intent.getStringExtra(EXTRA_DECISION) ?: return
         val app = context.applicationContext as AdbuddyApp
         val locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-        if (!ConfirmUi.canSend(app.bridge.state.value, id, decision, app.clock.now(), locked, notification = true)) return
+        if (!mayReply(app.bridge.state.value, id, decision, app.clock.now(), locked, ConfirmNotifier.arming)) return
         app.bridge.reply(id, decision)
     }
 
     companion object {
+        /** RED stub. */
+        internal fun mayReply(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean, arming: ConfirmArming): Boolean =
+            ConfirmUi.canSend(state, id, decision, now, locked, armed = true, notification = true)
+
         const val ACTION_REPLY = "tech.hybriq.adbuddy.action.CONFIRM_REPLY"
         const val EXTRA_ID = "id"
         const val EXTRA_DECISION = "decision"

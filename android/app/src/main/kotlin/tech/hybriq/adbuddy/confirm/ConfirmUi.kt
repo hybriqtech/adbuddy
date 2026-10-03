@@ -89,7 +89,7 @@ object ConfirmUi {
      * it was tapped (the [notification] offers less than the dialog), and allowing needs the phone unlocked (a
      * tap can arrive late, after the bouncer, or from a stale notification). Denying is always fine.
      */
-    fun canSend(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean, notification: Boolean): Boolean {
+    fun canSend(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean, armed: Boolean, notification: Boolean): Boolean {
         val r = state.pending.firstOrNull { it.id == id } ?: return false
         val status = status(r, state, now)
         val offered = if (notification) notificationDecisions(r, status) else decisions(r, status)
@@ -187,6 +187,12 @@ object ConfirmUi {
         val next = shown.filterKeys { it in ids } + post.associate { it.request.id to it.status }
         return Plan(cancel = shown.keys - ids, post = post, shown = next)
     }
+
+    /** Whether a button shown at [shownAt] is armed at [now]. RED stub. */
+    fun armed(shownAt: Long?, now: Long): Boolean = true
+
+    /** How long Allow waits once shown. */
+    const val ARMING_MS = 600L
 
     /** What the notification shows of the command; a longer one is cut there and only the dialog allows it. */
     const val MAX_COMMAND = 300

@@ -149,7 +149,14 @@ private fun ConsentScreenPreview() {
  * are refused while another app's window covers it (ObscuredTouchGuard).
  */
 @Composable
-fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock, onClose: () -> Unit, onAnswer: (String) -> Unit) {
+fun ConfirmDialog(
+    r: ConfirmRequest,
+    status: ConfirmUi.Status,
+    clock: HostClock,
+    armed: Boolean,
+    onClose: () -> Unit,
+    onAnswer: (String) -> Unit,
+) {
     val context = LocalContext.current
     val decisions = ConfirmUi.decisions(r, status)
     val footer = ConfirmNotifier.footer(context, status, ConfirmUi.expiry(r)?.let { clock.toLocal(it) })
