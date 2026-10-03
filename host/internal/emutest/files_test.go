@@ -338,3 +338,76 @@ func TestUploadSendsTheRealBytes(t *testing.T) {
 	l.finishUpload(t, u, b, size, pushedSHA)
 	e.waitNode(t, "the sent file's chip", 15*time.Second, func(n uiNode) bool { return strings.Contains(n.Text+n.Desc, name) })
 }
+
+// Validation 3 of M3b (b): the channel drops in the middle of a big upload
+// (100 MiB; T1 measured 15 s for the whole case). The app reconnects, sends
+// attach.begin again with the same id and the same hash, the host says how
+// many bytes it has, and the app sends only the rest: the first frame is at
+// that offset, what comes after the cut is exactly size - offset, the file
+// is size bytes in all with no byte twice, and its SHA-256 is that of the
+// bytes pushed.
+//
+// The host is slowed down (10 ms a frame) until the cut, or the whole file
+// would be here in 2.4 s, before the test could cut; the cut is asked from
+// the test's goroutine once the threshold passed, never from the frame
+// handler, which stop would wait for.
+func TestUploadResumesAfterACut(t *testing.T) {
+	mutate := mutation(t, "ready-zero")
+	l := openLink(t)
+	e := l.e
+	const name = "emutest-upload-b.bin"
+	const size = 100 << 20
+	const cutAfter = 30 << 20
+	pushedSHA := e.pushRandomFile(t, name, size, 2)
+	l.openChat(t)
+
+	u := newUploadRecv(mutate)
+	u.slow, u.stopAt = 10*time.Millisecond, cutAfter
+	l.setOnFrame(u.onFrame)
+	b, m := l.pickAndBegin(t, name, size, pushedSHA)
+	if off := u.begin(t, b, false); off != 0 {
+		t.Fatalf("a first upload starts at %d", off)
+	}
+	l.reply(t, m, bridge.TypeAttachReady, bridge.AttachReady{ID: b.ID, Offset: 0})
+
+	select {
+	case <-u.reached:
+	case <-time.After(60 * time.Second):
+		recv, _, _ := u.state()
+		t.Fatalf("the upload did not get to %d bytes in 60 s (%d)", cutAfter, recv)
+	case <-e.ctx.Done():
+		t.Fatal("test context done")
+	}
+	l.cut()
+	atCut, _, _ := u.state()
+	if atCut < cutAfter || atCut >= size {
+		t.Fatalf("cut with %d of %d bytes: not in the middle of the upload", atCut, size)
+	}
+	u.mark()
+	hellos := len(l.Hellos())
+	l.resume(t)
+	l.waitHellos(t, hellos+1, 60*time.Second)
+
+	m2 := l.waitFor(t, bridge.TypeAttachBegin, 90*time.Second)
+	b2 := payload[bridge.AttachBegin](t, m2)
+	if b2.ID != b.ID || b2.SHA256 != b.SHA256 || b2.Size != size {
+		t.Fatalf("the app began again with %+v, want the same upload %+v", b2, b)
+	}
+	offset := u.begin(t, b2, true)
+	l.reply(t, m2, bridge.TypeAttachReady, bridge.AttachReady{ID: b.ID, Offset: offset})
+	// What the host says is what it had: the exact bytes it took before the cut.
+	if offset != atCut {
+		t.Errorf("the host answered attach.ready at %d, it had taken %d bytes", offset, atCut)
+	}
+
+	l.finishUpload(t, u, b, size, pushedSHA)
+	u.mu.Lock()
+	first, since := u.firstOff, u.sinceMark
+	u.mu.Unlock()
+	if first != offset {
+		t.Errorf("the first frame after the cut is at %d, the host said %d", first, offset)
+	}
+	if since != size-atCut {
+		t.Errorf("%d bytes came after the cut, want size - the %d taken before = %d", since, atCut, size-atCut)
+	}
+}
