@@ -1,12 +1,12 @@
 # ADBuddy · VB-41 · Un puerto de `persist.adb.tcp.port` nunca se da por cerrado · Plan de implementación
 
-> **Plan v1** (sin revisar). Encargo: `.superpowers/sdd/2026-10-04-adbuddy-vb41-persist-port/plan-brief.md`.
+> **Plan v2:** incorpora la revisión opus del plan (`.superpowers/sdd/2026-10-04-adbuddy-vb41-persist-port/plan-review.md`: 0 críticos, 2 importantes, 5 menores) y las decisiones del controlador: **I1** se arregla aquí (el vigilante del móvil relee el puerto cuando el móvil vuelve y avisa; ruling 9; doctor dice lo que hace `serve` de verdad); **I2** el ruling 3 queda como suposición, con su validación en emulador y el límite en pendientes, y la lectura de persist como `shell` pasa a **bloqueante antes de integrar**; **M1** la lectura tiene plazo propio (`device.ReadTCPWait`); **M2** `Controller.Note` desde `serve` tras el invariante; **M3** comentario viejo de `persist_test.go`; **M4** `State.Persist` es la última lectura, dicho en el código; **M5** dos tests más. Encargo: `.superpowers/sdd/2026-10-04-adbuddy-vb41-persist-port/plan-brief.md`.
 >
 > **Para quien ejecute:** REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`. Los pasos usan casillas (`- [ ]`). Implementador y re-revisiones en Sonnet (`adbuddy-implementer`, `adbuddy-rereviewer`; si BLOCKED o ronda 4-5, `adbuddy-implementer-opus`). Las Tareas 1 y 2 tocan el modo remoto, el invariante del host y lo que el host afirma de un puerto abierto (🔒): las revisa `adbuddy-reviewer-opus`; la Tarea 3 (docs), `adbuddy-reviewer`. Nunca Haiku. **Antes de la Tarea 1, `adbuddy-reviewer-opus` revisa este plan completo, código incluido** (CLAUDE.md), y el plan se corrige con sus hallazgos.
 
 **Meta:** que el host deje de dar por cerrado un puerto TCP de adbd que no ha leído. Hoy decide si adbd escucha por red leyendo **solo** `service.adb.tcp.port` (`remote.Disable`, `Reconcile`, `Enable`, `portClosed` en `host/internal/remote/remote.go`; `device.TCPPort` y `EnsureNoTCPPort` en `host/internal/device/device.go`, que usan el invariante de `serve`/`setup` y `doctor`). Pero adbd (AOSP) al arrancar toma `persist.adb.tcp.port` cuando `service.adb.tcp.port` está vacío, como tras un reinicio. Medido en el emulador API 34 (T8, 2026-10-03; `.superpowers/sdd/2026-10-04-adbuddy-validaciones-t8/evidencia/run3.txt` y la fila VB-41 del inventario): `persist.adb.tcp.port=5555` **no** se limpia con `remote off` ni con `adb usb`; tras `adb reboot`, `service.adb.tcp.port` queda vacío y el host lo toma por cerrado. En un móvil real, persist más un reinicio abre el 5555 en cualquier red sin que ADBuddy lo vea (eso sale de leer AOSP: el emulador escucha siempre en el 5555 y no deja ver el listener real). El usuario `shell` no puede fijar persist (`setprop` sale con 1, medido): el riesgo real son móviles con root o con persist ya fijado por otra herramienta.
 
-**Arquitectura:** una sola lectura del puerto para todo el host, `device.ReadTCP`, que lee las dos propiedades y devuelve `device.TCP{Now, Persist}`: `Now` es el puerto en el que escucha adbd (`service.adb.tcp.port`, o `persist.adb.tcp.port` si aquel está vacío) y `Persist` es persist cuando nombra un puerto; si cualquiera de las dos lecturas falla, error (desconocido, nunca cerrado). `EnsureNoTCPPort` decide con `Now` y devuelve también lo leído. El controlador del modo remoto lee con `device.ReadTCP` antes de cada `adb usb` y de cada decisión, recuerda lo último que dijo de persist y lo devuelve en `remote.State{Persist, PersistUnknown}`. Cuando persist sigue fijado, el host **avisa** (no puede borrarlo sin root y no usará `su`): `adbuddy doctor` (⚠ con qué propiedad es, que no la fijó ADBuddy y cómo quitarla), el log de `serve` (invariante al arrancar, cada "off" y la caducidad, una vez por suceso) y `adbuddy remote off|status` (texto y `--json`: `persistPort`, `persistUnknown`). `adb usb` solo corre cuando hay algo que cerrar ahora (`Now`): con `service.adb.tcp.port` a `0` (lo que deja `adb usb`) persist no se toca y solo se avisa, así que no hay bucle de reinicios. **No cambian:** el protocolo con la app (`remote.state` y la tarjeta), el clasificador, el shim, el vigilante del móvil, la comprobación de identidad, ni el camino de `adbuddy remote off` sin serve con el modo ya apagado (ruling 7).
+**Arquitectura:** una sola lectura del puerto para todo el host, `device.ReadTCP`, que lee las dos propiedades y devuelve `device.TCP{Now, Persist}`: `Now` es el puerto en el que escucha adbd (`service.adb.tcp.port`, o `persist.adb.tcp.port` si aquel está vacío) y `Persist` es persist cuando nombra un puerto; si cualquiera de las dos lecturas falla, error (desconocido, nunca cerrado). `EnsureNoTCPPort` decide con `Now` y devuelve también lo leído. El controlador del modo remoto lee con `device.ReadTCP` antes de cada `adb usb` y de cada decisión, recuerda lo último que dijo de persist y lo devuelve en `remote.State{Persist, PersistUnknown}`. Cuando persist sigue fijado, el host **avisa** (no puede borrarlo sin root y no usará `su`): `adbuddy doctor` (⚠ con qué propiedad es, que no la fijó ADBuddy y cómo quitarla), el log de `serve` (invariante al arrancar, cada "off", la caducidad y cada vez que el móvil vuelve tras perderse: el vigilante relee el puerto, ruling 9; una vez por suceso o por cambio) y `adbuddy remote off|status` (texto y `--json`: `persistPort`, `persistUnknown`; desde el arranque, porque `serve` pasa la lectura del invariante al controlador con `Note`). Cada lectura que precede a otra cosa (`adb usb`, el vigilante) tiene su propio plazo corto, `device.ReadTCPWait`. `adb usb` solo corre cuando hay algo que cerrar ahora (`Now`): con `service.adb.tcp.port` a `0` (lo que deja `adb usb`) persist no se toca y solo se avisa, así que no hay bucle de reinicios. **No cambian:** el protocolo con la app (`remote.state` y la tarjeta), el clasificador, el shim, la comprobación de identidad, lo que hace el vigilante del móvil para encontrarlo (solo añade una lectura del puerto cuando vuelve; nunca abre ni cierra), ni el camino de `adbuddy remote off` sin serve con el modo ya apagado (ruling 7).
 
 **Tecnologías:** Go 1.27 (`host/`). Nada nuevo en `go.mod`. `remote` pasa a importar `device` (sin ciclo: `device` solo importa `classify`).
 
@@ -32,12 +32,13 @@
 
 1. **Ruling: el puerto en el que escucha adbd es `service.adb.tcp.port`, o `persist.adb.tcp.port` cuando aquel está vacío; cualquier valor que no sea vacío ni `0` es un puerto, también uno no numérico, negativo o enorme.** — Es la regla de adbd de AOSP al arrancar (lee persist solo con service vacío). `adb usb` deja service a `0` (medido en S1 y en la T8) y con él a `0` adbd ignora persist hasta el siguiente reinicio. Un valor raro cuenta como abierto: el lado seguro, como hoy con service (`"abc"` ya es abierto en `TestEnsureNoTCPPortEdgeCases`). Los valores se recortan a 16 runas y se hacen imprimibles al leerlos (`device.portValue`), así que todo el que los muestra (doctor, log, CLI) está a salvo. — Si me equivoco: un `adb usb` de más (un reinicio de adbd y un corte breve) por un valor que adbd no habría aceptado.
 2. **Ruling: si cualquiera de las dos lecturas falla, el puerto es desconocido, nunca cerrado; cada sitio conserva su política ante lo desconocido.** — Invariante: `DEVICE_UNREADABLE` sin `adb usb` (como hoy con service). `Disable`: `adb usb` igualmente (como hoy: "a port that cannot be read is closed all the same") y estado `PersistUnknown`. `Reconcile` y `Enable`: no tocan la caducidad (como hoy). Doctor: «no se pudo leer», con un texto que ya no nombra solo service. — Si me equivoco: con persist ilegible y service abierto, el invariante para `serve` en vez de cerrar; es lo que ya pasa hoy si falla la lectura de service, y se arregla volviendo a lanzar `serve`.
-3. **Ruling: persist fijado es «algo que cerrar» solo mientras `service.adb.tcp.port` esté vacío; con service a `0` solo se avisa.** — El encargo (criterio 2) dice "si persist no está vacío ni 0, intentar `adb usb`". Con service a `0` adbd no escucha en persist (AOSP), así que ese `adb usb` solo reiniciaría adbd y cortaría la conexión del móvil en cada arranque de `serve` y en cada "off", sin cerrar nada; y como `adb usb` deja service a `0`, esta regla es justo lo que impide el bucle (criterio 3): el primer `adb usb` tras un reinicio cierra, los siguientes no corren. — Si me equivoco: un móvil cuyo adbd sí escuchara en persist con service a `0` (no es AOSP) seguiría con el puerto abierto, pero avisado en doctor, en el log y en `remote off`, nunca callado.
-4. **Ruling: la prueba de aceptación en emulador se redefine: tras "off" con persist fijado, adbd queda sin puerto ahora (service vacío o `0` y adbd reiniciado si había algo que cerrar), el host devuelve un estado que nombra persist (`remote.State{Persist: "5555"}`, `device.TCP{Persist: "5555"}`), persist sigue como estaba y una segunda pasada no reinicia adbd.** — Sin root el host no puede vaciar persist (shell sale con 1, medido) y no usará `su`; exigir que lo vacíe haría el test imposible sin meter `su` en producción. El test, además, **mide la premisa no medida del diseño**: que el usuario `shell` puede leer persist (el host lo lee sin `su`; la T8 lo leyó siempre con `su 0`). Los unitarios con adb falso (RED reales antes del código) son el contrato; el de emulador, la verificación. — Si me equivoco (shell no puede leer persist: SELinux devolvería vacío con código 0, como con `service.adb.tls.port`): el test de emulador falla con `Persist ""` y el diseño no sirve tal cual; por eso es la primera validación tras la rama, antes de integrar.
+3. **Ruling (descansa en una suposición sin medir, revisión I2): persist fijado es «algo que cerrar» solo mientras `service.adb.tcp.port` esté vacío; con service a `0` solo se avisa.** — Suposiciones: que service a `0` implica que adbd arrancó después con él a `0` (cierto tras `adb usb`, medido; **no** se sabe tras un `setprop service.adb.tcp.port 0` suelto, y fijar persist no reinicia adbd, `run3.txt:13`: lo mide la validación 1 (e)), y que adbd solo escucha según esas dos propiedades (AOSP también mira `service.adb.listen_addrs` y abre el 5555 por defecto en un dispositivo sin USB: límite en pendientes). Por eso el aviso dice «cerrado por ahora» y nunca «cerrado» a secas. El encargo (criterio 2) dice "si persist no está vacío ni 0, intentar `adb usb`". Con service a `0` adbd no escucha en persist (AOSP), así que ese `adb usb` solo reiniciaría adbd y cortaría la conexión del móvil en cada arranque de `serve` y en cada "off", sin cerrar nada; y como `adb usb` deja service a `0`, esta regla es justo lo que impide el bucle (criterio 3): el primer `adb usb` tras un reinicio cierra, los siguientes no corren. — Si me equivoco: un móvil cuyo adbd sí escuchara en persist con service a `0` (no es AOSP) seguiría con el puerto abierto, pero avisado en doctor, en el log y en `remote off`, nunca callado.
+4. **Ruling: la prueba de aceptación en emulador se redefine: tras "off" con persist fijado, adbd queda sin puerto ahora (service vacío o `0` y adbd reiniciado si había algo que cerrar), el host devuelve un estado que nombra persist (`remote.State{Persist: "5555"}`, `device.TCP{Persist: "5555"}`), persist sigue como estaba y una segunda pasada no reinicia adbd.** — Sin root el host no puede vaciar persist (shell sale con 1, medido) y no usará `su`; exigir que lo vacíe haría el test imposible sin meter `su` en producción. El test, además, **mide la premisa no medida del diseño**: que el usuario `shell` puede leer persist (el host lo lee sin `su`; la T8 lo leyó siempre con `su 0`). Los unitarios con adb falso (RED reales antes del código) son el contrato; el de emulador, la verificación. — Si me equivoco (shell no puede leer persist: SELinux devolvería vacío con código 0, como con `service.adb.tls.port`): el test de emulador falla con `Persist ""` y el diseño no sirve tal cual; por eso esa validación es **bloqueante antes de integrar** (revisión I2).
 5. **Ruling: el controlador lee el puerto antes de `adb usb`, no después.** — Tras `adb usb` adbd se reinicia y la conexión cae: una lectura inmediata fallaría (siempre «desconocido») o leería el adbd viejo. `adb usb` no cambia persist (medido en la T8), así que lo leído justo antes vale para después. La relectura con espera la hace quien puede esperar: el invariante (ya espera a que el móvil vuelva y relee). — Si me equivoco: si algo cambiara persist entre la lectura y el `adb usb`, el estado diría el valor viejo hasta la siguiente lectura (doctor, el siguiente `serve`, el siguiente "off").
 6. **Ruling: el aviso va al host (doctor, log de `serve`, `adbuddy remote off|status` y su `--json`), no a la tarjeta de la app.** — `remote.state` es protocolo: cambiarlo pide el ok de adbuddy-e5, fixtures en `protocol/` y la app. La tarjeta habla del modo, y el modo sí está apagado; el puerto está cerrado ahora (por `adb usb` o porque service está a `0`) y solo vuelve tras reiniciar el móvil. Queda en pendientes. — Si me equivoco: quien solo mira el móvil no ve el aviso hasta abrir doctor o mirar la terminal de `serve`.
 7. **Ruling: `adbuddy remote off` sin serve y con el modo ya apagado en `config.toml` sigue sin tocar adb.** — No afirma nada del puerto (dice "remote mode is already off"); leer pediría arrancar el servidor adb y esperar al móvil (hasta `deviceWait`) en un camino que hoy es instantáneo. El invariante al arrancar `serve` y doctor sí leen. Con el modo encendido, `remote off` sin serve sí lee persist antes de su `adb usb` y lo dice. — Si me equivoco: quien nunca arranca `serve` ni doctor no se entera de un persist ajeno; ese puerto no lo abrió ADBuddy.
-8. **Ruling: cada aviso se dice una vez por suceso, nunca por tick.** — Invariante: una vez por arranque de `serve`/`setup`. Cada "off" pedido (app o CLI): una vez, en el log de `serve` y en la respuesta. Caducidad: una vez (`Expire` solo cambia una vez; después la caducidad está vacía y no hace nada). El controlador recuerda la última lectura (`State`) para que `remote status` lo diga sin volver a leer. — Si me equivoco: un aviso repetido si el usuario repite el "off"; nada se repite solo.
+8. **Ruling: cada aviso se dice una vez por suceso, nunca por tick.** — Invariante: una vez por arranque de `serve`/`setup`. Cada "off" pedido (app o CLI): una vez, en el log de `serve` y en la respuesta. Caducidad: una vez (`Expire` solo cambia una vez; después la caducidad está vacía y no hace nada). Vigilante: solo cuando el móvil vuelve tras perderse y solo si la lectura cambió desde la última que se dijo (empieza con la del invariante). El controlador recuerda la última lectura (`State`, también la del invariante y la del vigilante por `Note`) para que `remote status` lo diga sin volver a leer; es la última lectura, no un valor vivo (revisión M4). — Si me equivoco: un aviso repetido si el usuario repite el "off"; nada se repite solo.
+9. **Ruling (revisión I1): cuando el móvil vuelve con `serve` en marcha (tras una falta o un cambio de serial), el vigilante relee el puerto y avisa; no ejecuta `adb usb`.** — Un reinicio del móvil con `serve` arrancado le hace tomar persist, y hasta ahora nadie lo releía (el invariante solo corre al arrancar `serve`; `phone_watch.go` "no applyInvariant"). Cerrar ahí sería un `adb usb` a mitad de sesión que corta el móvil otra vez y puede cruzarse con el modo remoto (el vigilante no toma el cerrojo del controlador); avisar es seguro y basta para que el usuario no crea cerrado lo que no lo está: un puerto abierto con el modo apagado sale como "⚠ adb listens on network port N on the phone again and remote mode is off … Run `adbuddy remote off`" (y `remote off` con `serve` sí lo cierra), y persist, como en el resto. El 5555 con el modo encendido no se avisa como abierto (es el esperado; `RemoteOn` se lee después del puerto: `Enable` guarda la caducidad antes de `adb tcpip`). Doctor dice lo que hace `serve`: lo cierra al arrancar y, al reconectar el móvil, solo avisa. — Si me equivoco: el puerto sigue abierto hasta que el usuario haga `remote off` o reinicie `serve`, pero avisado en el log y en doctor.
 
 ## Revisión de sitios (criterio 1 del encargo: nunca «cerrado» sin leer)
 
@@ -55,6 +56,8 @@
 | `adbuddy remote off` sin serve, modo encendido | `adb usb` → "closed" | lee persist antes y lo dice |
 | `adbuddy remote off` sin serve, modo apagado | no toca adb: "remote mode is already off" | igual (ruling 7) |
 | log de la caducidad (`watchRemote`) | "Remote mode expired: port 5555 closed." | igual, más el aviso de persist |
+| `serve` al arrancar (lectura del invariante) | no llega al controlador | `Controller.Note`: `remote status`/`--json` dicen persist desde el arranque (revisión M2) |
+| el móvil vuelve con `serve` en marcha (`phone_watch`) | nadie relee el puerto (un reinicio con persist lo reabre toda la sesión) | relee con `ReadTCP` y avisa una vez por cambio: puerto abierto con el modo apagado, persist, o lectura fallida; nunca `adb usb` (ruling 9) |
 | tarjeta de la app | apagado | igual (ruling 6) |
 
 ## Textos nuevos de cara al usuario
@@ -72,8 +75,11 @@ En `host/internal/i18n/catalog/en.toml` y `es.toml` (Tarea 2):
 | `remote.text.persist_unknown` | But persist.adb.tcp.port could not be read: … Run `adbuddy doctor` to check. | Pero no se pudo leer persist.adb.tcp.port: … Ejecuta `adbuddy doctor` para comprobarlo. |
 | `remote.persist.log` | ⚠ persist.adb.tcp.port is %[1]s on the phone (ADBuddy did not set it): … | ⚠ persist.adb.tcp.port vale %[1]s en el móvil (ADBuddy no la fijó): … |
 | `remote.persist.unknown_log` | ⚠ Could not read persist.adb.tcp.port: … | ⚠ No se pudo leer persist.adb.tcp.port: … |
+| `phone_watch.port_open` | ⚠ adb listens on network port %[1]s on the phone again and remote mode is off: serve does not close it while it runs. Run `adbuddy remote off` to close it now. | ⚠ adb vuelve a escuchar en el puerto de red %[1]s del móvil y el modo remoto está desactivado: serve no lo cierra mientras está en marcha. Ejecuta `adbuddy remote off` para cerrarlo ya. |
+| `doctor.port.serve_running` | serve closes it only when it starts; when the phone reconnects while serve runs, it only warns. Run `adbuddy remote off` to close it now. | serve solo lo cierra al arrancar; si el móvil se reconecta con serve en marcha, solo avisa. Ejecuta `adbuddy remote off` para cerrarlo ya. |
+| `doctor.port.nothing_to_do` (cambia) | Nothing to do: serve closes it when it starts (remote mode is off). | No hay nada que hacer: serve lo cierra al arrancar (el modo remoto está desactivado). |
 
-El texto completo de cada uno está en el paso 3 de la Tarea 2. "Quién la fijó": el host no puede saberlo; dice que **no** fue ADBuddy y nombra las fuentes habituales.
+Cambia también `doctor.port.persist_fix`: dice que `serve` ejecuta `adb usb` al arrancar y que, si el móvil se reinicia con `serve` en marcha, solo avisa (revisión I1). El texto completo de cada uno está en el paso 3 de la Tarea 2. "Quién la fijó": el host no puede saberlo; dice que **no** fue ADBuddy y nombra las fuentes habituales.
 
 ## Mapa de ficheros
 
@@ -87,6 +93,8 @@ El texto completo de cada uno está en el paso 3 de la Tarea 2. "Quién la fijó
 | `host/internal/cli/doctor.go` | 1, 2 | T1: `ReadTCP`; T2: ⚠ de persist |
 | `host/internal/cli/remotecmd.go` | 2 | `remoteInfo.PersistPort/PersistUnknown`, textos, `remoteOffWithoutServe` lee persist |
 | `host/internal/cli/phone_remote.go` | 2 | aviso en el log tras un "off" y al caducar |
+| `host/internal/cli/phone_watch.go` | 2 | `phoneWatch.Port/Seen/ReadWait`, `recheckPort` al volver el móvil, `switchTo(ctx, …)` |
+| `host/internal/cli/serve.go` | 2 | `invariantTCP`, `ctl.Note`, la lectura al vigilante |
 | `host/internal/i18n/catalog/{en,es}.toml` | 2 | claves de "Textos nuevos" |
 | `host/internal/cli/{invariant,phone_remote,remotecmd,doctor,doctor_lang,messages_lang}_test.go` | 1, 2 | T1: llamadas esperadas con la lectura de persist; T2: tests nuevos |
 | `host/cmd/adbuddy/e2e_test.go` | 1 | la lista exacta de llamadas a adb incluye la lectura de persist |
@@ -103,10 +111,10 @@ El texto completo de cada uno está en el paso 3 de la Tarea 2. "Quién la fijó
 
 **Files:** los de la Tarea 1 en el mapa.
 
-- Produces: `type device.TCP struct { Now, Persist string }`; `func device.ReadTCP(ctx context.Context, a device.ADB) (device.TCP, error)`; `func device.EnsureNoTCPPort(ctx context.Context, a device.ADB, keep string) (device.TCP, bool, error)` (antes `(bool, error)`); `remote.State.Persist string`, `remote.State.PersistUnknown bool`; `func (c *remote.Controller) readTCP(ctx context.Context) (device.TCP, error)`; `func (c *remote.Controller) disable(ctx context.Context, t device.TCP, rerr error) (remote.State, error)` (antes `disable(ctx)`).
+- Produces: `type device.TCP struct { Now, Persist string }`; `func device.ReadTCP(ctx context.Context, a device.ADB) (device.TCP, error)`; `func device.EnsureNoTCPPort(ctx context.Context, a device.ADB, keep string) (device.TCP, bool, error)` (antes `(bool, error)`); `remote.State.Persist string`, `remote.State.PersistUnknown bool`; `func (c *remote.Controller) readTCP(ctx context.Context) (device.TCP, error)`; `func (c *remote.Controller) disable(ctx context.Context, t device.TCP, rerr error) (remote.State, error)` (antes `disable(ctx)`); `func (c *remote.Controller) Note(t device.TCP)`; `var device.ReadTCPWait = 10 * time.Second` (y el campo `readWait` del controlador, que `New` copia).
 - Desaparecen: `device.TCPPort`, `remote.portClosed`.
 
-**Concurrencia (razonada; la CI corre `-race`):** `persist` y `persistUnknown` del controlador van bajo un mutex propio, `pmu`, que solo toman `readTCP` (escribe) y `State` (lee). `State` se llama con `mu` tomado (desde `Enable`/`Disable`/…) y sin él (`remoteLink.refresh`, `handleRemote` "status"): por eso no puede tomar `mu`, y `pmu` nunca se toma con otro cerrojo de este paquete dentro, así que no hay orden de cerrojos que respetar. `readTCP` corre siempre con `mu` tomado (una lectura a la vez). El adb falso `remote.env` lo usa un solo hilo, como hoy.
+**Concurrencia (razonada; la CI corre `-race`):** `persist` y `persistUnknown` del controlador van bajo un mutex propio, `pmu`, que solo toman `readTCP` (escribe) y `State` (lee). `State` se llama con `mu` tomado (desde `Enable`/`Disable`/…) y sin él (`remoteLink.refresh`, `handleRemote` "status"): por eso no puede tomar `mu`, y `pmu` nunca se toma con otro cerrojo de este paquete dentro, así que no hay orden de cerrojos que respetar. `readTCP` corre siempre con `mu` tomado (una lectura a la vez); `Note` solo toma `pmu` (la llaman `serve` antes de lanzar gorrutinas y el vigilante desde la suya). `device.ReadTCPWait` es una variable de test: `New` la copia en `readWait`, así que ninguna gorrutina del controlador la lee después (lo mismo hace el vigilante con `ReadWait`, que `serve` lee antes de lanzarlo). El adb falso `remote.env` lo usa un solo hilo, como hoy (`persHang` espera al contexto de la llamada).
 
 - [ ] **Step 1: tests que fallan con el código de hoy.** Todos compilan con el código actual: los de `device` pasan por `EnsureNoTCPPort` a través de un ayudante (`ensureRan`) cuya única línea cambia en el paso 3; los de `remote` miran eventos y caducidad, no campos nuevos. Las ediciones van en este orden (el reemplazo múltiple antes de añadir `ensureRan`, que no debe tocarse).
 
@@ -451,6 +459,12 @@ type TCP struct {
 // maxPortRunes bounds a port property as the host keeps and shows it.
 const maxPortRunes = 16
 
+// ReadTCPWait bounds one ReadTCP where a caller has a longer budget for more
+// than the read (the remote controller and `remote off` before `adb usb`, the
+// watcher of the connection): a hung getprop must not eat it. A variable so
+// a test can shorten it; read it before starting goroutines.
+var ReadTCPWait = 10 * time.Second
+
 // portValue is a property read as a port: "" when empty or 0; otherwise the
 // value, cut to maxPortRunes and printable.
 func portValue(v string) string {
@@ -508,7 +522,7 @@ func EnsureNoTCPPort(ctx context.Context, a ADB, keep string) (TCP, bool, error)
 }
 ```
 
-(`utf8` ya está importado en `device.go`.)
+(`utf8` y `time` ya están importados en `device.go`.)
 
 Edit en `host/internal/device/device_test.go`:
 
@@ -635,10 +649,12 @@ Edit en `host/internal/remote/remote.go`:
 ```go
 	Address   string // ip:port while enabled
 	ExpiresAt time.Time
-	// Persist is persist.adb.tcp.port as the controller last read it, when it
-	// names a port (device.TCP.Persist): `adb usb` does not clear it, and adbd
-	// listens on it again when the phone restarts (VB-41). ADBuddy never sets
-	// it and cannot clear it without root.
+	// Persist is persist.adb.tcp.port as the controller last read it (or was
+	// told with Note), when it names a port (device.TCP.Persist): `adb usb`
+	// does not clear it, and adbd listens on it again when the phone restarts
+	// (VB-41). ADBuddy never sets it and cannot clear it without root. It is
+	// the last read, not a live value: a persist set or emptied since shows
+	// at the next read.
 	Persist string
 	// PersistUnknown says the controller's last read of the port failed:
 	// whether a port opens again when the phone restarts is not known (never
@@ -658,13 +674,28 @@ Edit en `host/internal/remote/remote.go`:
 **por:**
 ```go
 	closedFor time.Time
+	// readWait bounds each read of the port (device.ReadTCPWait as New read
+	// it, before any goroutine).
+	readWait time.Duration
 	// pmu guards persist and persistUnknown, what the last read of the port
-	// said (readTCP). State takes only pmu: the snapshot and `status` call it
-	// while a change may hold mu.
+	// said (readTCP, Note). State takes only pmu: the snapshot and `status`
+	// call it while a change may hold mu.
 	pmu            sync.Mutex
 	persist        string
 	persistUnknown bool
 }
+```
+
+Edit en `host/internal/remote/remote.go`:
+
+**Reemplazar:**
+```go
+	return &Controller{adb: a, st: s, now: now}
+```
+
+**por:**
+```go
+	return &Controller{adb: a, st: s, now: now, readWait: device.ReadTCPWait}
 ```
 
 Edit en `host/internal/remote/remote.go`:
@@ -702,13 +733,27 @@ func (c *Controller) State() State {
 
 // readTCP reads adbd's TCP port (device.ReadTCP: service.adb.tcp.port, or
 // persist.adb.tcp.port when it is empty) and keeps what it said of
-// persist.adb.tcp.port for State; a read that fails makes it unknown.
+// persist.adb.tcp.port for State; a read that fails makes it unknown. The
+// read has its own deadline (readWait): a hung getprop must not eat the
+// budget of the `adb usb` that follows.
 func (c *Controller) readTCP(ctx context.Context) (device.TCP, error) {
-	t, err := device.ReadTCP(ctx, c.adb)
+	rctx, cancel := context.WithTimeout(ctx, c.readWait)
+	defer cancel()
+	t, err := device.ReadTCP(rctx, c.adb)
 	c.pmu.Lock()
 	c.persist, c.persistUnknown = t.Persist, err != nil
 	c.pmu.Unlock()
 	return t, err
+}
+
+// Note keeps a read of the port made elsewhere (serve's invariant at its
+// start, the watcher when the phone comes back) for State, as if the
+// controller had made it: `adbuddy remote status` says what
+// persist.adb.tcp.port holds from serve's start. It takes only pmu.
+func (c *Controller) Note(t device.TCP) {
+	c.pmu.Lock()
+	c.persist, c.persistUnknown = t.Persist, false
+	c.pmu.Unlock()
 }
 ```
 
@@ -1177,8 +1222,114 @@ func TestUsbFailsWithAPersistPort(t *testing.T) {
 }
 ```
 
+Para `TestReadTCPHasItsOwnWait`, el adb falso de `remote` aprende a colgarse en la lectura de persist hasta que acabe su contexto (revisión M1), y para `TestNoteFeedsState` el test importa `device` (revisión M2):
+
+Edit en `host/internal/remote/remote_test.go`:
+
+**Reemplazar:**
+```go
+func (e *env) Run(_ context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (int, error) {
+```
+
+**por:**
+```go
+func (e *env) Run(ctx context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (int, error) {
+```
+
+Edit en `host/internal/remote/remote_test.go`:
+
+**Reemplazar:**
+```go
+	case getpersist:
+		if e.persFails {
+```
+
+**por:**
+```go
+	case getpersist:
+		if e.persHang {
+			<-ctx.Done()
+			return -1, ctx.Err()
+		}
+		if e.persFails {
+```
+
+Edit en `host/internal/remote/remote_test.go`:
+
+**Reemplazar:**
+```go
+	persFails bool
+	tcpipFail bool
+```
+
+**por:**
+```go
+	persFails bool
+	persHang  bool // getprop persist.adb.tcp.port waits for its context to end
+	tcpipFail bool
+```
+
+Añadir al final de `host/internal/remote/remote_test.go`:
+
+```go
+
+// The read of the port has its own deadline (device.ReadTCPWait): a hung
+// getprop of persist ends as "unknown" and `adb usb` still runs within the
+// caller's budget.
+func TestReadTCPHasItsOwnWait(t *testing.T) {
+	old := device.ReadTCPWait
+	device.ReadTCPWait = 20 * time.Millisecond
+	defer func() { device.ReadTCPWait = old }()
+	e := newEnv()
+	e.until = t0.Add(time.Hour)
+	e.persHang = true
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	s, err := e.controller().Disable(ctx)
+	if err != nil || s != (State{PersistUnknown: true}) || !e.ran("usb") || time.Since(start) > 5*time.Second {
+		t.Fatalf("%+v %v after %s (%q)", s, err, time.Since(start), e.events)
+	}
+}
+
+// Note: a read made elsewhere (serve's invariant) feeds State from the start;
+// a later read of the controller replaces it.
+func TestNoteFeedsState(t *testing.T) {
+	e := newEnv()
+	ctl := e.controller()
+	ctl.Note(device.TCP{Persist: "5555"})
+	if s := ctl.State(); s != (State{Persist: "5555"}) {
+		t.Fatalf("%+v", s)
+	}
+	e.port = "0"
+	if s, err := ctl.Disable(context.Background()); err != nil || s != (State{}) || ctl.State() != (State{}) {
+		t.Fatalf("after a read: %+v %v", s, err)
+	}
+	e.events = nil
+	ctl.Note(device.TCP{})
+	if len(e.events) != 0 {
+		t.Fatalf("Note ran adb: %q", e.events)
+	}
+}
+```
+
+Edit en `host/internal/remote/remote_test.go`:
+
+**Reemplazar:**
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/adb"
+)
+```
+
+**por:**
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/adb"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
+)
+```
+
 Run: `cd host && gofmt -l ./internal/remote ./internal/device && go vet ./internal/remote/ ./internal/device/ && go test -count=1 -timeout 5m ./internal/remote/ ./internal/device/`
-Expected: `gofmt` sin salida, `vet` limpio, `ok` en los dos. Mutaciones (comprobadas en la réplica, restaurar después): sin `if service == "" { t.Now = t.Persist }` en `ReadTCP` fallan 8 tests entre `device` y `remote`; con `c.persist = ""` fijo en `readTCP` fallan `TestOffSaysWhatPersistHolds`, `TestPersistDoesNotRestartAdbdAgain` y `TestStateKeepsTheLastReadOfPersist`.
+Expected: `gofmt` sin salida, `vet` limpio, `ok` en los dos. Mutaciones (comprobadas en la réplica, restaurar después): sin `if service == "" { t.Now = t.Persist }` en `ReadTCP` fallan 8 tests entre `device` y `remote`; con `c.persist = ""` fijo en `readTCP` fallan `TestOffSaysWhatPersistHolds`, `TestPersistDoesNotRestartAdbdAgain` y `TestStateKeepsTheLastReadOfPersist`. Sin el plazo propio de `readTCP` (`rctx` = `ctx`), `TestReadTCPHasItsOwnWait` falla a los 10 s.
 
 - [ ] **Step 5: los llamadores de `cli` (sin textos nuevos todavía) y las llamadas esperadas.**
 
@@ -1462,6 +1613,22 @@ Edit en `host/internal/emutest/persist_test.go`:
 	})
 ```
 
+Edit en `host/internal/emutest/persist_test.go`:
+
+**Reemplazar:**
+```go
+	// persist set and service.adb.tcp.port empty, as after a reboot: adbd took
+	// the persist port at its start (AOSP adbd reads persist only when the
+	// service property is empty), and the host reads "closed".
+```
+
+**por:**
+```go
+	// persist set and service.adb.tcp.port empty, as after a reboot: adbd took
+	// the persist port at its start (AOSP adbd reads persist only when the
+	// service property is empty), and the host reads it there (device.ReadTCP).
+```
+
 Edit en `host/internal/emutest/remote_test.go`:
 
 **Reemplazar:**
@@ -1569,11 +1736,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 2: avisar de persist en doctor, en el log de serve y en `adbuddy remote` (textos en/es) 🔒
 
-**Files:** `host/internal/cli/{invariant,doctor,remotecmd,phone_remote}.go`, sus tests, `doctor_lang_test.go`, `messages_lang_test.go` y los dos catálogos.
+**Files:** `host/internal/cli/{invariant,doctor,remotecmd,phone_remote,phone_watch,serve}.go`, sus tests, `doctor_lang_test.go`, `messages_lang_test.go` y los dos catálogos.
 
-- Produces: `func tellPersist(log io.Writer, persist string, unknown bool)` (en `invariant.go`); `remoteInfo.PersistPort string` (`json:"persistPort,omitempty"`) y `remoteInfo.PersistUnknown bool` (`json:"persistUnknown,omitempty"`); las claves de "Textos nuevos".
+- Produces: `func tellPersist(log io.Writer, persist string, unknown bool)` y `func invariantTCP(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) (device.TCP, error)` (en `invariant.go`; `applyInvariant` la envuelve y no cambia de firma); `phoneWatch.Port device.TCP`, `phoneWatch.Seen func(device.TCP)`, `phoneWatch.ReadWait time.Duration`; `func (w *watcher) recheckPort(ctx context.Context)`; `switchTo(ctx, serial, where)` (antes sin `ctx`); `remoteInfo.PersistPort string` (`json:"persistPort,omitempty"`) y `remoteInfo.PersistUnknown bool` (`json:"persistUnknown,omitempty"`); las claves de "Textos nuevos".
 
-**Concurrencia:** nada nuevo compartido. `tellPersist` escribe en el `log` de `serve` (ya lo comparten `watchRemote`, `remoteLink` y el invariante; `syncBuffer` en los tests). En `ctlADB`, `persist` se lee bajo `a.mu` como el resto de campos; los tests que lo cambian con `serve` en marcha lo hacen bajo `h.g.phone.mu` o antes de lanzar la gorrutina.
+**Concurrencia:** `recheckPort` corre en la gorrutina del vigilante (un paso a la vez, como hoy) y su estado (`said`, `unknown`) es solo suyo; llama a `Seen` (`ctl.Note`, que toma `pmu`) y a `RemoteOn` (el almacén, seguro para uso concurrente). `ReadWait` se lee en `serve` antes de lanzar la gorrutina. `tellPersist` escribe en el `log` de `serve` (ya lo comparten `watchRemote`, `remoteLink` y el invariante; `syncBuffer` en los tests). En `ctlADB`, `persist` se lee bajo `a.mu` como el resto de campos; los tests que lo cambian con `serve` en marcha lo hacen bajo `h.g.phone.mu` o antes de lanzar la gorrutina.
 
 - [ ] **Step 1: tests que fallan con el código de la Tarea 1.** Compilan: miran textos, el log y el JSON en bruto, no campos nuevos.
 
@@ -1835,15 +2002,129 @@ Edit en `host/internal/cli/doctor_lang_test.go`:
 		{"adb server down", doctorRules(noServer), []string{
 ```
 
+Revisión I1, M1 y M5: el móvil que vuelve con `serve` en marcha, doctor con `serve` en marcha y `remote off` sin serve con la lectura de persist colgada (para esta, `remotecmd_test.go` importa `device`):
+
+Añadir al final de `host/internal/cli/phone_watch_test.go`:
+
+```go
+
+// VB-41 (review I1): a phone that comes back may have restarted and taken
+// persist.adb.tcp.port. The watcher reads the port again (it never closes it
+// mid-session) and says once what changed: a port open with the remote mode
+// off, and the persist port.
+func TestWatchPhoneRereadsThePortWhenThePhoneComesBack(t *testing.T) {
+	back := func(t *testing.T, r *rig) {
+		r.set(t, devicesRule(phoneSerial), testutil.FakeRule{Match: tcpPortRule, Stdout: "\n"},
+			testutil.FakeRule{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: "5555\n"})
+	}
+	t.Run("remote mode off", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr))
+		w, _, log := watcherFor(t, r, tsConfig(), false, phoneSerial)
+		steps(w, 2)
+		back(t, r)
+		steps(w, 2)
+		if strings.Count(log.String(), "adb listens on network port 5555 on the phone again") != 1 || strings.Count(log.String(), "persist.adb.tcp.port is 5555") != 1 {
+			t.Fatalf("log %q", log.String())
+		}
+		if r.count(t, "usb") != 0 || r.count(t, "tcpip") != 0 {
+			t.Fatalf("the watcher closed or opened a port: %q", r.calls(t))
+		}
+		// Lost and back again with the same port: nothing new to say.
+		r.set(t, devicesRule(), failRule(tsAddr))
+		steps(w, 2)
+		back(t, r)
+		steps(w, 1)
+		if n := strings.Count(log.String(), "persist.adb.tcp.port is 5555"); n != 1 {
+			t.Fatalf("said %d times: %q", n, log.String())
+		}
+	})
+	t.Run("remote mode on", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr), failRule(tsHome))
+		w, _, log := watcherFor(t, r, tsConfig(), true, phoneSerial)
+		steps(w, 2)
+		back(t, r)
+		steps(w, 1)
+		if strings.Contains(log.String(), "adb listens on network port") || strings.Count(log.String(), "persist.adb.tcp.port is 5555") != 1 {
+			t.Fatalf("log %q", log.String())
+		}
+	})
+}
+```
+
+Añadir al final de `host/internal/cli/doctor_test.go`:
+
+```go
+
+// VB-41 (review I1): with serve running, an open port is not closed until
+// serve starts again (when the phone reconnects, serve only warns): doctor
+// does not say "nothing to do" then.
+func TestDoctorNetworkPortOpenWithServeRunning(t *testing.T) {
+	e := doctorEnv(t, doctorRules(testutil.FakeRule{Match: `^shell getprop service\.adb\.tcp\.port$`, Stdout: "5555\n"}))
+	doctorServe(t, e)
+	out, _, _ := runWithInput(t, "", "doctor", "--json")
+	c := statusOf(doctorJSON(t, out), "network port")
+	if c.Status != checkWarn || strings.Contains(c.Guidance, "Nothing to do") || !strings.Contains(c.Guidance, "adbuddy remote off") {
+		t.Fatalf("%+v", c)
+	}
+}
+```
+
+Añadir al final de `host/internal/cli/remotecmd_test.go`:
+
+```go
+
+// VB-41 (review M1, M5): off without serve with a persist read that hangs:
+// the read has its own short deadline, `adb usb` still runs, and the answer
+// says persist could not be read (never "closed").
+func TestRemoteOffWithoutServePersistUnreadable(t *testing.T) {
+	setVar(t, &device.ReadTCPWait, 300*time.Millisecond)
+	until := time.Now().Add(5 * time.Hour).UTC().Format(time.RFC3339)
+	e := newSetupEnv(t, []testutil.FakeRule{
+		{Match: "^start-server$"},
+		{Match: "^devices$", Stdout: phoneOnline},
+		{Match: `^shell getprop ro\.serialno$`, Stdout: "AAAA1111\n"},
+		{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: "5555\n", SleepMs: 20000},
+		{Match: "^usb$", Stdout: "restarting in USB mode\n"},
+	})
+	saveRemoteCmdConfig(t, e, until, phoneSerial)
+	start := time.Now()
+	out, errOut, code := run(t, "remote", "off")
+	if code != 0 || !strings.Contains(out, "could not be read") || strings.Contains(out, "is closed") || time.Since(start) > 15*time.Second {
+		t.Fatalf("exit %d stdout %q stderr %q after %s", code, out, errOut, time.Since(start))
+	}
+	if !strings.Contains(strings.Join(loggedCalls(t, e.log), "|"), "usb") {
+		t.Fatalf("adb usb did not run: %q", loggedCalls(t, e.log))
+	}
+}
+```
+
+Edit en `host/internal/cli/remotecmd_test.go`:
+
+**Reemplazar:**
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+```
+
+**por:**
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+```
+
 - [ ] **Step 2: comprobar el RED.**
 
-Run: `cd host && gofmt -l internal/cli && go vet ./internal/cli/ && go test -count=1 -timeout 10m -run 'TestApplyInvariantWarnsAboutAPersistPort|TestDoctorNetworkPortPersist|TestRemoteSetOffSaysThePersistPort|TestWatchRemoteSaysThePersistPortWhenItExpires|TestRemoteOffThroughServeSaysThePersistPort|TestRemoteOffWithoutServeSaysThePersistPort|TestDoctorInSpanish' ./internal/cli/`
-Expected: `FAIL`, sin errores de compilación ni `panic`; 14 líneas `--- FAIL` (7 tests y 7 subtests), todas por el aviso que falta:
+Run: `cd host && gofmt -l internal/cli && go vet ./internal/cli/ && go test -count=1 -timeout 10m -run 'TestApplyInvariantWarnsAboutAPersistPort|TestDoctorNetworkPortPersist|TestRemoteSetOffSaysThePersistPort|TestWatchRemoteSaysThePersistPortWhenItExpires|TestRemoteOffThroughServeSaysThePersistPort|TestRemoteOffWithoutServeSaysThePersistPort|TestDoctorInSpanish|TestWatchPhoneRereadsThePortWhenThePhoneComesBack|TestDoctorNetworkPortOpenWithServeRunning|TestRemoteOffWithoutServePersistUnreadable' ./internal/cli/`
+Expected: `FAIL`, sin errores de compilación ni `panic`; 19 líneas `--- FAIL` (10 tests y 9 subtests), todas por el aviso o la lectura que faltan:
 - `TestDoctorInSpanish/persist_port`: el informe dice `✓ puerto de red: cerrado (sin modo adb tcpip)`.
 - `TestDoctorNetworkPortPersist`: `service_at_0` → `Status:ok Detail:closed (no adb tcpip mode)`; `after_a_reboot` → `Guidance:Nothing to do: serve closes it (remote mode is off).`; `unreadable` → `Detail:could not read service.adb.tcp.port: adb shell getprop persist.adb.tcp.port: exit 1: error: closed`.
 - `TestApplyInvariantWarnsAboutAPersistPort`: `service_at_0` → `stderr ""`; `after_a_reboot` → solo `Closed adb's network port on the phone (adb usb)…`; `still_open_after_adb_usb` → fix `Restart the phone (that closes a port opened with \`adb tcpip\`)…`.
 - `TestRemoteSetOffSaysThePersistPort` → `log ""`; `TestWatchRemoteSaysThePersistPortWhenItExpires` → `timed out waiting for the warning` (5 s).
 - `TestRemoteOffThroughServeSaysThePersistPort` y `TestRemoteOffWithoutServeSaysThePersistPort` → `stdout "Remote mode is off: port 5555 is closed.\n"`.
+- `TestWatchPhoneRereadsThePortWhenThePhoneComesBack` (los dos subtests) → el log solo dice `The phone is not reachable … The phone is reachable again.`
+- `TestDoctorNetworkPortOpenWithServeRunning` → `Guidance:Nothing to do: serve closes it (remote mode is off).`
+- `TestRemoteOffWithoutServePersistUnreadable` → `stdout "Remote mode is off: port 5555 is closed.\n"` (hoy no lee persist).
 
 - [ ] **Step 3: los textos (en y es).**
 
@@ -1881,9 +2162,10 @@ Edit en `host/internal/i18n/catalog/en.toml`:
 
 **por:**
 ```toml
-"doctor.port.nothing_to_do" = "Nothing to do: serve closes it (remote mode is off)."
+"doctor.port.nothing_to_do" = "Nothing to do: serve closes it when it starts (remote mode is off)."
+"doctor.port.serve_running" = "serve closes it only when it starts; when the phone reconnects while serve runs, it only warns. Run `adbuddy remote off` to close it now."
 "doctor.port.persist" = "closed for now, but persist.adb.tcp.port is %[1]s: adb listens on port %[1]s again, on any network, every time the phone restarts"
-"doctor.port.persist_fix" = "ADBuddy did not set it and cannot clear it without root: `adb usb`, which serve and `adbuddy remote off` run, only closes the port until the next restart. Turn off whatever set it (a ROM's 'ADB over network' setting, a root app or a command run earlier), or empty it as root (`setprop persist.adb.tcp.port ''`) and restart the phone."
+"doctor.port.persist_fix" = "ADBuddy did not set it and cannot clear it without root: `adb usb` (serve runs it when it starts, and `adbuddy remote off` runs it) only closes the port until the next restart, and when the phone restarts while serve runs, serve only warns. Turn off whatever set it (a ROM's 'ADB over network' setting, a root app or a command run earlier), or empty it as root (`setprop persist.adb.tcp.port ''`) and restart the phone."
 ```
 
 Edit en `host/internal/i18n/catalog/en.toml`:
@@ -1937,9 +2219,10 @@ Edit en `host/internal/i18n/catalog/es.toml`:
 
 **por:**
 ```toml
-"doctor.port.nothing_to_do" = "No hay nada que hacer: serve lo cierra (el modo remoto está desactivado)."
+"doctor.port.nothing_to_do" = "No hay nada que hacer: serve lo cierra al arrancar (el modo remoto está desactivado)."
+"doctor.port.serve_running" = "serve solo lo cierra al arrancar; si el móvil se reconecta con serve en marcha, solo avisa. Ejecuta `adbuddy remote off` para cerrarlo ya."
 "doctor.port.persist" = "cerrado por ahora, pero persist.adb.tcp.port vale %[1]s: adb vuelve a escuchar en el puerto %[1]s, en cualquier red, cada vez que el móvil se reinicia"
-"doctor.port.persist_fix" = "ADBuddy no la fijó y no puede borrarla sin root: `adb usb`, que ejecutan serve y `adbuddy remote off`, solo cierra el puerto hasta el siguiente reinicio. Desactiva lo que la fijó (el ajuste «ADB por red» de una ROM, una app con root o una orden de antes), o vacíala como root (`setprop persist.adb.tcp.port ''`) y reinicia el móvil."
+"doctor.port.persist_fix" = "ADBuddy no la fijó y no puede borrarla sin root: `adb usb` (serve lo ejecuta al arrancar, y también `adbuddy remote off`) solo cierra el puerto hasta el siguiente reinicio, y si el móvil se reinicia con serve en marcha, serve solo avisa. Desactiva lo que la fijó (el ajuste «ADB por red» de una ROM, una app con root o una orden de antes), o vacíala como root (`setprop persist.adb.tcp.port ''`) y reinicia el móvil."
 ```
 
 Edit en `host/internal/i18n/catalog/es.toml`:
@@ -1959,6 +2242,32 @@ Edit en `host/internal/i18n/catalog/es.toml`:
 "remote.persist.unknown_log" = "⚠ No se pudo leer persist.adb.tcp.port: el puerto de red de adb puede volver a abrirse cuando el móvil se reinicie. Ejecuta `adbuddy doctor` para comprobarlo."
 ```
 
+Edit en `host/internal/i18n/catalog/en.toml`:
+
+**Reemplazar:**
+```toml
+"phone_watch.the_phone_is_now_at" = "📱 The phone is now at %[1]s."
+```
+
+**por:**
+```toml
+"phone_watch.the_phone_is_now_at" = "📱 The phone is now at %[1]s."
+"phone_watch.port_open" = "⚠ adb listens on network port %[1]s on the phone again and remote mode is off: serve does not close it while it runs. Run `adbuddy remote off` to close it now."
+```
+
+Edit en `host/internal/i18n/catalog/es.toml`:
+
+**Reemplazar:**
+```toml
+"phone_watch.the_phone_is_now_at" = "📱 El móvil está ahora en %[1]s."
+```
+
+**por:**
+```toml
+"phone_watch.the_phone_is_now_at" = "📱 El móvil está ahora en %[1]s."
+"phone_watch.port_open" = "⚠ adb vuelve a escuchar en el puerto de red %[1]s del móvil y el modo remoto está desactivado: serve no lo cierra mientras está en marcha. Ejecuta `adbuddy remote off` para cerrarlo ya."
+```
+
 - [ ] **Step 4: el código.**
 
 Edit en `host/internal/cli/invariant.go`:
@@ -1976,30 +2285,16 @@ func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, 
 		return nil
 	}
 	tell(log, "invariant.closed_adb_s_network_port")
-```
-
-**por:**
-```go
-// what the user runs again after a failure. When ctx ends, the error is whatever the step returned: callers turn it into
-// Interrupted. A persist.adb.tcp.port that names a port (VB-41) is said once
-// in log, from the last read: ADBuddy cannot clear it, and adbd listens on it
-// again when the phone restarts.
-func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) error {
-	t, restarted, err := device.EnsureNoTCPPort(ctx, runner, keep)
-	if err != nil {
-		return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix", err.Error())
+	if err := waitDropped(ctx, runner, usbDropWait); err != nil {
+		return err
 	}
-	if !restarted {
-		tellPersist(log, t.Persist, false)
-		return nil
+	if _, err := runner.WaitSerial(ctx, runner.Serial, wait); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return TransientErrorT("DEVICE_NOT_FOUND", "err.invariant.device_not_found", "err.invariant.device_not_found.fix", command)
 	}
-	tell(log, "invariant.closed_adb_s_network_port")
-```
-
-Edit en `host/internal/cli/invariant.go`:
-
-**Reemplazar:**
-```go
+	// Only read the port now: another `adb usb` would restart adbd again.
 	t, err := device.ReadTCP(ctx, runner)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -2016,23 +2311,55 @@ Edit en `host/internal/cli/invariant.go`:
 
 **por:**
 ```go
+// what the user runs again after a failure. When ctx ends, the error is whatever the step returned: callers turn it into
+// Interrupted. A persist.adb.tcp.port that names a port (VB-41) is said once
+// in log, from the last read: ADBuddy cannot clear it, and adbd listens on it
+// again when the phone restarts.
+func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) error {
+	_, err := invariantTCP(ctx, runner, wait, log, command, keep)
+	return err
+}
+
+// invariantTCP is applyInvariant that also returns the last read of the port:
+// serve gives it to the remote controller (Note) and to the watcher of the
+// connection, so both know what persist.adb.tcp.port holds from the start.
+func invariantTCP(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) (device.TCP, error) {
+	t, restarted, err := device.EnsureNoTCPPort(ctx, runner, keep)
+	if err != nil {
+		return t, NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix", err.Error())
+	}
+	if !restarted {
+		tellPersist(log, t.Persist, false)
+		return t, nil
+	}
+	tell(log, "invariant.closed_adb_s_network_port")
+	if err := waitDropped(ctx, runner, usbDropWait); err != nil {
+		return t, err
+	}
+	if _, err := runner.WaitSerial(ctx, runner.Serial, wait); err != nil {
+		if ctx.Err() != nil {
+			return t, ctx.Err()
+		}
+		return t, TransientErrorT("DEVICE_NOT_FOUND", "err.invariant.device_not_found", "err.invariant.device_not_found.fix", command)
+	}
+	// Only read the port now: another `adb usb` would restart adbd again.
 	t, err = device.ReadTCP(ctx, runner)
 	if err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return t, ctx.Err()
 		}
-		return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix_2", err.Error())
+		return t, NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix_2", err.Error())
 	}
 	if t.Now != "" && t.Now != keep {
 		// Restarting the phone closes a port of `adb tcpip`, but opens
 		// persist's again: that fix only without persist.
 		if t.Persist != "" {
-			return NewErrorT("DEVICE_PORT_OPEN", "err.invariant.device_port_open", "err.invariant.device_port_open.persist_fix", command, t.Persist)
+			return t, NewErrorT("DEVICE_PORT_OPEN", "err.invariant.device_port_open", "err.invariant.device_port_open.persist_fix", command, t.Persist)
 		}
-		return NewErrorT("DEVICE_PORT_OPEN", "err.invariant.device_port_open", "err.invariant.device_port_open.fix", command)
+		return t, NewErrorT("DEVICE_PORT_OPEN", "err.invariant.device_port_open", "err.invariant.device_port_open.fix", command)
 	}
 	tellPersist(log, t.Persist, false)
-	return nil
+	return t, nil
 }
 
 // tellPersist says in log that persist.adb.tcp.port names a port (VB-41:
@@ -2095,9 +2422,13 @@ Edit en `host/internal/cli/doctor.go`:
 **por:**
 ```go
 	c := mk("network port", checkWarn, i18n.M("doctor.port.open", port))
-	if t.Persist != "" {
+	switch {
+	case t.Persist != "":
 		// serve's adb usb closes it, but only until the phone restarts.
 		return c.withGuide(i18n.M("doctor.port.persist_fix"))
+	case serveRunning:
+		// serve closes it only when it starts; on a reconnection it only warns.
+		return c.withGuide(i18n.M("doctor.port.serve_running"))
 	}
 	return c.withGuide(i18n.M("doctor.port.nothing_to_do"))
 }
@@ -2232,7 +2563,10 @@ Edit en `host/internal/cli/remotecmd.go`:
 ```go
 	octx, cancel := context.WithTimeout(ctx, remoteOpTimeout)
 	defer cancel()
-	t, rerr := device.ReadTCP(octx, runner)
+	// Its own short deadline: a hung read must not eat the budget of adb usb.
+	rctx, rcancel := context.WithTimeout(ctx, device.ReadTCPWait)
+	t, rerr := device.ReadTCP(rctx, runner)
+	rcancel()
 	var out, errb strings.Builder
 	code, err := runner.Run(octx, "", []string{"usb"}, nil, &out, &errb)
 ```
@@ -2299,7 +2633,328 @@ Edit en `host/internal/cli/phone_remote.go`:
 				link.refresh()
 ```
 
-Run: `cd host && gofmt -l . && go vet ./internal/cli/ && go test -count=1 -timeout 10m -run 'TestApplyInvariantWarnsAboutAPersistPort|TestDoctorNetworkPortPersist|TestRemoteSetOffSaysThePersistPort|TestWatchRemoteSaysThePersistPortWhenItExpires|TestRemoteOffThroughServeSaysThePersistPort|TestRemoteOffWithoutServeSaysThePersistPort|TestDoctorInSpanish' ./internal/cli/`
+`serve` le pasa la lectura del invariante al controlador (revisión M2: `remote status` y su `--json` dicen lo de persist desde el arranque) y al vigilante del móvil, que relee el puerto cuando el móvil vuelve (revisión I1).
+
+Edit en `host/internal/cli/serve.go`:
+
+**Reemplazar:**
+```go
+			// Host invariant (spec §3.3): no adb network port while remote mode is off.
+			if err := applyInvariant(ctx, active.Runner(), deviceWait, app.Log(), "adbuddy serve", keep); err != nil {
+				if ctx.Err() != nil {
+					return Interrupted()
+				}
+				return err
+			}
+```
+
+**por:**
+```go
+			// Host invariant (spec §3.3): no adb network port while remote mode is off.
+			tcp, err := invariantTCP(ctx, active.Runner(), deviceWait, app.Log(), "adbuddy serve", keep)
+			if err != nil {
+				if ctx.Err() != nil {
+					return Interrupted()
+				}
+				return err
+			}
+			// VB-41: `adbuddy remote status` says what persist.adb.tcp.port
+			// holds from the start, not only after the first "off".
+			ctl.Note(tcp)
+```
+
+Edit en `host/internal/cli/serve.go`:
+
+**Reemplazar:**
+```go
+				Cfg: store.Config, RemoteOn: func() bool { return !store.Until().IsZero() }, Log: app.Log(),
+				Every: watchEvery, Misses: watchMisses, TryWait: watchTryWait,
+			})
+```
+
+**por:**
+```go
+				Cfg: store.Config, RemoteOn: func() bool { return !store.Until().IsZero() }, Log: app.Log(),
+				Every: watchEvery, Misses: watchMisses, TryWait: watchTryWait,
+				Port: tcp, Seen: ctl.Note, ReadWait: device.ReadTCPWait,
+			})
+```
+
+Edit en `host/internal/cli/serve.go`:
+
+**Reemplazar:**
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/daemon"
+```
+
+**por:**
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/daemon"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
+```
+
+Edit en `host/internal/cli/phone_watch.go`:
+
+**Reemplazar:**
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+```
+
+**por:**
+```go
+	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+```
+
+Edit en `host/internal/cli/phone_watch.go`:
+
+**Reemplazar:**
+```go
+	Every   time.Duration
+	Misses  int
+	TryWait time.Duration
+}
+```
+
+**por:**
+```go
+	Every   time.Duration
+	Misses  int
+	TryWait time.Duration
+
+	// Port is the last read of adbd's TCP port already said (serve's
+	// invariant at its start) and Seen gets each new read (the remote
+	// controller's Note); both optional. ReadWait bounds each read (zero:
+	// device.ReadTCPWait, read when the watcher is made).
+	Port     device.TCP
+	Seen     func(device.TCP)
+	ReadWait time.Duration
+}
+```
+
+Edit en `host/internal/cli/phone_watch.go`:
+
+**Reemplazar:**
+```go
+// its guid). It never opens or closes a port (no applyInvariant): that is the
+// remote mode's job. It ends with ctx.
+```
+
+**por:**
+```go
+// its guid). It never opens or closes a port (no applyInvariant): that is the
+// remote mode's job. When the phone comes back it reads the port again
+// (recheckPort: the phone may have restarted and taken persist.adb.tcp.port,
+// VB-41) and warns. It ends with ctx.
+```
+
+Edit en `host/internal/cli/phone_watch.go`:
+
+**Reemplazar:**
+```go
+	warned   bool            // "not reachable" was said and the phone has not come back
+	wrong    map[string]bool // addresses said to be another phone since the phone was last listed
+}
+```
+
+**por:**
+```go
+	warned   bool            // "not reachable" was said and the phone has not come back
+	wrong    map[string]bool // addresses said to be another phone since the phone was last listed
+	readWait time.Duration
+	said     device.TCP // the last read of the port that was said
+	unknown  bool       // "could not read persist" was said and no read worked since
+}
+```
+
+Edit en `host/internal/cli/phone_watch.go`:
+
+**Reemplazar:**
+```go
+	wt := &watcher{phoneWatch: w, every: w.Every, misses: w.Misses, tryWait: w.TryWait, wrong: map[string]bool{}}
+```
+
+**por:**
+```go
+	wt := &watcher{phoneWatch: w, every: w.Every, misses: w.Misses, tryWait: w.TryWait, wrong: map[string]bool{}, readWait: w.ReadWait, said: w.Port}
+	if wt.readWait <= 0 {
+		wt.readWait = device.ReadTCPWait
+	}
+```
+
+Edit en `host/internal/cli/phone_watch.go`:
+
+**Reemplazar:**
+```go
+	if hasSerial(online, w.Active.Serial()) {
+		if w.warned {
+			tell(w.Log, "phone_watch.the_phone_is_reachable_again")
+		}
+		w.count, w.warned = 0, false
+		clear(w.wrong)
+		return
+	}
+```
+
+**por:**
+```go
+	if hasSerial(online, w.Active.Serial()) {
+		back := w.count > 0 || w.warned // it was missing at least once
+		if w.warned {
+			tell(w.Log, "phone_watch.the_phone_is_reachable_again")
+		}
+		w.count, w.warned = 0, false
+		clear(w.wrong)
+		if back {
+			w.recheckPort(ctx)
+		}
+		return
+	}
+```
+
+Edit en `host/internal/cli/phone_watch.go`:
+
+**Reemplazar:**
+```go
+		if err == nil && verified {
+			w.switchTo(d.Serial, d.Serial)
+			return
+		}
+```
+
+**por:**
+```go
+		if err == nil && verified {
+			w.switchTo(ctx, d.Serial, d.Serial)
+			return
+		}
+```
+
+Edit en `host/internal/cli/phone_watch.go`:
+
+**Reemplazar:**
+```go
+		if err == nil && verified {
+			w.switchTo(active, addr)
+			return
+		}
+```
+
+**por:**
+```go
+		if err == nil && verified {
+			w.switchTo(ctx, active, addr)
+			return
+		}
+```
+
+Edit en `host/internal/cli/phone_watch.go`:
+
+**Reemplazar:**
+```go
+// switchTo makes serial the active phone. Only called with a verified one.
+func (w *watcher) switchTo(serial, where string) {
+	w.Active.Switch(serial)
+	w.count, w.warned = 0, false
+	clear(w.wrong)
+	tell(w.Log, "phone_watch.the_phone_is_now_at", where)
+}
+```
+
+**por:**
+```go
+// switchTo makes serial the active phone. Only called with a verified one.
+func (w *watcher) switchTo(ctx context.Context, serial, where string) {
+	w.Active.Switch(serial)
+	w.count, w.warned = 0, false
+	clear(w.wrong)
+	tell(w.Log, "phone_watch.the_phone_is_now_at", where)
+	w.recheckPort(ctx)
+}
+
+// recheckPort reads adbd's TCP port again once the phone is back (VB-41: it
+// may have restarted and taken persist.adb.tcp.port, which serve's invariant
+// only reads when serve starts). It never opens or closes a port: `adb usb`
+// in the middle of the session would cut the phone again and race with the
+// remote mode. It says what changed since the last time it was said, once: a
+// port open with the remote mode off (run `adbuddy remote off`), the persist
+// port, or a read that failed.
+func (w *watcher) recheckPort(ctx context.Context) {
+	rctx, cancel := context.WithTimeout(ctx, w.readWait)
+	t, err := device.ReadTCP(rctx, w.Active.Runner())
+	cancel()
+	if ctx.Err() != nil {
+		return
+	}
+	if err != nil {
+		if !w.unknown {
+			w.unknown = true
+			tellPersist(w.Log, "", true)
+		}
+		return
+	}
+	w.unknown = false
+	if w.Seen != nil {
+		w.Seen(t)
+	}
+	if t == w.said {
+		return
+	}
+	w.said = t
+	// RemoteOn is read after the port: Enable saves the expiry before
+	// `adb tcpip`, so a 5555 it opened is seen with the mode on.
+	if t.Now != "" && !(t.Now == remote.Port && w.RemoteOn()) {
+		tell(w.Log, "phone_watch.port_open", t.Now)
+	}
+	tellPersist(w.Log, t.Persist, false)
+}
+```
+
+El test que vigila que el vigilante no toca el puerto admite ahora leerlo (solo `getprop`), nunca abrirlo ni cerrarlo:
+
+Edit en `host/internal/cli/phone_watch_test.go`:
+
+**Reemplazar:**
+```go
+// The watcher never opens or closes a port.
+func TestWatchPhoneNeverTouchesThePort(t *testing.T) {
+	r := newRig(t, devicesRule(tsAddr), connectRule(tsAddr), serialnoIs("AAAA1111"))
+	w, _, _ := watcherFor(t, r, tsConfig(), true, phoneSerial)
+	steps(w, 6)
+	for _, c := range r.calls(t) {
+		if strings.HasPrefix(c, "tcpip") || strings.Contains(c, "adb.tcp.port") || strings.Contains(c, "setprop") {
+			t.Fatalf("the watcher touched the port: %q", c)
+		}
+	}
+}
+```
+
+**por:**
+```go
+// The watcher never opens or closes a port: it only reads it (getprop) when
+// the phone comes back (VB-41).
+func TestWatchPhoneNeverTouchesThePort(t *testing.T) {
+	r := newRig(t, devicesRule(tsAddr), connectRule(tsAddr), serialnoIs("AAAA1111"))
+	w, _, _ := watcherFor(t, r, tsConfig(), true, phoneSerial)
+	steps(w, 6)
+	read := 0
+	for _, c := range r.calls(t) {
+		if strings.HasPrefix(c, "tcpip") || c == "usb" || strings.Contains(c, "setprop") {
+			t.Fatalf("the watcher touched the port: %q", c)
+		}
+		if strings.HasPrefix(c, "shell getprop") && strings.Contains(c, "adb.tcp.port") {
+			read++
+		}
+	}
+	if read == 0 {
+		t.Fatalf("the port was not read after the switch: %q", r.calls(t))
+	}
+}
+```
+
+Run: `cd host && gofmt -l . && go vet ./internal/cli/ && go test -count=1 -timeout 10m -run 'TestApplyInvariantWarnsAboutAPersistPort|TestDoctorNetworkPortPersist|TestRemoteSetOffSaysThePersistPort|TestWatchRemoteSaysThePersistPortWhenItExpires|TestRemoteOffThroughServeSaysThePersistPort|TestRemoteOffWithoutServeSaysThePersistPort|TestDoctorInSpanish|TestWatchPhoneRereadsThePortWhenThePhoneComesBack|TestDoctorNetworkPortOpenWithServeRunning|TestRemoteOffWithoutServePersistUnreadable|TestWatchPhoneNeverTouchesThePort' ./internal/cli/`
 Expected: `ok`. Mutación comprobada: sin la línea `tellPersist(log, s.Persist, s.PersistUnknown)` de `watchRemote`, `TestWatchRemoteSaysThePersistPortWhenItExpires` falla; restaurada, `ok`.
 
 - [ ] **Step 5: el español de `adbuddy remote` con persist.**
@@ -2345,6 +3000,32 @@ Edit en `host/internal/cli/messages_lang_test.go`:
 
 (Los dos casos nuevos entran también en el bucle de `TestRemoteTextInSpanish`: sin inglés en el español, mayúscula inicial con serve, y "5555" y "adbuddy remote off" en los dos idiomas o en ninguno.)
 
+Revisión M5, el inglés exacto:
+
+Añadir al final de `host/internal/cli/remotecmd_test.go`:
+
+```go
+
+// VB-41 (review M5): the English of off and status with a persist port, and
+// with persist unread.
+func TestRemoteTextWithPersist(t *testing.T) {
+	persist := remoteInfo{Serve: true, PersistPort: "5555"}
+	const warning = "But adb's network port is not closed for good: persist.adb.tcp.port is 5555 (ADBuddy did not set it), and adb listens on that port again every time the phone restarts. `adbuddy doctor` says how to remove it."
+	if got := remoteText("off", persist); got != "Remote mode is off. "+warning {
+		t.Errorf("off: %q", got)
+	}
+	if got := remoteText("status", persist); got != "Remote mode: off. "+warning {
+		t.Errorf("status: %q", got)
+	}
+	if got := remoteText("status", remoteInfo{PersistPort: "5555"}); got != "serve is not running; remote mode: off. "+warning {
+		t.Errorf("status without serve: %q", got)
+	}
+	if got := remoteText("off", remoteInfo{Serve: true, PersistUnknown: true}); got != "Remote mode is off. But persist.adb.tcp.port could not be read: adb's network port may open again when the phone restarts. Run `adbuddy doctor` to check." {
+		t.Errorf("off, unknown: %q", got)
+	}
+}
+```
+
 - [ ] **Step 6: suite completa y commit.**
 
 Run: `cd host && go build ./... && go vet ./... && gofmt -l . && go test -count=1 -timeout 15m ./...`
@@ -2356,9 +3037,10 @@ git commit -m "feat(cli): avisar de persist.adb.tcp.port en doctor, serve y adbu
 
 Un puerto de persist nunca sale como cerrado: doctor lo marca con qué
 propiedad es, que no la fijó ADBuddy y cómo quitarla; serve lo dice una vez
-al arrancar, en cada off y al caducar; remote off/status lo dice y --json
-lleva persistPort/persistUnknown. DEVICE_PORT_OPEN por persist no manda
-reiniciar el móvil.
+al arrancar, en cada off, al caducar y cuando el móvil vuelve (el vigilante
+relee el puerto, sin adb usb); remote off/status lo dice desde el arranque
+(Controller.Note) y --json lleva persistPort/persistUnknown. DEVICE_PORT_OPEN
+por persist no manda reiniciar el móvil.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
@@ -2380,7 +3062,7 @@ Edit en `docs/superpowers/specs/2026-09-29-adbuddy-v1-design.md`:
 
 **por:**
 ```markdown
-  - **Al desactivarlo,** el host ejecuta `adb usb`: el puerto se cierra (`service.adb.tcp.port=0`) y se conserva la depuración inalámbrica. `adb usb` no borra `persist.adb.tcp.port` (medido en la T8, VB-41): si otra herramienta la fijó, adbd vuelve a escuchar en ese puerto tras reiniciar el móvil. El host la lee siempre junto a `service.adb.tcp.port`, nunca da ese puerto por cerrado y lo avisa (doctor, terminal de `serve`, `adbuddy remote off|status`); sin root no puede borrarla y no usa `su` (plan `2026-10-04-adbuddy-vb41-persist-port`).
+  - **Al desactivarlo,** el host ejecuta `adb usb`: el puerto se cierra (`service.adb.tcp.port=0`) y se conserva la depuración inalámbrica. `adb usb` no borra `persist.adb.tcp.port` (medido en la T8, VB-41): si otra herramienta la fijó, adbd vuelve a escuchar en ese puerto tras reiniciar el móvil. El host la lee siempre junto a `service.adb.tcp.port`, nunca da ese puerto por cerrado y lo avisa (doctor, terminal de `serve` al arrancar, en cada apagado y cada vez que el móvil vuelve tras perderse, y `adbuddy remote off|status`); sin root no puede borrarla y no usa `su` (plan `2026-10-04-adbuddy-vb41-persist-port`).
 ```
 
 Edit en `docs/superpowers/specs/2026-09-29-adbuddy-v1-design.md`:
@@ -2392,7 +3074,7 @@ Edit en `docs/superpowers/specs/2026-09-29-adbuddy-v1-design.md`:
 
 **por:**
 ```markdown
-  - **Invariante del host:** al conectar, si el puerto en el que escucha adbd (`service.adb.tcp.port`, o `persist.adb.tcp.port` cuando aquel está vacío, como tras un reinicio: así arranca adbd en AOSP) no está vacío ni es `0` y el modo remoto no está activado, el host ejecuta `adb usb`, que reinicia adbd y corta la conexión un instante (ver "Reactivar" en §4.6). Con `service.adb.tcp.port` a `0` y persist fijado no hay nada que cerrar hasta el siguiente reinicio: solo se avisa (así no hay bucle de `adb usb`). Una lectura que falla es «desconocido», nunca «cerrado».
+  - **Invariante del host:** al conectar, si el puerto en el que escucha adbd (`service.adb.tcp.port`, o `persist.adb.tcp.port` cuando aquel está vacío, como tras un reinicio: así arranca adbd en AOSP) no está vacío ni es `0` y el modo remoto no está activado, el host ejecuta `adb usb`, que reinicia adbd y corta la conexión un instante (ver "Reactivar" en §4.6). Con `service.adb.tcp.port` a `0` y persist fijado no hay nada que cerrar hasta el siguiente reinicio (suposición sin medir del todo, ver el plan): solo se avisa (así no hay bucle de `adb usb`). Una lectura que falla es «desconocido», nunca «cerrado». Si el móvil se reinicia con `serve` en marcha, al volver `serve` relee el puerto y avisa, pero no lo cierra: lo cierra `adbuddy remote off` o el siguiente arranque de `serve`.
 ```
 
 - [ ] **Step 2: spec M5 §7.2.**
@@ -2430,7 +3112,7 @@ Edit en `docs/superpowers/specs/2026-10-01-adbuddy-m5-ayudas-remoto-design.md`:
 
 **por:**
 ```markdown
-- **Invariante** (`invariant.go`): con `remote_until` en el futuro, el puerto abierto es el esperado y `applyInvariant` no ejecuta `adb usb`. Sin `remote_until`, o ya pasado, se comporta como hoy. El puerto es el que lee `device.ReadTCP` (service, o persist si aquel está vacío); persist fijado se avisa en la terminal de `serve`, y si el puerto sigue abierto tras `adb usb` por persist, `DEVICE_PORT_OPEN` no manda reiniciar el móvil (eso lo volvería a abrir).
+- **Invariante** (`invariant.go`): con `remote_until` en el futuro, el puerto abierto es el esperado y `applyInvariant` no ejecuta `adb usb`. Sin `remote_until`, o ya pasado, se comporta como hoy. El puerto es el que lee `device.ReadTCP` (service, o persist si aquel está vacío); persist fijado se avisa en la terminal de `serve`, y si el puerto sigue abierto tras `adb usb` por persist, `DEVICE_PORT_OPEN` no manda reiniciar el móvil (eso lo volvería a abrir). El invariante solo corre al arrancar `serve`: cuando el móvil vuelve a mitad de sesión, el vigilante relee el puerto y avisa (puerto abierto con el modo apagado, persist), sin `adb usb`.
 ```
 
 - [ ] **Step 3: `docs/troubleshooting.md`.**
@@ -2470,7 +3152,7 @@ Edit en `docs/troubleshooting.md`:
 ```markdown
 ### Doctor says `persist.adb.tcp.port` is set
 
-Some ROMs (a setting often called "ADB over network"), root apps or a command run before ADBuddy set the property `persist.adb.tcp.port`. While it names a port, adb listens on that port, on every network, each time the phone restarts. ADBuddy never sets it and cannot clear it without root: `adb usb`, which `adbuddy serve` and `adbuddy remote off` run, only closes the port until the next restart. ADBuddy says so in `adbuddy doctor`, in the serve terminal and in `adbuddy remote off` and `adbuddy remote status` (`persistPort` in `--json`), and never calls that port closed.
+Some ROMs (a setting often called "ADB over network"), root apps or a command run before ADBuddy set the property `persist.adb.tcp.port`. While it names a port, adb listens on that port, on every network, each time the phone restarts. ADBuddy never sets it and cannot clear it without root: `adb usb`, which `adbuddy serve` runs when it starts and `adbuddy remote off` runs, only closes the port until the next restart. If the phone restarts while serve runs, serve only warns when the phone comes back ("adb listens on network port … again"): run `adbuddy remote off` to close the port. ADBuddy says so in `adbuddy doctor`, in the serve terminal and in `adbuddy remote off` and `adbuddy remote status` (`persistPort` in `--json`), and never calls that port closed.
 
 To remove it, turn off the setting or app that set it. With root, empty it as root (`setprop persist.adb.tcp.port ''`) and restart the phone. Then run `adbuddy doctor` again.
 
@@ -2504,12 +3186,12 @@ Edit en `docs/superpowers/plans/pendientes-m3-m5.md`:
 
 ## VB-41 · `persist.adb.tcp.port` (plan `docs/superpowers/plans/2026-10-04-adbuddy-vb41-persist-port.md`)
 
-- **HECHO:** `device.ReadTCP` lee `service.adb.tcp.port` y `persist.adb.tcp.port`; el puerto de adbd es service, o persist si aquel está vacío; una lectura fallida es desconocido. El invariante, `Disable`, `Reconcile`, `Enable` y `Expire` deciden con él; el host avisa en doctor, en la terminal de `serve` y en `adbuddy remote off|status` (`persistPort`/`persistUnknown` en `--json`). No ejecuta `su` ni intenta borrar persist.
-- **Pendiente (antes de integrar):** correr `TestOffClosesAPersistTCPPort` y `TestPersistTCPPortAgainstUSBAndRestarts` en el emulador (`ADBUDDY_EMULATOR_ADBD=1`, y `ADBUDDY_EMULATOR_REBOOT=1` para el reinicio): miden que el usuario `shell` puede leer persist, premisa del diseño no medida (la T8 lo leyó con `su 0`).
+- **HECHO:** `device.ReadTCP` lee `service.adb.tcp.port` y `persist.adb.tcp.port`; el puerto de adbd es service, o persist si aquel está vacío; una lectura fallida es desconocido. El invariante, `Disable`, `Reconcile`, `Enable` y `Expire` deciden con él; el host avisa en doctor, en la terminal de `serve` (al arrancar, en cada apagado, al caducar y cuando el móvil vuelve: el vigilante relee el puerto, sin `adb usb`) y en `adbuddy remote off|status` (`persistPort`/`persistUnknown` en `--json`, desde el arranque de `serve`). No ejecuta `su` ni intenta borrar persist.
+- **BLOQUEANTE antes de integrar:** correr `TestOffClosesAPersistTCPPort` y `TestPersistTCPPortAgainstUSBAndRestarts` en el emulador (`ADBUDDY_EMULATOR_ADBD=1`, y `ADBUDDY_EMULATOR_REBOOT=1` para el reinicio): miden que el usuario `shell` puede leer persist, premisa del diseño no medida (la T8 lo leyó con `su 0`; un `getprop` vetado por SELinux devuelve vacío con código 0). Y medir si `su 0 setprop service.adb.tcp.port 0` sin `ctl.restart` cambia el pid de adbd (suposición del ruling 3).
 - **Diferido (protocolo, ok de adbuddy-e5):** la tarjeta del modo remoto no dice nada de persist; `remote.state` podría llevar `persistPort` para que la app lo avise.
 - **Diferido:** `adbuddy remote off` sin serve y con el modo ya apagado no lee el puerto (ruling 7 del plan: no afirma «cerrado» y leer costaría arrancar el servidor y esperar al móvil).
 - **Diferido:** con el modo remoto encendido y persist fijado, doctor da la guía del modo (lo urgente) y no la de persist; el aviso llega al apagarlo.
-- **Límite conocido:** el host lee propiedades, no sockets; un adbd que no siga AOSP (escuchar en persist con service a `0`) quedaría abierto, avisado pero sin cerrar.
+- **Límite conocido:** el host lee propiedades, no sockets. No mira `service.adb.listen_addrs` (AOSP adbd también escucha donde diga) ni el 5555 que adbd abre por defecto en un dispositivo sin USB; un adbd que no siga AOSP (escuchar en persist con service a `0`) quedaría abierto, avisado pero sin cerrar. Con `serve` en marcha, un puerto que reaparece al volver el móvil se avisa pero no se cierra (ruling 9 del plan).
 ```
 
 - [ ] **Step 5: inventario, fila VB-41.**
@@ -2523,7 +3205,7 @@ Edit en `docs/superpowers/plans/2026-10-03-validaciones-manuales.md`:
 
 **por:**
 ```markdown
-| Hallazgo confirmado solo en el estado de las propiedades (persist no se limpia; `service.adb.tcp.port` vacío tras el reinicio); que adbd escuche en el puerto de `persist` tras el reinicio sale de leer AOSP, no se midió. Fijar `persist` como shell falla (exit 1, medido): el riesgo real son móviles con root o con `persist` ya fijado. **Arreglo:** rama `fix/vb41-persist-tcp-port` (plan `2026-10-04-adbuddy-vb41-persist-port`): el host lee persist, nunca lo da por cerrado y avisa (doctor, `serve`, `remote off|status`); `TestOffClosesAPersistTCPPort` redefinido (ruling 4: persist reportado, no vaciado). Falta correrlo en el emulador: mide además que `shell` puede leer persist. | medio | T8 (medida); arreglo en rama, pendiente de la pasada en emulador |
+| Hallazgo confirmado solo en el estado de las propiedades (persist no se limpia; `service.adb.tcp.port` vacío tras el reinicio); que adbd escuche en el puerto de `persist` tras el reinicio sale de leer AOSP, no se midió. Fijar `persist` como shell falla (exit 1, medido): el riesgo real son móviles con root o con `persist` ya fijado. **Arreglo:** rama `fix/vb41-persist-tcp-port` (plan `2026-10-04-adbuddy-vb41-persist-port`): el host lee persist, nunca lo da por cerrado y avisa (doctor, `serve`, `remote off|status`); `TestOffClosesAPersistTCPPort` redefinido (ruling 4: persist reportado, no vaciado). **Bloqueante antes de integrar:** correrlo en el emulador; mide además que `shell` puede leer persist. | medio | T8 (medida); arreglo en rama, pendiente de la pasada en emulador (bloqueante) |
 ```
 
 - [ ] **Step 6: comprobar y commit.**
@@ -2542,37 +3224,26 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ## Validaciones pendientes (emulador y móvil)
 
-1. **Emulador (lo corre el controlador cuando haya emulador; nunca en el móvil del usuario):** `TestOffClosesAPersistTCPPort` y `TestPersistTCPPortAgainstUSBAndRestarts` con `ADBUDDY_EMULATOR_SERIAL`, `ADBUDDY_EMULATOR_ADBD=1` y, para el paso de reinicio, `ADBUDDY_EMULATOR_REBOOT=1` (arranque y parada con `scripts/emulator.sh`, ver `host/README.md`). Miden: (a) que el host lee persist **como `shell`** (`State{Persist: "5555"}`, `TCP{Persist: "5555"}`); si saliera vacío, el diseño no sirve tal cual (ruling 4); (b) que tras el "off" adbd queda con service `0` y otro pid; (c) que una segunda pasada no reinicia adbd; (d) con el reinicio, que `Disable` cierra el 5555 de persist.
+1. **Emulador (BLOQUEANTE antes de integrar; lo corre el controlador cuando haya emulador; nunca en el móvil del usuario):** `TestOffClosesAPersistTCPPort` y `TestPersistTCPPortAgainstUSBAndRestarts` con `ADBUDDY_EMULATOR_SERIAL`, `ADBUDDY_EMULATOR_ADBD=1` y, para el paso de reinicio, `ADBUDDY_EMULATOR_REBOOT=1` (arranque y parada con `scripts/emulator.sh`, ver `host/README.md`). Miden: (a) que el host lee persist **como `shell`** (`State{Persist: "5555"}`, `TCP{Persist: "5555"}`); si saliera vacío, el diseño no sirve tal cual (ruling 4); (b) que tras el "off" adbd queda con service `0` y otro pid; (c) que una segunda pasada no reinicia adbd; (d) con el reinicio, que `Disable` cierra el 5555 de persist; (e) a mano en el emulador, `adb shell su 0 setprop service.adb.tcp.port 0` sin `ctl.restart`: ¿cambia el pid de adbd? (suposición del ruling 3; si no cambia, un service a `0` puesto así no prueba que adbd no escuche en persist, y el texto «cerrado por ahora» debería suavizarse). **(a) es bloqueante antes de integrar** (revisión I2).
 2. **Móvil del usuario, solo lectura y con su permiso explícito:** `adb shell getprop -Z service.adb.tcp.port` y `adb shell getprop -Z persist.adb.tcp.port` (contexto SELinux de cada propiedad) y `adb shell getprop persist.adb.tcp.port`. Si los dos contextos son el mismo, `shell` lee persist como lee service (medido en S1); un valor vacío por sí solo no distingue "sin fijar" de "vetado".
 
 ## Réplica acumulada tarea a tarea
 
-Sobre `git archive 8f881bf` completo (los tests de `cli` y `bridge` leen `protocol/` y `docs/`), en el scratchpad, sin emulador:
+**v2 (tras la revisión opus), desde el texto del plan** con un script que interpreta las cabeceras "Edit en `…`" (con o sin `replace_all` y su número de apariciones) y "Añadir al final de `…`", aplica cada bloque en orden y aborta si un ancla no aparece exactamente las veces dichas (los ficheros CRLF se editan normalizando y se guardan en CRLF). Sobre `git archive b5a32a6` completo (la cabeza de la rama: código de 8f881bf más el plan v1; los tests de `cli` y `bridge` leen `protocol/` y `docs/`), sin emulador, por etapas:
 
-- **Línea base:** `go test -count=1 -timeout 15m ./...` → los 34 paquetes con tests en `ok` (`cli 96.778s`), `EXIT 0`.
-- **Tarea 1, pasos 1-2 (RED):** `vet` limpio; `device` → `FAIL` con 2 tests (`TestEnsureNoTCPPortReadsPersist`, 5 casos; `TestEnsureNoTCPPortPersistUnreadable`, 3 casos), `remote` → `FAIL` con 5 tests, los citados en el paso 2; ninguno por compilación ni `panic`.
-- **Pasos 3-4 (GREEN):** `device` y `remote` → `ok`; mutaciones del paso 4: sin la línea de persist en `ReadTCP`, 8 `--- FAIL`; con `c.persist = ""` fijo, 3 `--- FAIL`; restaurado, `ok`.
-- **Pasos 5-7:** `go build ./... && go vet ./... && gofmt -l .` limpios; suite completa → todos en `ok` (`cli 97.766s`), `EXIT 0`. Antes de los pasos 5 y 6 la suite falló donde el plan lo dice: `TestEndToEnd` (lista exacta de llamadas), 4 subtests de `TestApplyInvariant`, `TestRemoteSetOffRunsUsb`, `TestRemoteSetRunsInOrder`, `TestRemoteOffQueuesBehindTheAppsOn`.
-- **Tarea 2, pasos 1-2 (RED):** 14 `--- FAIL` (7 tests y 7 subtests), los citados en el paso 2, sin errores de compilación.
-- **Pasos 3-6 (GREEN):** el `-run` del paso 4 → `ok`; `TestRemoteTextInSpanish` → `ok`; suite completa → todos en `ok` (`cli 100.305s`), `EXIT 0`. Mutación del paso 4 (sin `tellPersist` en `watchRemote`) → `FAIL`; restaurada, `ok`.
-- **Tarea 3:** las once ediciones, con anclas de una sola línea y únicas (el árbol de trabajo de la rama, 8f881bf limpio, tiene los mismos ficheros que el `git archive`, en CRLF); aplicadas por el script; los cinco ficheros siguen en CRLF; `go test -run Doc ./internal/cli/` → `ok`.
-- **Réplica desde el texto:** el plan entero aplicado por script (pares en orden, número exacto de apariciones de cada ancla, "Añadir al final") sobre otro `git archive 8f881bf`; resultado en "Réplica desde el texto del plan" (abajo).
+- **Tarea 1, paso 1 (9 ediciones, RED):** `vet` limpio; `device` → `FAIL` con 2 tests (`TestEnsureNoTCPPortReadsPersist`, 5 casos; `TestEnsureNoTCPPortPersistUnreadable`, 3 casos), `remote` → `FAIL` con 5 tests, los citados en el paso 2; ninguno por compilación ni `panic`.
+- **Resto de la Tarea 1 (49 ediciones, GREEN):** `go build ./... && go vet ./... && gofmt -l .` limpios; suite completa: los 34 paquetes con tests en `ok` (`cli 196.030s`, máquina cargada), `EXIT 0`. Mutaciones del paso 4 (en la implementación a mano, restauradas): sin la línea de persist en `ReadTCP`, 8 `--- FAIL`; con `c.persist = ""` fijo, 3; sin el plazo propio de `readTCP`, `TestReadTCPHasItsOwnWait` falla a los 10 s.
+- **Tarea 2, paso 1 (12 ediciones, RED):** 19 `--- FAIL` (10 tests y 9 subtests), los citados en el paso 2, sin errores de compilación ni `panic`.
+- **Resto de la Tarea 2 (38 ediciones, GREEN):** limpios; el `-run` del paso 4 más `TestRemoteTextWithPersist` y `TestRemoteTextInSpanish` → `ok`; suite completa: 34 en `ok` (`cli 129.220s`), `EXIT 0`. Mutaciones: sin `recheckPort` al volver el móvil, `TestWatchPhoneRereadsThePortWhenThePhoneComesBack` falla (los dos subtests); sin `tellPersist` en `watchRemote`, `TestWatchRemoteSaysThePersistPortWhenItExpires` falla (v1).
+- **Tarea 3 (11 ediciones):** los cinco ficheros siguen en CRLF; suite completa final: 34 en `ok` (`cli 114.159s`), `EXIT 0` (incluye `TestDocsAreGuarded`: enlaces, anclas, órdenes y privacidad de `docs/troubleshooting.md`).
 
-### Réplica desde el texto del plan
-
-Script de la réplica: interpreta las cabeceras "Edit en `…`" (con o sin `replace_all` y su número de apariciones) y "Añadir al final de `…`", aplica cada bloque en orden sobre un `git archive 8f881bf` limpio y aborta si un ancla no aparece exactamente las veces dichas (los ficheros CRLF se editan normalizando y se guardan en CRLF). Aplicado por etapas:
-
-- Tarea 1, paso 1 (9 ediciones) → `device` y `remote` en `FAIL` con los mismos 7 tests del paso 2.
-- Resto de la Tarea 1 (42 ediciones) → `go build ./... && go vet ./... && gofmt -l .` limpios; suite completa: 33 paquetes en `ok` (`cli 123.455s`) y un fallo en `internal/ipc` (`TestDisconnectCancelsHandlerThatIgnoresStdin: handler context was not cancelled`), paquete que el plan no toca; repetido solo, 3 de 3 `ok` (flake con la máquina cargada).
-- Tarea 2, paso 1 (8 ediciones) → 14 `--- FAIL`, sin errores de compilación ni `panic`.
-- Resto de la Tarea 2 (23 ediciones) → limpios; suite completa: 34 en `ok` (`cli 127.061s`), `EXIT 0`. `diff -r` del `host/` resultante contra el de la implementación a mano: idénticos.
-- Tarea 3 (11 ediciones) → los cinco ficheros siguen en CRLF; `go test -run Doc ./internal/cli/` → `ok`; suite completa final: 34 en `ok` (`cli 152.659s`), `EXIT 0`.
+**v1 (antes de la revisión):** implementada a mano sobre `git archive 8f881bf` y reaplicada desde el texto; suite en `ok` en las tres tareas, salvo un fallo suelto de `internal/ipc` (`TestDisconnectCancelsHandlerThatIgnoresStdin`, paquete que el plan no toca; 3 de 3 `ok` al repetirlo solo: flake con la máquina cargada). Línea base de 8f881bf: 34 paquetes en `ok`.
 
 ## Autorrevisión del plan
 
 ### Cobertura frente al encargo
 
-- Criterio 1 (nunca «cerrado» sin leer): tabla "Revisión de sitios", con cada sitio y su cambio; los dos que no cambian, con su ruling (6 y 7).
+- Criterio 1 (nunca «cerrado» sin leer): tabla "Revisión de sitios", con cada sitio y su cambio (también el móvil que vuelve con `serve` en marcha, revisión I1, y la lectura del invariante que llega al controlador, revisión M2); los dos que no cambian, con su ruling (6 y 7).
 - Criterio 2 (tras off, leer persist, `adb usb` si hay algo que cerrar, avisar en doctor y en estado/log, sin `su`): Tarea 1 (`ReadTCP`, `EnsureNoTCPPort`, `Disable`), Tarea 2 (doctor, log, `remote`). Desviación explicada en el ruling 3: con service a `0`, persist no lanza `adb usb` (solo aviso).
 - Criterio 3 (sin bucles, `adb usb` solo con algo que cerrar, avisar una vez): rulings 3 y 8; `TestPersistDoesNotRestartAdbdAgain`, `TestEnsureNoTCPPortReadsPersist` ("service at 0"), `TestApplyInvariantWarnsAboutAPersistPort` (aviso una vez), `TestWatchRemoteSaysThePersistPortWhenItExpires` (una vez con más ticks), y en emulador la segunda pasada de `EnsureNoTCPPort`.
 - Criterio 4 (aceptación redefinida, RED con adb falso en `remote` y `device`): ruling 4; RED reales en los pasos 1-2 de las dos tareas. Casos adversos: persist raro (`abc`), enorme, negativo, `0`, 5555, otro puerto, lectura que falla (service y persist), `adb usb` que falla (`TestUsbFailsWithAPersistPort`, `TestEnsureNoTCPPortEdgeCases`), persist que sigue tras usb (`still open after adb usb`, `TestPersistDoesNotRestartAdbdAgain`), shell sin root (el host no escribe persist: la aceptación lo exige), lecturas contradictorias (service vacío y persist fijado; primera lectura abierta y segunda cerrada en "after a reboot"; lectura nueva que reemplaza a la vieja en `TestStateKeepsTheLastReadOfPersist`).
@@ -2580,18 +3251,20 @@ Script de la réplica: interpreta las cabeceras "Edit en `…`" (con o sin `repl
 
 ### Placeholders y tipos
 
-Sin placeholders. `remote.ADB` y `device.ADB` tienen el mismo método `Run`: `device.ReadTCP(ctx, c.adb)` compila sin conversión. `device.TCP` es comparable (dos `string`): los tests lo comparan con `!=`. `remote.State` sigue comparable (añade un `string` y un `bool`). `tellPersist` vive en `invariant.go` y la usan `invariant.go` y `phone_remote.go` (mismo paquete).
+Sin placeholders. `remote.ADB` y `device.ADB` tienen el mismo método `Run`: `device.ReadTCP(ctx, c.adb)` compila sin conversión. `device.TCP` es comparable (dos `string`): los tests lo comparan con `!=`. `remote.State` sigue comparable (añade un `string` y un `bool`). `tellPersist` vive en `invariant.go` y la usan `invariant.go`, `phone_remote.go` y `phone_watch.go` (mismo paquete). `ctl.Note` tiene la firma de `phoneWatch.Seen` (`func(device.TCP)`).
 
 ### Riesgos abiertos para el revisor
 
-- **Premisa:** que `shell` pueda leer `persist.adb.tcp.port` no está medido (ruling 4). En AOSP las dos propiedades comparten contexto SELinux (`adbd_config_prop`, leído de memoria, no verificado aquí) y `service.adb.tcp.port` sí se lee como `shell` (S1). Si no, un `getprop` vetado da vacío con código 0 y el host diría "sin persist": el fallo sería el de hoy, no uno nuevo. Validaciones 1 y 2.
+- **Premisa (bloqueante antes de integrar):** que `shell` pueda leer `persist.adb.tcp.port` no está medido (ruling 4). En AOSP las dos propiedades comparten contexto SELinux (`adbd_config_prop`, leído de memoria, no verificado aquí) y `service.adb.tcp.port` sí se lee como `shell` (S1). Si no, un `getprop` vetado da vacío con código 0 y el host diría "sin persist": el fallo sería el de hoy, no uno nuevo. Validaciones 1 y 2.
 - **Lectura antes de `adb usb` en el controlador** (ruling 5): una carrera entre la lectura y el `adb usb` daría un valor viejo hasta la siguiente lectura.
-- **Un `getprop` más por decisión:** `Disable`, `Expire` y `Reconcile` hacen dos `adb shell` donde antes hacían uno o ninguno (unos 100 ms cada uno; dentro de `remoteOpTimeout`). El invariante, dos más al arrancar `serve`.
+- **Un `getprop` más por decisión:** `Disable`, `Expire` y `Reconcile` hacen dos `adb shell` donde antes hacían uno o ninguno (unos 100 ms cada uno; con su propio plazo, `device.ReadTCPWait`, 10 s, dentro de `remoteOpTimeout`). El invariante, dos más al arrancar `serve`; el vigilante, dos cada vez que el móvil vuelve.
 - **Doctor con el modo encendido y persist fijado:** se queda con la guía del modo (pendientes).
-- **`adbuddy remote status` recién arrancado `serve`:** el estado del controlador solo sabe de persist cuando el controlador ha leído (un "off", `Reconcile` con caducidad guardada, la caducidad); el invariante lee con `device` y avisa en el log, pero no alimenta al controlador. Hasta entonces `status` dice "remote mode: off" sin aviso: no afirma nada del puerto, y doctor y el log sí lo dicen. Alimentarlo pediría que `serve` pase la lectura del invariante al controlador (un método más); se deja a criterio del revisor.
+- **El vigilante avisa, no cierra** (ruling 9): con `serve` en marcha, un puerto que reaparece al volver el móvil queda abierto hasta `adbuddy remote off` o el siguiente arranque de `serve`. El vigilante solo relee cuando el móvil faltó al menos una vez (10 s) o cambió de serial; un reinicio del móvil siempre lo hace.
+- **Ruling 3 descansa en suposiciones** (revisión I2): validación 1 (e) y límite en pendientes.
 - **Texto "adb listens on port X again":** sale de leer AOSP (el emulador no deja ver el listener real); el texto lo afirma como consecuencia esperada, igual que la spec.
 
 ### Decisiones y dudas para el controlador
 
 - El encargo cita la §7.1 de la spec M5; el plan edita la §7.2, que es donde están `adb usb`, la caducidad y el invariante (la §7.1 trata el puerto de la depuración inalámbrica).
+- Revisión opus (v2): I1 arreglado aquí (ruling 9, sin `adb usb` a mitad de sesión: solo relectura y aviso); I2 como suposición con validación y límite; M1-M5 aplicados. La lectura de persist como `shell` es **bloqueante antes de integrar**.
 - `docs/usage.md` y `docs/safety.md` no se tocan: troubleshooting tiene la sección nueva y doctor/`remote` remiten a ella; si el controlador quiere una línea en `usage.md` ("Remote mode"), es una edición de una línea.
