@@ -17,14 +17,22 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 | Variable | Used by | Default | What the runner needs |
 | --- | --- | --- | --- |
 | `CI_HOST_MATRIX` | `host.yml` | the three hosted cells (`ubuntu-latest`, `windows-latest`, `macos-latest`) | A JSON array of cells `{"name": ..., "runner": ...}`. A Linux cell needs `gcc` (for `go test -race`); a Windows cell needs Git for Windows. Leave a cell out of the array to drop it. |
-| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes ~16 min and the app's tests about 10 min more, measured, plus 4.5-5.5 min for the emulator restart between their two groups). |
-| `CI_RUNNER_EMULATOR` | `emulator.yml` | `"ubuntu-latest"` | Android SDK, hardware acceleration (the AVDs `adbuddy-ci-api37` for the oracle and `adbuddy-ci-api34` for the app's tests are created by `scripts/emulator.sh` when missing), and JDK 17 for the app's tests (Gradle 9.8 is downloaded by `setup-gradle`); a Linux runner needs `/dev/kvm` (see section 6). |
+| `CI_RUNNER_ANDROID` | `android.yml` | `"ubuntu-latest"` | JDK, Android SDK (`ANDROID_HOME`); Windows or Linux. Linux runner recommended (the Windows runner is the bottleneck: it runs one job at a time and the emulator oracle takes about 16-26 min and the app's tests about 30-40 min, measured, including 4.5-5.5 min for the emulator restart between their two groups; they are two workflows now). |
+| `CI_RUNNER_EMULATOR` | `emulator-oracle.yml` and `emulator-app.yml` | `"ubuntu-latest"` | Android SDK, hardware acceleration (the AVDs `adbuddy-ci-api37` for the oracle and `adbuddy-ci-api34` for the app's tests are created by `scripts/emulator.sh` when missing), and JDK 17 for the app's tests (Gradle 9.8 is downloaded by `setup-gradle`); a Linux runner needs `/dev/kvm` (see section 6). |
 | `CI_RUNNER_RELEASE` | `release-check.yml` (`scripts` and `goreleaser`) | `"ubuntu-latest"` | Linux with `shellcheck`. |
 | `CI_RUNNER_SIGN` | `release-check.yml` (`sign`) | `"ubuntu-latest"` | Linux with an Android SDK: `apksigner` and `zipalign` are Linux scripts here. |
 
-`emulator.yml` runs on `pull_request` (same path filters) and by hand with `workflow_dispatch`. It does not run on every push to `main`: merges are fast-forwards of a pull request that already passed it.
+The emulator tests are two workflows, each with its own `paths`, both on `CI_RUNNER_EMULATOR`. `emulator-oracle.yml` (job `mksh`, android-37, AVD `adbuddy-ci-api37`, emulator port 5590, adb server 5049) records the classifier's oracle, compares it with the repository and runs the skills' read-only examples; it runs on pull requests that touch its inputs (the oracle corpus under `host/internal/classify/testdata/**`, `differential_test.go`, `corpus_test.go`, the skills and their tests, `scripts/emulator.sh`, its own workflow), by hand with `workflow_dispatch` and weekly on `main` (Mondays 04:17 UTC, because the system image's mksh can change without any pull request; a schedule runs on the default branch only). `emulator-app.yml` (job `app`, android-34, AVD `adbuddy-ci-api34`, emulator port 5592, adb server 5051) builds the app and runs its instrumented tests and the host against it; it runs on pull requests that touch any package `emutest` depends on, `android/**` or `protocol/**`, and by hand. The test `TestAppWorkflowPathsCoverDependencies` (`host/internal/emutest`, run by `host.yml`) fails if the workflow's `paths` miss a package of `go list -test -deps ./internal/emutest`. Neither runs on every push to `main`: merges are fast-forwards of a pull request that already passed them.
 
-qemu's memory only grows while an emulator runs and is never returned: about 3.6 GB after boot and about 7 GB after the full app suite (android-34, 2560 MB guest, one emulator alone on the PC). The job therefore restarts the android-34 emulator between the guard tests (`TestTheGuard*`) and the rest of the app's tests, and prints the emulator's memory after each stage (`scripts/emulator.sh mem`: after the oracle, after the guard tests and after the rest). The "rest" group peaks at about 5 GB (5.5 GB at the end), close to the 6 GB target. The restart adds 4.5-5.5 minutes (boot about 160 s, stability wait 120 s, stop up to 60 s); with it the job takes about 55-65 minutes and stays under its 90. `ADBUDDY_EMU_RAM` (plain MB) lowers the guest's RAM; the workflow does not set it yet. Do not write `1536M` or `2G` in an AVD's config: the emulator may raise them (a `1536M` left the effective value at 2560).
+The oracle is no longer re-recorded when only the evaluator's code changes with the corpus intact: the offline tests in `host.yml` (`TestWhatMkshRunsIsSpecial`, `TestAdmittedSinksStayBelowRed`) check the evaluator against the recorded `oracle.jsonl`.
+
+Neither workflow may be made a required check while a path filter can skip it: a required check that is skipped stays pending forever.
+
+The weekly run waits in the queue if the PC is off (at most 24 hours, then it is cancelled), competes for RAM with development emulators when it runs, and a failure is reported to whoever last edited the cron line: the supervisor reads the run list of `emulator-oracle.yml` each week.
+
+With a single runner carrying the emulator label the two workflows run one after the other. With two runners on the same machine they would run together, and neither the RAM (one emulator fits at a time) nor the log file `adbuddy-emulator.log` (shared, in the temp folder) would hold: do not do it.
+
+qemu's memory only grows while an emulator runs and is never returned: about 3.6 GB after boot and about 7 GB after the full app suite (android-34, 2560 MB guest, one emulator alone on the PC). The app job therefore restarts the android-34 emulator between the guard tests (`TestTheGuard*`) and the rest of the app's tests, and prints the emulator's memory after each stage (`scripts/emulator.sh mem`: after the oracle in its workflow, after the guard tests and after the rest in the other). The "rest" group peaks at about 5 GB (5.5 GB at the end), close to the 6 GB target. The restart adds 4.5-5.5 minutes (boot about 160 s, stability wait 120 s, stop up to 60 s); with it the app job takes about 30-40 minutes and stays under its 75. `ADBUDDY_EMU_RAM` (plain MB) lowers the guest's RAM; the workflows do not set it yet. Do not write `1536M` or `2G` in an AVD's config: the emulator may raise them (a `1536M` left the effective value at 2560).
 
 The special value `"none"` skips the job of a single-job workflow.
 
@@ -89,13 +97,13 @@ For `CI_HOST_MATRIX`, `"none"` and `[]` are not valid: they break the workflow. 
 
 ### Emulator environment variables
 
-`scripts/emulator.sh` (used by the emulator job and by the local oracle tests) reads these variables:
+`scripts/emulator.sh` (used by the emulator workflows and by the local oracle tests) reads these variables:
 
 | Variable | Meaning |
 | --- | --- |
-| `ADBUDDY_EMU_AVD` | AVD name. The CI uses `adbuddy-ci-api37`. |
-| `ADBUDDY_EMU_PORT` | Emulator port. The CI uses `5590`. |
-| `ADBUDDY_EMU_ADB_PORT` | Port of the script's own adb server. The CI uses `5049`. It must be a number in 1024-65535 and not `5037` (the user's adb server) nor `5038` (ADBuddy's); otherwise the script exits with 2. |
+| `ADBUDDY_EMU_AVD` | AVD name. The CI uses `adbuddy-ci-api37` (oracle) and `adbuddy-ci-api34` (app). |
+| `ADBUDDY_EMU_PORT` | Emulator port. The CI uses `5590` (oracle) and `5592` (app). |
+| `ADBUDDY_EMU_ADB_PORT` | Port of the script's own adb server. The CI uses `5049` (oracle) and `5051` (app). It must be a number in 1024-65535 and not `5037` (the user's adb server) nor `5038` (ADBuddy's); otherwise the script exits with 2. |
 | `ADBUDDY_EMU_GPU` | GPU mode (default `swiftshader_indirect`). |
 | `ADBUDDY_EMU_IMAGE` | System image used when the AVD is created (the AVD is created with it the first time only: to change the image, use another AVD name). |
 | `ADBUDDY_EMU_RAM` | Guest RAM in plain MB, 1024-8192 (default: empty, the AVD's own). Passed to the emulator as `-memory`; an invalid value makes `start` exit with 2. Do not write `1536M` or `2G` in the AVD's config instead: the emulator may raise them. |
@@ -107,7 +115,7 @@ The script also runs `unset ADB_SERVER_SOCKET ANDROID_ADB_SERVER_ADDRESS`: adb g
 
 The script exports `ADB_MDNS=0` and `ADB_MDNS_AUTO_CONNECT=0` so that its adb server never auto-connects a real phone found over mDNS, and it aborts (exit 3) if that server sees any other device.
 
-After boot, `start` also checks that the emulator on the port runs the AVD of `ADBUDDY_EMU_AVD` (`adb emu avd name`); if not, it stops it and exits with 3. `stop` waits, for up to 60 s, until adb no longer lists the emulator and its console port is closed, and only then stops the adb server: the emulator job stops the android-37 emulator and starts the android-34 one on the same port, and the start must not take the dying one for the new one. `stop` always exits 0 (after 60 s it warns on stderr). `mem` prints one line with the emulator's host memory (working set and private memory in MB; on Linux both numbers are the RSS), or says that it is not running or that the system could not be asked; it always exits 0.
+After boot, `start` also checks that the emulator on the port runs the AVD of `ADBUDDY_EMU_AVD` (`adb emu avd name`); if not, it stops it and exits with 3. `stop` waits, for up to 60 s, until adb no longer lists the emulator and its console port is closed, and only then stops the adb server: the app job restarts its emulator on the same port between its two groups of tests, and the start must not take the dying one for the new one. `stop` always exits 0 (after 60 s it warns on stderr). `mem` prints one line with the emulator's host memory (working set and private memory in MB; on Linux both numbers are the RSS), or says that it is not running or that the system could not be asked; it always exits 0.
 
 Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBUDDY_EMU_ADB_PORT` (for `start`: also an invalid `ADBUDDY_EMU_RAM`); `3` the adb server sees another device (or none), or the emulator on the port runs another AVD; `4` the emulator is not stable; `124` it did not boot in 10 minutes.
 
@@ -227,7 +235,7 @@ This is the procedure that was tested. The Linux runner lives in a WSL2 Ubuntu d
      ```
 
      Neither `/tmp/w.exe` nor `/init /tmp/w.exe` may ever print your Windows `computer\user`.
-   - Ports 5037, 5038, 5039 and 5049 are closed on `127.0.0.1` and on the gateway (`ip route show default`): `timeout 3 bash -c '</dev/tcp/HOST/PORT'` must fail for each.
+   - Ports 5037, 5038, 5039, 5049 and 5051 are closed on `127.0.0.1` and on the gateway (`ip route show default`): `timeout 3 bash -c '</dev/tcp/HOST/PORT'` must fail for each.
    - `python3 -m http.server 5999 --bind 127.0.0.1` in WSL is not reachable from Windows: `Test-NetConnection 127.0.0.1 -Port 5999` must fail.
    - `/mnt/wslg` and `/tmp/.X11-unix` are empty or do not exist.
    - `ls -l /dev/dxg` shows mode 600, owner root.
@@ -318,8 +326,8 @@ A runner executes the code of the branches it builds, as the user that runs it. 
 
 - **Requirement** to keep `CI_HOST_MATRIX`, `CI_RUNNER_ANDROID` or `CI_RUNNER_EMULATOR` on Windows while agents push branches to the repository: run the runner under a dedicated local Windows account that has none of those. For adb it is the only barrier (see below).
 - **Accepted risk (the user accepted it on 2026-10-03 and decided not to create the dedicated Windows account; it is not resolved):** the Windows runner runs under the user's own account, so the requirement above is NOT met and stays unmet. The conditions of the acceptance: the repository is private and is never made public while a runner is registered; only pull requests of the repository owner use the self-hosted runners (the allow-list by author below); no auto-merge and no "Dependabot on self-hosted"; and, as an optional mitigation, revoke the wireless-debugging authorizations on the phone when nothing is being tested. The attack: a test or Gradle task in a branch calls the `adb` on the runner's PATH, which reaches the user's adb server (port 5037) with the phone already connected (or loads `\Users\<user>\.android\adbkey` and pairs its own server), and from there it runs anything on the phone with no classifier, journal or confirmation; it also reads SSH keys, the `gh` token and the credentials of the coding agents. The only closing is the dedicated Windows account (optional steps: `docs/superpowers/plans/2026-10-03-runners-pasos-usuario.md`, block 3, decided: not done). Without it, do not make the repository public and do not point any `CI_*` variable at the Windows runner for pull requests of other authors.
-- **Target, not met (accepted risk, same decision):** the runner uses its own Android SDK, JDK and Go (section 3, step 4), never the user's `ANDROID_HOME` or `adb`. The `sdkmanager` steps of `android.yml` and `emulator.yml` write into the SDK, so a branch could replace `platform-tools/adb.exe` there and the change would persist for the user and `adbuddy serve`. Having a dedicated account does not fix it if that account is given write access to the user's SDK. Check that the `ANDROID_HOME` of the runner's `.env` is not the SDK you use with ADBuddy.
-- **Minimum:** start `run.cmd` from a clean console, without `ADBUDDY_*`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT`, `ADB_SERVER_SOCKET` or `ANDROID_ADB_SERVER_ADDRESS` in the environment (the last two would make the diagnostic `adb devices -l` of `emulator.yml` ask the user's server and write the phone's serial in the Actions log).
+- **Target, not met (accepted risk, same decision):** the runner uses its own Android SDK, JDK and Go (section 3, step 4), never the user's `ANDROID_HOME` or `adb`. The `sdkmanager` steps of `android.yml`, `emulator-oracle.yml` and `emulator-app.yml` write into the SDK, so a branch could replace `platform-tools/adb.exe` there and the change would persist for the user and `adbuddy serve`. Having a dedicated account does not fix it if that account is given write access to the user's SDK. Check that the `ANDROID_HOME` of the runner's `.env` is not the SDK you use with ADBuddy.
+- **Minimum:** start `run.cmd` from a clean console, without `ADBUDDY_*`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT`, `ADB_SERVER_SOCKET` or `ANDROID_ADB_SERVER_ADDRESS` in the environment (the last two would make the diagnostic `adb devices -l` of the emulator workflows ask the user's server and write the phone's serial in the Actions log).
 
 The real barriers are:
 
@@ -341,14 +349,14 @@ For a pull request that is not trusted:
 
 - `android.yml` and the three jobs of `release-check.yml` use `ubuntu-latest` whatever `CI_RUNNER_ANDROID`, `CI_RUNNER_RELEASE` or `CI_RUNNER_SIGN` say (an empty variable already falls back to `ubuntu-latest`). Their `if:` does not change, so `"none"` still skips them.
 - `host.yml` runs a matrix of one cell, `ubuntu-latest`, whatever `CI_HOST_MATRIX` says (macOS and Windows hosted cells, which cost more, are not used).
-- `emulator.yml` skips its job: it only lives on the self-hosted runner and takes about an hour. `workflow_dispatch` still runs it.
+- `emulator-oracle.yml` and `emulator-app.yml` skip their job: they only live on the self-hosted runner and take about an hour between them. `workflow_dispatch` still runs them.
 - `push` to `main` and `workflow_dispatch` are not pull requests and are not affected; after the merge, `push` runs on the self-hosted runners as before.
 
 GitHub treats the runs that Dependabot triggers as fork runs: the `GITHUB_TOKEN` is read-only and Actions secrets are not passed (only Dependabot secrets, none here). Dependabot's own jobs (the ones that create the pull requests) run on GitHub and do not use Actions minutes; the CI of its pull requests does. These workflows have no secrets and use `pull_request`, never `pull_request_target`.
 
 The table below is the contract; `python scripts/check-ci-runner-rules.py` evaluates the real expressions of the workflows for every cell (events: owner, Dependabot, other bot, collaborator, fork, `push`, `workflow_dispatch`; variable: empty, self-hosted, `"none"`).
 
-| Event | Variable | `runs-on` | `host.yml` matrix | `emulator.yml` job |
+| Event | Variable | `runs-on` | `host.yml` matrix | `emulator-oracle.yml` and `emulator-app.yml` jobs |
 | --- | --- | --- | --- | --- |
 | PR of the owner | empty | `ubuntu-latest` | the three hosted cells | runs on `ubuntu-latest` |
 | PR of the owner | self-hosted | the variable | the variable | runs on the variable |
@@ -367,7 +375,7 @@ If the pull requests of the owner are ever opened by another account (an agent),
 
 1. Check in the log of the first runs that `runs-on` was `ubuntu-latest`, the `host` matrix had one cell and `emulator` was `skipped`.
 2. Review the diff: `go.mod`/`go.sum`, `libs.versions.toml`, the action SHA and its `# vX` comment. Several majors of the same action exist in the workflows (`actions/checkout` v4, v5, v7; `setup-gradle` v4, v6): they arrive as individual pull requests and can break inputs (for example `cache-disabled`); review them one by one.
-3. If the pull request touches something the emulator checks, run `gh workflow run emulator.yml --ref <dependabot branch>`. `workflow_dispatch` takes a branch, not a SHA, and Dependabot can rewrite its branch (rebase, recreate) between the review and the dispatch: after launching, check that the `head_sha` of the run is the SHA you reviewed (`gh run view <id> --json headSha`) and cancel it if not.
+3. If the pull request touches something the emulator checks, run `gh workflow run emulator-app.yml --ref <dependabot branch>` (and `emulator-oracle.yml` if the corpus, the skills or the script changed). `workflow_dispatch` takes a branch, not a SHA, and Dependabot can rewrite its branch (rebase, recreate) between the review and the dispatch: after launching, check that the `head_sha` of the run is the SHA you reviewed (`gh run view <id> --json headSha`) and cancel it if not.
 4. Do not merge a Dependabot pull request without that run green on the reviewed SHA when the emulator applies. Nothing enforces it: the repository is private on the free plan (no branch protection) and a `skipped` job counts as success.
 5. Never enable auto-merge for Dependabot. Never enable "Dependabot on self-hosted runners" or give the self-hosted runners the label `dependabot` (by default its runs go to GitHub-hosted runners; GitHub can be configured the other way).
 
@@ -379,7 +387,7 @@ The practical route to the key-reading risk is the branches that local coding ag
 
 adb on Windows loads the real key from \Users\<user>\.android\adbkey whatever `HOME`, `USERPROFILE` and `ANDROID_USER_HOME` say (measured with adb 37 and `ADB_TRACE=all`: `auth.cpp loaded new key from 'C:\Users\...\.android\adbkey'`). Isolating the environment of the job therefore does not protect the adb key. For adb the only barrier is a dedicated Windows account for the runner.
 
-What `host.yml` does (and `emulator.yml` does not, because its adb and emulator must share the real key or adb reports `unauthorized`): each self-hosted Windows job gets its own `HOME`, `USERPROFILE`, `ANDROID_USER_HOME`, `APPDATA` and `LOCALAPPDATA` (folders inside `RUNNER_TEMP`) and an empty `ADB_VENDOR_KEYS`. That covers only what depends on the environment: ssh, gh, git, the configuration of coding agents and of ADBuddy. It covers `gh` and git only in part: on Windows `gh` keeps its configuration in `%AppData%\GitHub CLI` and the git token is in the Credential Manager, and neither depends on `HOME`; the isolated `APPDATA`/`LOCALAPPDATA` cover the first only partly. `GOPATH` moves to the isolated home, with no effect because `GOMODCACHE` and `GOCACHE` are explicit. A malicious process can still read the real profile by absolute path, so this stops accidents and naive code, not an attacker.
+What `host.yml` does (and the emulator workflows do not, because its adb and emulator must share the real key or adb reports `unauthorized`): each self-hosted Windows job gets its own `HOME`, `USERPROFILE`, `ANDROID_USER_HOME`, `APPDATA` and `LOCALAPPDATA` (folders inside `RUNNER_TEMP`) and an empty `ADB_VENDOR_KEYS`. That covers only what depends on the environment: ssh, gh, git, the configuration of coding agents and of ADBuddy. It covers `gh` and git only in part: on Windows `gh` keeps its configuration in `%AppData%\GitHub CLI` and the git token is in the Credential Manager, and neither depends on `HOME`; the isolated `APPDATA`/`LOCALAPPDATA` cover the first only partly. `GOPATH` moves to the isolated home, with no effect because `GOMODCACHE` and `GOCACHE` are explicit. A malicious process can still read the real profile by absolute path, so this stops accidents and naive code, not an attacker.
 
 ### Linux runner
 
@@ -405,9 +413,9 @@ The Windows runner is not ephemeral either, and nothing cleans it automatically:
 - Take the runners down (remove them in the repository settings and delete the runner folders) before making the repository public.
 - The workflows use `pull_request` and `push`, never `pull_request_target`, and these jobs have no secrets.
 - One job runs at a time per runner. Register a second runner in another folder to run jobs in parallel.
-- The emulator job uses and stops the AVD `adbuddy-ci-api37` (emulator port 5590) and the adb server on port 5049 of the runner's machine: do not use them by hand meanwhile. It no longer uses the script's default AVD and ports, which can be used by hand at the same time.
+- The emulator workflows use and stop the AVDs `adbuddy-ci-api37` (emulator port 5590, adb server 5049; oracle) and `adbuddy-ci-api34` (emulator port 5592, adb server 5051; app) on the runner's machine: do not use them by hand meanwhile. They no longer use the script's default AVD and ports, which can be used by hand at the same time.
 - Two emulators at once need about 5 GB of RAM each.
-- A Linux runner needs /dev/kvm accessible through the kvm group for the emulator job (WSL2 here has no /dev/kvm without nested virtualization, so the emulator job stays on the Windows runner). Never give the runner user sudo: root in the distribution can mount C: and read your adb key.
+- A Linux runner needs /dev/kvm accessible through the kvm group for the emulator workflows (WSL2 here has no /dev/kvm without nested virtualization, so the emulator workflows stay on the Windows runner). Never give the runner user sudo: root in the distribution can mount C: and read your adb key.
 
 ### Repository settings
 
