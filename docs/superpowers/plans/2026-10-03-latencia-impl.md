@@ -40,7 +40,7 @@ Archivos: `host/internal/workspace/templates/AGENTS.md`, `host/internal/workspac
   - En el apartado `## The screen`, después de la viñeta de `adbuddy type`, añadir esta viñeta (texto exacto):
 
 ```
-- Do several steps in one call: `adbuddy tap "<text>" && adbuddy screen` taps and shows the result, and several taps can follow each other in the same command (`adbuddy tap "A" && adbuddy tap "B" && adbuddy screen`). Each call you make costs you a turn; run `adbuddy screen` after a tap or type in the same call unless you must decide something in between. If the screen still shows the old state, run `adbuddy screen` once more.
+- Do several steps in one call: `adbuddy tap "<text>" && adbuddy screen` taps and shows the result, and several taps can follow each other in the same command only when both targets are on the screen you already read (`adbuddy tap "A" && adbuddy tap "B" && adbuddy screen`); if B only exists after A, run the screen between them and look before you tap (rule 5 still applies). Each call you make costs you a turn; run `adbuddy screen` after a tap or type in the same call unless you must decide something in between. If the screen still shows the old state, run `adbuddy screen` once more.
 ```
   - No cambiar nada más (la regla 15, los niveles, etc.).
 - [ ] **Paso 4:** `cd <worktree>/host && go test ./internal/workspace ./internal/cli -timeout 10m`. Si algún golden o test de textos (`textlint_test.go`, `docs_test.go`) falla, adaptarlo a lo nuevo y nada más.
@@ -119,7 +119,7 @@ Tests (`args_test.go`): `ValidModel` acepta `opus`, `claude-sonnet-5-5`, `opus[1
 - [ ] **Paso 2: config.** En `Config` añadir
 
 ```go
-	AgentModel  string `toml:"agent_model"`  // model passed to Claude Code (--model); empty = the one the user configured in it
+	AgentModel  string `toml:"agent_model"`  // model passed to Claude Code (--model) by `adbuddy serve` only (`adbuddy run` takes it after --); empty = the one the user configured in it
 	AgentEffort string `toml:"agent_effort"` // effort passed to Claude Code (--effort); empty = the user's own
 ```
 
@@ -157,10 +157,10 @@ Test en `session_test.go` (con el `Start` falso que ya usan los demás): con `Ar
 	cmd.Flags().StringVar(&effort, "effort", "", app.T("help.serve.flag.effort"))
 ```
 
-Después de `loadEnv`, antes de arrancar nada: `if model == "" { model = e.cfg.AgentModel }`, `if effort == "" { effort = e.cfg.AgentEffort }` y validar con `agent.ValidModel`/`ValidEffort`, devolviendo `UsageErrorT("err.serve.usage_model_invalid")` / `UsageErrorT("err.serve.usage_effort_invalid")`. Pasar `model, effort` a `newSession(app, ws, activeSerial, link.sessionInfo, model, effort)`; en `serve_session.go`, `newSession` pone `Args: func(name string) []string { a, _ := agent.Args(name, model, effort); return a }`. Antes de `startAgent`, si `model != "" || effort != ""`: `_, unused := agent.Args(agentName, model, effort)`; si `len(unused) > 0` avisar en stderr (`serve.model_not_applied`: «The model/effort you set is not applied to <agente>: only Claude Code takes it.») y si no, decir qué se aplica (`serve.model_applied`: «The agent starts with <Describe>.»). El `session.new` del móvil usa el mismo `Manager`, así que hereda lo mismo; el móvil no puede cambiarlo.
+Después de `loadEnv`, antes de arrancar nada: `if model == "" { model = e.cfg.AgentModel }`, `if effort == "" { effort = e.cfg.AgentEffort }` y validar con `agent.ValidModel`/`ValidEffort`, devolviendo `UsageErrorT("err.serve.usage_model_invalid")` / `UsageErrorT("err.serve.usage_effort_invalid")`. Pasar `model, effort` a `newSession(app, ws, activeSerial, link.sessionInfo, model, effort)`; en `serve_session.go`, `newSession` pone `Args: func(name string) []string { a, _ := agent.Args(name, model, effort); return a }`. Antes de `startAgent`, si `model != "" || effort != ""`: `_, unused := agent.Args(agentName, model, effort)`; si `len(unused) > 0` avisar en stderr (`serve.model_not_applied`: «The model/effort you set is not applied to %[1]s: only Claude Code takes it.», con `%[1]s` en `en` y en `es`: el test de paridad del catálogo lo mira) y si no, decir qué se aplica (`serve.model_applied`: «The agent starts with <Describe>.»). El `session.new` del móvil usa el mismo `Manager`, así que hereda lo mismo; el móvil no puede cambiarlo.
 
 - [ ] **Paso 5: i18n y docs.** Añadir a `en.toml` y `es.toml` las claves `help.serve.flag.model`, `help.serve.flag.effort`, `err.serve.usage_model_invalid`, `err.serve.usage_effort_invalid`, `serve.model_applied`, `serve.model_not_applied` (el español, natural). En `docs/usage.md`, sección de `serve`: «Por defecto el agente usa el modelo y el esfuerzo que tengas configurados en Claude Code. Para fijarlos solo para ADBuddy: `adbuddy serve --model claude-sonnet-5-5 --effort medium` o `agent_model` y `agent_effort` en `config.toml`. Para `adbuddy run`: `adbuddy run claude -- --model … --effort …`. En nuestras medidas el modelo no cambia la latencia (ver `docs/superpowers/plans/2026-10-03-latencia.md`); cambia el coste.» (en el idioma de ese documento).
-- [ ] **Paso 6:** tests del `cli` de serve (si hay helper que arranca `serve` con fakes, un caso con `--model x`; si no, `go vet` y los tests de i18n/golden/textlint al día). `cd <worktree>/host && go test ./internal/... ./cmd/... -timeout 15m`.
+- [ ] **Paso 6:** tests del `cli` de serve (si hay helper que arranca `serve` con fakes, un caso con `--model x`; si no, `go vet` y los tests de i18n/golden/textlint al día). `cd <worktree>/host && go test ./internal/... ./cmd/... -timeout 15m` (los goldens de ayuda de `serve` se actualizan con `-update-help`).
 - [ ] **Paso 7:** commit `feat(serve): --model y --effort opcionales para Claude Code (por defecto, los del usuario)`.
 
 ## T3: el daemon espera a que la pantalla se asiente y la devuelve
@@ -178,7 +178,7 @@ Archivos: `host/internal/ipc/ipc.go` (campo), `host/internal/daemon/ui.go` (+ `s
 	Screen bool `json:"screen,omitempty"`
 ```
 
-- [ ] **Paso 2: tipos y tiempos (`daemon/settle.go`).**
+- [ ] **Paso 2: tipos y espera (`daemon/settle.go`).**
 
 ```go
 package daemon
@@ -187,19 +187,22 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strconv"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 )
 
 // Settling: after an act, or on request, the screen is read again until two
 // reads in a row are the same, so the agent sees what its tap did without
-// guessing a sleep. Variables for the tests.
+// guessing a sleep. Variables for the tests (settle copies them on entry).
 var (
 	settleFirst = 150 * time.Millisecond // after an act, before the first read: the effect starts
 	settleGap   = 120 * time.Millisecond // between two reads
+	settleMin   = 400 * time.Millisecond // two equal reads count as settled only this long after the act or the request: a slow transition shows the old screen twice
 	settleMax   = 2 * time.Second        // all in all, counted from the act or from the request
 	settleReads = 8                      // reads at most
 )
@@ -218,21 +221,24 @@ type ScreenSettled struct {
 type ClickedScreen struct {
 	bridge.UIClicked
 	Screen *ScreenSettled `json:"screen,omitempty"`
-	Note   string         `json:"screen_note,omitempty"`
+	Note   string         `json:"screenNote,omitempty"`
 }
 
 // TextSetScreen is setText's data with the screen after it.
 type TextSetScreen struct {
 	bridge.UITextSet
 	Screen *ScreenSettled `json:"screen,omitempty"`
-	Note   string         `json:"screen_note,omitempty"`
+	Note   string         `json:"screenNote,omitempty"`
 }
 
 // asDump returns the dump an app or adb answered.
 func asDump(v any) (bridge.UIDump, bool) {
 	switch d := v.(type) {
 	case *bridge.UIDump:
-		return *d, d != nil
+		if d == nil {
+			return bridge.UIDump{}, false
+		}
+		return *d, true
 	case bridge.UIDump:
 		return d, true
 	}
@@ -251,89 +257,94 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// settle reads the screen until two reads in a row are equal, at most
-// settleReads of them and until start+settleMax. first is a read already made
-// (nil after an act: the first read waits settleFirst). Every read goes through
-// the doors and the guard like any other read of the screen: paused, a 🔴
-// question waiting, and guardForeground (a protected app, ADBuddy itself, the
-// shade, a notification...). If one of them says no, there is no screen: why
-// says it ("" if the context ended: the agent or serve went away). It fails
-// closed: nothing it could not read is returned.
-func (d *Daemon) settle(ctx context.Context, args json.RawMessage, first *bridge.UIDump, start time.Time) (screen *ScreenSettled, why string, f *uiFailure) {
+// settle reads the screen until two reads in a row are equal and settleMin
+// has passed since start, at most settleReads reads and until start+settleMax.
+// first is a read already made (nil after an act: the first read waits
+// settleFirst). Every read goes through the doors and the guard like any other
+// read of the screen: paused, a 🔴 question waiting, and guardForeground (a
+// protected app, ADBuddy itself, the shade, a notification...). If one of them
+// says no, there is no screen: why says it. why and f are both empty when the
+// context ended (the agent or serve went away). It fails closed: nothing it
+// could not read is returned. via says how the last read was made.
+func (d *Daemon) settle(ctx context.Context, args json.RawMessage, first *bridge.UIDump, start time.Time) (screen *ScreenSettled, via, why string, f *uiFailure) {
+	firstWait, gap, min, max, maxReads := settleFirst, settleGap, settleMin, settleMax, settleReads
 	prev := first
-	deadline := start.Add(settleMax)
+	deadline := start.Add(max)
 	reads := 0
 	for {
-		wait := settleGap
+		wait := gap
 		if prev == nil {
-			wait = settleFirst
+			wait = firstWait
 		}
 		if !sleepCtx(ctx, wait) {
-			return nil, "", nil
+			return nil, "", "", nil
 		}
 		if d.o.Paused() {
-			return nil, PausedMessage, nil
+			return nil, "", PausedMessage, nil
 		}
 		release, other := d.admit("Read the screen", false)
 		if other != "" {
-			return nil, other, nil
+			return nil, "", other, nil
 		}
 		release()
 		if why := d.guardForeground(ctx, nil); why != "" {
 			if ctx.Err() != nil {
-				return nil, "", nil
+				return nil, "", "", nil
 			}
-			return nil, why, nil
+			return nil, "", why, nil
 		}
 		if d.o.Paused() { // paused while the guard looked
-			return nil, PausedMessage, nil
+			return nil, "", PausedMessage, nil
 		}
-		v, _, uf := d.runUI(ctx, bridge.UIOpDump, args, nil)
+		v, how, uf := d.runUI(ctx, bridge.UIOpDump, args, nil)
 		if uf != nil {
-			return nil, "", uf
+			return nil, "", "", uf
 		}
 		cur, ok := asDump(v)
 		if !ok {
-			return nil, "", fail(1, "UI_FAILED", "the ADBuddy app answered something unreadable")
+			return nil, "", "", fail(1, "UI_FAILED", "the ADBuddy app answered something unreadable")
 		}
+		via = how
 		reads++
-		if prev != nil && reflect.DeepEqual(*prev, cur) {
-			return &ScreenSettled{UIDump: cur, Settled: true}, "", nil
+		now := time.Now()
+		if prev != nil && reflect.DeepEqual(*prev, cur) && now.Sub(start) >= min {
+			return &ScreenSettled{UIDump: cur, Settled: true}, via, "", nil
 		}
 		prev = &cur
-		if reads >= settleReads || !time.Now().Before(deadline) {
-			return &ScreenSettled{UIDump: cur, Settled: false}, "", nil
+		if reads >= maxReads || !now.Before(deadline) {
+			return &ScreenSettled{UIDump: cur, Settled: false}, via, "", nil
 		}
 	}
 }
 ```
 
-(`classify` y `journal` se usan en el Paso 3; si el compilador no los ve aquí, mover los imports.)
+(`reflect.DeepEqual` compara bien los `*bool` por valor. Si `settleMin` ≥ `settleMax` en un test, nunca se da por asentada: es el comportamiento esperado.)
 
-- [ ] **Paso 3: `ui()` usa `settle`.** En `ui()` (`daemon/ui.go`), después de calcular `data, via, f := d.runUI(...)` y antes de armar `code`:
+- [ ] **Paso 3: `ui()` usa `settle` para `screen` con `Screen`.** En `ui()` (`daemon/ui.go`), justo después de `data, via, f := d.runUI(ctx, req.UIOp, req.UIArgs, s)`:
 
 ```go
-	// screen=dump con Screen: espera a que se asiente (la lectura de arriba cuenta como la primera).
+	// screen with Screen: wait for it to settle; the read above counts as the first one.
 	if f == nil && req.Screen && req.UIOp == bridge.UIOpDump {
 		if first, ok := asDump(data); ok {
-			scr, why, sf := d.settle(ctx, req.UIArgs, &first, d.o.Now())
+			scr, how, why, sf := d.settle(ctx, req.UIArgs, &first, time.Now())
 			switch {
 			case sf != nil:
 				f = sf
 			case why != "":
-				f = fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+why)
-			case scr == nil: // el contexto terminó
-				f = fail(1, "UI_FAILED", "stopped")
+				return d.blockUI(e, why) // nothing read before is returned
+			case scr == nil: // the agent or serve went away
+				code := ExitDenied
+				e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
+				d.record(e)
+				return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
 			default:
-				data, via = *scr, via+", settled"
+				data, via = *scr, how+", settled"
 			}
 		}
 	}
 ```
 
-(`d.o.Now()` es un reloj de pared que los tests pueden fijar; usar `time.Now()` para el plazo si `Options.Now` se sustituye en tests con un reloj fijo: el plazo debe ser tiempo real. Usar `time.Now()`.)
-
-Y al final de `ui()`, sustituir
+(`time` e `ipc` ya se importan en `ui.go`; si no, añadirlos.) Y al final de `ui()`, sustituir
 
 ```go
 	if data != nil {
@@ -346,21 +357,24 @@ por
 	if data != nil {
 		if req.Screen && f == nil && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
 			release() // the change is done: a question must not wait for the screen to settle
-			data = d.withScreen(ctx, req, data, via)
+			data = d.withScreen(ctx, req, data)
 		}
 		if err := s.Data(data); err != nil {
 ```
 
-- [ ] **Paso 4: `withScreen`** (en `settle.go`): hace la lectura tras la acción y deja **su propia entrada de diario** (la acción ya dejó la suya):
+- [ ] **Paso 4: `withScreen`** (en `settle.go`): lee tras la acción y deja **su propia entrada de diario** (la acción ya dejó la suya):
 
 ```go
+// notDone goes first in every note about a screen that could not be read
+// after an act: the act happened, and repeating it would do it twice.
+const notDone = "The action was done; do not repeat it. The screen could not be read after it: "
+
 // withScreen adds the screen after an act (click, setText) to its result and
 // journals the read as the entry of an `adbuddy screen`: a green one, or a
 // blocked one when the guard said no. The act itself already happened and is
 // reported as such: a block only means there is no screen to show.
-func (d *Daemon) withScreen(ctx context.Context, req ipc.Request, data any, via string) any {
-	start := time.Now()
-	scr, why, f := d.settle(ctx, json.RawMessage("{}"), nil, start)
+func (d *Daemon) withScreen(ctx context.Context, req ipc.Request, data any) any {
+	scr, via, why, f := d.settle(ctx, json.RawMessage("{}"), nil, time.Now())
 	now := d.o.Now().UTC()
 	h := helpers[bridge.UIOpDump]
 	e := journal.Entry{
@@ -373,17 +387,20 @@ func (d *Daemon) withScreen(ctx context.Context, req ipc.Request, data any, via 
 	note := ""
 	code := 0
 	switch {
+	case f != nil && f.exit == ExitDenied: // the app's own check (a protected screen, FLAG_SECURE, a notification)
+		e.Status, e.Reason, code = journal.StatusBlocked, f.msg, ExitDenied
+		note = notDone + "Blocked by ADBuddy: " + classify.Printable(f.msg)
 	case f != nil:
 		e.Status, e.Reason, code = journal.StatusError, f.msg, f.exit
-		note = classify.Printable(f.msg)
+		note = notDone + classify.Printable(f.msg)
 	case why != "":
 		e.Status, e.Reason, code = journal.StatusBlocked, why, ExitDenied
-		note = "Blocked by ADBuddy: " + classify.Printable(why)
+		note = notDone + "Blocked by ADBuddy: " + classify.Printable(why)
 	case scr == nil: // the agent or serve went away
 		e.Status, e.Reason, code = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), ExitDenied
-		note = "stopped"
+		note = notDone + "stopped"
 	default:
-		e.Status, e.Reason = journal.StatusOK, "after "+req.UIOp+", "+via+", settled="+strconv.FormatBool(scr.Settled)
+		e.Status, e.Reason = journal.StatusOK, "after "+req.UIOp+", via "+via+", settled="+strconv.FormatBool(scr.Settled)
 	}
 	e.ExitCode = &code
 	d.record(e)
@@ -401,49 +418,56 @@ func (d *Daemon) withScreen(ctx context.Context, req ipc.Request, data any, via 
 }
 ```
 
-(Imports: `ipc`, `strconv`. `helperArgv(bridge.UIOpDump, nil)` — si `json.Unmarshal(nil, …)` falla en silencio es seguro: ya ignora el error.) La nota nunca lleva texto del teléfono sin escapar (`classify.Printable`). La guarda dice `Blocked by ADBuddy:` como siempre, y el agente aplica su regla 8; el código de salida del CLI sigue siendo el de la acción (0): un 126 haría reintentar un tap que sí ocurrió.
+La nota nunca lleva texto del teléfono sin escapar (`classify.Printable`), empieza por decir que la acción se hizo y no se repita, y la guarda dice `Blocked by ADBuddy:` como siempre para que el agente aplique su regla 8 **solo a leer la pantalla**. El código de salida del CLI sigue siendo el de la acción (0): un 126 haría reintentar un tap que sí ocurrió. Entradas de diario: la de la acción (como hoy) y esta; la spec M5 §4.1 y §11 («una entrada por ayuda») se actualizan en T4.
 
-- [ ] **Paso 5: tests (`settle_test.go`)**, con los fakes de `ui_test.go` (adb falso y `UI` que cuenta llamadas), `settleFirst`/`settleGap`/`settleMax` reducidos a milisegundos con `t.Cleanup` que los restaura (leer los valores antes de lanzar gorrutinas: no hay `-race` local):
-  1. `TestSettleStopsWhenTwoReadsMatch`: tras `click` con `Screen`, la `UI` devuelve dumps A, B, B: el resultado trae `Screen` con B, `Settled` true, y la `UI` recibió 3 `dump` (más los `foreground` de la guarda, uno por lectura).
-  2. `TestSettleGivesUpAtTheCap`: la `UI` devuelve un dump distinto cada vez: se detiene con `Settled` false en `settleReads` lecturas o `settleMax`, lo que llegue antes, y el resultado sigue siendo ok.
-  3. `TestSettleEveryReadIsGuarded`: la `UI` de `foreground` devuelve un paquete protegido tras el click: `Screen` nil, `Note` empieza por `Blocked by ADBuddy: `, el click se dio una vez, el journal tiene la entrada del click (🟡 ok) y una `blocked` de `adbuddy screen`; la `UI` no recibió ningún `dump` después del bloqueo. Variante: ADBuddy delante, la sombra abierta (`mCurrentFocus` = NotificationShade) y `FLAG_SECURE`/`Protected` de la app (`UIForeground.Protected` true).
-  4. `TestSettlePausedAndQuestionStopTheReads`: `Paused` pasa a true entre lecturas → nota de pausa y ninguna lectura más; una pregunta 🔴 en espera (`d.ask`) → nota `waiting…`.
-  5. `TestSettleDumpWaitsAndBlocksMidway`: `screen` con `Screen`: el primer dump pasa, el primer plano cambia a protegida en la segunda lectura → `UI_BLOCKED` con exit 126 y **sin datos** (la pantalla no se devuelve); entrada `blocked`.
-  6. `TestSettleContextCancel`: el contexto se cancela durante la espera → no hay datos, el diario dice `abandoned`, no hay pánico ni fuga de gorrutina.
-  7. `TestSettleWithoutTheApp`: sin app (`UI` nil), por adb (`uiautomator`) funciona igual; con el servicio de accesibilidad activo y sin app, falla como `screen` (UI_UNAVAILABLE) y la nota lo dice, sin tocar nada más.
-  8. `TestNoScreenWithoutTheFlag`: sin `Screen` el resultado es el de siempre (mismos bytes que antes, sin campos nuevos): `go test ./internal/daemon` entero verde.
-  9. `TestSettleSameAsScreenGuard`: una tabla con los estados grabados (`uidump/testdata/api34`: shade, quick-settings, headsup, locked, doze, split, keyboard…) comprobando que `settle` bloquea exactamente donde `guardForeground` bloquea (usa los mismos lectores que `guard_api34_test.go`).
+- [ ] **Paso 5: tests (`settle_test.go`)**, con los fakes de `ui_test.go`. Ojo: el `fakeApp` actual da un resultado fijo por operación (`ui_test.go:23-38`); este paso añade a `settle_test.go` un fake propio que devuelve una **lista** de dumps por llamada a `dump` (y registra la secuencia de operaciones: cada `dump` debe ir precedido de un `foreground`). `settleFirst`, `settleGap`, `settleMin` y `settleMax` se reducen a milisegundos con `t.Cleanup` que los restaura:
+  1. `TestSettleStopsWhenTwoReadsMatch`: tras `click` con `Screen`, la `UI` devuelve dumps A, B, B: el resultado trae `Screen` con B y `Settled` true; la secuencia es `foreground, dump, foreground, dump, foreground, dump` (cada lectura guardada).
+  2. `TestSettleMinimumTime`: con `settleMin` mayor que dos lecturas, A, A, A, B, B no da por asentada la primera pareja igual: devuelve B asentada (o `Settled` false si el tope llega antes), nunca A.
+  3. `TestSettleGivesUpAtTheCap`: la `UI` devuelve un dump distinto cada vez: se detiene con `Settled` false en `settleReads` lecturas o `settleMax`, y el resultado sigue siendo ok.
+  4. `TestSettleEveryReadIsGuarded`: la `UI` de `foreground` devuelve un paquete protegido tras el click: `Screen` nil, `Note` empieza por `The action was done; do not repeat it.` y contiene `Blocked by ADBuddy: `, el click se dio una vez, el diario tiene la entrada del click (🟡 ok) y una `blocked` de `adbuddy screen`; la `UI` no recibió ningún `dump` después del bloqueo. Variantes: ADBuddy delante (`UIForeground.Package` = el de la app), la sombra abierta (`mCurrentFocus` = NotificationShade), `UIForeground.Protected` true, y el propio `dump` del app que contesta `CodeProtected` (la nota lleva el prefijo y el diario dice `blocked`, no `error`).
+  5. `TestSettlePausedAndQuestionStopTheReads`: `Paused` pasa a true entre lecturas → nota de pausa y ninguna lectura más; una pregunta 🔴 en espera (`d.ask`) → nota `waiting…`.
+  6. `TestSettleDumpWaitsAndBlocksMidway`: `screen` con `Screen`: el primer dump pasa, el primer plano cambia a protegida en la segunda lectura → exit 126 con `UI_BLOCKED`, **sin datos** (la primera lectura no sale) y entrada `blocked` con el motivo sin el prefijo repetido (como `blockUI`).
+  7. `TestSettleContextCancel`: el contexto se cancela durante la espera, tanto en `screen --settle` como tras un tap → no hay datos, el diario dice `abandoned` (`StatusDenied`), no hay pánico. `settle` copia las variables de tiempo al entrar: el test no compite con su `t.Cleanup`.
+  8. `TestSettleWithoutTheApp`: sin app (`UI` nil), por adb (`uiautomator`) funciona igual; con el servicio de accesibilidad activo y sin app, falla como `screen` (UI_UNAVAILABLE) y la nota lo dice.
+  9. `TestNoScreenWithoutTheFlag`: sin `Screen` el resultado es el de siempre (mismos bytes, sin campos nuevos); `go test ./internal/daemon` entero verde.
 - [ ] **Paso 6:** `cd <worktree>/host && go vet ./... && go test ./internal/daemon ./internal/ipc -timeout 10m`, y `go test ./... -timeout 15m`.
 - [ ] **Paso 7:** commit `feat(daemon): tap y type pueden devolver la pantalla ya asentada, cada lectura con la guarda de screen`.
 
-## T4: el CLI (`--screen`, `--settle`), textos y docs
+## T4: el CLI (`--screen`, `--settle`), textos, spec y docs
 
-Archivos: `host/internal/cli/helpers.go`, `host/internal/cli/helpers_test.go`, `host/internal/i18n/catalog/{en,es}.toml`, goldens de ayuda (`testdata`), `host/internal/workspace/templates/AGENTS.md`, `docs/usage.md`.
+Archivos: `host/internal/cli/helpers.go`, `host/internal/cli/helpers_test.go`, `host/internal/i18n/catalog/{en,es}.toml` (solo la ayuda de las banderas), goldens de ayuda, `host/internal/workspace/templates/AGENTS.md`, `docs/usage.md`, `docs/superpowers/specs/2026-10-01-adbuddy-m5-ayudas-remoto-design.md`, `docs/superpowers/plans/2026-10-03-latencia.md` (validaciones pendientes).
+
+Lo que imprimen las órdenes para el agente va siempre en inglés (M6c §3; `textlint_test.go` exime a `helpers.go`): por el catálogo solo pasan las ayudas de las banderas.
 
 - [ ] **Paso 1: `callHelper` con `Screen`.** Añadir un parámetro `screen bool` (o una variante `callHelperScreen`) que pone `req.Screen = screen`; el resto igual.
 - [ ] **Paso 2: banderas.**
-  - `tap` y `type`: `--screen` (bool): «after the tap, wait for the screen to settle and show it». `tap` sigue imprimiendo `Tapped (l,t)-(r,b).`; con `--screen`, después imprime una línea en blanco y `printScreen` del resultado, y si `Settled` es false añade `(the screen was still changing: run adbuddy screen again if you need it steady)`; si el resultado trae `screen_note`, imprime `The screen could not be read after it: <note>` en lugar de la pantalla (stdout, exit 0). `type` igual con `Typed.`.
-  - `screen`: `--settle` (bool): «wait for the screen to settle before showing it»: con él `callHelper(..., true)`; la salida es la de siempre más el aviso de `Settled` false.
-  - `--json`: `tap --screen --json` escribe `daemon.ClickedScreen` completo, `type --screen --json` `daemon.TextSetScreen`, `screen --settle --json` `daemon.ScreenSettled`.
-  - Un daemon antiguo contesta sin `screen`: el CLI imprime solo lo de la acción (no es error).
+  - `tap` y `type`: `--screen` (bool). `tap` sigue imprimiendo `Tapped (l,t)-(r,b).`; con `--screen`, el CLI decodifica la respuesta en una estructura con los campos de `UIClicked` más `Screen *daemon.ScreenSettled` y `Note string` (`json:"screenNote"`) y:
+    - con pantalla: línea en blanco, `printScreen` de ella y, si `Settled` es false, `(the screen was still changing: run adbuddy screen again if you need it steady)`;
+    - con `Note`: imprime `Note` tal cual (empieza por `The action was done; do not repeat it.`) en stdout y sale 0;
+    - sin pantalla ni nota (un daemon antiguo que ignoró `screen`): imprime `This ADBuddy did not return the screen: run adbuddy screen.`;
+    - `type` igual con `Typed.`.
+  - `screen`: `--settle` (bool): `callHelper(..., true)`; la salida es la de siempre más el aviso de `Settled` false. Decodificar `settled` como `*bool`: ausente (daemon antiguo) no avisa.
+  - `--json`: `tap --screen --json` escribe la respuesta completa (`daemon.ClickedScreen`), `type --screen --json` `daemon.TextSetScreen`, `screen --settle --json` `daemon.ScreenSettled`.
   - `tap`/`type` con `--screen` y `--all`: no se añade; la pantalla es la de `screen` sin `--all`.
-- [ ] **Paso 3: tests (`helpers_test.go`)** con el daemon falso que ya usan: `tap X --screen` imprime `Tapped` y la pantalla; con nota imprime la nota y sale 0; `screen --settle` con `settled=false` imprime el aviso; `--json` conserva los campos; `tap X` sin bandera imprime lo de siempre; textos en `en` y `es` (el aviso).
-- [ ] **Paso 4: i18n y goldens.** Claves `help.tap.flag.screen`, `help.type.flag.screen`, `help.screen.flag.settle` (y las del aviso y de la nota si pasan por `app.T`), en `en.toml` y `es.toml`; regenerar los goldens de ayuda que cambien (`go test ./internal/cli -run Golden -update` si existe la bandera; si no, a mano) y revisar que solo cambian las líneas nuevas.
-- [ ] **Paso 5: `AGENTS.md`.** Sustituir la viñeta de «Do several steps in one call» (T1) y las de `tap`/`type` por:
+- [ ] **Paso 3: tests (`helpers_test.go`)** con el daemon falso que ya usan: `tap X --screen` imprime `Tapped` y la pantalla; con nota imprime la nota (contiene `do not repeat`) y sale 0; sin pantalla ni nota imprime el aviso del daemon antiguo; `screen --settle` con `settled=false` imprime el aviso y con `settled` ausente no; `--json` conserva los campos; `tap X` sin bandera imprime lo de siempre.
+- [ ] **Paso 4: i18n y goldens.** Claves `help.tap.flag.screen`, `help.type.flag.screen`, `help.screen.flag.settle` (solo ayuda), en `en.toml` y `es.toml`; regenerar los goldens de ayuda que cambien (`go test ./internal/cli -run Golden -update-help`) y revisar que solo cambian las líneas nuevas.
+- [ ] **Paso 5: `AGENTS.md`.** Sustituir la viñeta «Do several steps in one call» (T1) y las de `tap`/`type` por:
 
 ```
 - `adbuddy tap "<text>"`, `adbuddy tap --id <id>`, `adbuddy tap --xy <x,y>`: tap an element by its text or description, by its id, or a point. If several elements match, use `--id` or `--xy` from `adbuddy screen`.
 - `adbuddy type "<text>"`: type in the field that has the focus (tap it first). It replaces the field's text.
-- Add `--screen` to `tap` or `type` to get the screen right after it, once it has settled, in the same call: `adbuddy tap "Network & internet" --screen`. Do not `sleep` and do not run `adbuddy screen` in a separate call afterwards. After a raw `adb` command (`monkey`, `am start`, `input`) use `adbuddy screen --settle`. Several steps can go in one call (`adbuddy tap "A" && adbuddy tap "B" --screen`): each call you make costs you a turn.
+- Add `--screen` to `tap` or `type` to get the screen right after it, in the same call, once it has settled: `adbuddy tap "Network & internet" --screen`. Do not `sleep` and do not run `adbuddy screen` in a separate call afterwards. After a raw `adb` command (`monkey`, `am start`, `input`) use `adbuddy screen --settle`. Several steps can go in one call (`adbuddy tap "A" && adbuddy tap "B" --screen`) only when both targets are on the screen you already read; if B only exists after A, use `--screen` after A and look before you tap (rule 5 still applies). Each call you make costs you a turn. If the screen still shows the old state, run `adbuddy screen` once more.
+- With `--screen`, if the answer says `The action was done; do not repeat it`, the tap or the text already happened: whatever reason follows (rule 8) is only about reading the screen. Never repeat the action; run `adbuddy screen` when the reason allows it.
 ```
 
-  y la frase de `adbuddy screen`: «Run it before tapping; after a tap or type use `--screen` instead of running it again.» Actualizar el test de T1 (`in one call` → `--screen`). En `docs/usage.md` (sección «Screen helpers»): describir `--screen` y `--settle` con un ejemplo, y que esperan como mucho unos 2 s.
-- [ ] **Paso 6:** `cd <worktree>/host && go vet ./... && go test ./... -timeout 15m`.
-- [ ] **Paso 7:** commit `feat(cli): tap --screen, type --screen y screen --settle`.
+  y la frase de `adbuddy screen`: «Run it before tapping; after a tap or type use `--screen` instead of running it again.» Actualizar el test de T1 (`in one call` → `--screen`). En `docs/usage.md` (sección «Screen helpers»): describir `--screen` y `--settle` con un ejemplo, que esperan como mucho unos 2 s, y que los workspaces ya creados reciben `@NOTES.md` y estos textos con `adbuddy env init --force`.
+- [ ] **Paso 6: spec y validaciones.** En la spec M5 (§3.1-3.3, §4.1 y §11) apuntar `--screen`/`--settle` y que `tap --screen` deja dos entradas (la de la acción y una `adbuddy screen` de la lectura). En `2026-10-03-latencia.md`, sección nueva «Validaciones manuales pendientes»: medir en el emulador y en un móvil real (con permiso del usuario) los tiempos de transición y de `uiautomator` para ajustar `settleFirst/Gap/Min/Max`; comprobar que una apertura de app con notificación entrante da la nota de bloqueo y el agente no repite el tap; `screen --settle` tras `am start`.
+- [ ] **Paso 7:** `cd <worktree>/host && go vet ./... && go test ./... -timeout 15m`.
+- [ ] **Paso 8:** commit `feat(cli): tap --screen, type --screen y screen --settle`.
 
 ## T5: medir antes y después
 
-Con `latbench` (ver `2026-10-03-latencia.md`), tareas 3 y 5, `opus:medium` y `sonnet:medium`, 2 pasadas por celda, antes (rama en `4a745ef`) y después de cada tarea que cambie el comportamiento del agente (T1, y T4). `ADBUDDY_LATENCY=1 ADBUDDY_LATENCY_AGENT=1 ADBUDDY_LATENCY_TASKS=3,5 ADBUDDY_LATENCY_CONFIGS=opus:medium,sonnet:medium go test ./cmd/adbuddy -run TestLatencyAgentFakePhone`. El teléfono falso (`latbench.Phone`) debe aprender a contestar a `tap --screen`: no necesita cambios, el daemon real es quien espera. Apuntar tabla antes/después en `2026-10-03-latencia.md`.
+Con `latbench` (ver `2026-10-03-latencia.md`), tareas 3 y 5, `opus:medium` y `sonnet:medium`, 2 pasadas por celda: **antes** en `55809cd` (producción sin cambios; el banco llega con `2c99bd4`), y después de T1 y después de T4. `ADBUDDY_LATENCY=1 ADBUDDY_LATENCY_AGENT=1 ADBUDDY_LATENCY_TASKS=3,5 ADBUDDY_LATENCY_CONFIGS=opus:medium,sonnet:medium go test ./cmd/adbuddy -run TestLatencyAgentFakePhone`. El teléfono falso (`latbench.Phone`) no necesita cambios: el daemon real es quien espera y sondea el `dump` del teléfono falso. Apuntar la tabla antes/después en `2026-10-03-latencia.md`.
 
 ---
 
@@ -451,8 +475,8 @@ Con `latbench` (ver `2026-10-03-latencia.md`), tareas 3 y 5, `opus:medium` y `so
 
 1. Cada lectura de la espera pasa por `paused`, `admit` (pregunta 🔴 en espera) y `guardForeground`, igual que `screen`; ninguna ruta lee la pantalla sin la guarda; el bloqueo a mitad de la espera no devuelve nada leído antes (en `screen --settle`) ni el resto de la pantalla (en `tap --screen`).
 2. Sin la app, sin `uiautomator` con el servicio de accesibilidad activo (misma regla).
-3. La acción ya hecha nunca se reintenta ni se presenta como fallida; el CLI sale 0 aunque la lectura se bloquee, y la nota empieza por `Blocked by ADBuddy:` para que el agente aplique su regla.
+3. La acción ya hecha nunca se reintenta ni se presenta como fallida; el CLI sale 0 aunque la lectura se bloquee, y la nota dice primero que no se repita y después `Blocked by ADBuddy:` para que el agente aplique su regla 8 solo a la lectura.
 4. `release()` antes de la lectura: una pregunta 🔴 no espera la espera; pero una pregunta 🔴 que aparece después bloquea las lecturas siguientes.
-5. Tiempo acotado (`settleMax`, `settleReads`) y cancelación por contexto; sin gorrutinas nuevas.
+5. Tiempo acotado (`settleMax`, `settleReads`, `settleMin`) y cancelación por contexto; sin gorrutinas nuevas.
 6. El diario: una entrada por la acción (como hoy) y una por la lectura; el contenido de la pantalla no se escribe (solo el estado).
 7. Orden con un daemon o un CLI antiguos (campo `screen` ignorado): degrada a lo de siempre.
