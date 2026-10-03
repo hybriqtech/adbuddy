@@ -162,6 +162,8 @@ type uploadRecv struct {
 	firstOff  int64 // offset of the first frame since mark; -1: none yet
 	sinceMark int64 // bytes delivered since mark
 	bad       []string
+	// frozen: frames that come now are ignored (not counted, not taken); see freeze.
+	frozen bool
 
 	// slow is waited on each frame while it is set: the host is slow, so the
 	// whole file does not arrive before the test cuts.
@@ -193,12 +195,26 @@ func (u *uploadRecv) begin(t *testing.T, b bridge.AttachBegin, resumed bool) int
 	return u.recv
 }
 
+// freeze stops the host taking frames and returns what it has taken until now
+// (recv): from here every frame that is still in flight is ignored, so the
+// offset the host will give after the cut is exact and cannot change, whatever
+// the reader was doing (stop does not wait for a frame inside onFrame to be
+// counted; this does not depend on that timing). The app sends again from that
+// offset, so what is ignored comes back. mark lifts it.
+func (u *uploadRecv) freeze() int64 {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.frozen = true
+	return u.recv
+}
+
 // mark forgets the "since" counters: what comes next is counted from here.
 func (u *uploadRecv) mark() {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.firstOff, u.sinceMark = -1, 0
 	u.slow = 0
+	u.frozen = false
 }
 
 // onFrame is the link's frame handler (it never cuts).
@@ -211,6 +227,9 @@ func (u *uploadRecv) onFrame(id bridge.FrameID, off int64, data []byte) {
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	if u.frozen {
+		return
+	}
 	if !u.known || id != u.id {
 		u.bad = append(u.bad, "frame of "+id.String()+" nobody asked for")
 		return
@@ -279,9 +298,7 @@ func (l *link) finishUpload(t *testing.T, u *uploadRecv, b bridge.AttachBegin, s
 	if sum != pushedSHA {
 		t.Errorf("sha256 of what the host received %s != sha256 of the pushed bytes %s", sum, pushedSHA)
 	}
-	if b.SHA256 != pushedSHA {
-		t.Errorf("the app announced sha256 %s, the pushed bytes have %s", b.SHA256, pushedSHA)
-	}
+	// (pickAndBegin already checked that the app announced the pushed bytes' sha256.)
 	if sum != b.SHA256 {
 		t.Errorf("received %s != announced %s", sum, b.SHA256)
 	}
@@ -378,8 +395,11 @@ func TestUploadResumesAfterACut(t *testing.T) {
 	case <-e.ctx.Done():
 		t.Fatal("test context done")
 	}
+	// Frozen before the cut: atCut is the offset the host will answer, and no
+	// frame still in flight can move it (the cut is asked from here, not from
+	// onFrame).
+	atCut := u.freeze()
 	l.cut()
-	atCut, _, _ := u.state()
 	if atCut < cutAfter || atCut >= size {
 		t.Fatalf("cut with %d of %d bytes: not in the middle of the upload", atCut, size)
 	}
