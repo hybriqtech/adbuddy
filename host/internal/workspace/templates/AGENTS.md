@@ -8,7 +8,7 @@ You are working in an ADBuddy environment. From here you manage the user's Andro
 
 <!-- adbuddy:profile -->
 
-`NOTES.md` has what the user wants you to remember about this phone. Read it before you start.
+`NOTES.md` has what the user wants you to remember about this phone. If it is not already in your context, read it before you start.
 
 ## Commands
 
@@ -26,6 +26,7 @@ These helpers read and act on the phone's screen through the ADBuddy app (fast, 
 - `adbuddy screen [--all] [--json]`: what is on the screen, one element per line: `[id] "text" desc="…" Class (left,top)-(right,bottom)` and what you can do with it (`click`, `edit`, `scroll`, `checked=…`). Run it before tapping, and again after, to see what changed.
 - `adbuddy tap "<text>"`, `adbuddy tap --id <id>`, `adbuddy tap --xy <x,y>`: tap an element by its text or description, by its id, or a point. If several elements match, use `--id` or `--xy` from `adbuddy screen`.
 - `adbuddy type "<text>"`: type in the field that has the focus (tap it first). It replaces the field's text.
+- Do several steps in one call: `adbuddy tap "<text>" && adbuddy screen` taps and shows the result, and several taps can follow each other in the same command only when both targets are on the screen you already read (`adbuddy tap "A" && adbuddy tap "B" && adbuddy screen`); if B only exists after A, run the screen between them and look before you tap (rule 5 still applies). Each call you make costs you a turn; run `adbuddy screen` after a tap or type in the same call unless you must decide something in between. If the screen still shows the old state, run `adbuddy screen` once more.
 - `adbuddy foreground`: the app and activity in front.
 - `adbuddy screenshot [--scale 0.5] [-o file.png]`: a screenshot in this environment (`screenshots/` by default). Prefer `adbuddy screen`: it is text and much smaller.
 

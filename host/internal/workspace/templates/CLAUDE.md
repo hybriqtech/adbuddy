@@ -1,4 +1,5 @@
 @AGENTS.md
+@NOTES.md
 
 ## Claude Code
 
