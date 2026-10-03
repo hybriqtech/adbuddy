@@ -60,6 +60,11 @@ jobs:
       ADBUDDY_EMU_PORT: "5592"
       ADBUDDY_EMU_ADB_PORT: "5051"
       ADBUDDY_EMU_STABLE_SECS: "120"
+      # GPU rendering inside the guest instead of on the host (swiftshader_indirect): with it qemu goes from
+      # about 3.6 to 6.0 GB across the guard tests (the "Emulator memory" lines of the logs); with guest the
+      # host side should stay near the guest RAM plus about 1 GB. The "Emulator memory after ..." steps
+      # of this job are the check; if the tests fail with guest, remove this line.
+      ADBUDDY_EMU_GPU: guest
       ADBUDDY_EMULATOR_CUT: ""
       # Its adb server never auto-connects a phone over mDNS.
       ADB_MDNS: "0"
