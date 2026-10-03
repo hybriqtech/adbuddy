@@ -162,6 +162,9 @@ func (e *emu) closedAtStartAndEnd(t *testing.T) {
 	t.Cleanup(func() {
 		c := *e
 		c.ctx = context.WithoutCancel(e.ctx)
+		// A restart ordered by an earlier cleanup leaves the emulator offline
+		// for a few seconds.
+		c.waitState(func(s string) bool { return s == "device" }, 60*time.Second)
 		pid, p, ok := c.adbdNow()
 		if !ok {
 			t.Errorf("could not read adbd's pid and port at the cleanup (emulator %q): the port may be left open; %s", c.state(), restartHint)
@@ -444,6 +447,34 @@ func cardText(nodes []uiNode) string {
 	return ""
 }
 
+// cardSwitch waits up to 5 s for the remote card's switch. Compose draws it as
+// a plain android.view.View, not an android.widget.Switch: it is the first
+// text-less View beside "Remote mode" in the card's row (same parent), the
+// rightmost thing of the row.
+func (e *emu) cardSwitch(t *testing.T) uiNode {
+	t.Helper()
+	var found uiNode
+	var last []uiNode
+	if !poll(5*time.Second, func() bool {
+		last = e.screen(t)
+		for _, title := range last {
+			if title.Text != "Remote mode" {
+				continue
+			}
+			for _, n := range last {
+				if n.Parent == title.Parent && n.Class == "android.view.View" && n.Text == "" && n.X > title.X {
+					found = n
+					return true
+				}
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("no the card's switch on screen in 5 s: %+v", last)
+	}
+	return found
+}
+
 // Validation 13 of M5b, on the emulator, with the answer lost (M5b ruling
 // 3): the remote card's switch sends remote.set; the harness, as serve, runs
 // the real Enable (adb tcpip 5555 restarts adbd and drops the tunnel) and does
@@ -467,7 +498,7 @@ func TestTheCardSaysUnknownWhenTheAnswerIsLost(t *testing.T) {
 	l.send(t, bridge.TypeRemoteState, bridge.RemoteState{})
 	l.openChat(t)
 	e.waitNode(t, "the card saying Off", 15*time.Second, func(n uiNode) bool { return n.Text == "Off" })
-	e.tap(t, e.waitNode(t, "the card's switch", 5*time.Second, func(n uiNode) bool { return n.Class == "android.widget.Switch" }))
+	e.tap(t, e.cardSwitch(t))
 	e.tap(t, e.waitNode(t, "Turn on", 10*time.Second, func(n uiNode) bool { return n.Text == "Turn on" }))
 	req := l.waitFor(t, bridge.TypeRemoteSet, 10*time.Second)
 	if p := payload[bridge.RemoteSet](t, req); !p.Enabled {

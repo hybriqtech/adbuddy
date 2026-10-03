@@ -95,8 +95,10 @@ func TestASecondProviderOnTheAuthorityIsRefused(t *testing.T) {
 	refused("with ADBuddy's provider enabled")
 
 	// With ADBuddy's provider disabled the authority is still taken.
-	e.atCleanup(t, "shell", shq.Join("pm", "enable", providerComponent))
-	e.shell(t, shq.Join("pm", "disable", providerComponent))
+	// The shell user cannot change component state (SecurityException): the
+	// userdebug image gives su.
+	e.atCleanup(t, "shell", "su 0 pm enable "+providerComponent)
+	e.shell(t, "su 0 pm disable "+providerComponent)
 	refused("with ADBuddy's provider disabled")
 }
 
