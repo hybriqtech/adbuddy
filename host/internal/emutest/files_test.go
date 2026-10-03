@@ -17,7 +17,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 )
 
-// Files over the channel (validation 3 of M3b, a and b): the upload of a file
+// Files over the channel (validation 3 of M3b, a and b; the downloads, c-e, are in downloads_test.go): the upload of a file
 // chosen in the phone's picker, with the SHA-256 of the bytes the host got.
 //
 // Mutations. Each test must go red when the host's side misbehaves; the
@@ -27,6 +27,9 @@ import (
 //	corrupt-byte  the host damages one byte of one frame it received   (TestUploadSendsTheRealBytes)
 //	skip-frame    the host drops one frame it received                  (TestUploadSendsTheRealBytes)
 //	ready-zero    the host answers attach.ready{offset:0} after a cut   (TestUploadResumesAfterACut)
+//	corrupt-frame the host damages a byte of every frame it serves      (TestDownloadsBringTheRealBytes, TestDownloadResumesAfterACut)
+//	ignore-offset the host serves from 0 whatever file.get asked        (TestDownloadResumesAfterACut)
+//	heal-on-retry the host stops damaging frames on the app's retry     (TestDownloadRetriesOnceThenFails)
 //
 //	ADBUDDY_EMUTEST_MUTATE=corrupt-byte go test -count=1 -run TestUploadSendsTheRealBytes ./internal/emutest
 //
@@ -42,7 +45,7 @@ func mutation(t *testing.T, taken ...string) string {
 	switch m {
 	case "":
 		return ""
-	case "corrupt-byte", "skip-frame", "ready-zero":
+	case "corrupt-byte", "skip-frame", "ready-zero", "corrupt-frame", "ignore-offset", "heal-on-retry":
 	default:
 		t.Fatalf("%s=%q: unknown mutation", mutateEnv, m)
 	}

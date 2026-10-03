@@ -285,11 +285,30 @@ func (l *link) reply(t *testing.T, req bridge.Message, typ string, p any) {
 	}
 }
 
+// serveOpts are the ways a host can misbehave when it serves a file.
+type serveOpts struct {
+	// limit > 0: only that many bytes from the offset asked for, and no
+	// file.end: the host stalls there (the test then cuts or cancels).
+	limit int64
+	// corrupt damages the first byte of every frame it sends.
+	corrupt bool
+	// fromZero ignores the offset the app asked for and serves from 0.
+	fromZero bool
+	// endSize, when not 0, is the Size file.end carries instead of the real one.
+	endSize int64
+}
+
 // sendFile serves req, a file.get of the app, from data (the whole file): the
 // binary frames from the offset asked for, in frames of MaxFrameData, and then
 // file.end as a reply; the queue sends them in that order (spec M3 §6.2). It
 // blocks while the app is slow to take them.
 func (l *link) sendFile(t *testing.T, req bridge.Message, data []byte) {
+	t.Helper()
+	l.serveFile(t, req, data, serveOpts{})
+}
+
+// serveFile is sendFile with the host's misbehaviour of opt.
+func (l *link) serveFile(t *testing.T, req bridge.Message, data []byte, opt serveOpts) {
 	t.Helper()
 	g := payload[bridge.FileGet](t, req)
 	id, err := bridge.ParseFrameID(g.ID)
@@ -299,9 +318,21 @@ func (l *link) sendFile(t *testing.T, req bridge.Message, data []byte) {
 	if g.Offset < 0 || g.Offset > int64(len(data)) {
 		t.Fatalf("file.get offset %d outside the %d bytes of the file", g.Offset, len(data))
 	}
-	for off := g.Offset; off < int64(len(data)); {
-		n := min(int64(bridge.MaxFrameData), int64(len(data))-off)
-		frame, err := bridge.EncodeFrame(id, off, data[off:off+n])
+	from, end := g.Offset, int64(len(data))
+	if opt.fromZero {
+		from = 0
+	}
+	if opt.limit > 0 {
+		end = min(end, from+opt.limit)
+	}
+	for off := from; off < end; {
+		n := min(int64(bridge.MaxFrameData), end-off)
+		chunk := data[off : off+n]
+		if opt.corrupt {
+			chunk = append([]byte(nil), chunk...)
+			chunk[0] ^= 0xff
+		}
+		frame, err := bridge.EncodeFrame(id, off, chunk)
 		if err != nil {
 			t.Fatalf("frame at %d: %v", off, err)
 		}
@@ -310,7 +341,14 @@ func (l *link) sendFile(t *testing.T, req bridge.Message, data []byte) {
 		}
 		off += n
 	}
-	l.reply(t, req, bridge.TypeFileEnd, bridge.FileEnd{ID: g.ID, Size: int64(len(data))})
+	if opt.limit > 0 && end < int64(len(data)) {
+		return
+	}
+	size := int64(len(data))
+	if opt.endSize != 0 {
+		size = opt.endSize
+	}
+	l.reply(t, req, bridge.TypeFileEnd, bridge.FileEnd{ID: g.ID, Size: size})
 }
 
 // connected reports whether the app is connected now.
