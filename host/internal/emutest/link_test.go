@@ -54,7 +54,14 @@ type link struct {
 func openLink(t *testing.T) *link {
 	t.Helper()
 	e := newEmu(t)
-	v := e.installApp(t)
+	return e.linkTo(t, e.installApp(t))
+}
+
+// linkTo is openLink for the app v checked, already installed (and
+// uninstalled at cleanup) by its caller: the debug app (installApp) or
+// another build, such as the release one (installRelease).
+func (e *emu) linkTo(t *testing.T, v phoneapp.Verified) *link {
+	t.Helper()
 	if err := phoneapp.AllowBackground(e.ctx, e.adb, v); err != nil {
 		t.Fatalf("battery optimisation: %v", err)
 	}
