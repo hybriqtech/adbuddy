@@ -4,6 +4,10 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -33,6 +37,14 @@ class NotificationAccessScreensTest(private val mode: ScreenMode) {
 
     private fun show(effective: Effective, confirmed: Boolean, checking: Boolean = false) {
         compose.setContent { AdbuddyTheme(dynamic = false) { NotificationAccessContent(null, checking, confirmed, effective, {}, {}, {}, {}, {}, {}) } }
+    }
+
+    /** The restricted-settings hint is one merged node (its icon is not announced), between the state and the button. */
+    private fun assertHintBetween(stateTitle: Int) {
+        fun top(id: Int) = compose.onNodeWithText(text(id)).fetchSemanticsNode().positionInRoot.y
+        fun bottom(id: Int) = compose.onNodeWithText(text(id)).fetchSemanticsNode().let { it.positionInRoot.y + it.size.height }
+        assertNull(compose.onNodeWithText(text(R.string.access_restricted_hint)).fetchSemanticsNode().config.getOrNull(SemanticsProperties.ContentDescription))
+        assertTrue("state, then the hint, then the button", bottom(stateTitle) <= top(R.string.access_restricted_hint) + 0.5f && bottom(R.string.access_restricted_hint) <= top(R.string.access_open) + 0.5f)
     }
 
     /** The state's title and detail, the buttons it shows and the ones it must not; then the texts and the image. */
@@ -75,6 +87,7 @@ class NotificationAccessScreensTest(private val mode: ScreenMode) {
 
     @Test fun notAllowed() {
         show(Effective.OFF, confirmed = false)
+        assertHintBetween(R.string.access_state_denied)
         check(
             "access_not_allowed", R.string.access_state_denied, R.string.access_detail_denied,
             shown = listOf(R.string.access_open, R.string.access_restricted_hint),
@@ -84,6 +97,7 @@ class NotificationAccessScreensTest(private val mode: ScreenMode) {
 
     @Test fun unknown() {
         show(Effective.UNKNOWN, confirmed = false)
+        assertHintBetween(R.string.access_state_unknown)
         check(
             "access_unknown", R.string.access_state_unknown, R.string.access_detail_unknown,
             shown = listOf(R.string.access_open, R.string.access_restricted_hint),

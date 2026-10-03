@@ -156,6 +156,8 @@ fun NotificationAccessContent(
                 if (effective == Effective.NEEDS_CONFIRMATION) Button(onClick = onConfirm) { Text(stringResource(R.string.access_confirm)) }
                 if (confirmed) OutlinedButton(onClick = onWithdraw) { Text(stringResource(R.string.access_withdraw)) }
             }
+            // The advice that matters when the system's switch is greyed out sits between the state and the button.
+            if (!checking && (effective == Effective.OFF || effective == Effective.UNKNOWN)) RestrictedHint()
             FilledTonalButton(onClick = onOpen) { Text(stringResource(R.string.access_open)) }
             // The way out of the step says it is later, and where to turn it on.
             if (step != null && effective != Effective.ON) {
@@ -165,18 +167,23 @@ fun NotificationAccessContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (!checking && (effective == Effective.OFF || effective == Effective.UNKNOWN)) {
-                Text(
-                    stringResource(R.string.access_restricted_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             Text(
                 stringResource(R.string.access_codes_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/** Why the system's switch may be greyed out, and what to do: an information card, not the smallest line. */
+@Composable
+private fun RestrictedHint() {
+    val scheme = MaterialTheme.colorScheme
+    Surface(modifier = Modifier.semantics(mergeDescendants = true) {}, color = scheme.secondaryContainer, contentColor = scheme.onSecondaryContainer, shape = MaterialTheme.shapes.medium) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+            Icon(Icons.Default.Info, contentDescription = null)
+            Text(stringResource(R.string.access_restricted_hint), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
