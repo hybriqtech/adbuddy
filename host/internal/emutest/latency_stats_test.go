@@ -85,3 +85,13 @@ func (r *Report) Flush(logf func(string, ...any)) {
 		}
 	}
 }
+
+// reportLine appends one line to $ADBUDDY_LATENCY_OUT (when set).
+func reportLine(line string) {
+	if p := os.Getenv("ADBUDDY_LATENCY_OUT"); p != "" {
+		if f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			_, _ = f.WriteString(line + "\n")
+			_ = f.Close()
+		}
+	}
+}
