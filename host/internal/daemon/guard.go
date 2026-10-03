@@ -422,14 +422,19 @@ func adbuddyInFrontReason(viaApp bool) string {
 }
 
 // screenProtectedReason is why the app says the screen is protected: not
-// always a protected app, but also a notification on screen or a window whose
-// content the service cannot see. pkg is only what is in front (may be "").
+// always a protected app, but also a notification that just arrived (the app
+// counts any for about 8 s, as it may be a heads-up with a code) or a window
+// whose content the service cannot see. The host cannot tell which, and the
+// likeliest, a notification, passes within seconds (V45): the agent is told
+// to wait and try once more before asking the user. It starts as before,
+// which the agent's context and the skills quote. pkg is only what is in
+// front (may be "").
 func screenProtectedReason(pkg string) string {
 	in := ""
 	if pkg != "" {
 		in = "; " + classify.Printable(pkg) + " is in front"
 	}
-	return "something on the screen is protected (a protected app, a notification or a window ADBuddy cannot read" + in + "); ask the user to do this part"
+	return "something on the screen is protected (a protected app, a notification or a window ADBuddy cannot read" + in + "). A notification that just arrived counts for about 8 seconds: wait 10 seconds and try once more; if it is still blocked, ask the user to do this part"
 }
 
 // protected reports whether pkg is ADBuddy or one of the user's protected apps.
