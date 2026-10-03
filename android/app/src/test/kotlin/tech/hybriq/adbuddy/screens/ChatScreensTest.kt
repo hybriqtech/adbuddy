@@ -49,12 +49,12 @@ class ChatScreensTest(private val mode: ScreenMode) {
 
     private fun text(id: Int, vararg args: Any): String = app.getString(id, *args)
 
-    private fun show(state: BridgeState, cut: Boolean = false, configured: Boolean = true, outgoing: List<Outgoing> = emptyList(), terminalOpenByDefault: Boolean = true) {
+    private fun show(state: BridgeState, cut: Boolean = false, configured: Boolean = true, outgoing: List<Outgoing> = emptyList(), terminalOpenByDefault: Boolean = true, notificationsBlocked: Boolean = false) {
         compose.setContent {
             AdbuddyTheme(dynamic = false) {
                 ChatScreen(
                     state, outgoing = outgoing, drafts = emptyList(), downloads = emptyMap(), cut = cut, terminal = null,
-                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = configured, terminalOpenByDefault = terminalOpenByDefault, remoteCard = {},
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = configured, terminalOpenByDefault = terminalOpenByDefault, notificationsBlocked = notificationsBlocked, remoteCard = {},
                 )
             }
         }
@@ -93,6 +93,18 @@ class ChatScreensTest(private val mode: ScreenMode) {
         compose.assertTextsFit()
         compose.assertTitleFitsTheTopBar(text(R.string.session_idle))
         compose.shot("chat_connected_messages", mode)
+    }
+
+    @Test fun theNotificationsBannerShowsOnlyWhenTheyAreBlocked() {
+        val connected = BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc")
+        show(connected, notificationsBlocked = true)
+        compose.onNodeWithText(text(R.string.notifications_blocked)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.notifications_open_settings)).assertIsDisplayed()
+    }
+
+    @Test fun withNotificationsOnThereIsNoNotificationsBanner() {
+        show(BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), notificationsBlocked = false)
+        compose.onNodeWithText(text(R.string.notifications_blocked)).assertDoesNotExist()
     }
 
     @Test fun workingShowsStopInTheInputBar() {

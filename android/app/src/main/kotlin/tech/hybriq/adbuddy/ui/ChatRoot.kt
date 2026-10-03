@@ -24,6 +24,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
@@ -38,6 +39,8 @@ import tech.hybriq.adbuddy.control.CutAccess
 import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.DownloadState
 import tech.hybriq.adbuddy.files.FileIntents
+import tech.hybriq.adbuddy.notify.NotificationsStatus
+import tech.hybriq.adbuddy.notify.openNotificationSettings
 
 /**
  * The app's screens: the first-run steps until they are done (only when firstRun: the chat bubble passes
@@ -130,6 +133,12 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
 
     val holder = rememberSaveableStateHolder()
     val configured = remember(state.connection) { BridgePrefs(context).link != null }
+    var notifications by remember { mutableStateOf(NotificationsStatus.of(context)) }
+    // Back from the system settings the user may have turned them on: read them again.
+    LifecycleResumeEffect(Unit) {
+        notifications = NotificationsStatus.of(context)
+        onPauseOrDispose {}
+    }
     val back = { route = route.parent ?: Route.CHAT }
     val first = step
     if (first != null) {
@@ -145,7 +154,8 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             // The chat leaves the composition under Settings and Activity: its state (the text being written,
             // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
             Route.CHAT -> holder.SaveableStateProvider("chat") {
-                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured, terminalOpenByDefault = terminalOpenByDefault) {
+                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured, terminalOpenByDefault = terminalOpenByDefault,
+                    notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) }) {
                     RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
                 }
             }

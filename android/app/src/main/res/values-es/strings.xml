@@ -39,6 +39,8 @@
     <string name="status_short_paused">En pausa</string>
     <string name="status_short_not_set_up">Sin configurar</string>
     <string name="status_short_connected">Conectado</string>
+    <string name="notifications_blocked">Las notificaciones de ADBuddy están desactivadas o silenciadas: no se te avisará cuando el agente te pregunte algo. Actívalas en los ajustes del sistema.</string>
+    <string name="notifications_open_settings">Ajustes</string>
 
     <string name="action_allow">Permitir</string>
     <string name="action_deny">Rechazar</string>

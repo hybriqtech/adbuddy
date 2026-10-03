@@ -96,6 +96,9 @@ fun ChatScreen(
     configured: Boolean = true,
     /** False in the chat bubble (about 600 dp tall): the terminal starts folded and opens with the arrow. */
     terminalOpenByDefault: Boolean = true,
+    /** Notifications off or the confirm/ask channel silenced: the banner says so and opens the system settings. */
+    notificationsBlocked: Boolean = false,
+    onOpenNotificationSettings: () -> Unit = {},
     /** The remote-mode switch (RemoteCard), shown above the conversation; a preview passes an empty one. */
     remoteCard: @Composable () -> Unit,
 ) {
@@ -165,6 +168,7 @@ fun ChatScreen(
     ) { inner ->
         Column(Modifier.padding(inner).consumeWindowInsets(inner).imePadding().fillMaxSize()) {
             if (bannerStatus != null) LinkBanner(bannerStatus)
+            if (notificationsBlocked) NotificationsBanner(onOpenNotificationSettings)
             remoteCard()
             if (terminalOn) {
                 Box(Modifier.weight(0.45f).fillMaxSize()) {
