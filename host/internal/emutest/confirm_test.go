@@ -127,7 +127,7 @@ func question(id, title, raw string) bridge.ConfirmRequest {
 // openShade pulls the notification shade down (it goes up again at cleanup).
 func (e *emu) openShade(t *testing.T) {
 	t.Helper()
-	e.atCleanup(t, "shell", "cmd statusbar collapse")
+	e.cleanStateAtCleanup(t)
 	e.shell(t, "cmd statusbar expand-notifications")
 }
 
@@ -389,6 +389,10 @@ func (e *emu) lockWithPIN(t *testing.T) {
 		}
 		_, _, _, _ = e.adb.Output(ctx, "shell", "input keyevent KEYCODE_WAKEUP")
 		_, _, _, _ = e.adb.Output(ctx, "shell", "wm dismiss-keyguard")
+		// With the PIN gone: dismiss, collapse the shade, back to HOME.
+		if why := e.cleanState(); why != "" {
+			t.Logf("the emulator is left with %s", why)
+		}
 	})
 	e.shell(t, "locksettings set-pin "+testPIN)
 	e.lock(t)
@@ -397,6 +401,7 @@ func (e *emu) lockWithPIN(t *testing.T) {
 // lock puts the screen to sleep and wakes it on the lock screen.
 func (e *emu) lock(t *testing.T) {
 	t.Helper()
+	e.cleanStateAtCleanup(t)
 	e.shell(t, "input keyevent KEYCODE_SLEEP")
 	if !poll(10*time.Second, func() bool { return e.locked(t) }) {
 		t.Fatal("the device is not locked 10 s after going to sleep")

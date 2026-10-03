@@ -977,7 +977,7 @@ func TestTheScreenshotGoesToTheHost(t *testing.T) {
 
 	// The notification's action sends the screenshot at once.
 	const fromNotification = "fedcba9876543210fedcba9876543210"
-	e.atCleanup(t, "shell", "cmd statusbar collapse")
+	e.cleanStateAtCleanup(t)
 	e.shell(t, "cmd statusbar expand-notifications")
 	e.tap(t, e.waitNode(t, "Send screenshot", 10*time.Second, func(n uiNode) bool { return strings.EqualFold(n.Text, "Send screenshot") }))
 	l.answerCapture(t, fromNotification)
