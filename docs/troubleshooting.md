@@ -263,6 +263,8 @@ Other `Blocked by ADBuddy:` reasons exist, and the reason after the colon tells 
 |---|---|
 | `paused from the phone: nothing runs until you resume it there` | Choose **Resume** in the ADBuddy app. See [Pause and cut access](usage.md#pause-and-cut-access). |
 | `… is a protected app; ask the user to do this part` | An app ADBuddy protects is in front. Do that part yourself, or close the app. See [Protected apps and the screen](safety.md#protected-apps-and-the-screen). |
+| `tech.hybriq.adbuddy is a protected app: ADBuddy itself is in front …` | You are in the ADBuddy app, so the agent cannot use the screen. It may leave it with Home, or open the app it needs by its package when the ADBuddy app reports the screen; or you can switch to that app yourself. |
+| `something on the screen is protected (…)` | The app saw a notification that just arrived (it counts for about 8 seconds), a protected app, or a window ADBuddy cannot read. The agent waits 10 seconds and tries once more; if it still blocks, do that part yourself. |
 | `the journal cannot be written (…); without a journal no changes are allowed` | Make the `journal` folder of the environment writable and free some disk space. Doctor shows it on the `environment` line. |
 | `only the active phone can be used (…)` | The command named another phone (with `-s`, or through `ANDROID_SERIAL`). Run it for the active phone. |
 | `the adb option … is not allowed` | ADBuddy only talks to the active phone through its own adb server. Run the command without that option. |
