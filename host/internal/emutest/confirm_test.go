@@ -407,6 +407,74 @@ func (e *emu) lock(t *testing.T) {
 		t.Fatal("the device is not locked 10 s after going to sleep")
 	}
 	e.shell(t, "input keyevent KEYCODE_WAKEUP")
+	if !poll(10*time.Second, func() bool {
+		return strings.Contains(e.shell(t, "dumpsys power | grep -m1 mWakefulness="), "mWakefulness=Awake")
+	}) {
+		t.Fatal("the screen is not awake 10 s after KEYCODE_WAKEUP")
+	}
+	// A pending dismissKeyguardThenExecute (the known defect of the actions
+	// that ask to unlock) can make SystemUI show the bouncer, late, instead of
+	// the lock screen: BACK hides it without unlocking (never type the PIN here).
+	for try := 1; ; try++ {
+		var nodes []uiNode
+		sawBouncer := false
+		poll(3*time.Second, func() bool {
+			nodes = e.screen(t)
+			sawBouncer = bouncer(nodes)
+			return sawBouncer
+		})
+		switch lockAction(sawBouncer, try) {
+		case lockOK:
+			return
+		case lockFail:
+			t.Fatalf("the PIN bouncer is still on screen after %d BACK presses, not the lock screen: %s", try-1, trimNodes(nodes))
+		}
+		e.shell(t, "input keyevent KEYCODE_BACK")
+		if !poll(5*time.Second, func() bool { return !bouncer(e.screen(t)) && e.locked(t) }) {
+			t.Logf("lock(): the bouncer did not go away 5 s after BACK (try %d)", try)
+		}
+	}
+}
+
+// lockActions are the decisions of lock() after waking the screen.
+type lockActions int
+
+const (
+	lockOK   lockActions = iota // the lock screen is up
+	lockBack                    // the bouncer is up: press BACK
+	lockFail                    // the bouncer survived the BACKs
+)
+
+const lockMaxBacks = 2
+
+// lockAction decides, given whether the bouncer is on screen and the number of
+// this check (1 is the first), what lock() does next.
+func lockAction(bouncerUp bool, try int) lockActions {
+	switch {
+	case !bouncerUp:
+		return lockOK
+	case try > lockMaxBacks:
+		return lockFail
+	}
+	return lockBack
+}
+
+// trimNodes renders nodes for a failure message, at most 40 of them.
+func trimNodes(nodes []uiNode) string {
+	if len(nodes) > 40 {
+		return fmt.Sprintf("%+v ...(%d more)", nodes[:40], len(nodes)-40)
+	}
+	return fmt.Sprintf("%+v", nodes)
+}
+
+// diag logs the output of a read-only shell command, with a time limit; it
+// never fails the test.
+func (e *emu) diag(t *testing.T, command string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(e.ctx, 15*time.Second)
+	defer cancel()
+	out, errOut, code, err := e.adb.Output(ctx, "shell", command)
+	t.Logf("diag %q: exit %d, %v:\n%s%s", command, code, err, strings.TrimSpace(strings.ReplaceAll(out, "\r", "")), strings.TrimSpace(errOut))
 }
 
 // locked reports whether the device is locked (dumpsys trust).
@@ -479,8 +547,17 @@ func TestSwipeUpPoints(t *testing.T) {
 // waitNodes waits up to d for the screen to be as ok wants and returns its nodes, or fails.
 func (e *emu) waitNodes(t *testing.T, what string, d time.Duration, ok func([]uiNode) bool) []uiNode {
 	t.Helper()
+	return e.waitNodesDiag(t, what, d, ok, nil)
+}
+
+// waitNodesDiag is waitNodes that, before failing, runs diag (if not nil).
+func (e *emu) waitNodesDiag(t *testing.T, what string, d time.Duration, ok func([]uiNode) bool, diag func()) []uiNode {
+	t.Helper()
 	var nodes []uiNode
 	if !poll(d, func() bool { nodes = e.screen(t); return ok(nodes) }) {
+		if diag != nil {
+			diag()
+		}
 		t.Fatalf("no %s in %d s: %+v", what, int(d/time.Second), nodes)
 	}
 	return nodes
@@ -673,8 +750,11 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 	// name; without it, "emutest" being absent below would prove nothing.
 	e.shell(t, "settings put secure lock_screen_allow_private_notifications 1")
 	e.lock(t)
-	e.waitNodes(t, "the PC's name on the lock screen with private notifications allowed", 10*time.Second, func(nodes []uiNode) bool {
+	e.waitNodesDiag(t, "the PC's name on the lock screen with private notifications allowed", 10*time.Second, func(nodes []uiNode) bool {
 		return slices.ContainsFunc(nodes, func(n uiNode) bool { return strings.Contains(n.Text+n.Desc, "emutest") })
+	}, func() {
+		e.diag(t, "dumpsys window | grep -E 'mCurrentFocus|isKeyguardShowing|mKeyguardShowing|mDreamingLockscreen'")
+		e.diag(t, "dumpsys trust | head -30")
 	})
 	e.unlock(t)
 	e.shell(t, "settings put secure lock_screen_allow_private_notifications 0")
@@ -820,4 +900,22 @@ func (e *emu) screencap(t *testing.T, path string) {
 	e.run(t, "pull", remote, path)
 	e.shell(t, "rm -f "+remote)
 	t.Logf("screenshot: %s", path)
+}
+
+func TestLockAction(t *testing.T) {
+	for _, c := range []struct {
+		bouncer bool
+		try     int
+		want    lockActions
+	}{
+		{false, 1, lockOK},
+		{false, 3, lockOK},
+		{true, 1, lockBack},
+		{true, 2, lockBack},
+		{true, 3, lockFail},
+	} {
+		if got := lockAction(c.bouncer, c.try); got != c.want {
+			t.Errorf("lockAction(%v, %d) = %v, want %v", c.bouncer, c.try, got, c.want)
+		}
+	}
 }
