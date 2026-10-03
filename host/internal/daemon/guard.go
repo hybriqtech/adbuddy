@@ -348,7 +348,10 @@ func (g *guardReads) start(ctx context.Context, adb Executor, cmd string) <-chan
 // front is still decided first, with the same reasons in the same order; both
 // answers are still required (systemUIReason waits for them, and makes them
 // again when they are older than focusSlack); and every read still running
-// when the guard answers is cancelled and waited for.
+// when the guard answers is cancelled and waited for. With the app configured
+// but not answering (inFront falls back to dumpsys and viaApp is false), the
+// system windows were not started before and are read afterwards, in series,
+// as before P4: it is not an oversight.
 func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
 	// Nothing is started for a context that is already over (as before: the reads would fail).
 	if err := ctx.Err(); err != nil {

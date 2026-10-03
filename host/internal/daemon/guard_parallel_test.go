@@ -432,11 +432,37 @@ func shortSlack(t *testing.T, slack time.Duration) {
 }
 
 func TestGuardRereadsStaleReads(t *testing.T) {
-	slow := func(context.Context) { time.Sleep(150 * time.Millisecond) }
+	const slack = 20 * time.Millisecond
+	// meet closes the channel on the first call of a read (hook of the
+	// executor); wait blocks until every one of them is closed, and then
+	// lets more than focusSlack go by: the first reads are surely stale
+	// when the slow one ends, whatever the load of the machine.
+	meet := func() (chan struct{}, func(context.Context, int)) {
+		ch := make(chan struct{})
+		return ch, func(_ context.Context, n int) {
+			if n == 0 {
+				close(ch)
+			}
+		}
+	}
+	wait := func(t *testing.T, chs ...chan struct{}) {
+		t.Helper()
+		for _, ch := range chs {
+			select {
+			case <-ch:
+			case <-time.After(5 * time.Second):
+				t.Error("the first read never happened")
+				return
+			}
+		}
+		time.Sleep(slack * 5)
+	}
 	t.Run("the shade, behind a slow app", func(t *testing.T) {
-		shortSlack(t, 20*time.Millisecond)
+		shortSlack(t, slack)
 		g, app := quietPhone(), settingsApp()
-		app.hook = slow
+		read, hook := meet()
+		g.hooks[fixedFocusCmd] = hook
+		app.hook = func(context.Context) { wait(t, read) }
 		g.answer(fixedFocusCmd, gateReply{out: focusApp}, gateReply{out: focusShade})
 		if why := gateDaemon(g, app).guardForeground(context.Background(), tapWords); why != shadeOpen {
 			t.Fatalf("got %q", why)
@@ -457,9 +483,13 @@ func TestGuardRereadsStaleReads(t *testing.T) {
 		}
 	})
 	t.Run("a heads-up that comes while dumpsys activity is slow", func(t *testing.T) {
-		shortSlack(t, 20*time.Millisecond)
+		shortSlack(t, slack)
 		g := quietPhone()
-		g.hooks["dumpsys activity activities"] = func(context.Context, int) { time.Sleep(150 * time.Millisecond) }
+		readF, hookF := meet()
+		readW, hookW := meet()
+		g.hooks[fixedFocusCmd] = hookF
+		g.hooks[fixedWindowsCmd] = hookW
+		g.hooks["dumpsys activity activities"] = func(context.Context, int) { wait(t, readF, readW) }
 		g.answer(fixedWindowsCmd, gateReply{out: windowsQuiet}, gateReply{out: windowsHeadsUp})
 		why := gateDaemon(g, nil).guardForeground(context.Background(), tapWords)
 		if !strings.HasPrefix(why, "a system window is on screen (") {
