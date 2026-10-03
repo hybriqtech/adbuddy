@@ -29,7 +29,7 @@ Doctor checks, in this order, what ADBuddy needs. A check that depends on one th
 4. **serve**: whether `adbuddy serve` is running.
 5. **phone**: the phone you set up is connected to that server.
 6. **identity**: that phone is the one you set up, not another phone on the network. When ADBuddy cannot tell (it keeps the phone under a name with no serial number), this is a `⚠` that says so.
-7. **network port**: adb's network port on the phone (the `tcpip` mode) is closed, or says why it is open.
+7. **network port**: adb's network port on the phone (the `tcpip` mode) is closed, or says why it is open. It reads `persist.adb.tcp.port` too: when that property names a port, the port is not closed for good (see [Doctor says `persist.adb.tcp.port` is set](#doctor-says-persistadbtcpport-is-set)).
 8. **phone app**: the ADBuddy app is installed and set up (the permission for Cut access, the accessibility service, the battery exemption) and, with serve running, its channel to the host is open.
 9. **environment**: the agent's folder has `AGENTS.md` and the `adb` shim, and the journal can be written.
 10. **claude hooks**: warns when your Claude Code settings already have `PermissionRequest` or `PreToolUse` hooks, which can answer the same request as ADBuddy.
@@ -134,7 +134,7 @@ When a command fails, it prints `Error: <CODE> — <message>` and, when there is
 | `DAEMON_NOT_RUNNING` | 1 | A command that needs serve found none. `adbuddy journal --session current` also says it. (The agent's `adb` says something else: see [The agent's `adb` says the host is not running](#the-agents-adb-says-the-host-is-not-running).) | Start `adbuddy serve` in another terminal. For the journal, pass `--session <id>` (ids start with `s_`). |
 | `DAEMON_UNREACHABLE` | 1 | The ADBuddy socket exists but does not answer. | Stop the other `adbuddy serve`, or delete the socket file the message names if none is running. From `adbuddy run`: restart serve. |
 | `DEVICE_NOT_FOUND` | 75 | No phone in state `device` on ADBuddy's adb server; or none of its saved addresses worked; or the phone did not come back after `adb usb`. | See [The PC cannot find the phone](#the-pc-cannot-find-the-phone). |
-| `DEVICE_PORT_OPEN` | 1 | adb's network port on the phone is still open after `adb usb` (`adbuddy serve` and `adbuddy setup`). | Restart the phone (that closes a port opened with `adb tcpip`), turn Wireless debugging on again and run the command again. |
+| `DEVICE_PORT_OPEN` | 1 | adb's network port on the phone is still open after `adb usb` (`adbuddy serve` and `adbuddy setup`). | Restart the phone (that closes a port opened with `adb tcpip`), turn Wireless debugging on again and run the command again. When the message names `persist.adb.tcp.port`, a restart opens it again: see [Doctor says `persist.adb.tcp.port` is set](#doctor-says-persistadbtcpport-is-set). |
 | `DEVICE_UNREADABLE` | 1 (75 when the phone did not answer in time) | The phone did not answer a read. | Unlock the phone and check that it is still connected. |
 | `DIRS_UNKNOWN` | 78 | ADBuddy cannot work out its configuration and data folders. | Set `ADBUDDY_CONFIG_DIR` and `ADBUDDY_DATA_DIR`. |
 | `DOCTOR_BROKEN` | 1 | `adbuddy doctor --json` found a failed check. | Follow the `run` and `guidance` of the failed checks, from the top. |
@@ -216,6 +216,12 @@ Every time Wireless debugging is turned on again, the phone picks a new port. If
 4. Run `adbuddy serve` again.
 
 While serve runs, it also watches the phone. If it disappears, serve may try the saved address, the local network and the phone's Tailscale address, and it only switches to a phone it can verify is the one you set up ([Use ADBuddy](usage.md#remote-mode)).
+
+### Doctor says `persist.adb.tcp.port` is set
+
+Some ROMs (a setting often called "ADB over network"), root apps or a command run before ADBuddy set the property `persist.adb.tcp.port`. While it names a port, adb listens on that port, on every network, each time the phone restarts. ADBuddy never sets it and cannot clear it without root: `adb usb`, which `adbuddy serve` runs when it starts and `adbuddy remote off` runs, only closes the port until the next restart. If the phone restarts while serve runs, serve only warns when the phone comes back ("adb listens on network port … again"): run `adbuddy remote off` to close the port. ADBuddy says so in `adbuddy doctor`, in the serve terminal and in `adbuddy remote off` and `adbuddy remote status` (`persistPort` in `--json`), and never calls that port closed.
+
+To remove it, turn off the setting or app that set it. With root, empty it as root (`setprop persist.adb.tcp.port ''`) and restart the phone. Then run `adbuddy doctor` again.
 
 ### "Wrong password" and `protocol fault` when pairing
 
