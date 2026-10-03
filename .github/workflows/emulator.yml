@@ -1,4 +1,10 @@
 name: emulator
+# Trust rule: a pull request opened by anyone but the repository owner
+# (Dependabot, other bots, collaborators) never reaches a self-hosted runner;
+# it runs on GitHub-hosted runners whatever the CI_* variables say. See
+# docs/ci-self-hosted.md section 6.
+# Its job is skipped for such pull requests; the owner runs it by hand
+# (workflow_dispatch) after reviewing the diff.
 # Runners come from repository variables (docs/ci-self-hosted.md); with none
 # set, GitHub-hosted runners are used.
 
@@ -30,7 +36,7 @@ jobs:
   mksh:
     name: oracle against the emulator's mksh
     # Fork pull requests never reach a self-hosted runner.
-    if: ${{ vars.CI_RUNNER_EMULATOR != '"none"' && (vars.CI_RUNNER_EMULATOR == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    if: ${{ vars.CI_RUNNER_EMULATOR != '"none"' && (vars.CI_RUNNER_EMULATOR == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) }}
     runs-on: ${{ fromJSON(vars.CI_RUNNER_EMULATOR || '"ubuntu-latest"') }}
     timeout-minutes: 90
     # Its own AVD, emulator port and adb server, so it never collides with an

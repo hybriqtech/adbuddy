@@ -1,4 +1,8 @@
 name: release-check
+# Trust rule: a pull request opened by anyone but the repository owner
+# (Dependabot, other bots, collaborators) never reaches a self-hosted runner;
+# it runs on GitHub-hosted runners whatever the CI_* variables say. See
+# docs/ci-self-hosted.md section 6.
 
 # Builds everything the release workflow builds, without publishing and
 # without secrets (spec M6a §9). pull_request only, never
@@ -41,7 +45,7 @@ jobs:
   scripts:
     # Fork pull requests never reach a self-hosted runner.
     if: ${{ vars.CI_RUNNER_RELEASE != '"none"' && (vars.CI_RUNNER_RELEASE == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_RELEASE || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && vars.CI_RUNNER_RELEASE || '"ubuntu-latest"') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,7 +58,7 @@ jobs:
   goreleaser:
     # Fork pull requests never reach a self-hosted runner.
     if: ${{ vars.CI_RUNNER_RELEASE != '"none"' && (vars.CI_RUNNER_RELEASE == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_RELEASE || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && vars.CI_RUNNER_RELEASE || '"ubuntu-latest"') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,7 +94,7 @@ jobs:
   sign:
     # Fork pull requests never reach a self-hosted runner.
     if: ${{ vars.CI_RUNNER_SIGN != '"none"' && (vars.CI_RUNNER_SIGN == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_SIGN || '"ubuntu-latest"') }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && vars.CI_RUNNER_SIGN || '"ubuntu-latest"') }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

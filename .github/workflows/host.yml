@@ -1,4 +1,8 @@
 name: host
+# Trust rule: a pull request opened by anyone but the repository owner
+# (Dependabot, other bots, collaborators) never reaches a self-hosted runner;
+# it runs on GitHub-hosted runners whatever the CI_* variables say. See
+# docs/ci-self-hosted.md section 6.
 # Runners come from repository variables (docs/ci-self-hosted.md); with none
 # set, GitHub-hosted runners are used.
 
@@ -21,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(vars.CI_HOST_MATRIX || '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":"windows-latest"},{"name":"macos-latest","runner":"macos-latest"}]') }}
+        include: ${{ fromJSON(!(github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && '[{"name":"ubuntu-latest","runner":"ubuntu-latest"}]' || vars.CI_HOST_MATRIX || '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":"windows-latest"},{"name":"macos-latest","runner":"macos-latest"}]') }}
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
