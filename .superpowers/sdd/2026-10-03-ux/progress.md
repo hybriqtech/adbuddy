@@ -84,3 +84,9 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - Ruling: menores 1-4 de la final (foreground atascado en multiventana/PiP, pregunta sin tarjeta fuera del chat, reaviso al plegar la burbuja, banner+dialogo a la vez en Android 13) — DEFER, anotados en el fragmento — cuestan: casos raros o de ruido.
 - Aviso al lider: C27 (iconos, LinkDialog saveable, boton del terminal) quedan sin destino en P5; que el controlador de integracion los apunte en pendientes.
 - P4: listo para PR (ux/p4).
+
+## Fase 2 - P6a (CLI: textos, ayuda y errores de uso) en la rama ux/p6 (desde ux/p4; P5 queda a la espera de la base de seguridad)
+- P4 subido (ux/p4 9008b28, avisado). Plan P6a: docs/superpowers/plans/2026-10-04-ux-p6a-cli-textos-y-ayuda.md, revisado por adbuddy-reviewer-opus (a334c9a2): 4 bloqueos (mainContext rompia exitCodeError; claves dinamicas en forCommand y confirmersNote contra TestKeysExist; textos de H10 falsos) y 12 importantes, todos incorporados.
+- Ruling: orden P6a antes de P5 — P5 espera la base de seguridad (fix/confirm-arming, tapjacking) y P6a es independiente (solo host/internal/cli) — cuesta: P5 mas tarde.
+- Ruling: H2, H5, H13 a P6b; H14 fuera de arbol; Example de attach/new/send/stop/env/version, Long<=80 y prefijos ⚠/⏳ aplazados — la lista de P6a ya es larga y esos piden golden amplio — cuesta: ayuda sin ejemplos por comando.
+- HALLAZGO (opus, ver mensaje al lider): docs/usage.md:~107 y docs/safety.md:~84 dicen que --confirm deny deniega todo, pero con el movil conectado la 🔴 se pregunta en la app. No se editan aqui (frases de seguridad): van al fragmento y al lider/seguridad.
