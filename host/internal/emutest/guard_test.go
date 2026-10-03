@@ -47,19 +47,6 @@ var guardReads = map[string]string{
 	"accessibility": "dumpsys accessibility",
 }
 
-// wallpaperWindow is the title of the wallpaper's window on the API 34 image:
-// a window of systemui, visible (mViewVisibility=0x0) behind every app, that
-// fixedSystemUI (uidump/window.go) does not list (it has "ImageWallpaper").
-// Without the app the guard then sees an unknown system window on every
-// screen and blocks every command that touches or reads it.
-// TODO(adjudicar): product finding of T5. Blocking more is safe, so the tests
-// expect today's decision; once the title is listed, wallpaperReason becomes
-// "the command runs".
-const wallpaperWindow = "com.android.systemui.wallpapers.ImageWallpaper"
-
-// wallpaperReason is today's refusal on a screen with nothing over the app.
-const wallpaperReason = "a system window is on screen (" + wallpaperWindow + ")"
-
 // read runs one of guardReads on the emulator as the guard does (adb shell,
 // the output untouched) and records it as state's (not when state is "").
 func (e *emu) read(t *testing.T, state, name string) string {
@@ -332,6 +319,15 @@ func (g *hostGuard) passes(t *testing.T, argv ...string) {
 	}
 }
 
+// notBlocked checks that the guard does not refuse argv; what argv itself
+// does then (a screenshot with the screen off) is not the guard's.
+func (g *hostGuard) notBlocked(t *testing.T, argv ...string) {
+	t.Helper()
+	if exit := g.exec(argv...); exit.Code == daemon.ExitDenied || strings.Contains(exit.Error, "Blocked by ADBuddy") {
+		t.Errorf("%q: exit %d %q, want the guard to let it run", argv, exit.Code, exit.Error)
+	}
+}
+
 var (
 	screencap = []string{"exec-out", "screencap", "-p"}
 	tapMiddle = []string{"shell", "input", "tap", "540", "1200"}
@@ -343,11 +339,12 @@ var (
 
 func xyArgs(x, y int) bridge.UIClickArgs { return bridge.UIClickArgs{X: &x, Y: &y} }
 
-// onlyWallpaper checks that the only unknown system window is the wallpaper's.
-func onlyWallpaper(t *testing.T, s screenState) {
+// noSystemWindow checks that no unknown system window is on screen: only the
+// fixed ones, the wallpaper's among them (the T5 finding, fixed).
+func noSystemWindow(t *testing.T, s screenState) {
 	t.Helper()
-	if !slices.Equal(s.unknown, []string{wallpaperWindow}) {
-		t.Errorf("unknown system windows %q, want only the wallpaper's", s.unknown)
+	if len(s.unknown) != 0 {
+		t.Errorf("unknown system windows %q, want none", s.unknown)
 	}
 }
 
@@ -366,20 +363,21 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 	e.atCleanup(t, "shell", "input keyevent KEYCODE_WAKEUP")
 	g := newHostGuard(t, e, nil)
 
-	// Settings in front, nothing over it. The command should run; today the
-	// wallpaper's window blocks it (wallpaperWindow).
+	// Settings in front, nothing over it: the command runs.
 	t.Run("settings", func(t *testing.T) {
 		e.openSettings(t)
 		s := e.snapshot(t, "settings")
 		if !slices.Equal(s.resumed, []string{settingsPkg}) || shade(s.focus) || s.asleep {
 			t.Errorf("Settings in front: %+v", s)
 		}
-		onlyWallpaper(t, s)
+		noSystemWindow(t, s)
 		if _, err := uidump.Find(e.screenXML(t, "settings", false), "", "Network & internet", nil); err != nil {
 			t.Errorf("Find Network & internet in Settings: %v", err)
 		}
-		g.blocks(t, wallpaperReason, screencap...)
-		g.helperBlocks(t, wallpaperReason, bridge.UIOpDump, bridge.UIDumpArgs{})
+		g.passes(t, screencap...)
+		if exit, data := g.helper(bridge.UIOpDump, bridge.UIDumpArgs{}); exit.Code != 0 || !strings.Contains(data, `"package":"`+settingsPkg+`"`) {
+			t.Errorf("adbuddy screen on Settings: %+v %.200s, want uiautomator's dump of Settings", exit, data)
+		}
 	})
 
 	// ADBuddy in front (V44): nothing touches or reads it; Home alone leaves.
@@ -434,7 +432,7 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 				time.Sleep(time.Second)
 			}
 			e.waitFocus(t, "the shade closed by Back", noShade)
-			g.blocks(t, wallpaperReason, screencap...)
+			g.passes(t, screencap...)
 		})
 	}
 
@@ -451,8 +449,8 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 		if !strings.Contains(e.read(t, "keyboard", "windows"), " u0 InputMethod}:") || len(s.resumed) == 0 || s.resumed[0] != "com.google.android.settings.intelligence" {
 			t.Errorf("keyboard: %+v", s)
 		}
-		onlyWallpaper(t, s)
-		g.blocks(t, wallpaperReason, screencap...)
+		noSystemWindow(t, s)
+		g.passes(t, screencap...)
 		e.shell(t, "am force-stop com.google.android.settings.intelligence")
 	})
 
@@ -523,7 +521,7 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 		if !s.asleep || shade(s.focus) {
 			t.Errorf("screen off: %+v", s)
 		}
-		g.blocks(t, wallpaperReason, screencap...)
+		g.notBlocked(t, screencap...)
 		g.passes(t, keyWake...)
 		e.waitFocus(t, "Settings focused after the wake key", focusedOn(settingsPkg))
 
@@ -578,8 +576,8 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 // TestTheGuardWithAHeadsUp (the sample of M5b-17): a heads-up of an app over
 // Settings shows NotificationShade visible in dumpsys window windows, and the
 // guard without the app refuses because of it; once the heads-up is gone the
-// notification stays in the shade and only the fixed windows (and the
-// wallpaper's) are left.
+// notification stays in the shade and only the fixed windows (the wallpaper's
+// among them) are left: the command runs.
 func TestTheGuardWithAHeadsUp(t *testing.T) {
 	e := newEmu(t)
 	e.installApp(t)
@@ -607,8 +605,8 @@ func TestTheGuardWithAHeadsUp(t *testing.T) {
 		t.Error("the notification is gone with the heads-up")
 	}
 	s = e.snapshot(t, "headsup-gone")
-	onlyWallpaper(t, s)
-	g.blocks(t, wallpaperReason, screencap...)
+	noSystemWindow(t, s)
+	g.passes(t, screencap...)
 	release()
 }
 
@@ -801,21 +799,16 @@ func a11yBound(dump string) bool {
 // uiautomator while ADBuddy's accessibility service is off, and answers
 // UI_UNAVAILABLE while it is on, without running uiautomator: the service
 // stays bound. dumpsys accessibility in each case is recorded
-// (uidump.ServiceOn, M5a-9). The guard in front of the fallback would refuse
-// on every screen today (wallpaperWindow), so the app only answers what is in
-// front (Settings, as it would); every other helper finds no app.
+// (uidump.ServiceOn, M5a-9). There is no app at all: the guard in front of the
+// fallback reads dumpsys, and with Settings in front and nothing over it lets
+// the helper run.
 func TestTheFallbackWithoutTheApp(t *testing.T) {
 	e := newEmu(t)
 	v := e.installApp(t)
 	e.restoreAtCleanup(t, "secure", "enabled_accessibility_services", e.shell(t, "settings get secure enabled_accessibility_services"))
 	e.restoreAtCleanup(t, "secure", "accessibility_enabled", e.shell(t, "settings get secure accessibility_enabled"))
 	e.atCleanup(t, "shell", "input keyevent KEYCODE_HOME")
-	g := newHostGuard(t, e, func(_ context.Context, op string, _ json.RawMessage) (json.RawMessage, error) {
-		if op == bridge.UIOpForeground {
-			return json.RawMessage(`{"package":"` + settingsPkg + `","activity":"` + settingsPkg + `.Settings","protected":false}`), nil
-		}
-		return nil, daemon.ErrNoApp
-	})
+	g := newHostGuard(t, e, nil)
 	e.openSettings(t)
 
 	if a := e.read(t, "a11y-off", "accessibility"); uidump.ServiceOn(a) || a11yBound(a) {
