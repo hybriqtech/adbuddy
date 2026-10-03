@@ -243,7 +243,8 @@ func (w *watcher) recheckPort(ctx context.Context) {
 		if !w.unknown {
 			w.unknown = true
 			// Forget what was said: the next good read says what persist holds
-			// again, which closes this warning.
+			// again, which closes this warning. If that read finds persist empty
+			// nothing is said and the warning stays up (the safe side).
 			w.said = device.TCP{}
 			tellPersist(w.Log, "", true)
 		}

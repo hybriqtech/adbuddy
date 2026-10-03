@@ -568,6 +568,20 @@ func TestWatchPhoneRecheckSaysOnlyWhatChanged(t *testing.T) {
 			t.Fatalf("the new port was not said: %q", log.String())
 		}
 	})
+	t.Run("a persist that appears with the service port fixed says the port once", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr))
+		w, _, log := watcherFor(t, r, tsConfig(), false, phoneSerial)
+		steps(w, 2)
+		back(t, r, w, serviceIs("7777"), persistIs(""))
+		lost(t, r, w)
+		back(t, r, w, serviceIs("7777"), persistIs("5555"))
+		if n := strings.Count(log.String(), "network port 7777 on the phone again"); n != 1 {
+			t.Fatalf("port_open said %d times: %q", n, log.String())
+		}
+		if n := strings.Count(log.String(), persistMsg); n != 1 {
+			t.Fatalf("persist said %d times: %q", n, log.String())
+		}
+	})
 	t.Run("a good read after an unreadable one says what it holds", func(t *testing.T) {
 		r := newRig(t, devicesRule(), failRule(tsAddr))
 		w, _, log := watcherFor(t, r, tsConfig(), false, phoneSerial)
