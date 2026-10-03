@@ -97,6 +97,7 @@ fun PermissionCard(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ObscuredTouchGuard()
             // Whose question it is outweighs what it says: the label is bold and larger, the agent's own words are marked as such.
             Text(stringResource(R.string.perm_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary)
             Text(stringResource(R.string.perm_summary, p.summary.ifEmpty { p.tool }), style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr))

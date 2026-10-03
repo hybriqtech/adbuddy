@@ -43,7 +43,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -53,7 +52,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +74,7 @@ import tech.hybriq.adbuddy.control.CutAccess
 /** Consent for the PC to finish the setup (spec §3.1 step 6.1). Header, content, actions at the foot. */
 @Composable
 fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
+    ObscuredTouchGuard()
     Scaffold(
         bottomBar = {
             Surface(tonalElevation = 3.dp) {
@@ -169,11 +168,7 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
             }
         },
         text = {
-            val view = LocalView.current
-            DisposableEffect(view) {
-                view.rootView.filterTouchesWhenObscured = true
-                onDispose {}
-            }
+            ObscuredTouchGuard()
             Column(Modifier.verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (shown.warning) {
                     Text("⚠ " + stringResource(R.string.confirm_special), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)

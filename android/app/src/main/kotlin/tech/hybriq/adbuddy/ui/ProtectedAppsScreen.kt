@@ -40,7 +40,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,7 +52,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -83,11 +81,7 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
     val context = LocalContext.current
     val protectedApps = remember(context) { ProtectedApps.of(context) }
     // Another window drawn over the screen must not get the user's tap on a button that grants or saves.
-    val view = LocalView.current
-    DisposableEffect(view) {
-        view.rootView.filterTouchesWhenObscured = true
-        onDispose {}
-    }
+    ObscuredTouchGuard()
     var load by remember { mutableStateOf<ProtectedAppsUi.LoadState>(ProtectedAppsUi.LoadState.Loading) }
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     var selection by rememberSaveable(stateSaver = SelectionSaver) { mutableStateOf<Set<String>?>(null) }
@@ -153,7 +147,10 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
         AlertDialog(
             onDismissRequest = { askDiscard = false },
             title = { Text(stringResource(R.string.protected_discard_title)) },
-            text = { Text(stringResource(R.string.protected_discard_body)) },
+            text = {
+                ObscuredTouchGuard()
+                Text(stringResource(R.string.protected_discard_body))
+            },
             confirmButton = { TextButton(onClick = { askDiscard = false; onBack() }) { Text(stringResource(R.string.protected_discard_confirm)) } },
             dismissButton = { TextButton(onClick = { askDiscard = false }) { Text(stringResource(R.string.action_cancel)) } },
         )

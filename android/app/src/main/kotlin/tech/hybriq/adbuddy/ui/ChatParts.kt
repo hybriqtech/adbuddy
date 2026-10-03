@@ -377,7 +377,10 @@ fun LinkDialog(url: String, domain: String, onOpen: () -> Unit, onDismiss: () ->
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.link_open_title, domain), fontWeight = FontWeight.Bold) },
-        text = { Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis) },
+        text = {
+            ObscuredTouchGuard()
+            Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis)
+        },
         confirmButton = { TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )
