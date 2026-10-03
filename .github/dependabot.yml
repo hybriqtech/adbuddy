@@ -49,6 +49,12 @@ updates:
       go:
         patterns: ["*"]
         update-types: [minor, patch]
+    # Pinned by pseudo-version (v0.0.0-<date>-<commit>) in a monorepo: Dependabot lists the
+    # tags of the root module github.com/charmbracelet/x, tries x@v0.1.0, which does not
+    # contain vt, and the whole gomod job ends in an error (dependency_file_not_resolvable).
+    # A person moves it (go get github.com/charmbracelet/x/vt@<commit>).
+    ignore:
+      - dependency-name: "github.com/charmbracelet/x/vt"
     commit-message:
       prefix: "chore(deps)"
     labels: [dependencies, go]
