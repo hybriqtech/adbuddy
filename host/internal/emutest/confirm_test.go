@@ -467,14 +467,14 @@ func trimNodes(nodes []uiNode) string {
 	return fmt.Sprintf("%+v", nodes)
 }
 
-// diag logs the output of a read-only shell command, with a time limit; it
+// logShell logs the output of a read-only shell command, with a time limit; it
 // never fails the test.
-func (e *emu) diag(t *testing.T, command string) {
+func (e *emu) logShell(t *testing.T, command string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(e.ctx, 15*time.Second)
 	defer cancel()
 	out, errOut, code, err := e.adb.Output(ctx, "shell", command)
-	t.Logf("diag %q: exit %d, %v:\n%s%s", command, code, err, strings.TrimSpace(strings.ReplaceAll(out, "\r", "")), strings.TrimSpace(errOut))
+	t.Logf("logShell %q: exit %d, %v:\n%s%s", command, code, err, strings.TrimSpace(strings.ReplaceAll(out, "\r", "")), strings.TrimSpace(errOut))
 }
 
 // locked reports whether the device is locked (dumpsys trust).
@@ -753,8 +753,8 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 	e.waitNodesDiag(t, "the PC's name on the lock screen with private notifications allowed", 10*time.Second, func(nodes []uiNode) bool {
 		return slices.ContainsFunc(nodes, func(n uiNode) bool { return strings.Contains(n.Text+n.Desc, "emutest") })
 	}, func() {
-		e.diag(t, "dumpsys window | grep -E 'mCurrentFocus|isKeyguardShowing|mKeyguardShowing|mDreamingLockscreen'")
-		e.diag(t, "dumpsys trust | head -30")
+		e.logShell(t, "dumpsys window | grep -E 'mCurrentFocus|isKeyguardShowing|mKeyguardShowing|mDreamingLockscreen'")
+		e.logShell(t, "dumpsys trust | head -30")
 	})
 	e.unlock(t)
 	e.shell(t, "settings put secure lock_screen_allow_private_notifications 0")
