@@ -283,6 +283,11 @@ func (r *remoteLink) run(j remoteJob) {
 		st, err = r.ctl.Enable(ctx)
 	} else {
 		st, err = r.ctl.Disable(ctx)
+		if err == nil {
+			// VB-41: an off that leaves a persist port says so in serve's log
+			// (the app only shows the mode).
+			tellPersist(r.log, st.Persist, st.PersistUnknown)
+		}
 	}
 	now := r.refresh()
 	if j.reply != nil {
@@ -350,6 +355,7 @@ func watchRemote(ctx context.Context, log io.Writer, ctl *remote.Controller, lin
 			warned, wait, skip = false, 0, 0
 			if changed {
 				tell(log, "phone_remote.remote_mode_expired_port_5555")
+				tellPersist(log, s.Persist, s.PersistUnknown) // once: the mode is off now
 				link.refresh()
 				link.publish(s)
 			}

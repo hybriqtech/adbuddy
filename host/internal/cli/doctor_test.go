@@ -834,3 +834,43 @@ func TestDoctorWarnsOfGlobalClaudeHooks(t *testing.T) {
 		t.Errorf("unreadable settings must not alarm: %+v", c)
 	}
 }
+
+// VB-41: a persist port is never "closed": doctor says it, what it does and
+// how to remove it, whether adbd listens on it now (the service property
+// empty, as after a reboot) or not (at 0, after adb usb). A persist property
+// that cannot be read is "could not read", never "closed".
+func TestDoctorNetworkPortPersist(t *testing.T) {
+	persist := testutil.FakeRule{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: "5555\n"}
+	for name, service := range map[string]string{"service at 0": "0\n", "after a reboot": "\n"} {
+		t.Run(name, func(t *testing.T) {
+			doctorEnv(t, doctorRules(testutil.FakeRule{Match: `^shell getprop service\.adb\.tcp\.port$`, Stdout: service}, persist))
+			out, _, code := runWithInput(t, "", "doctor", "--json")
+			c := statusOf(doctorJSON(t, out), "network port")
+			if code != 0 || c.Status != checkWarn || !strings.Contains(c.Detail, "5555") ||
+				!strings.Contains(c.Guidance, "did not set it") || !strings.Contains(c.Guidance, "setprop persist.adb.tcp.port ''") || strings.Contains(c.Guidance, "Nothing to do") {
+				t.Fatalf("exit %d %+v", code, c)
+			}
+		})
+	}
+	t.Run("unreadable", func(t *testing.T) {
+		doctorEnv(t, doctorRules(testutil.FakeRule{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stderr: "error: closed\n", Exit: 1}))
+		out, _, _ := runWithInput(t, "", "doctor", "--json")
+		c := statusOf(doctorJSON(t, out), "network port")
+		if c.Status != checkWarn || !strings.HasPrefix(c.Detail, "could not read adb's network port") {
+			t.Fatalf("%+v", c)
+		}
+	})
+}
+
+// VB-41 (review I1): with serve running, an open port is not closed until
+// serve starts again (when the phone reconnects, serve only warns): doctor
+// does not say "nothing to do" then.
+func TestDoctorNetworkPortOpenWithServeRunning(t *testing.T) {
+	e := doctorEnv(t, doctorRules(testutil.FakeRule{Match: `^shell getprop service\.adb\.tcp\.port$`, Stdout: "5555\n"}))
+	doctorServe(t, e)
+	out, _, _ := runWithInput(t, "", "doctor", "--json")
+	c := statusOf(doctorJSON(t, out), "network port")
+	if c.Status != checkWarn || strings.Contains(c.Guidance, "Nothing to do") || !strings.Contains(c.Guidance, "adbuddy remote off") {
+		t.Fatalf("%+v", c)
+	}
+}

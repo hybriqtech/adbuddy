@@ -373,15 +373,23 @@ func TestWatchPhoneOtherSessionPhoneDoesNotUseTheSavedAddresses(t *testing.T) {
 	}
 }
 
-// The watcher never opens or closes a port.
+// The watcher never opens or closes a port: it only reads it (getprop) when
+// the phone comes back (VB-41).
 func TestWatchPhoneNeverTouchesThePort(t *testing.T) {
 	r := newRig(t, devicesRule(tsAddr), connectRule(tsAddr), serialnoIs("AAAA1111"))
 	w, _, _ := watcherFor(t, r, tsConfig(), true, phoneSerial)
 	steps(w, 6)
+	read := 0
 	for _, c := range r.calls(t) {
-		if strings.HasPrefix(c, "tcpip") || strings.Contains(c, "adb.tcp.port") || strings.Contains(c, "setprop") {
+		if strings.HasPrefix(c, "tcpip") || c == "usb" || strings.Contains(c, "setprop") {
 			t.Fatalf("the watcher touched the port: %q", c)
 		}
+		if strings.HasPrefix(c, "shell getprop") && strings.Contains(c, "adb.tcp.port") {
+			read++
+		}
+	}
+	if read == 0 {
+		t.Fatalf("the port was not read after the switch: %q", r.calls(t))
 	}
 }
 
@@ -465,4 +473,46 @@ func TestWatchPhoneSwitchBudget(t *testing.T) {
 	if got != worstCase {
 		t.Fatalf("the worst case of the switch is %v (misses %d * every %v + %d candidates * (try %v + identity %v)), pinned at %v", got, watchMisses, watchEvery, n, watchTryWait, identityWait, worstCase)
 	}
+}
+
+// VB-41 (review I1): a phone that comes back may have restarted and taken
+// persist.adb.tcp.port. The watcher reads the port again (it never closes it
+// mid-session) and says once what changed: a port open with the remote mode
+// off, and the persist port.
+func TestWatchPhoneRereadsThePortWhenThePhoneComesBack(t *testing.T) {
+	back := func(t *testing.T, r *rig) {
+		r.set(t, devicesRule(phoneSerial), testutil.FakeRule{Match: tcpPortRule, Stdout: "\n"},
+			testutil.FakeRule{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: "5555\n"})
+	}
+	t.Run("remote mode off", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr))
+		w, _, log := watcherFor(t, r, tsConfig(), false, phoneSerial)
+		steps(w, 2)
+		back(t, r)
+		steps(w, 2)
+		if strings.Count(log.String(), "adb listens on network port 5555 on the phone again") != 1 || strings.Count(log.String(), "persist.adb.tcp.port is 5555") != 1 {
+			t.Fatalf("log %q", log.String())
+		}
+		if r.count(t, "usb") != 0 || r.count(t, "tcpip") != 0 {
+			t.Fatalf("the watcher closed or opened a port: %q", r.calls(t))
+		}
+		// Lost and back again with the same port: nothing new to say.
+		r.set(t, devicesRule(), failRule(tsAddr))
+		steps(w, 2)
+		back(t, r)
+		steps(w, 1)
+		if n := strings.Count(log.String(), "persist.adb.tcp.port is 5555"); n != 1 {
+			t.Fatalf("said %d times: %q", n, log.String())
+		}
+	})
+	t.Run("remote mode on", func(t *testing.T) {
+		r := newRig(t, devicesRule(), failRule(tsAddr), failRule(tsHome))
+		w, _, log := watcherFor(t, r, tsConfig(), true, phoneSerial)
+		steps(w, 2)
+		back(t, r)
+		steps(w, 1)
+		if strings.Contains(log.String(), "adb listens on network port") || strings.Count(log.String(), "persist.adb.tcp.port is 5555") != 1 {
+			t.Fatalf("log %q", log.String())
+		}
+	})
 }

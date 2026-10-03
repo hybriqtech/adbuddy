@@ -291,7 +291,7 @@ func (c *Controller) Reconcile(ctx context.Context) (State, error) {
 	defer c.mu.Unlock()
 	until := c.until()
 	if until.IsZero() {
-		return State{}, nil
+		return c.State(), nil
 	}
 	t, err := c.readTCP(ctx)
 	if err != nil {

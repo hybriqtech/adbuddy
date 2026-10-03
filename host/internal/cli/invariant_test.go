@@ -327,3 +327,62 @@ func TestServeFindsThePhoneByItsGuid(t *testing.T) {
 		})
 	}
 }
+
+// VB-41: a persist port is said once in serve's log: with no `adb usb` when
+// the service property is at 0 (adb usb already ran since the boot), and
+// after the `adb usb` that closed it when the service property was empty (as
+// after a reboot). A port still open after `adb usb` because of persist gets
+// a fix that does not say "restart the phone" (that opens it again).
+func TestApplyInvariantWarnsAboutAPersistPort(t *testing.T) {
+	setVar(t, &usbDropWait, 300*time.Millisecond)
+	setVar(t, &invariantPoll, 20*time.Millisecond)
+	persistRule := testutil.FakeRule{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: "5555\n"}
+	const warning = "persist.adb.tcp.port is 5555"
+	t.Run("service at 0", func(t *testing.T) {
+		r, log := invariantRunner(t, testutil.FakeRule{Match: tcpPortRule, Stdout: "0\n"}, persistRule)
+		var errb strings.Builder
+		if err := applyInvariant(context.Background(), r, time.Second, &errb, "adbuddy serve", ""); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(loggedCalls(t, log), "|"); got != tcpPortCalls {
+			t.Fatalf("calls %q: adb usb must not run", got)
+		}
+		if strings.Count(errb.String(), warning) != 1 {
+			t.Fatalf("stderr %q", errb.String())
+		}
+	})
+	t.Run("after a reboot", func(t *testing.T) {
+		r, log := invariantRunner(t,
+			testutil.FakeRule{Match: tcpPortRule, Stdout: "\n", Times: 1},
+			testutil.FakeRule{Match: tcpPortRule, Stdout: "0\n"},
+			persistRule,
+			testutil.FakeRule{Match: "^usb$", Stdout: "restarting in USB mode\n"},
+			testutil.FakeRule{Match: "^devices$", Stdout: phoneGone, Times: 1},
+			testutil.FakeRule{Match: "^devices$", Stdout: phoneOnline},
+		)
+		var errb strings.Builder
+		if err := applyInvariant(context.Background(), r, time.Second, &errb, "adbuddy serve", ""); err != nil {
+			t.Fatal(err)
+		}
+		got := strings.Join(loggedCalls(t, log), "|")
+		if strings.Count(got, "usb") != 1 || !strings.HasPrefix(got, tcpPortCalls+"|usb|") || !strings.HasSuffix(got, "|"+tcpPortCalls) {
+			t.Fatalf("calls %q: want one adb usb and the port read again", got)
+		}
+		if strings.Count(errb.String(), warning) != 1 {
+			t.Fatalf("stderr %q", errb.String())
+		}
+	})
+	t.Run("still open after adb usb", func(t *testing.T) {
+		r, _ := invariantRunner(t,
+			testutil.FakeRule{Match: tcpPortRule, Stdout: "\n"},
+			persistRule,
+			testutil.FakeRule{Match: "^devices$", Stdout: phoneGone, Times: 1},
+			testutil.FakeRule{Match: "^devices$", Stdout: phoneOnline},
+		)
+		err := applyInvariant(context.Background(), r, time.Second, &strings.Builder{}, "adbuddy serve", "")
+		fix := AsError(err).Fix
+		if errorCode(err) != "DEVICE_PORT_OPEN" || !strings.Contains(fix, "persist.adb.tcp.port is 5555") || !strings.Contains(fix, "adbuddy serve") || strings.Contains(fix, "that closes a port") {
+			t.Fatalf("%v (fix %q)", err, fix)
+		}
+	})
+}

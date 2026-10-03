@@ -13,6 +13,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
@@ -784,5 +785,93 @@ func TestRemoteUnavailableSaysStillOn(t *testing.T) {
 	exit, _ := h.call(t, "off", nil)
 	if exit.ErrorCode != "REMOTE_UNAVAILABLE" || !strings.Contains(exit.Error, "(the remote mode is still on)") {
 		t.Fatalf("%+v", exit)
+	}
+}
+
+// VB-41: `adbuddy remote off` never says "closed" while persist.adb.tcp.port
+// names a port, or could not be read; status and --json keep saying it.
+func TestRemoteOffThroughServeSaysThePersistPort(t *testing.T) {
+	h := newRemoteHost(t, withTailscale(), confirm.Allow)
+	h.g.phone.mu.Lock()
+	h.g.phone.persist = "5555"
+	h.g.phone.mu.Unlock()
+	out, errOut, code := run(t, "remote", "off")
+	if code != 0 || !strings.Contains(out, "persist.adb.tcp.port is 5555") || strings.Contains(out, "is closed") {
+		t.Fatalf("off: exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	if out, _, code = run(t, "remote", "status"); code != 0 || !strings.Contains(out, "persist.adb.tcp.port is 5555") {
+		t.Fatalf("status: exit %d stdout %q", code, out)
+	}
+	if out, _, code = run(t, "remote", "status", "--json"); code != 0 || !strings.Contains(out, `"persistPort":"5555"`) {
+		t.Fatalf("json: exit %d stdout %q", code, out)
+	}
+	h.g.phone.setFail("shell getprop persist.adb.tcp.port", true)
+	if out, _, code = run(t, "remote", "off"); code != 0 || !strings.Contains(out, "could not be read") || strings.Contains(out, "is closed") {
+		t.Fatalf("unreadable: exit %d stdout %q", code, out)
+	}
+}
+
+// VB-41: off without serve reads persist.adb.tcp.port before `adb usb` and
+// says it.
+func TestRemoteOffWithoutServeSaysThePersistPort(t *testing.T) {
+	until := time.Now().Add(5 * time.Hour).UTC().Format(time.RFC3339)
+	e := newSetupEnv(t, []testutil.FakeRule{
+		{Match: "^start-server$"},
+		{Match: "^devices$", Stdout: phoneOnline},
+		{Match: `^shell getprop ro\.serialno$`, Stdout: "AAAA1111\n"},
+		{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: "5555\n"},
+		{Match: "^usb$", Stdout: "restarting in USB mode\n"},
+	})
+	saveRemoteCmdConfig(t, e, until, phoneSerial)
+	out, errOut, code := run(t, "remote", "off")
+	if code != 0 || !strings.Contains(out, "persist.adb.tcp.port is 5555") || strings.Contains(out, "is closed") {
+		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	calls := strings.Join(loggedCalls(t, e.log), "|")
+	if i, j := strings.Index(calls, "getprop persist.adb.tcp.port"), strings.Index(calls, "usb"); i < 0 || j < i {
+		t.Fatalf("calls %q: persist must be read before adb usb", calls)
+	}
+}
+
+// VB-41 (review M1, M5): off without serve with a persist read that hangs:
+// the read has its own short deadline, `adb usb` still runs, and the answer
+// says persist could not be read (never "closed").
+func TestRemoteOffWithoutServePersistUnreadable(t *testing.T) {
+	setVar(t, &device.ReadTCPWait, 300*time.Millisecond)
+	until := time.Now().Add(5 * time.Hour).UTC().Format(time.RFC3339)
+	e := newSetupEnv(t, []testutil.FakeRule{
+		{Match: "^start-server$"},
+		{Match: "^devices$", Stdout: phoneOnline},
+		{Match: `^shell getprop ro\.serialno$`, Stdout: "AAAA1111\n"},
+		{Match: `^shell getprop persist\.adb\.tcp\.port$`, Stdout: "5555\n", SleepMs: 20000},
+		{Match: "^usb$", Stdout: "restarting in USB mode\n"},
+	})
+	saveRemoteCmdConfig(t, e, until, phoneSerial)
+	start := time.Now()
+	out, errOut, code := run(t, "remote", "off")
+	if code != 0 || !strings.Contains(out, "could not be read") || strings.Contains(out, "is closed") || time.Since(start) > 15*time.Second {
+		t.Fatalf("exit %d stdout %q stderr %q after %s", code, out, errOut, time.Since(start))
+	}
+	if !strings.Contains(strings.Join(loggedCalls(t, e.log), "|"), "usb") {
+		t.Fatalf("adb usb did not run: %q", loggedCalls(t, e.log))
+	}
+}
+
+// VB-41 (review M5): the English of off and status with a persist port, and
+// with persist unread.
+func TestRemoteTextWithPersist(t *testing.T) {
+	persist := remoteInfo{Serve: true, PersistPort: "5555"}
+	const warning = "But adb's network port is not closed for good: persist.adb.tcp.port is 5555 (ADBuddy did not set it), and adb listens on that port again every time the phone restarts. `adbuddy doctor` says how to remove it."
+	if got := remoteText("off", persist); got != "Remote mode is off. "+warning {
+		t.Errorf("off: %q", got)
+	}
+	if got := remoteText("status", persist); got != "Remote mode: off. "+warning {
+		t.Errorf("status: %q", got)
+	}
+	if got := remoteText("status", remoteInfo{PersistPort: "5555"}); got != "serve is not running; remote mode: off. "+warning {
+		t.Errorf("status without serve: %q", got)
+	}
+	if got := remoteText("off", remoteInfo{Serve: true, PersistUnknown: true}); got != "Remote mode is off. But persist.adb.tcp.port could not be read: adb's network port may open again when the phone restarts. Run `adbuddy doctor` to check." {
+		t.Errorf("off, unknown: %q", got)
 	}
 }

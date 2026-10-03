@@ -159,20 +159,21 @@ func (a *connADB) called() []string {
 // ctlADB is the phone for the remote.Controller: it records the orders and
 // fails the ones in fail.
 type ctlADB struct {
-	mu     sync.Mutex
-	calls  []string
-	fail   map[string]bool
-	hang   map[string]bool // wait for the context to end
-	gate   chan struct{}   // `tcpip 5555` waits for it to close
-	port   string          // answer of getprop service.adb.tcp.port
-	stderr string          // what a failing command says (default "error: closed")
+	mu      sync.Mutex
+	calls   []string
+	fail    map[string]bool
+	hang    map[string]bool // wait for the context to end
+	gate    chan struct{}   // `tcpip 5555` waits for it to close
+	port    string          // answer of getprop service.adb.tcp.port
+	persist string          // answer of getprop persist.adb.tcp.port
+	stderr  string          // what a failing command says (default "error: closed")
 }
 
 func (a *ctlADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (int, error) {
 	key := strings.Join(args, " ")
 	a.mu.Lock()
 	a.calls = append(a.calls, key)
-	hang, gate, fail, port, serr := a.hang[key], a.gate, a.fail[key], a.port, a.stderr
+	hang, gate, fail, port, persist, serr := a.hang[key], a.gate, a.fail[key], a.port, a.persist, a.stderr
 	a.mu.Unlock()
 	if hang {
 		<-ctx.Done()
@@ -190,6 +191,9 @@ func (a *ctlADB) Run(ctx context.Context, _ string, args []string, _ io.Reader, 
 	}
 	if key == "shell getprop service.adb.tcp.port" {
 		io.WriteString(stdout, port+"\n")
+	}
+	if key == "shell getprop persist.adb.tcp.port" {
+		io.WriteString(stdout, persist+"\n")
 	}
 	return 0, nil
 }
@@ -1172,5 +1176,38 @@ func TestAttachPublishesRemoteStateThroughTheLink(t *testing.T) {
 			}
 			t.Fatal("no remote.state after the welcome")
 		})
+	}
+}
+
+// VB-41: an "off" from the app that finds persist.adb.tcp.port set says so
+// in serve's log, once.
+func TestRemoteSetOffSaysThePersistPort(t *testing.T) {
+	g := newRemoteRig(t, withTailscale(), "")
+	g.phone.persist = "5555"
+	if err := g.store.SetUntil(g.clock.now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	g.r.handleSet(setMsg("r2", `{"enabled":false}`))
+	g.waitMsgs(t, 1)
+	if strings.Count(g.log.String(), "persist.adb.tcp.port is 5555") != 1 {
+		t.Fatalf("log %q", g.log.String())
+	}
+}
+
+// VB-41: the expiry that closes the port says the persist port too, once.
+func TestWatchRemoteSaysThePersistPortWhenItExpires(t *testing.T) {
+	g := newRemoteRig(t, withTailscale(), "")
+	g.phone.persist = "7777"
+	if err := g.store.SetUntil(g.clock.now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	g.r.refresh()
+	go watchRemote(g.ctx, g.log, g.ctl, g.r, 5*time.Millisecond, time.Second)
+	g.clock.advance(2 * time.Hour)
+	g.waitMsgs(t, 1)
+	waitUntil(t, "the warning", func() bool { return strings.Contains(g.log.String(), "persist.adb.tcp.port is 7777") })
+	time.Sleep(30 * time.Millisecond) // more ticks: nothing more to say
+	if n := strings.Count(g.log.String(), "persist.adb.tcp.port is 7777"); n != 1 || g.phone.count("usb") != 1 {
+		t.Fatalf("said %d times, usb %d: %q", n, g.phone.count("usb"), g.log.String())
 	}
 }

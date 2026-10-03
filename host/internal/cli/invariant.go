@@ -22,37 +22,67 @@ var (
 // the phone to come back (at most wait), and checks that the port is really
 // closed, except keep (remote mode's port, "" when it is off). command is
 // what the user runs again after a failure. When ctx ends, the error is whatever the step returned: callers turn it into
-// Interrupted.
+// Interrupted. A persist.adb.tcp.port that names a port (VB-41) is said once
+// in log, from the last read: ADBuddy cannot clear it, and adbd listens on it
+// again when the phone restarts.
 func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) error {
-	_, restarted, err := device.EnsureNoTCPPort(ctx, runner, keep)
+	_, err := invariantTCP(ctx, runner, wait, log, command, keep)
+	return err
+}
+
+// invariantTCP is applyInvariant that also returns the last read of the port:
+// serve gives it to the remote controller (Note) and to the watcher of the
+// connection, so both know what persist.adb.tcp.port holds from the start.
+func invariantTCP(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) (device.TCP, error) {
+	t, restarted, err := device.EnsureNoTCPPort(ctx, runner, keep)
 	if err != nil {
-		return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix", err.Error())
+		return t, NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix", err.Error())
 	}
 	if !restarted {
-		return nil
+		tellPersist(log, t.Persist, false)
+		return t, nil
 	}
 	tell(log, "invariant.closed_adb_s_network_port")
 	if err := waitDropped(ctx, runner, usbDropWait); err != nil {
-		return err
+		return t, err
 	}
 	if _, err := runner.WaitSerial(ctx, runner.Serial, wait); err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return t, ctx.Err()
 		}
-		return TransientErrorT("DEVICE_NOT_FOUND", "err.invariant.device_not_found", "err.invariant.device_not_found.fix", command)
+		return t, TransientErrorT("DEVICE_NOT_FOUND", "err.invariant.device_not_found", "err.invariant.device_not_found.fix", command)
 	}
 	// Only read the port now: another `adb usb` would restart adbd again.
-	t, err := device.ReadTCP(ctx, runner)
+	t, err = device.ReadTCP(ctx, runner)
 	if err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return t, ctx.Err()
 		}
-		return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix_2", err.Error())
+		return t, NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix_2", err.Error())
 	}
 	if t.Now != "" && t.Now != keep {
-		return NewErrorT("DEVICE_PORT_OPEN", "err.invariant.device_port_open", "err.invariant.device_port_open.fix", command)
+		// Restarting the phone closes a port of `adb tcpip`, but opens
+		// persist's again: that fix only without persist.
+		if t.Persist != "" {
+			return t, NewErrorT("DEVICE_PORT_OPEN", "err.invariant.device_port_open", "err.invariant.device_port_open.persist_fix", command, t.Persist)
+		}
+		return t, NewErrorT("DEVICE_PORT_OPEN", "err.invariant.device_port_open", "err.invariant.device_port_open.fix", command)
 	}
-	return nil
+	tellPersist(log, t.Persist, false)
+	return t, nil
+}
+
+// tellPersist says in log that persist.adb.tcp.port names a port (VB-41:
+// ADBuddy did not set it, cannot clear it, and adbd listens on it again when
+// the phone restarts), or that it could not be read (unknown). Nothing when
+// neither.
+func tellPersist(log io.Writer, persist string, unknown bool) {
+	switch {
+	case persist != "":
+		tell(log, "remote.persist.log", persist)
+	case unknown:
+		tell(log, "remote.persist.unknown_log")
+	}
 }
 
 // waitDropped waits until runner's phone is no longer in state `device`, or

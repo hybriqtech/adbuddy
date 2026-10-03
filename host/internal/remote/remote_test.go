@@ -386,6 +386,19 @@ func TestReconcileWithoutUntilRunsNoAdb(t *testing.T) {
 	e.noAdb(t)
 }
 
+// VB-41 (review T1): a Reconcile with no expiry runs no adb either, but its
+// state carries what Note was given (persist), not a bare State{}.
+func TestReconcileWithoutUntilCarriesTheNotedPersist(t *testing.T) {
+	e := newEnv()
+	ctl := e.controller()
+	ctl.Note(device.TCP{Persist: "5555"})
+	s, err := ctl.Reconcile(context.Background())
+	if err != nil || s != (State{Persist: "5555"}) {
+		t.Fatalf("%+v %v", s, err)
+	}
+	e.noAdb(t)
+}
+
 func TestEnableWhileClosingSavesAgainAndRunsTcpip(t *testing.T) {
 	e := newEnv()
 	e.until = t0.Add(-time.Minute)
