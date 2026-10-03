@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"html"
 	"io"
 	"net"
@@ -722,18 +723,29 @@ func (e *emu) screen(t *testing.T) []uiNode {
 // dumpScreen returns the uiautomator dump of the emulator's screen now.
 //
 // uiautomator dump sometimes fails (exit 255, "could not get idle state") while
-// the screen is changing, as when an app has just closed: it is tried again.
+// the screen is changing or the app is starting cold (the terminal's WebView
+// keeps the UI busy for ~9 s). The shell's exit code is the dump's (rc is kept
+// across the rm), and an empty dump counts as a failure too (it would read as
+// an empty screen). It is tried again; the last failure is reported with its
+// stderr.
 func (e *emu) dumpScreen(t *testing.T) string {
 	t.Helper()
-	const cmd = "uiautomator dump /sdcard/adbuddy-emutest.xml >/dev/null && cat /sdcard/adbuddy-emutest.xml; rm -f /sdcard/adbuddy-emutest.xml"
-	for try := 1; try < 4; try++ {
-		out, _, code, err := e.adb.Output(e.ctx, "shell", cmd)
-		if err == nil && code == 0 {
-			return strings.TrimSpace(strings.ReplaceAll(out, "\r", ""))
+	const f = "/sdcard/adbuddy-emutest.xml"
+	const cmd = "uiautomator dump " + f + " >/dev/null && cat " + f + "; rc=$?; rm -f " + f + "; exit $rc"
+	var last string
+	for try := 1; try <= 5; try++ {
+		ctx, cancel := context.WithTimeout(e.ctx, 3*time.Minute)
+		out, errOut, code, err := e.adb.Output(ctx, "shell", cmd)
+		cancel()
+		out = strings.TrimSpace(strings.ReplaceAll(out, "\r", ""))
+		if err == nil && code == 0 && out != "" {
+			return out
 		}
+		last = fmt.Sprintf("exit %d, %v, stderr %q, %d bytes of dump", code, err, strings.TrimSpace(errOut), len(out))
 		time.Sleep(time.Second)
 	}
-	return e.shell(t, cmd)
+	t.Fatalf("uiautomator dump failed 5 times: %s", last)
+	return ""
 }
 
 // waitNode waits up to d for a node that match accepts, or fails.
@@ -778,7 +790,8 @@ func (l *link) openChat(t *testing.T) {
 		if step == 2 {
 			want = "Message the agent"
 		}
-		e.waitNode(t, want, 15*time.Second, func(n uiNode) bool { return n.Text == want })
+		// A cold start is slow here: the terminal's WebView loads (~9 s) and the UI is not idle.
+		e.waitNode(t, want, 60*time.Second, func(n uiNode) bool { return n.Text == want })
 	}
 }
 
