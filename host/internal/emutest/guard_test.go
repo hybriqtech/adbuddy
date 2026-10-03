@@ -495,6 +495,12 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 			g.blocks(t, phoneapp.Package, argv...)
 		}
 		e.shell(t, "input keyevent KEYCODE_HOME")
+		// Home must have ended (neither half resumed) before an app opens: an
+		// app opened during the animation brings the pair back.
+		e.waitFront(t, "the launcher after Home", func(p []string) bool {
+			return len(p) > 0 && !slices.Contains(p, settingsPkg) && !slices.Contains(p, phoneapp.Package)
+		})
+		time.Sleep(2 * time.Second)
 		e.shell(t, "am start -W -n "+settingsPkg+"/.Settings")
 		e.waitFront(t, "Settings alone after leaving the split screen", func(p []string) bool { return slices.Equal(p, []string{settingsPkg}) })
 		// The split root's own two tasks (no app, invisible) keep their halves.
