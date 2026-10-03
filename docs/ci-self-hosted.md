@@ -26,15 +26,14 @@ Each job reads its runner from a repository variable. The value is JSON: a strin
 
 The special value `"none"` skips the job of a single-job workflow.
 
-Example for "only a Windows runner for now":
+Example for "only a Windows runner for now". **This is not the recommended configuration**: every variable that points at the Windows runner makes it run the code of any branch as your Windows user, with your adb server and phone in reach (section 6, "Requirement"). Use it only while the repository is private and only our own agents push branches, which is a risk you accept explicitly; the way out is a dedicated Windows account for the runner.
 
 ```sh
 gh variable set CI_HOST_MATRIX --body '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":["self-hosted","windows","adbuddy-local"]}]'
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-local"]'
 gh variable set CI_RUNNER_EMULATOR --body '["self-hosted","windows","adbuddy-local"]'
 ```
 
-The Ubuntu cell of the matrix stays on a GitHub-hosted runner here; no label `linux` appears because there is no Linux runner. Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`.
+`CI_RUNNER_ANDROID` is left out on purpose: it runs Gradle and the unit tests of the branch with no isolated home, so on Windows it carries the same risk as the other two (it only belongs on the Windows runner under the same acceptance or a dedicated account). The Ubuntu cell of the matrix stays on a GitHub-hosted runner here; no label `linux` appears because there is no Linux runner. Leave `CI_RUNNER_RELEASE` and `CI_RUNNER_SIGN` unset (they stay on GitHub-hosted runners) or set them to `"none"`.
 
 Example with both runners (Windows and the Linux runner of section 4):
 
@@ -93,7 +92,7 @@ Exit codes: `1` SDK or packages missing; `2` incorrect usage or an invalid `ADBU
    config.cmd --url https://github.com/OWNER/REPO --token TOKEN --labels self-hosted,windows,adbuddy-local
    ```
 
-4. Create `.env` in the runner folder. Use forward slashes in `ANDROID_HOME`, and keep the caches inside the runner folder so CI never touches your real ones:
+4. Create `.env` in the runner folder. Use forward slashes in `ANDROID_HOME`, and keep the caches inside the runner folder so CI never touches your real ones. **Target:** the runner has its own Android SDK, JDK and Go (inside the runner folder or the profile of the dedicated account), not the `ANDROID_HOME` or the `adb` you use every day: the `sdkmanager` steps of the workflows write into that SDK, and a branch could leave a trojan `adb.exe` or `emulator.exe` there that you or `adbuddy serve` would run later against your phone. This is not met today (see section 6):
 
    ```text
    ANDROID_HOME=C:/path/to/android-sdk
@@ -265,7 +264,7 @@ This is the procedure that was tested. The Linux runner lives in a WSL2 Ubuntu d
 
 ```sh
 # Use a self-hosted runner for a job group
-gh variable set CI_RUNNER_ANDROID --body '["self-hosted","windows","adbuddy-local"]'
+gh variable set CI_RUNNER_ANDROID --body '["self-hosted","linux","adbuddy-local"]'
 
 # Skip a single-job workflow
 gh variable set CI_RUNNER_EMULATOR --body '"none"'
@@ -282,8 +281,10 @@ gh variable delete CI_RUNNER_SIGN
 
 A runner executes the code of the branches it builds, as the user that runs it. That user can reach its adb key (authorised on the phone), the adb server, SSH keys, the `gh` token and the credentials of any coding agent.
 
-- **Requirement** to keep `CI_HOST_MATRIX` or `CI_RUNNER_EMULATOR` on Windows while agents push branches to the repository: run the runner under a dedicated local Windows account that has none of those. For adb it is the only barrier (see below).
-- **Minimum:** start `run.cmd` from a clean console, without `ADBUDDY_*`, `ANDROID_SERIAL` or `ANDROID_ADB_SERVER_PORT` in the environment.
+- **Requirement** to keep `CI_HOST_MATRIX`, `CI_RUNNER_ANDROID` or `CI_RUNNER_EMULATOR` on Windows while agents push branches to the repository: run the runner under a dedicated local Windows account that has none of those. For adb it is the only barrier (see below).
+- **Accepted risk today (decision of the user):** while the Windows runner runs under the user's own account, the requirement is NOT met. The user accepts that only while the repository is private and only branches of our own agents are built. The attack: a test or Gradle task in a branch calls the `adb` on the runner's PATH, which reaches the user's adb server (port 5037) with the phone already connected (or loads `\Users\<user>\.android\adbkey` and pairs its own server), and from there it runs anything on the phone with no classifier, journal or confirmation; it also reads SSH keys, the `gh` token and the credentials of the coding agents. The closing is the dedicated Windows account, and it is the user's decision. Until then, do not leave any `CI_*` variable pointing at the Windows runner while nobody watches (or stop `run.cmd`).
+- **Target, not met today:** the runner uses its own Android SDK, JDK and Go (section 3, step 4), never the user's `ANDROID_HOME` or `adb`. The `sdkmanager` steps of `android.yml` and `emulator.yml` write into the SDK, so a branch could replace `platform-tools/adb.exe` there and the change would persist for the user and `adbuddy serve`. Having a dedicated account does not fix it if that account is given write access to the user's SDK. Check that the `ANDROID_HOME` of the runner's `.env` is not the SDK you use with ADBuddy.
+- **Minimum:** start `run.cmd` from a clean console, without `ADBUDDY_*`, `ANDROID_SERIAL`, `ANDROID_ADB_SERVER_PORT`, `ADB_SERVER_SOCKET` or `ANDROID_ADB_SERVER_ADDRESS` in the environment (the last two would make the diagnostic `adb devices -l` of `emulator.yml` ask the user's server and write the phone's serial in the Actions log).
 
 The real barriers are:
 
@@ -315,6 +316,10 @@ Residual risk: a bug in the guest kernel gives root, and root can mount C: and r
 Phone: do not use `adb tcpip`, and reject any unexpected authorization dialog on the phone (the NAT reaches the LAN).
 
 Persistence between jobs: the runner is not ephemeral, so its jobs share the runner folder and its caches. The `runner` user can read the runner's credentials and poison `GOMODCACHE`, `GOCACHE` and Gradle in the runner folder, which affects later jobs. This is the cost of a non-ephemeral runner; `--ephemeral` with a new registration per job would avoid it.
+
+### Windows runner: persistence between jobs
+
+The Windows runner is not ephemeral either, and nothing cleans it automatically: no workflow removes `_work/_tool` (the Go and JDK that `setup-go` and `setup-java` install), `GOMODCACHE`, `GOCACHE` or `GRADLE_USER_HOME` (checked in `.github/workflows/`: no cleaning step). A branch can poison them, or the runner's `.env` and `.path` (the same user writes them), and every later job, including the `push` to `main`, then runs with those tools: a green on `main` could be fabricated or a failure hidden. What to clean by hand when you suspect a branch: stop the runner, delete `_work/_tool`, `gradle`, `gomod` and `gocache` of the runner folder, and re-check `.env` and `.path` against section 3. With a dedicated account, `.env`, `.path` and the runner's `bin/` should belong to an administrator and not be writable by that account. `--ephemeral` with a new registration per job would avoid all of it.
 
 ### Also
 
@@ -356,7 +361,7 @@ What is applied today (replace `OWNER/REPO`):
 What is not applied, and why:
 
 - **The guard in the workflows and the private repository** are what stop forks, besides the setting above.
-- **The `release` environment does not exist yet.** Create it with required reviewers before releases depend on it.
+- **The `release` environment does not exist yet.** Create it with required reviewers before releases depend on it, and do not create the signing secrets before those reviewers are effective (see `docs/releasing.md`, "Before creating the secrets"). On a tag push GitHub uses the `release.yml` of the tagged commit, so a branch can edit that file and drop its "tag is on main" check; the environment rule `v*` only looks at the tag name. Without a required reviewer that really stops the job, the secrets are readable from any branch.
 - **Rulesets and branch protection are not available** in the free plan for a private repository. When the repository goes public, create the `release` environment with a reviewer and protect `main` in the same step.
 
 ## 7. What is not covered locally
