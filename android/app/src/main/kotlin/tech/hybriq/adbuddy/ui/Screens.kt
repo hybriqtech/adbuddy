@@ -146,7 +146,7 @@ private fun ConsentScreenPreview() {
  * the question is open, and says why otherwise. It can always be closed (back
  * or a tap outside; Close when it has no buttons): Pause and Cut access are
  * never hidden with no way out, and the notification is still there. Touches
- * are refused while another app's window covers it (filterTouchesWhenObscured).
+ * are refused while another app's window covers it (ObscuredTouchGuard).
  */
 @Composable
 fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock, onClose: () -> Unit, onAnswer: (String) -> Unit) {

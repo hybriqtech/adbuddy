@@ -141,6 +141,7 @@ fun ChatHeader(
                     Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.action_menu))
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    ObscuredTouchGuard()
                     PauseButton.of(state)?.let { button ->
                         DropdownMenuItem(
                             text = { Text(stringResource(button.text)) },
@@ -344,6 +345,7 @@ fun InputBar(
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.chat_attach)) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                ObscuredTouchGuard()
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_photo)) }, onClick = { menu = false; onPhoto() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_file)) }, onClick = { menu = false; onFile() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_capture)) }, onClick = { menu = false; onCapture() })
