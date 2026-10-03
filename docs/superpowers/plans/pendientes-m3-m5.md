@@ -488,12 +488,15 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
 
 ### Post-v1: la guarda en la API 34 (hallazgos de la T5 y de su revisión)
 
-- **(a) El fondo de pantalla bloquea la guarda sin la app.** `com.android.systemui.wallpapers.ImageWallpaper` está siempre visible; sin la app, la guarda bloquea en todas las pantallas de la API 34. Es seguro, pero inutiliza el respaldo por `adb`.
+- **(a) Resuelto (rama `fix/guard-imagewallpaper`): el fondo de pantalla bloqueaba la guarda sin la app.** `com.android.systemui.wallpapers.ImageWallpaper` está siempre visible; sin la app, la guarda bloquea en todas las pantallas de la API 34. Es seguro, pero inutiliza el respaldo por `adb`.
   - Arreglo mínimo del revisor: añadir ese título a `fixedSystemUI` en `host/internal/uidump/window.go`. `ParseSystemUIWindows` solo mira ventanas del paquete systemui, así que suplantar el título con otro paquete no cambia nada.
   - Luego, invertir los tests marcados con `TODO(adjudicar)`: `TestAPI34SystemUIWindows`, los casos de fondo de `TestTheGuardOnAPI34Screens`, `wallpaperReason` y `onlyWallpaper` de `guard_test.go`, y el apaño de `TestTheFallbackWithoutTheApp`.
   - Opcional: saltar las ventanas de systemui con `mIsWallpaper=true`.
+  - **Hecho:** el título largo está en `fixedSystemUI` (sin quitar el corto) y los tests están invertidos, sin `TODO(adjudicar)`. `TestTheWallpaperUnblocksOnlyWhatItAloneBlocked` comprueba en todas las muestras de la API 34 que solo se desbloquea lo que bloqueaba el fondo. Lo de `mIsWallpaper` sigue siendo post-v1. Falta volver a correr `emutest` en el emulador (CI).
 - **(b) Hueco ya existente:** las superposiciones de terceros (`TYPE_APPLICATION_OVERLAY`) no las ve `ParseSystemUIWindows`, porque filtra por paquete. Confirmarlo en la T7 con una app de pruebas, y también con una superposición con `package=com.android.systemui` y ese título.
 - **(c) Falta una muestra del foco `StatusBar`** (solo hay `NotificationShade`) para Android 17.
+- **(d) Post-v1: el teclado.** La ventana `InputMethod` no es de systemui y nunca contó (tampoco con la app conectada). La barra de sugerencias de Gboard puede mostrar el chip del portapapeles (p. ej. un código copiado desde una app protegida) o sugerencias de autorrelleno, y una captura con una app sin proteger delante lo recogería. El fondo de pantalla lo tapaba por accidente en el respaldo sin app en la API 34; el arreglo de (a) restaura el comportamiento de diseño.
+- **(e) Post-v1: proteger Ajustes no protege su búsqueda** (`com.google.android.settings.intelligence`, otro paquete).
 
 ### Post-v1: Permitir tras desbloquear con PIN (M2-8)
 
@@ -547,3 +550,8 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 - **Diferido (revisión opus):** una lectura fallida del vigilante no llega al estado del modo remoto (no se llama a `Seen`/`Note`, `remote status` conserva la última lectura en vez de `persistUnknown`).
 - **Límite conocido:** el host lee propiedades, no sockets. No mira `service.adb.listen_addrs` (AOSP adbd también escucha donde diga) ni el 5555 que adbd abre por defecto en un dispositivo sin USB; un adbd que no siga AOSP (escuchar en persist con service a `0`) quedaría abierto, avisado pero sin cerrar. Con `serve` en marcha, un puerto que reaparece al volver el móvil se avisa pero no se cierra (ruling 9 del plan).
 - **Límite conocido (revisión opus):** un `getprop` que sale con código 0 y salida vacía se lee como «sin fijar» y el host no puede distinguirlo de un persist realmente vacío (p. ej. un veto de SELinux); medido en el emulador: `shell` sí lee persist; falta la lectura de solo lectura en el Pixel.
+## Ficheros y terminal en el emulador (M3b-3 y M3b-10; plan `docs/superpowers/plans/2026-10-03-adbuddy-test-link-files-terminal.md`)
+
+- Hecho: M3b-3 (a-e) y M3b-10 sobre el arnés de canal real (`host/internal/emutest/`), 10 tests verdes y 14 mutaciones en rojo en el emulador android-34; revisión final opus: APTO PARA PR. Condición de integración: que el run `emulator` del PR salga verde en el grupo «rest» (apuntar su duración y el `scripts/emulator.sh mem` final: son ~5 min de tests más y qemu crece ~3-4 GB por 10 min).
+- DEFER (menores de la revisión final): carrera latente del corte de la subida (`freeze` debería llevar una generación que `onFrame` capture antes de dormir; hoy solo daría un rojo falso); `TestDownloadResumesAfterACut` no distingue `corrupt-frame` de `ignore-offset` y la aserción `g.Offset != have` no tiene mutación que la ponga en rojo (truncar el `.part` con `run-as` antes de pulsar «retry»); `TestDownloadCancel` sin mutación (enviar el marco tardío antes del `file.cancel`); comentar por qué `hostFromEmulator` se arma con una concatenación (es el alias fijo del emulador, no una IP de red del usuario); `forward --remove-all` solo es correcto con un servidor adb propio del emulador.
+- No comprobado: `-race` (Windows), el espacio libre de `/data` del AVD del CI (el test exige 2 GiB libres), la corrida conjunta de todos los tests nuevos y una segunda ejecución en frío de `openChat`.

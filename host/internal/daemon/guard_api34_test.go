@@ -3,6 +3,7 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -61,25 +62,21 @@ func TestTheGuardOnAPI34Screens(t *testing.T) {
 		adbuddy = "ADBuddy itself is in front"
 		shade   = "the notification shade is open"
 		runs    = ""
-		// TODO(adjudicar): with nothing over the app the command should run
-		// (it did, with "runs", before T5 recorded these samples: the RED).
-		// The wallpaper's window of API 34 is not in uidump's fixedSystemUI,
-		// so the guard without the app blocks on every screen. Blocking more
-		// is safe: today's answer is expected until the finding is decided;
-		// then these go back to runs.
-		wallpaper = "a system window is on screen (com.android.systemui.wallpapers.ImageWallpaper)"
 	)
 	cases := []struct {
 		state string
 		argv  []string
 		why   string // "" (runs): it runs
 	}{
-		{"settings", screencap, wallpaper},
-		{"keyboard", screencap, wallpaper},
-		{"headsup-gone", screencap, wallpaper},
-		{"screen-off", screencap, wallpaper},
+		// Nothing over the app: the wallpaper's window behind it is a fixed
+		// one (the T5 finding, fixed), so the command runs.
+		{"settings", screencap, runs},
+		{"settings", tap, runs},
+		{"keyboard", screencap, runs},
+		{"headsup-gone", screencap, runs},
+		{"screen-off", screencap, runs},
 		{"screen-off", wake, runs},
-		{"doze", screencap, wallpaper},
+		{"doze", screencap, runs},
 		{"doze", wake, runs},
 
 		{"adbuddy", screencap, adbuddy},
@@ -128,5 +125,123 @@ func TestTheGuardOnAPI34Screens(t *testing.T) {
 		if exit.Code != ExitDenied || !strings.Contains(s.errOut.String(), c.why) || len(ran) != 0 {
 			t.Errorf("%s %q: exit %d %q, ran %q; want blocked because %q", c.state, c.argv, exit.Code, s.errOut.String(), ran, c.why)
 		}
+	}
+}
+
+// Reasons of the guard without the app on the API 34 samples.
+const (
+	api34ADBuddy   = "tech.hybriq.adbuddy is a protected app: ADBuddy itself is in front"
+	api34Split     = "tech.hybriq.adbuddy is a protected app; "
+	api34Settings  = "com.android.settings is a protected app; "
+	api34Shade     = "the notification shade is open; "
+	api34System    = "a system window is on screen ("
+	api34Wallpaper = "com.android.systemui.wallpapers.ImageWallpaper"
+)
+
+// api34Before is what the guard without the app decided on every sample of
+// uidump/testdata/api34 before the wallpaper's window of API 34 was listed as
+// a fixed one (recorded with the code of T5): for each state, with no app of
+// the user protected and with Settings protected. Every state was blocked.
+var api34Before = map[string][2]string{
+	"settings":             {api34System + api34Wallpaper + ")", api34Settings},
+	"adbuddy":              {api34ADBuddy, api34ADBuddy},
+	"keyboard":             {api34System + api34Wallpaper + ")", api34System + api34Wallpaper + ")"},
+	"split":                {api34Split, api34Settings},
+	"screen-off":           {api34System + api34Wallpaper + ")", api34Settings},
+	"doze":                 {api34System + api34Wallpaper + ")", api34Settings},
+	"headsup-gone":         {api34System + api34Wallpaper + ")", api34Settings},
+	"shade":                {api34Shade, api34Settings},
+	"quick-settings":       {api34Shade, api34Settings},
+	"locked-off":           {api34Shade, api34Settings},
+	"locked":               {api34Shade, api34Settings},
+	"headsup":              {api34System + "NotificationShade, " + api34Wallpaper + ")", api34Settings},
+	"volume-dialog":        {api34System + "VolumeDialogImpl, " + api34Wallpaper + ")", api34Settings},
+	"bubble-collapsed":     {api34System + "Bubbles!, " + api34Wallpaper + ")", api34Settings},
+	"bubble-expanded":      {api34ADBuddy, api34ADBuddy},
+	"bubble-expanded-a11y": {api34ADBuddy, api34ADBuddy},
+}
+
+// withoutWallpaper is what before becomes once the wallpaper's window is a
+// fixed one: the same reason without it, and "" (it runs) where it was the
+// only reason.
+func withoutWallpaper(before string) string {
+	list, ok := strings.CutPrefix(before, api34System)
+	if !ok {
+		return before
+	}
+	var left []string
+	for _, w := range strings.Split(strings.TrimSuffix(list, ")"), ", ") {
+		if w != api34Wallpaper {
+			left = append(left, w)
+		}
+	}
+	if len(left) == 0 {
+		return ""
+	}
+	return api34System + strings.Join(left, ", ") + ")"
+}
+
+// The wallpaper's window of API 34 listed as a fixed one unblocks exactly the
+// screens it alone blocked: on every real sample (all of them, by their
+// windows read), with a protected app or ADBuddy in front, the shade or the
+// lock screen open, a heads-up, the volume dialog or the bubble on screen, the
+// guard without the app still blocks for the same reason, minus the wallpaper.
+// What reads or touches the screen is judged so: a screenshot, a tap, a dump.
+func TestTheWallpaperUnblocksOnlyWhatItAloneBlocked(t *testing.T) {
+	files, err := filepath.Glob(filepath.Join("..", "uidump", "testdata", "api34", "*.windows.txt"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no samples: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, f := range files {
+		state := strings.TrimSuffix(filepath.Base(f), ".windows.txt")
+		seen[state] = true
+		before, ok := api34Before[state]
+		if !ok {
+			t.Errorf("%s: a sample with no decision before the fix; add it to api34Before", state)
+			continue
+		}
+		for i, protectSettings := range []bool{false, true} {
+			want := withoutWallpaper(before[i])
+			for _, argv := range [][]string{
+				{"exec-out", "screencap", "-p"},
+				{"shell", "input", "tap", "540", "1200"},
+				{"shell", "uiautomator", "dump"},
+			} {
+				e := api34Env(t, state)
+				if protectSettings {
+					e.d.o.Protected = func(pkg string) bool { return pkg == "com.android.settings" }
+				}
+				s, exit := e.exec(t, argv...)
+				ran := ranGuarded(e)
+				if want == "" {
+					if exit.Code != 0 || len(ran) != 1 {
+						t.Errorf("%s (Settings protected %v) %q: exit %d %q; want it to run (before: %q)", state, protectSettings, argv, exit.Code, s.errOut.String(), before[i])
+					}
+					continue
+				}
+				if exit.Code != ExitDenied || !strings.HasPrefix(s.errOut.String(), "Blocked by ADBuddy: "+want) || len(ran) != 0 {
+					t.Errorf("%s (Settings protected %v) %q: exit %d %q, ran %q; want blocked because %q", state, protectSettings, argv, exit.Code, s.errOut.String(), ran, want)
+				}
+			}
+		}
+	}
+	for state := range api34Before {
+		if !seen[state] {
+			t.Errorf("%s: in api34Before but no windows sample", state)
+		}
+	}
+	// Only the states with nothing over an unprotected app run now.
+	var unblocked []string
+	for state, before := range api34Before {
+		for i, b := range before {
+			if withoutWallpaper(b) == "" {
+				unblocked = append(unblocked, state+map[int]string{0: "", 1: " (Settings protected)"}[i])
+			}
+		}
+	}
+	slices.Sort(unblocked)
+	if want := []string{"doze", "headsup-gone", "keyboard", "keyboard (Settings protected)", "screen-off", "settings"}; !slices.Equal(unblocked, want) {
+		t.Errorf("unblocked %q, want %q", unblocked, want)
 	}
 }

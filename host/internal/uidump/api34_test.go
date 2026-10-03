@@ -78,13 +78,12 @@ func TestAPI34SystemUIWindows(t *testing.T) {
 		"bubble-expanded":      {"Bubbles!"},
 		"bubble-expanded-a11y": {"Bubbles!"},
 	} {
-		// TODO(adjudicar): the wallpaper's window, always visible, is not in
-		// fixedSystemUI (it lists "ImageWallpaper"), so it comes out as unknown
-		// on every screen and the guard without the app blocks everything
-		// (T5 finding). Blocking more is safe: today's answer is expected
-		// until it is decided; then drop this line.
-		want = append(want, wallpaper)
 		for _, out := range api34(t, state, "windows") {
+			// The wallpaper's window is in every sample, visible behind the
+			// app (T5 finding): it is a fixed one, not an unknown one.
+			if !strings.Contains(out, " u0 "+wallpaper+"}:") {
+				t.Errorf("%s: no wallpaper's window in the sample", state)
+			}
 			got, ok := ParseSystemUIWindows(out)
 			if !ok || !reflect.DeepEqual(got, want) {
 				t.Errorf("%s: unknown system windows %q %v, want %q", state, got, ok, want)

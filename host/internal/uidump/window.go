@@ -61,6 +61,9 @@ var fixedSystemUI = map[string]bool{
 	// edge panels and the rounded-corner overlays drawn by hardware.
 	"ImageWallpaper": true, "NavigationBarEdgePanel": true,
 	"ScreenDecorHwcOverlay": true, "ScreenDecorHwcOverlayBottom": true,
+	// The wallpaper's window on API 34, titled by its class (T5 of the manual
+	// validations plan, uidump/testdata/api34).
+	"com.android.systemui.wallpapers.ImageWallpaper": true,
 }
 
 // ParseSystemUIWindows reads `dumpsys window windows` and returns the titles

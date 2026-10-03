@@ -116,10 +116,29 @@ func TestAWindowHeaderNotUnderstoodIsNotOK(t *testing.T) {
 
 func TestFixedSystemUIWindowsOfARealPhone(t *testing.T) {
 	out := ""
-	for _, title := range []string{"StatusBar", "NavigationBar0", "ImageWallpaper", "NavigationBarEdgePanel", "ScreenDecorHwcOverlay", "ScreenDecorHwcOverlayBottom"} {
+	for _, title := range []string{"StatusBar", "NavigationBar0", "ImageWallpaper", "NavigationBarEdgePanel", "ScreenDecorHwcOverlay", "ScreenDecorHwcOverlayBottom", "com.android.systemui.wallpapers.ImageWallpaper"} {
 		out += "  Window #0 Window{1 u0 " + title + "}:\n    mOwnerUid=1 package=com.android.systemui appop=NONE\n    mViewVisibility=0x0\n"
 	}
 	if got, ok := ParseSystemUIWindows(out); !ok || len(got) != 0 {
 		t.Errorf("%q %v", got, ok)
+	}
+}
+
+// The long wallpaper title is fixed only for systemui: the same title in the
+// window of another package is not a systemui window and is ignored (the
+// parser only looks at windows of com.android.systemui).
+func TestTheLongWallpaperTitleIsFixedOnlyForSystemUI(t *testing.T) {
+	const title = "com.android.systemui.wallpapers.ImageWallpaper"
+	win := func(pkg string) string {
+		return `  Window #0 Window{1 u0 ` + title + `}:
+    mOwnerUid=1 package=` + pkg + ` appop=NONE
+    mViewVisibility=0x0
+`
+	}
+	if got, ok := ParseSystemUIWindows(win(SystemUIPackage)); !ok || len(got) != 0 {
+		t.Errorf("systemui: %q %v", got, ok)
+	}
+	if got, ok := ParseSystemUIWindows(win("com.evil.app")); !ok || len(got) != 0 {
+		t.Errorf("other package: %q %v", got, ok)
 	}
 }
