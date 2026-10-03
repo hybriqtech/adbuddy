@@ -487,10 +487,11 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
 
 ### Post-v1: la guarda en la API 34 (hallazgos de la T5 y de su revisión)
 
-- **(a) El fondo de pantalla bloquea la guarda sin la app.** `com.android.systemui.wallpapers.ImageWallpaper` está siempre visible; sin la app, la guarda bloquea en todas las pantallas de la API 34. Es seguro, pero inutiliza el respaldo por `adb`.
+- **(a) Resuelto (rama `fix/guard-imagewallpaper`): el fondo de pantalla bloqueaba la guarda sin la app.** `com.android.systemui.wallpapers.ImageWallpaper` está siempre visible; sin la app, la guarda bloquea en todas las pantallas de la API 34. Es seguro, pero inutiliza el respaldo por `adb`.
   - Arreglo mínimo del revisor: añadir ese título a `fixedSystemUI` en `host/internal/uidump/window.go`. `ParseSystemUIWindows` solo mira ventanas del paquete systemui, así que suplantar el título con otro paquete no cambia nada.
   - Luego, invertir los tests marcados con `TODO(adjudicar)`: `TestAPI34SystemUIWindows`, los casos de fondo de `TestTheGuardOnAPI34Screens`, `wallpaperReason` y `onlyWallpaper` de `guard_test.go`, y el apaño de `TestTheFallbackWithoutTheApp`.
   - Opcional: saltar las ventanas de systemui con `mIsWallpaper=true`.
+  - **Hecho:** el título largo está en `fixedSystemUI` (sin quitar el corto) y los tests están invertidos, sin `TODO(adjudicar)`. `TestTheWallpaperUnblocksOnlyWhatItAloneBlocked` comprueba en todas las muestras de la API 34 que solo se desbloquea lo que bloqueaba el fondo. Lo de `mIsWallpaper` sigue siendo post-v1. Falta volver a correr `emutest` en el emulador (CI).
 - **(b) Hueco ya existente:** las superposiciones de terceros (`TYPE_APPLICATION_OVERLAY`) no las ve `ParseSystemUIWindows`, porque filtra por paquete. Confirmarlo en la T7 con una app de pruebas, y también con una superposición con `package=com.android.systemui` y ese título.
 - **(c) Falta una muestra del foco `StatusBar`** (solo hay `NotificationShade`) para Android 17.
 
