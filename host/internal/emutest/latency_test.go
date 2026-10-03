@@ -21,7 +21,6 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
-	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
 
 // The device half of the latency harness (docs/superpowers/plans/2026-10-03-latencia.md):
@@ -33,6 +32,9 @@ import (
 // unless ADBUDDY_LATENCY=1:
 //
 //	ADBUDDY_LATENCY=1 ADBUDDY_LATENCY_OUT=<file.md> go test ./internal/emutest -run TestLatencyDevice -v
+//
+// The model's side (the agent with the fake phone) lives only in cmd/adbuddy
+// (latency_agent_test.go), so that emutest does not depend on the agent.
 //
 // (with ADBUDDY_EMULATOR_SERIAL, ADBUDDY_EMULATOR_ADB and ANDROID_ADB_SERVER_PORT
 // as for any emutest). The emulator has no Wi-Fi between it and the PC: a real
@@ -160,9 +162,9 @@ const daemonSelf = "(daemon itself: classify, journal, guard logic)"
 // scenario times f n times (after warmup runs) and adds to rep the total and
 // each stage's median per run, with how many times it ran per command. after
 // runs outside the timing after each run (to put the screen back).
-func scenario(t *testing.T, rep *testutil.Report, p *probe, name string, warmup, n int, f func() (ipc.Exit, int), after func()) {
+func scenario(t *testing.T, rep *Report, p *probe, name string, warmup, n int, f func() (ipc.Exit, int), after func()) {
 	t.Helper()
-	var totals testutil.Samples
+	var totals Samples
 	perStage := map[string][]time.Duration{} // label -> the sum of that label in each run
 	counts := map[string]int{}
 	bytesOut := 0
@@ -203,7 +205,7 @@ func scenario(t *testing.T, rep *testutil.Report, p *probe, name string, warmup,
 		labels = append(labels, l)
 	}
 	sort.Slice(labels, func(i, j int) bool {
-		return testutil.Samples(perStage[labels[i]]).Median() > testutil.Samples(perStage[labels[j]]).Median()
+		return Samples(perStage[labels[i]]).Median() > Samples(perStage[labels[j]]).Median()
 	})
 	for _, l := range labels {
 		label := l
@@ -234,13 +236,13 @@ func (l *link) appUI(t *testing.T) uiFunc {
 }
 
 func TestLatencyDevice(t *testing.T) {
-	if !testutil.LatencyOn() {
+	if !LatencyOn() {
 		t.Skip("set ADBUDDY_LATENCY=1")
 	}
 	n := 25
 	l := openLink(t)
 	e := l.e
-	rep := testutil.NewReport("Device side on the emulator (no Wi-Fi hop): the agent's helpers and adb commands through the host's daemon")
+	rep := NewReport("Device side on the emulator (no Wi-Fi hop): the agent's helpers and adb commands through the host's daemon")
 	defer rep.Flush(t.Logf)
 
 	e.restoreAtCleanup(t, "secure", "enabled_accessibility_services", e.shell(t, "settings get secure enabled_accessibility_services"))
@@ -249,7 +251,7 @@ func TestLatencyDevice(t *testing.T) {
 
 	// Floors: what adb costs by itself, called as the daemon calls it.
 	probeFloor := func(name string, args ...string) {
-		rep.Add(name, testutil.Measure(3, n, func() {
+		rep.Add(name, Measure(3, n, func() {
 			ctx, cancel := context.WithTimeout(e.ctx, time.Minute)
 			defer cancel()
 			if _, _, code, err := e.adb.Output(ctx, args...); err != nil || code != 0 {
