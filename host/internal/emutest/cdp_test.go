@@ -214,7 +214,7 @@ func (c *cdp) evalStrings(expr string) ([]string, error) {
 func (c *cdp) paintedRows() ([]string, error) {
 	rows, err := c.evalStrings(`[...document.querySelectorAll('.xterm-rows > div')].map(d=>d.textContent).filter(s=>s.trim())`)
 	for i := range rows {
-		rows[i] = strings.TrimSpace(strings.ReplaceAll(rows[i], " ", " "))
+		rows[i] = strings.TrimSpace(strings.ReplaceAll(rows[i], "\u00a0", " "))
 	}
 	return rows, err
 }
@@ -342,7 +342,7 @@ func (e *emu) openCDP(t *testing.T) *cdp {
 	var unix string
 	if !poll(30*time.Second, func() bool {
 		unix = e.shell(t, "cat /proc/net/unix | grep -a devtools; true")
-		return regexp.MustCompile(`@` + regexp.QuoteMeta(sock) + ``).MatchString(unix)
+		return regexp.MustCompile(`@` + regexp.QuoteMeta(sock) + `\b`).MatchString(unix)
 	}) {
 		t.Fatalf("no @%s in /proc/net/unix after 30 s (the debug build opens it by itself; is the terminal on screen?): %q", sock, unix)
 	}
@@ -434,7 +434,7 @@ func TestCDPClient(t *testing.T) {
 			expr, _ := params["expression"].(string)
 			switch {
 			case strings.Contains(expr, "xterm-rows"):
-				return map[string]any{"result": map[string]any{"type": "string", "value": `["  hello-from-host  ","a b"]`}}, nil
+				return map[string]any{"result": map[string]any{"type": "string", "value": `["  hello-from-host  ","a\u00a0b"]`}}, nil
 			case strings.Contains(expr, "boom"):
 				return map[string]any{"result": map[string]any{"type": "object"}, "exceptionDetails": map[string]any{"text": "Uncaught"}}, nil
 			default: // a script that makes the page ask for an image

@@ -139,6 +139,11 @@ func TestParseNetstatsUID(t *testing.T) {
 	if _, err := parseNetstatsUID("  ident=[x] uid=10193 set=DEFAULT\n      st=1 rp=1 tp=1\n", 10193); err == nil {
 		t.Error("a history row without rb/tb was accepted")
 	}
+	// Blocks of the uid with no row in the measured format: not "0 bytes".
+	other := "  ident=[x] uid=10193 set=DEFAULT\n    NetworkStatsHistory: bucketDuration=7200\n      1759500000: rx=5 tx=6\n  ident=[y] uid=1000 set=DEFAULT\n      st=1 rb=1 tb=1\n"
+	if _, err := parseNetstatsUID(other, 10193); err == nil {
+		t.Error("a uid with blocks and no readable row was read as 0 bytes")
+	}
 }
 
 // readNetstats forces netstats to poll ("Forced poll": the history is updated
