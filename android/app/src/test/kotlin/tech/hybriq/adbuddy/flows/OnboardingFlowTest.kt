@@ -65,14 +65,14 @@ class OnboardingFlowTest {
         installLauncherApps(Packages.ADBUDDY to "ADBuddy", "com.example.mybank" to "Mi Banco", "com.whatsapp" to "WhatsApp", "org.example.notes" to "Notes")
     }
 
-    @Test fun confirmingTheListThenDoneFinishesTheSteps() {
+    @Test fun confirmingTheListThenNotNowFinishesTheSteps() {
         // The apps are read off the main thread: the button turns on once they are there.
         compose.waitUntil(15_000) { compose.onAllNodes(hasText(text(R.string.protected_confirm)) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(text(R.string.protected_confirm)).performClick()
         step(2).assertIsDisplayed()
         assertTrue(ProtectedApps.of(app).confirmed)
         assertEquals(setOf("com.example.mybank", "com.whatsapp", "com.google.android.gms"), ProtectedApps.of(app).list())
-        compose.onNodeWithText(text(R.string.onboarding_done)).performClick()
+        compose.onNodeWithText(text(R.string.onboarding_skip)).performClick()
         compose.onNodeWithContentDescription(text(R.string.action_menu)).assertIsDisplayed()
         assertTrue(Onboarding.of(app).done())
     }

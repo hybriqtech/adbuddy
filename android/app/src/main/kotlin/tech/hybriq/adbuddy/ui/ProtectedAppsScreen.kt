@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -195,12 +194,14 @@ fun ProtectedAppsContent(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                        if (step != null) SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip)
-                        Button(onClick = onSave, enabled = canSave) {
-                            Text(stringResource(if (proposal) R.string.protected_confirm else R.string.protected_save))
-                        }
-                    }
+                    ActionFooter(
+                        main = { m ->
+                            Button(onClick = onSave, enabled = canSave, modifier = m) {
+                                Text(stringResource(if (proposal) R.string.protected_confirm else R.string.protected_save))
+                            }
+                        },
+                        other = if (step != null) { { m -> SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip, m) } } else null,
+                    )
                 }
             }
         },

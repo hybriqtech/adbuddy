@@ -131,12 +131,17 @@ fun NotificationAccessContent(
         bottomBar = {
             if (step != null) {
                 Surface(tonalElevation = 3.dp) {
-                    Row(
+                    Column(
                         Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        if (effective != Effective.ON) SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip)
-                        Button(onClick = onDone) { Text(stringResource(R.string.onboarding_done)) }
+                        if (effective == Effective.ON) {
+                            ActionFooter(main = { m -> Button(onClick = onDone, modifier = m) { Text(stringResource(R.string.onboarding_done)) } })
+                        } else {
+                            // Nothing is on yet: "Done" would only look like it. The way out says so, and where to turn it on later.
+                            Text(stringResource(R.string.access_later_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            ActionFooter(main = { m -> SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip, m) })
+                        }
                     }
                 }
             }
