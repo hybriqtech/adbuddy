@@ -42,7 +42,7 @@ permissions:
 # share the emulator port and RAM of the runner. Cancelling still runs the steps
 # with if: always(), so the emulator is stopped.
 concurrency:
-  group: emulator-oracle-${{ github.ref }}
+  group: emulator-oracle-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
