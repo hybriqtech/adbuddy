@@ -23,7 +23,8 @@ setk() { grep -q "^$1" "$CFG" && sed -i "s|^$1 *=.*|$1 = $2|" "$CFG" || echo "$1
 setk hw.lcd.width "$W"; setk hw.lcd.height "$H"; setk hw.lcd.density "$DPI"
 setk hw.ramSize "$RAM"; setk hw.cpu.ncore "$CORES"
 mem() { # ws private (MB) of MY qemu (the one on console port 5620)
-  powershell -NoProfile -Command "\$c=Get-CimInstance Win32_Process -Filter \"Name like 'qemu%'\" | Where-Object { \$_.CommandLine -match '-port 5620 ' } | Select-Object -First 1; if(\$c){\$p=Get-Process -Id \$c.ProcessId; '{0} {1}' -f [int](\$p.WorkingSet64/1MB),[int](\$p.PrivateMemorySize64/1MB)}else{'0 0'}" | tr -d ''
+  powershell -NoProfile -Command "\$c=Get-CimInstance Win32_Process -Filter \"Name like 'qemu%'\" | Where-Object { \$_.CommandLine -match '-port 5620 ' } | Select-Object -First 1; if(\$c){\$p=Get-Process -Id \$c.ProcessId; '{0} {1}' -f [int](\$p.WorkingSet64/1MB),[int](\$p.PrivateMemorySize64/1MB)}else{'0 0'}" | tr -d '
+'
 }
 t0=$(date +%s)
 envout=$(scripts/emulator.sh start 2>"$OUT/$NAME.start.err"); rc=$?
@@ -32,16 +33,16 @@ if [ $rc -ne 0 ]; then
   printf '%s\tSTART_FAILED\t%s\n' "$NAME" "$(tail -1 "$OUT/$NAME.start.err")"
   scripts/emulator.sh stop; exit 1
 fi
-boot=$(( $(date +%s) - t0 ))
+boot=$(( $(date +%s) - t0 )); eff=$(grep -E "^hw.ramSize" "$AVDDIR/hardware-qemu.ini" | tr -d " ")
 read -r ws0 pr0 <<<"$(mem)"
 # sample during the load
-( while :; do mem >> "$OUT/$NAME.samples"; sleep 10; done ) & SAMP=$!
 rm -f "$OUT/$NAME.samples"
-(cd host && go test -count=1 -v -timeout 25m -run "$TESTRUN" ./internal/emutest > "$OUT/$NAME.test.log" 2>&1)
+( while :; do echo "$(( $(date +%s) - t0 )) $(mem)" >> "$OUT/$NAME.samples"; sleep "${SAMPLE_SECS:-10}"; done ) & SAMP=$!
+(cd host && go test -count=1 -v -timeout 25m -run "$TESTRUN" ${GOSKIP:+-skip "$GOSKIP"} ./internal/emutest > "$OUT/$NAME.test.log" 2>&1)
 res="pass=$(grep -c -- '--- PASS' "$OUT/$NAME.test.log") fail=$(grep -c -- '--- FAIL' "$OUT/$NAME.test.log") skip=$(grep -c -- '--- SKIP' "$OUT/$NAME.test.log") $(tail -1 "$OUT/$NAME.test.log")"
 kill $SAMP 2>/dev/null
 read -r wsE prE <<<"$(mem)"
-wsP=$(awk '{if($1>m)m=$1}END{print m+0}' "$OUT/$NAME.samples"); prP=$(awk '{if($2>m)m=$2}END{print m+0}' "$OUT/$NAME.samples")
+wsP=$(awk '{if($2>m)m=$2}END{print m+0}' "$OUT/$NAME.samples"); prP=$(awk '{if($3>m)m=$3}END{print m+0}' "$OUT/$NAME.samples")
 scripts/emulator.sh stop
 sleep 5
 printf '%s\t%ss\t%s\t%s\t%s\t%s\t%s\t%s\n' "$NAME" "$boot" "$ws0" "$pr0" "$wsP" "$prP" "$wsE" "$res"

@@ -18,3 +18,17 @@ Hallazgos:
 - **Tests y resolución:** `confirm_test` usaba 540,1800 absolutos para `unlock`: a 720x1600 puede fallar (skimmer lo haría relativo).
 
 Pendiente (segunda pasada, `scratchpad/runall2.sh` equivalente): c2560 (1080x2400, 2560, 2 núcleos), a1536 (1080x2400, 1536, 2 núcleos), b1536small (720x1600, 1536), con `emutest` completo (`-run .`) como carga y RAM en MB planos; luego la GPU `host` en 34.
+
+## Segunda pasada: crecimiento del lado host con el emutest completo (test/guard-samples 612d8f3)
+
+AVD 1080x2400/420, hw.ramSize 2560 (efectivo), 4 núcleos, swiftshader_indirect, android-34, muestreo cada 30 s (`curvas/*.samples`: segundos, WS MB, Priv MB). Un solo emulador en el PC, ningún job de CI concurrente.
+
+| Run | Tests | WS estable | WS pico | Priv pico | WS final | Duración tests |
+| --- | --- | --- | --- | --- | --- | --- |
+| leakfull | emutest completo (50 pass, 1 skip) | 3643 MB | 6817 MB | 7947 MB | 7261 MB | 574 s |
+| leakNoGuard | sin `TestTheGuard*` (37 pass, 1 skip) | 3650 MB | 5018 MB | 5763 MB | 5455 MB | 487 s |
+
+- El WS **solo crece y nunca devuelve memoria**: +3,2 GB en 10 min con las pruebas del guard (T5), +1,4 GB sin ellas. Las pruebas del guard (pantallas reales, capturas) cuestan ~2 GB más de crecimiento.
+- El job de CI que llegó a 14-15 GB de WS (run 37105144718, 30+ min, con el oráculo 37 antes) es esta misma curva alargada: el emulador no libera.
+- Con un qemu concurrente (job de CI) y 2 núcleos, 20 tests fallaron por contención: medir siempre con un emulador.
+- Pendiente: GPU `guest` vs swiftshader, RAM del guest 1536 MB plana, reiniciar el emulador entre grupos de tests.
