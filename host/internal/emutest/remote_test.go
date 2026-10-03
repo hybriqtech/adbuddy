@@ -269,8 +269,10 @@ func TestTheRemoteModeOpensAndClosesThePort(t *testing.T) {
 
 // Validation 37 of the v1 deferred B (VB-37): "off" with the remote mode off
 // does not restart adbd when the port reads closed (on a phone that would cut
-// its connection for nothing), and closes a port opened by hand, 5555 or any
-// other (7777), with adb usb. adbd's pid tells a restart (adbdNow).
+// its connection for nothing), and closes a port opened by hand (5555) with
+// adb usb. Measured: `adb tcpip 7777` leaves the emulator offline (the
+// emulator's transport only listens on 5555), so a port opened by hand on 7777
+// can only be checked on a real phone. adbd's pid tells a restart (adbdNow).
 func TestOffWithTheModeOffOnlyClosesAnOpenPort(t *testing.T) {
 	adbdTests(t)
 	e := newEmu(t)
@@ -283,19 +285,18 @@ func TestOffWithTheModeOffOnlyClosesAnOpenPort(t *testing.T) {
 		}
 		e.sameAdbd(t, pid, port)
 	})
-	// 7777 last: the emulator's transport with a port other than 5555 has not
-	// been measured (restartHint if it does not come back).
-	for _, p := range []string{remote.Port, "7777"} {
-		t.Run("open by hand on "+p, func(t *testing.T) {
-			pid, _ := e.adbd(t)
-			e.run(t, "tcpip", p)
-			pid = e.restartedTo(t, pid, p)
-			if s, err := ctl.Disable(e.ctx); err != nil || s != (remote.State{}) {
-				t.Fatalf("Disable: %+v, %v", s, err)
-			}
-			e.restartedTo(t, pid, "0")
-		})
-	}
+	// Only 5555: `adb tcpip 7777` leaves the emulator offline (the emulator's
+	// transport only listens on 5555), so a port opened by hand on 7777 can
+	// only be checked on a real phone.
+	t.Run("open by hand on "+remote.Port, func(t *testing.T) {
+		pid, _ := e.adbd(t)
+		e.run(t, "tcpip", remote.Port)
+		pid = e.restartedTo(t, pid, remote.Port)
+		if s, err := ctl.Disable(e.ctx); err != nil || s != (remote.State{}) {
+			t.Fatalf("Disable: %+v, %v", s, err)
+		}
+		e.restartedTo(t, pid, "0")
+	})
 }
 
 // hostReadsPersistPort says whether remote and device.EnsureNoTCPPort read
