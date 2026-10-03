@@ -4,12 +4,12 @@ Notas que hay que incorporar cuando se escriban esos planes (desde el 2026-09-29
 
 ## M2.5b · La app en el emulador
 
-**HECHO en M2.5b** (plan `docs/superpowers/plans/2026-10-03-adbuddy-m2.5b-app-emulador.md`): los instrumentados corren en el emulador **Android 14 (API 34, imagen `android-34`)** con `am instrument` desde `TestInstrumentedSuite` (nunca `connected*`: UTP habla con el servidor adb 5037, el del móvil, y la guarda de Gradle lo niega), y `host/internal/emutest` prueba el host contra la app; el job `emulator` de la CI ejecuta el oráculo en `android-37` y luego `emutest` en `android-34`. La imagen `android-37.0` no sirve para la app: `surfaceflinger` aborta cada 5-10 s (`Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma`, hilo `RegionSampling`) con `swiftshader_indirect`, `swangle_indirect` y `host`, y Android reinicia su sistema en bucle (el oráculo lo esquiva porque solo usa el shell). Validaciones de M2 automatizadas en Android 14: 1, 2, 3, 10 y la 6 solo en local (`ADBUDDY_EMULATOR_CUT=1`, ver el plan de M2). Siguen manuales: 4, 5, 7, 8, 9 y lo que depende de Android 17 (lista siguiente).
+**HECHO en M2.5b** (plan `docs/superpowers/plans/2026-10-03-adbuddy-m2.5b-app-emulador.md`): los instrumentados corren en el emulador **Android 14 (API 34, imagen `android-34`)** con `am instrument` desde `TestInstrumentedSuite` (nunca `connected*`: UTP habla con el servidor adb 5037, el del móvil, y la guarda de Gradle lo niega), y `host/internal/emutest` prueba el host contra la app; los workflows `emulator-oracle` (android-37) y `emulator-app` (android-34) de la CI ejecutan el oráculo y `emutest`. La imagen `android-37.0` no sirve para la app: `surfaceflinger` aborta cada 5-10 s (`Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma`, hilo `RegionSampling`) con `swiftshader_indirect`, `swangle_indirect` y `host`, y Android reinicia su sistema en bucle (el oráculo lo esquiva porque solo usa el shell). Validaciones de M2 automatizadas en Android 14: 1, 2, 3, 10 y la 6 solo en local (`ADBUDDY_EMULATOR_CUT=1`, ver el plan de M2). Siguen manuales: 4, 5, 7, 8, 9 y lo que depende de Android 17 (lista siguiente).
 
 - **El emulador de desarrollo** usa el AVD `adbuddy-dev34` (imagen `android-34`), consola 5600 y servidor adb 5060 (`ADBUDDY_EMU_*` de `scripts/emulator.sh`); la CI, `adbuddy-ci-api37` (oráculo, 5590 y 5049) y `adbuddy-ci-api34` (app). Nunca dos a la vez en el PC del runner (~5 GB de RAM cada uno). Los puertos están fuera del rango que escanea adb (5555-5585): tras perder `adbd`, el emulador vuelve a su servidor solo por los reintentos de adb, y Cortar acceso espera 15 s antes de Reactivar (vuelve a ~17 s del corte).
 - **Cortar acceso solo en local:** tras un corte que nadie deshace, el AVD arranca con `adb_enabled=0` y `emulator.sh start` acaba en 124 a los 10 min; hay que borrar `userdata-qemu.img` y `.qcow2` del AVD. Por eso la CI no ejecuta `TestCutAccessAndReactivate`. La prueba de `tcpip` es débil: en el emulador `adbd` escucha siempre en 5555 (es su transporte), así que `listening before/after` salen igual con y sin `tcpip`.
-- **Cada PR que toca `android/**` lanza también el oráculo** (es un solo job). Si pesa, separar los tests de la app en otro job del mismo workflow con sus rutas.
-- **Post-v1: partir `emulator.yml` en dos workflows** (oráculo / app), cada uno con sus `paths`, para que un cambio de `android/**` no grabe el oráculo y uno del clasificador no pruebe la app. Al hacerlo, que no corran a la vez en el mismo runner (un emulador cabe en la RAM; mismo puerto 5590): un `concurrency` común o puertos y AVD distintos (de puffin, revisión de CI de M2.5b).
+- **HECHO (rama `ci/emulator-split`):** el oráculo y la app son dos workflows con sus rutas; un cambio de `android/**` ya no graba el oráculo.
+- **HECHO (rama `ci/emulator-split`, plan `2026-10-03-dividir-emulator-yml.md`): partir `emulator.yml` en dos workflows** (`emulator-oracle.yml` y `emulator-app.yml`, con puertos distintos 5590/5049 y 5592/5051); texto original: (oráculo / app), cada uno con sus `paths`, para que un cambio de `android/**` no grabe el oráculo y uno del clasificador no pruebe la app. Al hacerlo, que no corran a la vez en el mismo runner (un emulador cabe en la RAM; mismo puerto 5590): un `concurrency` común o puertos y AVD distintos (de puffin, revisión de CI de M2.5b).
 - `scripts/emulator.sh` escribe el log del emulador en `${TMPDIR:-/tmp}/adbuddy-emulator.log` sea cual sea el AVD: dos emuladores a la vez se pisan el log (de puffin).
 - `android/local.properties` no se versiona: crearlo con `sdk.dir=C\:/Users/<usuario>/AppData/Local/Android/Sdk`.
 
@@ -45,7 +45,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 - El grabador no mata procesos de otros usuarios que sobreviven a un caso (solo darían falsos "se ejecutó") ni borra el fichero de sesión antes de cada caso.
 - Si salta el `-timeout` de Go durante la grabación, el sistema Android del emulador queda parado (`su 0 start` para arrancarlo).
 - Muchos "no se ejecuta" del oráculo dependen de la imagen (`su` de AOSP frente a Magisk, `busybox`, `script`…): hoy todos son 🔴 especial, pero si se admiten en la lista blanca hay que regrabar en otra imagen.
-- `emulator.yml`: el paso de grabar pasaría con "no tests to run" si se renombra `TestRecordOracle`; y los límites (60 min de test, 90 de job) se pueden bajar cuando se vea lo que tarda en CI.
+- `emulator-oracle.yml`: el paso de grabar pasaría con "no tests to run" si se renombra `TestRecordOracle`; y los límites (45 min de grabación y 75 de job en el oráculo, 75 de job en `emulator-app.yml`) se pueden bajar cuando se vea lo que tarda en CI.
 - `xargs -n1` y `xargs -I{}` (opción y valor pegados) piden confirmación como especiales.
 
 ## M3 · Chat: daemon con PTY
@@ -522,8 +522,8 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
   - A5-7: `ADB_SERVER_SOCKET` y `ANDROID_ADB_SERVER_ADDRESS` en la lista mínima del entorno del runner. El `unset` en los pasos de diagnóstico de `emulator.yml` lo hace puffin.
 - **Post-v1 (aplazado):**
   - A5-4: `gradle/verification-metadata.xml` (`gradle --write-verification-metadata sha256 ...`), versionado y actualizado por una persona al cambiar `libs.versions.toml`; hoy `release.yml` firma con la clave real un APK construido sin verificación de dependencias.
-  - A5-6 (lo pasa puffin): `concurrency` de `emulator.yml` por `github.ref` con puertos y AVD fijos; con dos runners en la misma máquina una PR se validaría contra el emulador de otra. Un grupo por runner (`vars.CI_RUNNER_EMULATOR`) o un grupo fijo con `cancel-in-progress: false`; mientras tanto, un solo runner de emulador por máquina.
-  - A5-8: `dependabot.yml` solo para `github-actions` (las acciones fijadas por SHA no reciben correcciones) y excluir `dependabot[bot]` en la guarda de los jobs con runner propio (`github.actor != 'dependabot[bot]'`).
+  - A5-6 (lo pasa puffin): `concurrency` de `emulator-oracle.yml` y `emulator-app.yml` (una por workflow, por `github.ref`) con puertos y AVD fijos; con dos runners en la misma máquina una PR se validaría contra el emulador de otra. Un grupo por runner (`vars.CI_RUNNER_EMULATOR`) o un grupo fijo con `cancel-in-progress: false`; mientras tanto, un solo runner de emulador por máquina.
+  - A5-8 (cerrado en la sección «Dependabot» más abajo): `dependabot.yml` solo para `github-actions` (las acciones fijadas por SHA no reciben correcciones) y mandar los PRs que no son del propietario a runners de GitHub: cerrado con una lista blanca por autor (`github.event.pull_request.user.login == github.repository_owner`), no con la lista negra `github.actor != 'dependabot[bot]'` que se propuso primero.
 
 ## v1 · V44-V45 (plan `docs/superpowers/plans/2026-10-02-adbuddy-v44-v45.md`)
 
@@ -537,6 +537,26 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 - **Las salidas de ADBuddy son estrechas a propósito:** Inicio solo con `3` o `KEYCODE_HOME` exactos (`HOME`, `03`, `cmd input keyevent 3`, `input -d 0 keyevent 3` y `--longpress` siguen bloqueados), y abrir solo con `monkey -p <paquete> -c android.intent.category.LAUNCHER 1` exacto y con la app (sin la app, Inicio primero). Por la app, con ADBuddy arriba y un banco en la otra mitad de una pantalla dividida, o con el chat en burbuja (`ChatBubbleActivity`) sobre un banco, las dos pasan (la app no dice qué hay detrás; no lo tocan ni lo leen, y la orden siguiente ya lo ve; revisión M5). Con otra app arriba y ADBuddy en la otra mitad no hay salida, y el motivo es el genérico de app protegida.
 - **Skill `home-screen` y regla 8 de `AGENTS.md`:** ya dicen que seguir la salida del propio motivo (Inicio, `monkey … LAUNCHER 1`, esperar 10 s y reintentar una vez) no es un rodeo. Revisarlas si en las validaciones 44 o 45 el agente no sale de ADBuddy o no reintenta.
 - Validaciones en dispositivo 44 y 45: en "Validaciones manuales pendientes" del plan.
+
+## Dependabot (plan `docs/superpowers/plans/2026-10-03-adbuddy-dependabot.md`)
+
+- **Hecho:** `dependabot.yml` (actions, gomod, gradle), y los workflows mandan a los PR de autores que no son el propietario a runners de GitHub (lista blanca por autor; `scripts/check-ci-runner-rules.py` comprueba la tabla). Cierra A5-8. Regla y proceso en `docs/ci-self-hosted.md` §6.
+- **No comprobado (lo confirma el primer PR de Dependabot):**
+  - Con el token de `gh` actual (sin `admin:repo_hook`) no se puede consultar `security_and_analysis`: no se sabe qué más está activo en el repositorio.
+  - Cómo trata Dependabot las acciones fijadas por SHA con comentario `# vX` (se espera: sube el SHA y el comentario y mantiene el fijado).
+  - La sintaxis de `schedule` (`day`, `time`, `timezone`), los `groups` con `patterns` y `update-types`, y los patrones de `ignore` con comodín sobre los nombres de plugins de Gradle (`com.android.application*`, `org.jetbrains.kotlin.*`).
+  - Alerts y security updates en repositorios privados del plan Free.
+  - Si Dependabot admite `go 1.27.0` en el updater de `gomod` (los PR pueden fallar).
+  - Que `runs-on` cae en `ubuntu-latest`, la matriz de `host` tiene una celda y `emulator` sale `skipped` en ese primer PR: revisar los logs a mano.
+  - Que las etiquetas `ci`, `go` y `android` inexistentes se ignoran sin fallar (documentado por GitHub, no probado aquí).
+- **DEFER:**
+  - I2: `workflow_dispatch` solo acepta una rama y Dependabot puede reescribirla entre la revisión y el lanzamiento; hoy se mitiga comprobando `head_sha` a mano.
+  - I3: nada obliga a pasar el emulador (sin protección de rama en el plan Free, y un job `skipped` cuenta como éxito); es regla de proceso.
+  - M2: Gradle, el Go de `setup-go` y `goreleaser` quedan fuera de Dependabot; varias mayores de la misma acción (checkout v4/v5/v7, setup-gradle v4/v6) llegarán como PR individuales y pueden romper entradas.
+  - Riesgo I6 aceptado: revisar el diff no revisa el código de la dependencia, que tras el merge corre en los runners propios; falta `gradle/verification-metadata.xml` y la cuenta de Windows dedicada. Opcional: subir `semver-major-days` del cooldown de gradle.
+  - Si los PR del propietario los abre otra cuenta (un agente): lista `CI_TRUSTED_PR_AUTHORS` en la regla (anotada en §6, no implementada).
+
+- DEFER (menores de la revisión del diff de Dependabot): `scripts/check-ci-runner-rules.py` tiene la lista de jobs fija en el código (añadir una comprobación de estructura que falle si algún job con `vars.` en `runs-on`/matriz no está cubierto) y su evaluador no reconoce los literales `true`/`false`/`null`; opción más estricta del predicado de confianza: `&& !startsWith(github.event.pull_request.head.ref, 'dependabot/')` (cubre al propietario abriendo a mano un PR desde una rama `dependabot/**`).
 
 ## VB-41 · `persist.adb.tcp.port` (plan `docs/superpowers/plans/2026-10-04-adbuddy-vb41-persist-port.md`)
 
