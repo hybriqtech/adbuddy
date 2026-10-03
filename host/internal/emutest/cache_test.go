@@ -86,15 +86,20 @@ func TestCacheTrimsTheOldestAndKeepsTheParts(t *testing.T) {
 	}
 	e.runAs(t, "mkdir -p cache/downloads")
 
-	// Oldest first; the ids are 32 hex digits as the app's own.
+	// In order of modification time, oldest first. The names, the order of
+	// creation and the dates all differ, so only the mtime says which goes
+	// first: the oldest sorts LAST by name and is created last; the next
+	// oldest sorts FIRST by name and is created first. (The ids are 32 hex
+	// digits as the app's own.)
+	id := func(c string) string { return strings.Repeat(c, 32) }
 	olds := []string{
-		strings.Repeat("a", 31) + "1-old1.bin",
-		strings.Repeat("a", 31) + "2-old2.bin",
-		strings.Repeat("a", 31) + "3-old3.bin",
-		strings.Repeat("a", 31) + "4-old4.bin",
+		id("f") + "-oldest.bin", // 2020-01: the one that must go
+		id("a") + "-second.bin", // 2020-02
+		id("b") + "-third.bin",  // 2020-03
+		id("c") + "-fourth.bin", // 2020-04
 	}
-	for i, name := range olds {
-		e.fillCache(t, name, 125, fmt.Sprintf("2020-0%d-01 00:00:00", i+1))
+	for _, i := range []int{1, 2, 3, 0} { // creation order = name order
+		e.fillCache(t, olds[i], 125, fmt.Sprintf("2020-0%d-01 00:00:00", i+1))
 	}
 	part := strings.Repeat("b", 32) + ".part"
 	e.fillCache(t, part, 150, "2019-01-01 00:00:00")
@@ -120,7 +125,9 @@ func TestCacheTrimsTheOldestAndKeepsTheParts(t *testing.T) {
 			_, there := e.cacheLs(t)[olds[0]]
 			return !there
 		})
-		// ... and a little more, for it to have finished.
+		// ... and a little more, for it to have finished: what follows is a
+		// negative claim (nothing else was deleted), so it is made after a wait
+		// that was preceded by polling for the positive event.
 		time.Sleep(2 * time.Second)
 	}
 	after := e.cacheLs(t)
