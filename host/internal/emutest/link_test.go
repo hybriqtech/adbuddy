@@ -42,6 +42,10 @@ type link struct {
 	wake   chan struct{} // closed and replaced on each message or hello
 	msgs   []bridge.Message
 	hellos []bridge.Hello // tokens blanked
+
+	// onFrame, when set, receives the app's binary frames (see setOnFrame).
+	// It lives in the link, not in the Server, so it survives resume.
+	onFrame func(id bridge.FrameID, offset int64, data []byte)
 }
 
 // openLink installs the app on the emulator (as installApp, in the
@@ -98,6 +102,7 @@ func (l *link) listen(t *testing.T, port int) {
 		Session:     "emutest",
 		HostVersion: "emutest",
 		OnMessage:   l.put,
+		OnFrame:     l.frame,
 		Admit: func(_ context.Context, h bridge.Hello) bool {
 			h.Token = ""
 			l.mu.Lock()
@@ -124,6 +129,28 @@ func (l *link) listen(t *testing.T, port int) {
 			poll(5*time.Second, func() bool { return !srv.Connected() })
 		})
 	}
+}
+
+// frame hands a binary frame of the app to the handler set with setOnFrame.
+// The server only lends data during the call: it is copied here.
+func (l *link) frame(id bridge.FrameID, offset int64, data []byte) {
+	l.mu.Lock()
+	fn := l.onFrame
+	l.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	fn(id, offset, append([]byte(nil), data...))
+}
+
+// setOnFrame sets (nil: removes) the handler of the app's binary frames; it
+// holds for the servers resume starts too. The handler runs on the
+// connection's reader: it must never call cut (stop waits for the reader),
+// and what it keeps is its own copy of the data.
+func (l *link) setOnFrame(fn func(id bridge.FrameID, offset int64, data []byte)) {
+	l.mu.Lock()
+	l.onFrame = fn
+	l.mu.Unlock()
 }
 
 // handshake hands the token and the port to the app again, as serve does
@@ -256,6 +283,34 @@ func (l *link) reply(t *testing.T, req bridge.Message, typ string, p any) {
 	if err := l.srv.Reply(req, typ, p); err != nil {
 		t.Fatalf("reply %s: %v", typ, err)
 	}
+}
+
+// sendFile serves req, a file.get of the app, from data (the whole file): the
+// binary frames from the offset asked for, in frames of MaxFrameData, and then
+// file.end as a reply; the queue sends them in that order (spec M3 §6.2). It
+// blocks while the app is slow to take them.
+func (l *link) sendFile(t *testing.T, req bridge.Message, data []byte) {
+	t.Helper()
+	g := payload[bridge.FileGet](t, req)
+	id, err := bridge.ParseFrameID(g.ID)
+	if err != nil {
+		t.Fatalf("file.get id %q: %v", g.ID, err)
+	}
+	if g.Offset < 0 || g.Offset > int64(len(data)) {
+		t.Fatalf("file.get offset %d outside the %d bytes of the file", g.Offset, len(data))
+	}
+	for off := g.Offset; off < int64(len(data)); {
+		n := min(int64(bridge.MaxFrameData), int64(len(data))-off)
+		frame, err := bridge.EncodeFrame(id, off, data[off:off+n])
+		if err != nil {
+			t.Fatalf("frame at %d: %v", off, err)
+		}
+		if err := l.srv.SendFrameTo(l.e.ctx, req, frame); err != nil {
+			t.Fatalf("send the frame at %d: %v", off, err)
+		}
+		off += n
+	}
+	l.reply(t, req, bridge.TypeFileEnd, bridge.FileEnd{ID: g.ID, Size: int64(len(data))})
 }
 
 // connected reports whether the app is connected now.
