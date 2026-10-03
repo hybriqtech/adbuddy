@@ -1,0 +1,687 @@
+diff --git a/docs/superpowers/plans/2026-10-03-validaciones-manuales.md b/docs/superpowers/plans/2026-10-03-validaciones-manuales.md
+index cb2d0a4..a0fc756 100644
+--- a/docs/superpowers/plans/2026-10-03-validaciones-manuales.md
++++ b/docs/superpowers/plans/2026-10-03-validaciones-manuales.md
+@@ -7,21 +7,21 @@
+ - Las secciones "Validaciones manuales pendientes" de `docs/superpowers/plans/*.md`: M1b (1-5), M2 (1-10), M3.0 (ninguna), M3a, M3b (1-10), M4 (remite a pendientes), M5a (1-10), M5b (11-21), M5c (22-35), M6a (1-6), M6b, M6c (1-9), v1 diferidos, diferidos B (36-41), diferidos L (42-43), ola 2 H, ola 2 M, pty-kill y tests-ui-jvm (1-3).
+ - `pendientes-m3-m5.md`: M4 (y la spec M4 §11), ola 1, ola 2 H, la revisión de seguridad (PROJECT_MEDIA), A4 (tarjetas) y bidi-host.
+ - **Lo que aún no está en `main`:** el texto "Automatizada en M2.5b" del plan de M2, las secciones "Validaciones que solo se pueden hacer en el Pixel" y "Validaciones ampliadas aún no hechas" de `pendientes-m3-m5.md` y el ledger de M2.5b (`.superpowers/sdd/2026-10-03-adbuddy-m2.5b-app-emulador/progress.md`) solo existen en la rama `feat/m2.5b-app-emulador` (1c35794, PR abierto, sin integrar a 80d6b86). Aquí se citan desde esa rama. "Hecha (M2.5b)" quiere decir "hecha en esa rama".
+ - `docs/safety.md` no tiene validaciones pendientes. Las specs (M3 §11, M4 §11, M5 §6, M6b §6, M6c §10, M2.5 §7) repiten lo que dicen los planes: no añaden filas. La única excepción es la spec M4 §11, que entra en las filas M4-a y M4-b.
+ - Las filas repetidas, que son la misma comprobación escrita en dos planes, se marcan con "=" y no se cuentan: M3a-c a M3a-g (= M3b-1 a M3b-6), M5c-35 (= M5b-18), UIJ-3 (= M5c-27/34), PTY-b (= O2M-a) y las de ola 2 H copiadas en pendientes.
+ 
+ ## Resumen
+ 
+ **129 validaciones distintas**, sin contar las 4 filas repetidas. En el emulador propio:
+ 
+-- **33 son Sí.** Seis ya están hechas del todo: M2-1, M5b-20, M6c-8, desde la T3 M3b-6 y M5a-2, y desde la T5 VB-36. M3b-1 está hecha en ASCII (T3). La T5 hace además, en la API 34, M5a-5 (con un apaño por su hallazgo), M5a-9, y M5a-7 y M5a-8 en parte.
++- **33 son Sí.** Seis ya están hechas del todo: M2-1, M5b-20, M6c-8, desde la T3 M3b-6 y M5a-2, y desde la T5 VB-36. M3b-1 está hecha en ASCII (T3). La T5 hace además, en la API 34, M5a-5 (con un apaño por su hallazgo, quitado al arreglarlo en `fix/guard-imagewallpaper`), M5a-9, y M5a-7 y M5a-8 en parte.
+ - **44 son Parcial.** De ellas, 18 tienen ya una parte hecha (M2-2, 3, 6 y 10 en Android 14; la lógica de M5b-11 a 17, 19 y 21; M5c-27 y 34 en la JVM; y en la T3, el canal de M2-7, M3b-4 y M6c-6). Lo que les falta casi siempre es Android 17.
+ - **52 son No.** 45 no dependen del móvil: son del PC o de la CI, y las corre un agente sin el usuario. 2 son revisiones de código o de texto (M6c-9 y O2M-c). Solo 5 necesitan de verdad a la persona, su cuenta o una red real: M1b-1, M5b-15, M5c-31, M6a-4 y M6a-6.
+ 
+ Leyenda:
+ - **Emulador:**
+   - **Sí:** todo lo que pide la validación se puede comprobar en el emulador propio, o en la JVM si lo indica.
+   - **Parcial:** una parte se comprueba en el emulador y otra necesita el Pixel o algo que no hay.
+   - **No:** no se puede en el emulador. "No (PC)" y "No (CI)" son validaciones que no dependen del móvil.
+   - "hecha" indica que un test ya la cubre.
+ - **El emulador propio** es el AVD `adbuddy-dev34`: imagen `system-images;android-34;google_apis;x86_64` rev 14, consola 5600 (siempre ≥ 5600), servidor adb propio 5060, `ADB_MDNS=0`, `ADBUDDY_EMU_STABLE_SECS=120`. Los instrumentados se lanzan por `am instrument` desde `host/internal/emutest`, nunca con `connected*`: UTP habla con el servidor 5037, el del móvil. Los tests usan el adb del emulador directamente, sin pasar por el shim.
+@@ -125,31 +125,35 @@ Fuera de la lista también se midió:
+   - Es seguro (nunca permite con el móvil bloqueado), pero el flujo de M2-8 no funciona en la API 34. Arreglo barato posible: si la acción llega con el móvil aún bloqueado, esperar a que el keyguard se vaya (reintentar unos cientos de milisegundos) en lugar de descartarla. Falta medirlo en Android 17.
+   - **Es defecto de producto** (revisión opus de la T4): SystemUI entrega el `PendingIntent` antes de que `isDeviceLocked` pase a falso, y `ConfirmReceiver` y `BridgeService` lo descartan en silencio.
+   - Alcanza también a Responder (`BridgeService`, ~113-116: el texto escrito se pierde en silencio) y a Enviar captura. Es seguro, pero obliga a repetir la acción.
+   - Arreglo mínimo propuesto por el revisor: en `ConfirmReceiver`, con decisión distinta de deny, móvil bloqueado y API >= 31, `goAsync()` y sondear `isDeviceLocked` cada 100 ms hasta 2 s; solo si se desbloquea, reevaluar `ConfirmUi.canSend(...)` con el estado actual y `locked=false` y responder. En API 30 (sin `setAuthenticationRequired`) no esperar nunca. Rechazar no cambia. Lo mismo con `Handler` para REPLY y CAPTURE.
+   - Alternativa robusta: Permitir como `PendingIntent.getActivity` a una actividad translúcida con `requestDismissKeyguard`.
+   - Lo adjudica el controlador; también va a la T4b.
+   - El test lo admite mientras `authActionsMayBeDropped` (en `confirm_test.go`) sea verdadero; con el arreglo, se pone en falso y la pérdida hace fallar el test.
+ 
+ ## Hallazgos de la T5 (los adjudica el controlador)
+ 
+-- **Sin la app, la guarda bloquea en todas las pantallas de la API 34.**
++- **Sin la app, la guarda bloqueaba en todas las pantallas de la API 34. Resuelto** (rama `fix/guard-imagewallpaper`, ruling del supervisor; ver «Resuelto» al final de este punto).
+   - La ventana del fondo de pantalla se llama `com.android.systemui.wallpapers.ImageWallpaper`. Es de systemui y está siempre visible (`mViewVisibility=0x0`), también detrás de una app opaca. `fixedSystemUI` (`host/internal/uidump/window.go`) tiene `ImageWallpaper`, pero no este título.
+   - Por eso `ParseSystemUIWindows` la da como desconocida en los 16 estados con ventanas, y la guarda sin la app responde «a system window is on screen (com.android.systemui.wallpapers.ImageWallpaper)» a todo lo que toca o lee la pantalla, también con Ajustes delante y nada encima.
+   - Es seguro, porque falla cerrado, pero deja inservible el respaldo por `adb` sin la app (M5a-5 necesitó un apaño). Muestra mínima, de `settings.windows.txt`:
+ 
+     ```
+       Window #13 Window{7e8b51b u0 com.android.systemui.wallpapers.ImageWallpaper}:
+         mOwnerUid=10168 showForAllUsers=true package=com.android.systemui appop=NONE
+         mViewVisibility=0x0 mHaveFrame=true mObscured=false
+     ```
+   - Arreglo barato posible: añadir ese título a `fixedSystemUI`; hay que comprobar antes que el fondo de pantalla nunca muestra texto de nadie. Los tests esperan hoy el bloqueo, con `TODO(adjudicar)`: `TestAPI34SystemUIWindows`, `TestTheGuardOnAPI34Screens` y `wallpaperReason` en `guard_test.go`. Con el arreglo, esos casos vuelven a «se ejecuta».
++  - **Resuelto:** `fixedSystemUI` lista también `com.android.systemui.wallpapers.ImageWallpaper` (el título corto se queda). Nada más: ni la heurística de `mIsWallpaper` ni otros títulos (post-v1). `ParseSystemUIWindows` solo mira ventanas de `com.android.systemui`, así que otra app con ese título no se cuela.
++    - Los tests vuelven a su valor correcto, sin `TODO(adjudicar)`: `TestAPI34SystemUIWindows` (y comprueba que la ventana del fondo está en las 16 muestras), los casos `settings`, `keyboard`, `headsup-gone`, `screen-off` y `doze` de `TestTheGuardOnAPI34Screens` (se ejecutan), y en `guard_test.go` `noSystemWindow` sustituye a `onlyWallpaper`/`wallpaperReason`, y `TestTheFallbackWithoutTheApp` ya no simula el `foreground` de la app (va sin app).
++    - Comprobación de seguridad: `TestTheWallpaperUnblocksOnlyWhatItAloneBlocked` (`daemon/guard_api34_test.go`) recorre todas las muestras con `windows` y, para una captura, un toque y un `uiautomator dump`, sin apps protegidas y con Ajustes protegida, exige la decisión de antes del arreglo menos el fondo: solo se desbloquean `settings`, `keyboard`, `headsup-gone`, `screen-off` y `doze` (y `keyboard` con Ajustes protegida, que no está delante). ADBuddy delante, la pantalla partida, la persiana, los ajustes rápidos, el bloqueo, el heads-up, el diálogo de volumen y la burbuja siguen bloqueando por el mismo motivo. Mutaciones: sin el título largo, rojo; con `NotificationShade` en `fixedSystemUI`, rojo (el heads-up se ejecutaría).
++    - Pendiente: los cambios de `emutest/guard_test.go` no se han corrido aún en el emulador; los corre el job del emulador de la CI.
+ - **No son defectos, pero conviene saberlo:**
+   - Con la pantalla apagada o bloqueada no hay `topResumedActivity`, pero `ResumedActivity` sigue nombrando la app de debajo, así que la guarda cree que esa app está delante. En el bloqueo, el foco `NotificationShade` bloquea igualmente.
+   - Una burbuja plegada (`Bubbles!`) cuenta como ventana desconocida y bloquea sin la app.
+   - En la API 34, un `uiautomator dump` no desvincula el servicio de accesibilidad.
+ 
+ ## Tablas
+ 
+ ### M1b · Instalación y conexión (1-5)
+ 
+ | # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+@@ -212,21 +216,21 @@ Fuera de la lista también se midió:
+ | M4-d | El aviso de permiso es silencioso (canal LOW) y en el bloqueo no muestra texto | Parcial, hecha (T4) | Hecho en T4, en `TestAllowFromTheLockedShadeAsksToUnlock`: con un `permission.request` por el canal real, la notificación de la conversación dice "Claude Code needs an answer", su registro de `dumpsys` tiene `importance=2` (LOW) y no lleva el texto de la pregunta; la pantalla de bloqueo (con los silenciosos visibles) muestra esa línea y no la pregunta. | El aspecto. Paso: la pasada visual. | medio | Hecha + pasada visual |
+ 
+ ### M5a · Ayudas (1-10)
+ 
+ | # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+ |---|---|---|---|---|---|---|
+ | M5a-1 | `screen` tarda menos de 500 ms | Parcial | T3 y T5: medirlo en el emulador como guarda de regresión. | La cifra que vale es la del Pixel en su Wi-Fi. Paso: un `adbuddy screen` cronometrado. | bajo | Pixel |
+ | M5a-2 | `type "¿Qué tal? 👋"` en un campo de texto | Sí, hecha (T3) | `TestTypeWritesUnicodeIntoAField`: accesibilidad activada como en `setup` (`phoneapp.EnableAccessibility`), un `ui.request` `setText` con "¿Qué tal? 👋" por el canal real en la búsqueda de Ajustes (`android.settings.APP_SEARCH_SETTINGS`), y `uiautomator dump` lee ese texto en el campo. El test envía el `ui.request` por el canal; no pasa por la CLI `adbuddy type` ni por el argv Unicode del PC. Los ajustes de accesibilidad se restauran al final. | — | medio | Hecha |
+ | M5a-3 | Superposición: aspecto, la píldora pausa, la marca y que no intercepta toques | Parcial, hecha salvo el aspecto (T5) | Hecho en T5 (`TestTheOverlayOnTheEmulator`, `overlay_test.go`), con el arnés de T3 y la accesibilidad encendida. Con la superposición en pantalla (sus dos ventanas de `tech.hybriq.adbuddy` visibles en `dumpsys window windows`), un `input tap` sobre «Network & internet» atraviesa el marco y abre esa pantalla de Ajustes, como muestra el volcado de la app. Un `input tap` en la píldora hace que la app mande `pause` al host y quite la superposición. **No cubre:** la marca, ni que la app se tenga por pausada después: eso lo decide el estado de sesión que manda el host, y el arnés no lo manda. | El aspecto. Paso: la pasada visual. | medio | Hecha (T5) + Pixel (aspecto) |
+ | M5a-4 | Con una app de banca delante, `input tap`, `screencap`, `screen` y `tap` se bloquean | Parcial | T7: una app de pruebas con nombre de banca, que la heurística propone; la guarda del host se prueba contra el emulador. | Una app de banca real (FLAG_SECURE, detección de emulador). Paso: abrir su app de banca y pedir un `adbuddy screen`; debe responder Blocked. | alto | T7 + Pixel |
+-| M5a-5 | Respaldo: sin accesibilidad usa `uiautomator`; con ella y la app desconectada, `UI_UNAVAILABLE` | Sí, hecha con un apaño (T5) | Hecho en T5 (`TestTheFallbackWithoutTheApp`): el daemon real sobre el adb del emulador. Con el servicio apagado, `adbuddy screen` sale por `uiautomator` (el volcado de Ajustes). Con el servicio encendido y vinculado, da `UI_UNAVAILABLE`, y el servicio sigue vinculado. **El apaño:** la guarda que va delante bloquearía siempre sin la app (hallazgo del fondo de pantalla, «Hallazgos de la T5»), así que el test simula solo la respuesta `foreground` de la app (Ajustes), y todo lo demás da «no hay app». Medido de paso: en la API 34, un `uiautomator dump` con el servicio encendido no lo desvincula. | — | medio | Hecha (T5); sin apaño cuando se adjudique el hallazgo |
++| M5a-5 | Respaldo: sin accesibilidad usa `uiautomator`; con ella y la app desconectada, `UI_UNAVAILABLE` | Sí (T5; el apaño se quitó con el arreglo del hallazgo) | Hecho en T5 (`TestTheFallbackWithoutTheApp`): el daemon real sobre el adb del emulador. Con el servicio apagado, `adbuddy screen` sale por `uiautomator` (el volcado de Ajustes). Con el servicio encendido y vinculado, da `UI_UNAVAILABLE`, y el servicio sigue vinculado. **El apaño (ya quitado):** la guarda que va delante bloqueaba siempre sin la app (hallazgo del fondo de pantalla, «Hallazgos de la T5»), así que el test simulaba la respuesta `foreground` de la app. Con el arreglo (`fix/guard-imagewallpaper`) el test va sin app; falta correrlo otra vez en el emulador. Medido de paso: en la API 34, un `uiautomator dump` con el servicio encendido no lo desvincula. | — | medio | Hecha (T5); sin apaño desde el arreglo, pendiente de volver a correr en el emulador |
+ | M5a-6 | `dumpsys activity activities` en 11, 13-15 de otro fabricante y 17 | Parcial, hecha en la API 34 (T5) | Hecho en T5: `uidump/testdata/api34/*.activities.txt` (16 estados) y `TestAPI34Resumed`. Cubre Ajustes, ADBuddy, el teclado, la pantalla partida (las dos mitades, por el `topResumedActivity` de cada tarea), la burbuja abierta (dos tareas), la persiana, el heads-up, y la pantalla apagada y el bloqueo (sin `topResumedActivity`, con el `ResumedActivity` de la app de debajo). Si se quita `topResumedActivity` del patrón, la pantalla partida pierde una mitad (mutación). | 11 y 13 sin imagen, otros fabricantes y 17. Paso: la pasada de solo lectura. | alto | Hecha en 34 (T5) + Pixel |
+ | M5a-7 | Ventanas: diálogo, teclado y pantalla partida; `tap --xy` sobre la barra con una 🔴 pendiente da `protected` | Sí, hecha en parte (T5) | Hecho en T5. **La guarda sin la app** (`TestTheGuardOnRealScreens`): con el diálogo de volumen de systemui sobre Ajustes (una tecla de volumen con el panel oculto solo lo muestra; se comprueba que el volumen no cambia), `VolumeDialogImpl` sale como ventana desconocida y bloquea. Con el teclado en la búsqueda de Ajustes, la ventana `InputMethod` no es de systemui y no cuenta. Con la pantalla partida (ADBuddy y Ajustes, `WMShell splitscreen moveToSideStage`), se ven las dos mitades, se bloquea con «tech.hybriq.adbuddy is a protected app» e Inicio tampoco pasa. **La salida medida:** Inicio, esperar a que acabe y abrir una app deja las dos tareas a pantalla completa (un `am start` durante la animación vuelve a montar la pareja). **La 🔴** (`TestTheStatusBarWithAQuestionWaiting`, con el arnés y la accesibilidad): un `tap --xy` en la barra de estado con una pregunta esperando da `protected` («A question of ADBuddy is waiting on the phone»). **No cubre:** que `screen` muestre cada ventana en su `window` (`dialog`, `ime`, `split`), porque no se ha mirado el volcado de la app en esos estados. | — | alto | Hecha en parte (T5); falta el `window` del volcado de la app |
+ | M5a-8 | Marco: dos `tap --xy` seguidos no dan `protected`; un `tap` por texto con `ACTION_CLICK` fallido toca; el marco no sale en `getWindows()` | Sí, hecha en parte (T5) | Hecho en T5 (`TestTheOverlayOnTheEmulator`): dos `tap --xy` seguidos en un punto libre de Ajustes, con la superposición visible, no dan `protected`. Eso es lo que pasaría si el marco saliera en `getWindows()`: la mutación de quitarle `FLAG_NOT_TOUCHABLE` hace que salga y que el toque dé «ADBuddy does not act on itself». No hay instrumentado que consulte `getWindows()`: se comprueba su consecuencia. **No cubre:** el `tap` por texto con `ACTION_CLICK` fallido, porque en Ajustes no hay ningún elemento cuyo clic falle; necesita la app de pruebas (T7). | — | medio | Hecha en parte (T5) + T7 |
+ | M5a-9 | `ServiceOn` y `Asleep` contra salidas reales | Sí, hecha en la API 34 (T5) | Hecho en T5: `TestAPI34Asleep`, con `dumpsys power` con la pantalla encendida, apagada (`KEYCODE_SLEEP`), en Doze (`dumpsys deviceidle force-idle`) y bloqueada encendida y apagada. `TestAPI34ServiceOn`, con `dumpsys accessibility` con el servicio apagado, encendido, y encendido con la burbuja abierta. `ServiceOn` lee `dumpsys accessibility`, que es lo que usa `daemon/ui.go`, no `settings get secure enabled_accessibility_services` como decía la fila. En el emulador no sale `Dozing` (no hay pantalla ambiente): en Doze, `mWakefulness=Asleep`. | El formato de 17. Paso: la pasada de solo lectura. | alto | Hecha en 34 (T5) + Pixel |
+ | M5a-10 | Notificaciones de apps protegidas en la persiana o en heads-up dentro de `screen` y `screenshot` (límite; decidir en la spec §4.3) | Parcial | T7: un heads-up de la app de pruebas protegida y `screen`; ¿salen sus nodos de `com.android.systemui`? | La decisión es de producto. Sin paso del usuario: decide el coordinador con la medida. | medio | T7 |
+ 
+ ### M5b · Modo remoto (11-21)
+ 
+ | # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
+ |---|---|---|---|---|---|---|
+@@ -406,21 +410,21 @@ Las tareas van en orden de valor y en el emulador propio: AVD `adbuddy-dev34`, c
+ **T4b (S). Lo que no cupo en la T4.** Responder bloqueado (Reply, con `setAuthenticationRequired`) y Pausar en la persiana bloqueada (M3b-5); la 🔴 sobre el bloqueo con la app en español (M6c-3); y, si el controlador adjudica el arreglo del defecto de M2-8 (ver "Hallazgos de la T4", con Responder y Enviar captura), su verificación. Con los mismos ayudantes de `confirm_test.go` (`lockWithPIN`, `tapInShade`, `expandedText`).
+ 
+ **T5 (M). La guarda con muestras reales de la API 34** (M5a-3, 5, 6, 7, 8, 9; M5b-14, la muestra de M5b-17, M5b-19; M3b-8; M5c-28 y 34 en la parte de la guarda; VB-36; O1-a).
+ - Ficheros: `host/internal/emutest/guard_test.go`, que pone cada estado (ADBuddy delante, persiana, ajustes rápidos, bloqueo, heads-up con `cmd notification post`, diálogo, teclado, burbuja), graba las salidas y prueba la decisión de la guarda; `host/internal/uidump/testdata/api34/*.txt`, y los tests de `uidump` y `daemon` que las leen (`Foreground`, `ParseFocus`/`IsShade`, `ParseSystemUIWindows`, `ServiceOn`, `Asleep`).
+ - RED: cada muestra nueva se pasa primero por un test que espera la decisión correcta. Si pasa a la primera, la RED es la mutación de quitar `NotificationShade` o el título de systemui de su lista.
+ - GREEN: las muestras quedan versionadas sin seriales ni IPs (`git grep` antes de commitear).
+ - **Hecha el 2026-10-03** (rama `test/guard-samples`):
+   - `host/internal/emutest/guard_test.go` pone cada estado y pregunta al daemon real del host, sobre el adb del emulador, qué decide. `overlay_test.go` prueba la superposición con el arnés de T3. `GuardOnEmulatorTest.kt` publica el heads-up y la burbuja.
+   - `host/internal/uidump/testdata/api34/` tiene 18 estados en su `README.md` (16 con `windows`, `activities` y `focus`; los dos de accesibilidad solo con `accessibility`). Los leen `uidump/api34_test.go` y `daemon/guard_api34_test.go`.
+   - Cubre, en lo que dice cada fila: M5a-3, 5, 6, 7 (en parte), 8 (en parte) y 9; M5b-14, la muestra de M5b-17 y M5b-19; M3b-8 y M5c-34 en la guarda sin la app; la parte de T5 de M5c-28; VB-36; y el indicio de O1-a.
+-  - El hallazgo del fondo de pantalla está en «Hallazgos de la T5».
++  - El hallazgo del fondo de pantalla está en «Hallazgos de la T5» (resuelto en `fix/guard-imagewallpaper`).
+   - Las pruebas suman unos 3 minutos al job del emulador de la CI (`go test -timeout 20m ./internal/emutest`).
+ 
+ **T6 (M). Listener y consentimiento** (M5c-22, 23, 24, 26, 28 en la parte de la app, 29 y 32).
+ - Ficheros: `android/app/src/androidTest/kotlin/tech/hybriq/adbuddy/NotificationListenerOnEmulatorTest.kt` (lee por `NotificationGate.read` y `NotificationReport.build`), `host/internal/emutest/listener_test.go` (`allow_listener` y `disallow_listener`, `su 0 kill -9` (`am kill` no mata el proceso: T1-9), `am force-stop`, reinicio del AVD y dos `am instrument` para la 32), y `allowedSkips` o `requiredClasses` en `instrumented_test.go` para los tests que solo arrancan desde el host.
+ - RED por mutación: quitar `revoke()` de `onListenerDisconnected` hace fallar la 32(a); `secret = false` en `raw()` hace fallar la 26. GREEN: con el código de hoy. Si la 32(b) muestra que la marca sobrevive, es el riesgo aceptado del ruling 15: se anota y el arreglo barato (borrarla también en `onListenerConnected`) lo adjudica el controlador.
+ 
+ **T7 (L). App de pruebas y perfiles** (M5c-25, 30, 33; M5a-4, 10; M5b-16, M5b-17 (a) y (b); M2-4; SEG-1).
+ - Ficheros: el módulo nuevo `android/fixtures/poster` en `settings.gradle.kts`, con su variante `bank` (nombre de banca), `receiver` (un paquete de `CODE_RECEIVERS` que la imagen no traiga) y `sms` (los componentes del rol). Publica notificaciones por broadcast (visibilidad, ticker, actualización con el mismo id), y trae un `VpnService`, un servicio de accesibilidad mínimo y `createScreenCaptureIntent`. Además, `host/internal/emutest/fixture_test.go`, y que `android.yml` compile el módulo.
+ - RED por mutación: que `ProtectedApps.defaultSms` devuelva `null` hace fallar `TestTheDefaultSmsAppIsProposed`; quitar `sbn.user != Process.myUserHandle()` hace fallar el test del perfil. GREEN: con el código de hoy.
+ - Las variantes con nombres de paquete de terceros solo se instalan en el emulador.
+diff --git a/docs/superpowers/plans/pendientes-m3-m5.md b/docs/superpowers/plans/pendientes-m3-m5.md
+index dbbe2d4..5c35d00 100644
+--- a/docs/superpowers/plans/pendientes-m3-m5.md
++++ b/docs/superpowers/plans/pendientes-m3-m5.md
+@@ -480,24 +480,25 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
+   - Una racha de blancos con más de 4 grupos se enseña como `×N(␠×a\u00a0×b…)`: cuántos de cada clase, sin el orden. El orden importa poco (todo son blancos), pero en los bordes decide si el blanco de al lado de una palabra es separador (espacio) o parte de ella (NBSP).
+   - `Visible` y `Printable` escapan todas las marcas combinantes (Mn, Me): un nombre de fichero en NFD o en escrituras índicas se ve con escapes. Es a propósito (mil marcas sobre una letra tapan las líneas de alrededor).
+   - M1: el host no sabe de dónde viene un `allow`. Un `allow` a una pregunta especial o recortada de hasta 20 000 caracteres vale aunque venga de la notificación de una app antigua (la actual solo lo ofrece en el diálogo). Exigir una versión mínima de la app en el saludo para mandarle preguntas especiales queda por hacer.
+   - B3: `ConfirmDialogSourceTest` comprueba el código fuente (que los botones dependen de `!unread`, que existe `canScrollForward` y el aviso de lo oculto), no que `unread` venga del mismo `ScrollState` que desplaza la columna. Falta un test instrumentado del diálogo (con emulador, nunca en el móvil del usuario).
+   - B4 (sin hacer): `lineReadsStdin` quita comillas y barras invertidas, y da falsos positivos como `ls -l /proc/self/fd/0`. Solo cuesta preguntar otra vez un 🔴.
+   - No comprobado: si la `sed` de toybox implementa la orden `e` (da igual: `sed` ya no conserva la clave) y si `bu` es accesible desde la shell de adb en Android 14+ (tampoco conserva la clave).
+ - **Validación manual pendiente (nadie la ha corrido en un móvil):** con una pregunta especial y con un comando de más de 300 caracteres, la notificación solo muestra Rechazar y Abrir; ninguna notificación ofrece «Permitir durante la sesión»; el diálogo no activa Permitir hasta llegar al final, y con un comando de más de 20 000 caracteres dice cuántos oculta y solo ofrece Rechazar.
+ 
+ ### Post-v1: la guarda en la API 34 (hallazgos de la T5 y de su revisión)
+ 
+-- **(a) El fondo de pantalla bloquea la guarda sin la app.** `com.android.systemui.wallpapers.ImageWallpaper` está siempre visible; sin la app, la guarda bloquea en todas las pantallas de la API 34. Es seguro, pero inutiliza el respaldo por `adb`.
++- **(a) Resuelto (rama `fix/guard-imagewallpaper`): el fondo de pantalla bloqueaba la guarda sin la app.** `com.android.systemui.wallpapers.ImageWallpaper` está siempre visible; sin la app, la guarda bloquea en todas las pantallas de la API 34. Es seguro, pero inutiliza el respaldo por `adb`.
+   - Arreglo mínimo del revisor: añadir ese título a `fixedSystemUI` en `host/internal/uidump/window.go`. `ParseSystemUIWindows` solo mira ventanas del paquete systemui, así que suplantar el título con otro paquete no cambia nada.
+   - Luego, invertir los tests marcados con `TODO(adjudicar)`: `TestAPI34SystemUIWindows`, los casos de fondo de `TestTheGuardOnAPI34Screens`, `wallpaperReason` y `onlyWallpaper` de `guard_test.go`, y el apaño de `TestTheFallbackWithoutTheApp`.
+   - Opcional: saltar las ventanas de systemui con `mIsWallpaper=true`.
++  - **Hecho:** el título largo está en `fixedSystemUI` (sin quitar el corto) y los tests están invertidos, sin `TODO(adjudicar)`. `TestTheWallpaperUnblocksOnlyWhatItAloneBlocked` comprueba en todas las muestras de la API 34 que solo se desbloquea lo que bloqueaba el fondo. Lo de `mIsWallpaper` sigue siendo post-v1. Falta volver a correr `emutest` en el emulador (CI).
+ - **(b) Hueco ya existente:** las superposiciones de terceros (`TYPE_APPLICATION_OVERLAY`) no las ve `ParseSystemUIWindows`, porque filtra por paquete. Confirmarlo en la T7 con una app de pruebas, y también con una superposición con `package=com.android.systemui` y ese título.
+ - **(c) Falta una muestra del foco `StatusBar`** (solo hay `NotificationShade`) para Android 17.
+ 
+ ### Post-v1: Permitir tras desbloquear con PIN (M2-8)
+ 
+ - **Ruling del supervisor f3:** post-v1, no se implementa ahora. Falla seguro (no se ejecuta nada sin confirmación), es un problema de experiencia, y tocar `ConfirmReceiver`/`BridgeService` a última hora arriesga abrir el hueco que se protege.
+ - **Medición (emulador API 34, 7/7 ejecuciones):** al teclear el PIN en el bouncer, SystemUI entrega el `PendingIntent` unos 300 ms antes de que `isDeviceLocked` pase a false (entrega 05:11:51.202, keyguard fuera 05:11:51.499), y `ConfirmReceiver` lo descarta en silencio: hay que pulsar Permitir otra vez.
+ - **Rutas afectadas:** Permitir (medido); probablemente Responder (`BridgeService` ~113-116: se pierde el texto escrito); Enviar captura (medido 1 de 2).
+ - **Test que fija el comportamiento seguro actual:** `TestAllowFromTheLockedShadeAsksToUnlock` en emutest (`authActionsMayBeDropped = true`; ponerlo a false al arreglarlo).
+ - **Propuestas del revisor opus:**
+diff --git a/host/internal/daemon/guard_api34_test.go b/host/internal/daemon/guard_api34_test.go
+index 0ddda1b..22ca3df 100644
+--- a/host/internal/daemon/guard_api34_test.go
++++ b/host/internal/daemon/guard_api34_test.go
+@@ -1,15 +1,16 @@
+ package daemon
+ 
+ import (
+ 	"os"
+ 	"path/filepath"
++	"slices"
+ 	"strings"
+ 	"testing"
+ )
+ 
+ // The guard's decision on real outputs of the API 34 emulator (T5 of the
+ // manual validations plan): the fake adb answers each read of the guard with
+ // what the emulator printed in a state (uidump/testdata/api34, recorded by
+ // emutest's guard tests, which also ask the real daemon on the emulator).
+ 
+ // api34Sample reads the read name of state, "" when it was not recorded.
+@@ -54,39 +55,35 @@ func TestTheGuardOnAPI34Screens(t *testing.T) {
+ 		screencap = []string{"exec-out", "screencap", "-p"}
+ 		tap       = []string{"shell", "input", "tap", "540", "1200"}
+ 		back      = []string{"shell", "input", "keyevent", "4"}
+ 		home      = []string{"shell", "input", "keyevent", "3"}
+ 		wake      = []string{"shell", "input", "keyevent", "224"}
+ 	)
+ 	const (
+ 		adbuddy = "ADBuddy itself is in front"
+ 		shade   = "the notification shade is open"
+ 		runs    = ""
+-		// TODO(adjudicar): with nothing over the app the command should run
+-		// (it did, with "runs", before T5 recorded these samples: the RED).
+-		// The wallpaper's window of API 34 is not in uidump's fixedSystemUI,
+-		// so the guard without the app blocks on every screen. Blocking more
+-		// is safe: today's answer is expected until the finding is decided;
+-		// then these go back to runs.
+-		wallpaper = "a system window is on screen (com.android.systemui.wallpapers.ImageWallpaper)"
+ 	)
+ 	cases := []struct {
+ 		state string
+ 		argv  []string
+ 		why   string // "" (runs): it runs
+ 	}{
+-		{"settings", screencap, wallpaper},
+-		{"keyboard", screencap, wallpaper},
+-		{"headsup-gone", screencap, wallpaper},
+-		{"screen-off", screencap, wallpaper},
++		// Nothing over the app: the wallpaper's window behind it is a fixed
++		// one (the T5 finding, fixed), so the command runs.
++		{"settings", screencap, runs},
++		{"settings", tap, runs},
++		{"keyboard", screencap, runs},
++		{"headsup-gone", screencap, runs},
++		{"screen-off", screencap, runs},
+ 		{"screen-off", wake, runs},
+-		{"doze", screencap, wallpaper},
++		{"doze", screencap, runs},
+ 		{"doze", wake, runs},
+ 
+ 		{"adbuddy", screencap, adbuddy},
+ 		{"adbuddy", tap, adbuddy},
+ 		{"adbuddy", back, adbuddy},
+ 		{"adbuddy", home, runs},
+ 
+ 		{"shade", screencap, shade},
+ 		{"shade", tap, shade},
+ 		{"shade", back, runs},
+@@ -123,10 +120,128 @@ func TestTheGuardOnAPI34Screens(t *testing.T) {
+ 			if exit.Code != 0 || len(ran) != 1 {
+ 				t.Errorf("%s %q: exit %d %q, ran %q; want it to run", c.state, c.argv, exit.Code, s.errOut.String(), ran)
+ 			}
+ 			continue
+ 		}
+ 		if exit.Code != ExitDenied || !strings.Contains(s.errOut.String(), c.why) || len(ran) != 0 {
+ 			t.Errorf("%s %q: exit %d %q, ran %q; want blocked because %q", c.state, c.argv, exit.Code, s.errOut.String(), ran, c.why)
+ 		}
+ 	}
+ }
++
++// Reasons of the guard without the app on the API 34 samples.
++const (
++	api34ADBuddy   = "tech.hybriq.adbuddy is a protected app: ADBuddy itself is in front"
++	api34Split     = "tech.hybriq.adbuddy is a protected app; "
++	api34Settings  = "com.android.settings is a protected app; "
++	api34Shade     = "the notification shade is open; "
++	api34System    = "a system window is on screen ("
++	api34Wallpaper = "com.android.systemui.wallpapers.ImageWallpaper"
++)
++
++// api34Before is what the guard without the app decided on every sample of
++// uidump/testdata/api34 before the wallpaper's window of API 34 was listed as
++// a fixed one (recorded with the code of T5): for each state, with no app of
++// the user protected and with Settings protected. Every state was blocked.
++var api34Before = map[string][2]string{
++	"settings":             {api34System + api34Wallpaper + ")", api34Settings},
++	"adbuddy":              {api34ADBuddy, api34ADBuddy},
++	"keyboard":             {api34System + api34Wallpaper + ")", api34System + api34Wallpaper + ")"},
++	"split":                {api34Split, api34Settings},
++	"screen-off":           {api34System + api34Wallpaper + ")", api34Settings},
++	"doze":                 {api34System + api34Wallpaper + ")", api34Settings},
++	"headsup-gone":         {api34System + api34Wallpaper + ")", api34Settings},
++	"shade":                {api34Shade, api34Settings},
++	"quick-settings":       {api34Shade, api34Settings},
++	"locked-off":           {api34Shade, api34Settings},
++	"locked":               {api34Shade, api34Settings},
++	"headsup":              {api34System + "NotificationShade, " + api34Wallpaper + ")", api34Settings},
++	"volume-dialog":        {api34System + "VolumeDialogImpl, " + api34Wallpaper + ")", api34Settings},
++	"bubble-collapsed":     {api34System + "Bubbles!, " + api34Wallpaper + ")", api34Settings},
++	"bubble-expanded":      {api34ADBuddy, api34ADBuddy},
++	"bubble-expanded-a11y": {api34ADBuddy, api34ADBuddy},
++}
++
++// withoutWallpaper is what before becomes once the wallpaper's window is a
++// fixed one: the same reason without it, and "" (it runs) where it was the
++// only reason.
++func withoutWallpaper(before string) string {
++	list, ok := strings.CutPrefix(before, api34System)
++	if !ok {
++		return before
++	}
++	var left []string
++	for _, w := range strings.Split(strings.TrimSuffix(list, ")"), ", ") {
++		if w != api34Wallpaper {
++			left = append(left, w)
++		}
++	}
++	if len(left) == 0 {
++		return ""
++	}
++	return api34System + strings.Join(left, ", ") + ")"
++}
++
++// The wallpaper's window of API 34 listed as a fixed one unblocks exactly the
++// screens it alone blocked: on every real sample (all of them, by their
++// windows read), with a protected app or ADBuddy in front, the shade or the
++// lock screen open, a heads-up, the volume dialog or the bubble on screen, the
++// guard without the app still blocks for the same reason, minus the wallpaper.
++// What reads or touches the screen is judged so: a screenshot, a tap, a dump.
++func TestTheWallpaperUnblocksOnlyWhatItAloneBlocked(t *testing.T) {
++	files, err := filepath.Glob(filepath.Join("..", "uidump", "testdata", "api34", "*.windows.txt"))
++	if err != nil || len(files) == 0 {
++		t.Fatalf("no samples: %v", err)
++	}
++	seen := map[string]bool{}
++	for _, f := range files {
++		state := strings.TrimSuffix(filepath.Base(f), ".windows.txt")
++		seen[state] = true
++		before, ok := api34Before[state]
++		if !ok {
++			t.Errorf("%s: a sample with no decision before the fix; add it to api34Before", state)
++			continue
++		}
++		for i, protectSettings := range []bool{false, true} {
++			want := withoutWallpaper(before[i])
++			for _, argv := range [][]string{
++				{"exec-out", "screencap", "-p"},
++				{"shell", "input", "tap", "540", "1200"},
++				{"shell", "uiautomator", "dump"},
++			} {
++				e := api34Env(t, state)
++				if protectSettings {
++					e.d.o.Protected = func(pkg string) bool { return pkg == "com.android.settings" }
++				}
++				s, exit := e.exec(t, argv...)
++				ran := ranGuarded(e)
++				if want == "" {
++					if exit.Code != 0 || len(ran) != 1 {
++						t.Errorf("%s (Settings protected %v) %q: exit %d %q; want it to run (before: %q)", state, protectSettings, argv, exit.Code, s.errOut.String(), before[i])
++					}
++					continue
++				}
++				if exit.Code != ExitDenied || !strings.HasPrefix(s.errOut.String(), "Blocked by ADBuddy: "+want) || len(ran) != 0 {
++					t.Errorf("%s (Settings protected %v) %q: exit %d %q, ran %q; want blocked because %q", state, protectSettings, argv, exit.Code, s.errOut.String(), ran, want)
++				}
++			}
++		}
++	}
++	for state := range api34Before {
++		if !seen[state] {
++			t.Errorf("%s: in api34Before but no windows sample", state)
++		}
++	}
++	// Only the states with nothing over an unprotected app run now.
++	var unblocked []string
++	for state, before := range api34Before {
++		for i, b := range before {
++			if withoutWallpaper(b) == "" {
++				unblocked = append(unblocked, state+map[int]string{0: "", 1: " (Settings protected)"}[i])
++			}
++		}
++	}
++	slices.Sort(unblocked)
++	if want := []string{"doze", "headsup-gone", "keyboard", "keyboard (Settings protected)", "screen-off", "settings"}; !slices.Equal(unblocked, want) {
++		t.Errorf("unblocked %q, want %q", unblocked, want)
++	}
++}
+diff --git a/host/internal/emutest/guard_test.go b/host/internal/emutest/guard_test.go
+index 32fc981..e48924b 100644
+--- a/host/internal/emutest/guard_test.go
++++ b/host/internal/emutest/guard_test.go
+@@ -40,33 +40,20 @@ const guardRecordEnv = "ADBUDDY_GUARD_RECORD"
+ // guardReads are the reads of the guard (daemon/guard.go) and of the fallback
+ // without the app (daemon/ui.go), word for word.
+ var guardReads = map[string]string{
+ 	"focus":         "dumpsys window | grep -E 'mCurrentFocus'",
+ 	"windows":       "dumpsys window windows",
+ 	"activities":    "dumpsys activity activities",
+ 	"power":         "dumpsys power",
+ 	"accessibility": "dumpsys accessibility",
+ }
+ 
+-// wallpaperWindow is the title of the wallpaper's window on the API 34 image:
+-// a window of systemui, visible (mViewVisibility=0x0) behind every app, that
+-// fixedSystemUI (uidump/window.go) does not list (it has "ImageWallpaper").
+-// Without the app the guard then sees an unknown system window on every
+-// screen and blocks every command that touches or reads it.
+-// TODO(adjudicar): product finding of T5. Blocking more is safe, so the tests
+-// expect today's decision; once the title is listed, wallpaperReason becomes
+-// "the command runs".
+-const wallpaperWindow = "com.android.systemui.wallpapers.ImageWallpaper"
+-
+-// wallpaperReason is today's refusal on a screen with nothing over the app.
+-const wallpaperReason = "a system window is on screen (" + wallpaperWindow + ")"
+-
+ // read runs one of guardReads on the emulator as the guard does (adb shell,
+ // the output untouched) and records it as state's (not when state is "").
+ func (e *emu) read(t *testing.T, state, name string) string {
+ 	t.Helper()
+ 	cmd := guardReads[name]
+ 	ctx, cancel := context.WithTimeout(e.ctx, time.Minute)
+ 	defer cancel()
+ 	out, code, err := e.adb.Shell(ctx, cmd)
+ 	if err != nil || code != 0 {
+ 		t.Fatalf("%s: exit %d, %v", cmd, code, err)
+@@ -325,68 +312,79 @@ func (g *hostGuard) helperBlocks(t *testing.T, why, op string, args any) {
+ }
+ 
+ // passes checks that the guard lets argv run, and that it ran.
+ func (g *hostGuard) passes(t *testing.T, argv ...string) {
+ 	t.Helper()
+ 	if exit := g.exec(argv...); exit.Code != 0 {
+ 		t.Errorf("%q: exit %d %q, want it to run", argv, exit.Code, exit.Error)
+ 	}
+ }
+ 
++// notBlocked checks that the guard does not refuse argv; what argv itself
++// does then (a screenshot with the screen off) is not the guard's.
++func (g *hostGuard) notBlocked(t *testing.T, argv ...string) {
++	t.Helper()
++	if exit := g.exec(argv...); exit.Code == daemon.ExitDenied || strings.Contains(exit.Error, "Blocked by ADBuddy") {
++		t.Errorf("%q: exit %d %q, want the guard to let it run", argv, exit.Code, exit.Error)
++	}
++}
++
+ var (
+ 	screencap = []string{"exec-out", "screencap", "-p"}
+ 	tapMiddle = []string{"shell", "input", "tap", "540", "1200"}
+ 	dumpUI    = []string{"shell", "uiautomator", "dump"}
+ 	keyBack   = []string{"shell", "input", "keyevent", "4"}
+ 	keyHome   = []string{"shell", "input", "keyevent", "3"}
+ 	keyWake   = []string{"shell", "input", "keyevent", "224"}
+ )
+ 
+ func xyArgs(x, y int) bridge.UIClickArgs { return bridge.UIClickArgs{X: &x, Y: &y} }
+ 
+-// onlyWallpaper checks that the only unknown system window is the wallpaper's.
+-func onlyWallpaper(t *testing.T, s screenState) {
++// noSystemWindow checks that no unknown system window is on screen: only the
++// fixed ones, the wallpaper's among them (the T5 finding, fixed).
++func noSystemWindow(t *testing.T, s screenState) {
+ 	t.Helper()
+-	if !slices.Equal(s.unknown, []string{wallpaperWindow}) {
+-		t.Errorf("unknown system windows %q, want only the wallpaper's", s.unknown)
++	if len(s.unknown) != 0 {
++		t.Errorf("unknown system windows %q, want none", s.unknown)
+ 	}
+ }
+ 
+ // TestTheGuardOnRealScreens: the guard without the app on the emulator's real
+ // screens: ADBuddy in front and Home (M5c-28, V44), the shade and the quick
+ // settings closed with Back (M5b-14), the keyboard and a system dialog (M5a-7),
+ // a split screen with ADBuddy in one half and the way out of it (M5a-7, T1-11),
+ // the screen off, Doze and the lock screen with a PIN (M5b-14 (a), M5a-9).
+ // Every read is recorded (M5a-6, M5a-9).
+ func TestTheGuardOnRealScreens(t *testing.T) {
+ 	e := newEmu(t)
+ 	e.installApp(t)
+ 	e.shell(t, "pm grant "+phoneapp.Package+" android.permission.POST_NOTIFICATIONS")
+ 	e.atCleanup(t, "shell", "input keyevent KEYCODE_HOME")
+ 	e.atCleanup(t, "shell", "cmd statusbar collapse")
+ 	e.atCleanup(t, "shell", "input keyevent KEYCODE_WAKEUP")
+ 	g := newHostGuard(t, e, nil)
+ 
+-	// Settings in front, nothing over it. The command should run; today the
+-	// wallpaper's window blocks it (wallpaperWindow).
++	// Settings in front, nothing over it: the command runs.
+ 	t.Run("settings", func(t *testing.T) {
+ 		e.openSettings(t)
+ 		s := e.snapshot(t, "settings")
+ 		if !slices.Equal(s.resumed, []string{settingsPkg}) || shade(s.focus) || s.asleep {
+ 			t.Errorf("Settings in front: %+v", s)
+ 		}
+-		onlyWallpaper(t, s)
++		noSystemWindow(t, s)
+ 		if _, err := uidump.Find(e.screenXML(t, "settings", false), "", "Network & internet", nil); err != nil {
+ 			t.Errorf("Find Network & internet in Settings: %v", err)
+ 		}
+-		g.blocks(t, wallpaperReason, screencap...)
+-		g.helperBlocks(t, wallpaperReason, bridge.UIOpDump, bridge.UIDumpArgs{})
++		g.passes(t, screencap...)
++		if exit, data := g.helper(bridge.UIOpDump, bridge.UIDumpArgs{}); exit.Code != 0 || !strings.Contains(data, `"package":"`+settingsPkg+`"`) {
++			t.Errorf("adbuddy screen on Settings: %+v %.200s, want uiautomator's dump of Settings", exit, data)
++		}
+ 	})
+ 
+ 	// ADBuddy in front (V44): nothing touches or reads it; Home alone leaves.
+ 	t.Run("adbuddy", func(t *testing.T) {
+ 		e.openSettings(t)
+ 		e.shell(t, "am start -W -n "+phoneapp.Activity)
+ 		e.waitFront(t, "ADBuddy in front", first(phoneapp.Package))
+ 		e.waitFocus(t, "ADBuddy focused", focusedOn(phoneapp.Package))
+ 		s := e.snapshot(t, "adbuddy")
+ 		if len(s.resumed) == 0 || s.resumed[0] != phoneapp.Package {
+@@ -427,39 +425,39 @@ func TestTheGuardOnRealScreens(t *testing.T) {
+ 			const why = "the notification shade is open"
+ 			for _, argv := range [][]string{screencap, tapMiddle, dumpUI, {"shell", "input", "keyevent", "--longpress", "3"}} {
+ 				g.blocks(t, why, argv...)
+ 			}
+ 			g.helperBlocks(t, why, bridge.UIOpDump, bridge.UIDumpArgs{})
+ 			for i := 0; i < c.backs; i++ {
+ 				g.passes(t, keyBack...)
+ 				time.Sleep(time.Second)
+ 			}
+ 			e.waitFocus(t, "the shade closed by Back", noShade)
+-			g.blocks(t, wallpaperReason, screencap...)
++			g.passes(t, screencap...)
+ 		})
+ 	}
+ 
+ 	// The keyboard over Settings' search: the input method's window is not
+ 	// systemui's, and changes nothing.
+ 	t.Run("keyboard", func(t *testing.T) {
+ 		e.openSettings(t)
+ 		e.atCleanup(t, "shell", "am force-stop com.google.android.settings.intelligence")
+ 		e.shell(t, "am start -W -a android.settings.APP_SEARCH_SETTINGS")
+ 		if !poll(15*time.Second, func() bool { return strings.Contains(e.shell(t, "dumpsys input_method"), "mInputShown=true") }) {
+ 			t.Fatal("no keyboard on screen 15 s after opening Settings' search")
+ 		}
+ 		s := e.snapshot(t, "keyboard")
+ 		if !strings.Contains(e.read(t, "keyboard", "windows"), " u0 InputMethod}:") || len(s.resumed) == 0 || s.resumed[0] != "com.google.android.settings.intelligence" {
+ 			t.Errorf("keyboard: %+v", s)
+ 		}
+-		onlyWallpaper(t, s)
+-		g.blocks(t, wallpaperReason, screencap...)
++		noSystemWindow(t, s)
++		g.passes(t, screencap...)
+ 		e.shell(t, "am force-stop com.google.android.settings.intelligence")
+ 	})
+ 
+ 	// A system dialog: the volume panel, systemui's, over Settings. One volume
+ 	// key while it is hidden only shows it; the volume is checked unchanged.
+ 	t.Run("volume-dialog", func(t *testing.T) {
+ 		e.openSettings(t)
+ 		e.longerUITimeout(t)
+ 		vol := e.shell(t, "settings get system volume_music_speaker")
+ 		e.shell(t, "input keyevent KEYCODE_VOLUME_DOWN")
+@@ -516,21 +514,21 @@ func TestTheGuardOnRealScreens(t *testing.T) {
+ 
+ 	// The screen off and Doze (M5a-9): only the exact wake key goes through.
+ 	t.Run("screen-off", func(t *testing.T) {
+ 		e.openSettings(t)
+ 		e.sleepScreen(t)
+ 		s := e.snapshot(t, "screen-off")
+ 		// The focus stays on Settings or goes null a moment later: either is not the shade.
+ 		if !s.asleep || shade(s.focus) {
+ 			t.Errorf("screen off: %+v", s)
+ 		}
+-		g.blocks(t, wallpaperReason, screencap...)
++		g.notBlocked(t, screencap...)
+ 		g.passes(t, keyWake...)
+ 		e.waitFocus(t, "Settings focused after the wake key", focusedOn(settingsPkg))
+ 
+ 		e.sleepScreen(t)
+ 		e.atCleanup(t, "shell", "dumpsys deviceidle unforce")
+ 		if out := e.shell(t, "dumpsys deviceidle force-idle"); !strings.Contains(out, "deep idle") {
+ 			t.Fatalf("force-idle: %s", out)
+ 		}
+ 		if s := e.snapshot(t, "doze"); !s.asleep {
+ 			t.Errorf("Doze: %+v", s)
+@@ -571,22 +569,22 @@ func TestTheGuardOnRealScreens(t *testing.T) {
+ 		g.passes(t, keyHome...)
+ 		if !e.locked(t) {
+ 			t.Error("Back and Home unlocked the device")
+ 		}
+ 	})
+ }
+ 
+ // TestTheGuardWithAHeadsUp (the sample of M5b-17): a heads-up of an app over
+ // Settings shows NotificationShade visible in dumpsys window windows, and the
+ // guard without the app refuses because of it; once the heads-up is gone the
+-// notification stays in the shade and only the fixed windows (and the
+-// wallpaper's) are left.
++// notification stays in the shade and only the fixed windows (the wallpaper's
++// among them) are left: the command runs.
+ func TestTheGuardWithAHeadsUp(t *testing.T) {
+ 	e := newEmu(t)
+ 	e.installApp(t)
+ 	e.installTests(t)
+ 	e.shell(t, "pm grant "+phoneapp.Package+" android.permission.POST_NOTIFICATIONS")
+ 	e.atCleanup(t, "shell", "input keyevent KEYCODE_HOME")
+ 	e.longerUITimeout(t)
+ 	g := newHostGuard(t, e, nil)
+ 	e.openSettings(t)
+ 
+@@ -600,22 +598,22 @@ func TestTheGuardWithAHeadsUp(t *testing.T) {
+ 		t.Errorf("heads-up: %+v", s)
+ 	}
+ 
+ 	if !poll(40*time.Second, func() bool { return !slices.Contains(e.systemWindows(t), "NotificationShade") }) {
+ 		t.Fatal("the heads-up is still on screen 40 s later")
+ 	}
+ 	if !strings.Contains(e.shell(t, "cmd notification list"), "|"+phoneapp.Package+"|"+headsUpID+"|") {
+ 		t.Error("the notification is gone with the heads-up")
+ 	}
+ 	s = e.snapshot(t, "headsup-gone")
+-	onlyWallpaper(t, s)
+-	g.blocks(t, wallpaperReason, screencap...)
++	noSystemWindow(t, s)
++	g.passes(t, screencap...)
+ 	release()
+ }
+ 
+ // TestTheGuardWithTheBubble (M3b-8 and M5c-34, the guard's part): the bubble of
+ // ADBuddy's conversation (a test notification without the foreground service,
+ // which on API 34 is the only way it bubbles: T1-8) over Settings. Collapsed,
+ // its systemui window "Bubbles!" blocks; expanded, ChatBubbleActivity is
+ // resumed first and the guard refuses as with ADBuddy in front, with the
+ // accessibility service off and on.
+ func TestTheGuardWithTheBubble(t *testing.T) {
+@@ -794,35 +792,30 @@ func a11yBound(dump string) bool {
+ 		return false
+ 	}
+ 	bound, _, _ := strings.Cut(after, "\n")
+ 	return strings.Contains(bound, "label=ADBuddy")
+ }
+ 
+ // Validation 5 of M5a: without the app, adbuddy screen reads the screen with
+ // uiautomator while ADBuddy's accessibility service is off, and answers
+ // UI_UNAVAILABLE while it is on, without running uiautomator: the service
+ // stays bound. dumpsys accessibility in each case is recorded
+-// (uidump.ServiceOn, M5a-9). The guard in front of the fallback would refuse
+-// on every screen today (wallpaperWindow), so the app only answers what is in
+-// front (Settings, as it would); every other helper finds no app.
++// (uidump.ServiceOn, M5a-9). There is no app at all: the guard in front of the
++// fallback reads dumpsys, and with Settings in front and nothing over it lets
++// the helper run.
+ func TestTheFallbackWithoutTheApp(t *testing.T) {
+ 	e := newEmu(t)
+ 	v := e.installApp(t)
+ 	e.restoreAtCleanup(t, "secure", "enabled_accessibility_services", e.shell(t, "settings get secure enabled_accessibility_services"))
+ 	e.restoreAtCleanup(t, "secure", "accessibility_enabled", e.shell(t, "settings get secure accessibility_enabled"))
+ 	e.atCleanup(t, "shell", "input keyevent KEYCODE_HOME")
+-	g := newHostGuard(t, e, func(_ context.Context, op string, _ json.RawMessage) (json.RawMessage, error) {
+-		if op == bridge.UIOpForeground {
+-			return json.RawMessage(`{"package":"` + settingsPkg + `","activity":"` + settingsPkg + `.Settings","protected":false}`), nil
+-		}
+-		return nil, daemon.ErrNoApp
+-	})
++	g := newHostGuard(t, e, nil)
+ 	e.openSettings(t)
+ 
+ 	if a := e.read(t, "a11y-off", "accessibility"); uidump.ServiceOn(a) || a11yBound(a) {
+ 		t.Fatal("ADBuddy's service is on before it was enabled")
+ 	}
+ 	if exit, data := g.helper(bridge.UIOpDump, bridge.UIDumpArgs{}); exit.Code != 0 || !strings.Contains(data, `"package":"`+settingsPkg+`"`) {
+ 		t.Errorf("adbuddy screen with the service off: %+v %.200s, want uiautomator's dump of Settings", exit, data)
+ 	}
+ 
+ 	if _, err := phoneapp.EnableAccessibility(e.ctx, e.adb, v); err != nil {
+diff --git a/host/internal/uidump/api34_test.go b/host/internal/uidump/api34_test.go
+index f9ee80e..ff85ad7 100644
+--- a/host/internal/uidump/api34_test.go
++++ b/host/internal/uidump/api34_test.go
+@@ -71,27 +71,26 @@ func TestAPI34SystemUIWindows(t *testing.T) {
+ 		"shade":                {"NotificationShade"},
+ 		"quick-settings":       {"NotificationShade"},
+ 		"locked-off":           {"NotificationShade"},
+ 		"locked":               {"NotificationShade"},
+ 		"headsup":              {"NotificationShade"}, // a heads-up is drawn in the shade's window
+ 		"volume-dialog":        {"VolumeDialogImpl"},
+ 		"bubble-collapsed":     {"Bubbles!"},
+ 		"bubble-expanded":      {"Bubbles!"},
+ 		"bubble-expanded-a11y": {"Bubbles!"},
+ 	} {
+-		// TODO(adjudicar): the wallpaper's window, always visible, is not in
+-		// fixedSystemUI (it lists "ImageWallpaper"), so it comes out as unknown
+-		// on every screen and the guard without the app blocks everything
+-		// (T5 finding). Blocking more is safe: today's answer is expected
+-		// until it is decided; then drop this line.
+-		want = append(want, wallpaper)
+ 		for _, out := range api34(t, state, "windows") {
++			// The wallpaper's window is in every sample, visible behind the
++			// app (T5 finding): it is a fixed one, not an unknown one.
++			if !strings.Contains(out, " u0 "+wallpaper+"}:") {
++				t.Errorf("%s: no wallpaper's window in the sample", state)
++			}
+ 			got, ok := ParseSystemUIWindows(out)
+ 			if !ok || !reflect.DeepEqual(got, want) {
+ 				t.Errorf("%s: unknown system windows %q %v, want %q", state, got, ok, want)
+ 			}
+ 		}
+ 	}
+ }
+ 
+ func TestAPI34Resumed(t *testing.T) {
+ 	settings := Activity{"com.android.settings", "com.android.settings.Settings"}
+diff --git a/host/internal/uidump/window.go b/host/internal/uidump/window.go
+index bdbcfde..2563aef 100644
+--- a/host/internal/uidump/window.go
++++ b/host/internal/uidump/window.go
+@@ -54,20 +54,23 @@ const SystemUIPackage = "com.android.systemui"
+ 
+ // fixedSystemUI are the windows of the system interface that are always
+ // there and show no text of anyone's.
+ var fixedSystemUI = map[string]bool{
+ 	"StatusBar": true, "NavigationBar0": true, "NavigationBar1": true,
+ 	"ScreenDecorOverlay": true, "ScreenDecorOverlayBottom": true,
+ 	// Always visible on many phones: the wallpaper, the gesture-navigation
+ 	// edge panels and the rounded-corner overlays drawn by hardware.
+ 	"ImageWallpaper": true, "NavigationBarEdgePanel": true,
+ 	"ScreenDecorHwcOverlay": true, "ScreenDecorHwcOverlayBottom": true,
++	// The wallpaper's window on API 34, titled by its class (T5 of the manual
++	// validations plan, uidump/testdata/api34).
++	"com.android.systemui.wallpapers.ImageWallpaper": true,
+ }
+ 
+ // ParseSystemUIWindows reads `dumpsys window windows` and returns the titles
+ // of the windows of com.android.systemui that are visible (mViewVisibility=0x0)
+ // and not in the fixed list: a heads-up notification, the shade, a dialog.
+ // It is not ok when no window is found, or when a window of systemui does not
+ // say whether it is visible, or a window does not say whose it is.
+ func ParseSystemUIWindows(out string) (unknown []string, ok bool) {
+ 	type window struct{ title, pkg, vis string }
+ 	var all []window
