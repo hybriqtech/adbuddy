@@ -18,7 +18,10 @@ import (
 
 // The guard (M5 spec §4.3): nothing touches or reads the screen while a
 // protected app, or ADBuddy itself, is in front (in any half of a split
-// screen), and nothing opens a protected app. A command that touches or
+// screen), and nothing opens a protected app. With ADBuddy on top, the two
+// ways out that press and read nothing of it go through (V44): Home alone
+// and, when the app says what is on screen, opening another app by its
+// package with monkey's launcher form. A command that touches or
 // reads the screen runs alone, one key at a time, so it cannot open an app
 // and act on it after the guard looked. It fails closed: when what is in
 // front cannot be known, what it guards does not run.
@@ -264,6 +267,31 @@ func closesShade(words []string) bool {
 	return len(words) == 3 && path.Base(words[0]) == "input" && words[1] == "keyevent" && closingKeys[words[2]]
 }
 
+// homeKeys are the keys that go to the launcher.
+var homeKeys = map[string]bool{"3": true, "KEYCODE_HOME": true}
+
+// goesHome reports whether words are exactly `input keyevent <Home>` with no
+// option: `--longpress 3` opens the assistant, which reads the screen, and
+// any other spelling (`HOME`, `03`, `cmd input`, `input -d 0`) is judged as
+// any other key. (The guard has already required that the command runs
+// alone, unwrapped and with one key.)
+func goesHome(words []string) bool {
+	return len(words) == 3 && path.Base(words[0]) == "input" && words[1] == "keyevent" && homeKeys[words[2]]
+}
+
+// opensAnApp reports whether words are exactly
+// `monkey -p <package> -c android.intent.category.LAUNCHER 1`: it opens the
+// launcher entry of the app it names, written as a package name
+// (bridge.ValidPackage: nothing to decode), and sends no other event. Any
+// other form stays out: `am start` names any activity (a dialog would leave
+// ADBuddy on screen to be read) and resolves intents with no package, monkey
+// without -p may open ADBuddy, and another category or more events reach
+// other screens or touch.
+func opensAnApp(words []string) bool {
+	return len(words) == 6 && path.Base(words[0]) == "monkey" && words[1] == "-p" && bridge.ValidPackage(words[2]) &&
+		words[3] == "-c" && words[4] == "android.intent.category.LAUNCHER" && words[5] == "1"
+}
+
 // The fixed commands the guard asks the phone for the shade (no text of the
 // agent goes into them).
 const (
@@ -281,12 +309,36 @@ func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
 	if err != nil {
 		return "could not tell which app is in the foreground (" + err.Error() + "); ADBuddy does not touch or read the screen without knowing"
 	}
+	// V44: with ADBuddy itself on top (the user chatting with the agent on
+	// the phone), the ways out go through: Home alone (goesHome) and, when
+	// the app says what is in front, opening another app by its package
+	// (opensAnApp; guard has already judged that package, as every word of
+	// the command). Neither presses nor reads anything of ADBuddy: Back would
+	// act on it, a long press opens the assistant, which reads the screen,
+	// and an intent with no package may end in ADBuddy itself. Opening needs
+	// the app because what is opened may leave ADBuddy on screen (a dialog, a
+	// translucent activity): the app lists every window a tap can reach, so
+	// the next command still sees ADBuddy if it can be touched, while dumpsys
+	// only sees resumed activities. Any other protected app dumpsys sees (the
+	// other half of a split screen) still blocks. The app marks ADBuddy's own
+	// screen as protected, so that flag does not stop a way out either;
+	// whatever else it may stand for (a notification, a window the service
+	// cannot read, the other half of a split screen), leaving does not read
+	// or touch it.
+	// ADBuddy only in the other half, under another app, has no way out:
+	// its own reason, which offers one, would only make the agent loop.
+	leaving := f.first() == uidump.AppPackage && (goesHome(words) || f.viaApp && opensAnApp(words))
 	for _, pkg := range f.packages {
-		if d.protected(pkg) {
+		switch {
+		case pkg == uidump.AppPackage && leaving:
+			// Empty on purpose: a way out skips ADBuddy (and only ADBuddy).
+		case pkg == uidump.AppPackage && pkg == f.first():
+			return adbuddyInFrontReason(f.viaApp)
+		case d.protected(pkg):
 			return protectedReason(pkg)
 		}
 	}
-	if f.appProtected {
+	if f.appProtected && !leaving {
 		return screenProtectedReason(f.first())
 	}
 	if why := d.systemUIReason(ctx, f.viaApp, closesShade(words)); why != "" && !(wakesScreen(words) && d.screenOff(ctx)) {
@@ -356,15 +408,33 @@ func protectedReason(pkg string) string {
 	return classify.Printable(pkg) + " is a protected app; ask the user to do this part"
 }
 
+// adbuddyInFrontReason is why ADBuddy itself in front blocks: the user is
+// most likely chatting with the agent there (V44). It starts as
+// protectedReason does, which the docs and the agent's context quote, and
+// gives the ways out; opening an app by its package only when the app says
+// what is on screen (viaApp), as guardForeground lets it through only then.
+func adbuddyInFrontReason(viaApp bool) string {
+	out := "press Home alone (input keyevent 3) and then open the app you need"
+	if viaApp {
+		out = "press Home alone (input keyevent 3), or open the app you need with exactly monkey -p <package> -c android.intent.category.LAUNCHER 1"
+	}
+	return uidump.AppPackage + " is a protected app: ADBuddy itself is in front (the user is probably chatting with you there), and nothing touches its screen. To leave it, " + out + "; or ask the user to do this part"
+}
+
 // screenProtectedReason is why the app says the screen is protected: not
-// always a protected app, but also a notification on screen or a window whose
-// content the service cannot see. pkg is only what is in front (may be "").
+// always a protected app, but also a notification that just arrived (the app
+// counts any for about 8 s, as it may be a heads-up with a code) or a window
+// whose content the service cannot see. The host cannot tell which, and the
+// likeliest, a notification, passes within seconds (V45): the agent is told
+// to wait and try once more before asking the user. It starts as before,
+// which the agent's context and the skills quote. pkg is only what is in
+// front (may be "").
 func screenProtectedReason(pkg string) string {
 	in := ""
 	if pkg != "" {
 		in = "; " + classify.Printable(pkg) + " is in front"
 	}
-	return "something on the screen is protected (a protected app, a notification or a window ADBuddy cannot read" + in + "); ask the user to do this part"
+	return "something on the screen is protected (a protected app, a notification or a window ADBuddy cannot read" + in + "). A notification that just arrived counts for about 8 seconds: wait 10 seconds and try once more; if it is still blocked, ask the user to do this part"
 }
 
 // protected reports whether pkg is ADBuddy or one of the user's protected apps.
