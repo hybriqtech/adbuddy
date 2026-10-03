@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -370,6 +371,9 @@ func TestRevokingClearsTheMark(t *testing.T) {
 
 	t.Run("b_dead", func(t *testing.T) {
 		e := listenerEmu(t)
+		if sdk := strings.TrimSpace(e.tryShell("getprop ro.build.version.sdk")); sdk != "34" {
+			t.Skipf("measured on API 34 only (this image is API %s): how the system restarts the listener varies", sdk)
+		}
 		e.allowListener(t, true)
 		e.confirmOnScreen(t)
 		pid := e.pidOf(t)
@@ -395,7 +399,7 @@ func TestRevokingClearsTheMark(t *testing.T) {
 		wantGate(t, "revoked with the app dead and allowed again", g, map[string]string{
 			"listed": "YES", "connected": "true", "state": "GRANTED",
 		})
-		// TODO(adjudicar): FINDING (M5c-32 b, the risk ruling 15 accepted),
+		// KNOWN RISK (ruling 15 of M5c), the user's decision after v1: see pendientes-m3-m5.md. FINDING (M5c-32 b),
 		// measured on API 34 on 2026-10-03: the mark survives a revocation with
 		// the app dead, and allowed again the gate reads without a new tap. This
 		// pins today's behaviour; the cheap fix (clear the mark in
@@ -403,13 +407,13 @@ func TestRevokingClearsTheMark(t *testing.T) {
 		// would turn it into mark=false, gate=NotConfirmed, at the cost of a tap
 		// after every rebind (reboot, update, kill), and would also change what
 		// TestTheListenerStaysBound expects.
-		wantGate(t, "revoked with the app dead and allowed again (today's behaviour, the accepted risk)", g, map[string]string{
+		wantGate(t, "revoked with the app dead and allowed again (today's behaviour, a known risk)", g, map[string]string{
 			"mark": "true", "effective": "ON",
 		})
 		if !strings.HasPrefix(g["gate"], "Ok:") {
-			t.Errorf("revoked with the app dead and allowed again: the gate reads %q, today Ok (the accepted risk)", g["gate"])
+			t.Errorf("revoked with the app dead and allowed again: the gate reads %q, today Ok (a known risk)", g["gate"])
 		}
-		t.Logf("FINDING (M5c-32 b, ruling 15's accepted risk): the mark survived a revocation with the app dead; the gate reads %s without a new tap", g["gate"])
+		t.Logf("FINDING (M5c-32 b, ruling 15's known risk): the mark survived a revocation with the app dead; the gate reads %s without a new tap", g["gate"])
 	})
 }
 
@@ -512,6 +516,9 @@ func TestTheListenerGateStates(t *testing.T) {
 		"rebound.listed": "YES", "rebound.connected": "true", "rebound.state": "GRANTED",
 		"rebound.mark": "false", "rebound.effective": "NEEDS_CONFIRMATION", "rebound.gate": "NotConfirmed",
 	})
+	if ms, err := strconv.Atoi(g["unbound.readMs"]); err != nil || ms >= 1000 {
+		t.Errorf("allowed but not bound: read() took %q ms, want under 1000 (it must not hang)", g["unbound.readMs"])
+	}
 	l.restarted(t)
 
 	// Confirmed again, then revoked: not allowed, and allowed again it asks again.
@@ -530,11 +537,11 @@ func TestTheListenerGateStates(t *testing.T) {
 		t.Errorf("allowed again, the screen does not offer the confirm button: %+v", nodes)
 	}
 
-	// The process dead: the setting still lists the listener.
+	// After a force-stop the setting still lists the listener.
 	e.shell(t, "input keyevent KEYCODE_HOME")
 	e.shell(t, "am force-stop "+phoneapp.Package)
 	if !e.listenerListed(t) {
-		t.Error("with the app's process dead, the listener is no longer in enabled_notification_listeners")
+		t.Error("after a force-stop, the listener is no longer in enabled_notification_listeners")
 	}
 }
 

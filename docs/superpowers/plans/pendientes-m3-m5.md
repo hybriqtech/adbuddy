@@ -498,6 +498,18 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
 - **(d) Post-v1: el teclado.** La ventana `InputMethod` no es de systemui y nunca contó (tampoco con la app conectada). La barra de sugerencias de Gboard puede mostrar el chip del portapapeles (p. ej. un código copiado desde una app protegida) o sugerencias de autorrelleno, y una captura con una app sin proteger delante lo recogería. El fondo de pantalla lo tapaba por accidente en el respaldo sin app en la API 34; el arreglo de (a) restaura el comportamiento de diseño.
 - **(e) Post-v1: proteger Ajustes no protege su búsqueda** (`com.google.android.settings.intelligence`, otro paquete).
 
+### Post-v1: consentimiento del listener (M5c-32 b)
+
+RIESGO CONOCIDO (ruling 15 de M5c); la decisión es del usuario tras la v1. Severidad importante, no crítica: no ejecuta un 🔴 sin confirmar.
+
+- **Medición** (API 34, 2026-10-03, `TestRevokingClearsTheMark/b_dead`): con la app muerta, al revocar la marca sobrevive; al volver a permitir, la puerta lee sin otro toque (`mark=true`, `Ok:5`). El sistema retira el permiso, pero un reinicio programado conecta el servicio sin llamar a `onListenerDisconnected` (ni a `onDestroy`).
+- **Escenario realista (revisor opus):** móvil con ahorro de batería agresivo (Xiaomi, Huawei, OnePlus) donde el proceso muere y no se reenlaza. El usuario retira el acceso; luego el agente lo vuelve a activar con `adbuddy tap` en Ajustes, que no está protegido, y acepta el diálogo del sistema. En Android de serie la ventana es estrecha: tras un crash reinicia en 1 s y tras force-stop en 10 ms; el agente no puede matar la app sin un 🔴.
+- **Atenuantes:** solo lectura; el informe oculta las apps protegidas y lo de ADBuddy; cualquier llamada a `notifications` o a la pantalla durante la revocación borra la marca.
+- **Arreglo barato propuesto:** borrar la marca también en `onListenerConnected`, más un aviso de prioridad baja «vuelve a confirmar el acceso» que solo abra la pantalla de acceso, sin acción que confirme. **Coste:** un toque tras cada reenlace en un proceso nuevo (hoy ya se paga tras un desenlace con el proceso vivo: la T6 lo mide).
+- **Tests que cambiarían con el arreglo:** `ListenerIsReadOnlyTest.kt:86` (lista exacta de métodos del ciclo de vida); `TestTheListenerStaysBound` (hoy espera `mark=true` tras los kills); el paso «confirmed» de `TestTheListenerGateStates`; y `b_dead`, que pasaría a exigir `mark=false` y `NotConfirmed`.
+- **Alternativas descartadas:** una época del sistema no existe en la API pública; `JobScheduler` con `TriggerContentUri` es frágil con Doze.
+- **Defecto del plan de la T6:** quitar `revoke()` de uno solo de `onListenerDisconnected`/`onDestroy` no hace fallar la 32 (a); hay que quitarlo de los dos.
+
 ### Post-v1: Permitir tras desbloquear con PIN (M2-8)
 
 - **Ruling del supervisor f3:** post-v1, no se implementa ahora. Falla seguro (no se ejecuta nada sin confirmación), es un problema de experiencia, y tocar `ConfirmReceiver`/`BridgeService` a última hora arriesga abrir el hueco que se protege.
