@@ -126,6 +126,7 @@
     <string name="chat_discard">Discard</string>
     <string name="chat_not_sent">Not sent</string>
     <string name="chat_sending">Sending…</string>
+    <string name="chat_new_messages">New messages</string>
     <string name="menu_activity">Activity</string>
     <string name="menu_new_conversation">New conversation</string>
     <string name="new_conversation_title">Start a new conversation?</string>

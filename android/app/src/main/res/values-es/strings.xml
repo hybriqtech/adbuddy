@@ -124,6 +124,7 @@
     <string name="chat_discard">Descartar</string>
     <string name="chat_not_sent">No enviado</string>
     <string name="chat_sending">Enviando…</string>
+    <string name="chat_new_messages">Mensajes nuevos</string>
     <string name="menu_activity">Actividad</string>
     <string name="menu_new_conversation">Nueva conversación</string>
     <string name="new_conversation_title">¿Empezar una conversación nueva?</string>

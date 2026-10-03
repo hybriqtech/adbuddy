@@ -2,6 +2,7 @@ package tech.hybriq.adbuddy.ui
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -12,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -20,15 +22,20 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.BridgeState
@@ -97,7 +104,26 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     // The strip is the last item: the list follows it too, so what the agent is doing is in view.
     val rows = items.size + if (tools.isEmpty()) 0 else 1
-    LaunchedEffect(rows) { if (rows > 0) listState.animateScrollToItem(rows - 1) }
+    // Follows what arrives only while the reader is at the end. New rows go below and do not move the viewport, so "was at
+    // the end" is "the row that was last is (at least partly) in the viewport": a last bubble that grew in place now
+    // ends below it, and its reader was at the end all the same; a drop in rows (the tool strip going) is not news.
+    // Coming back from Settings the chat recomposes with seen = 0 and jumps to the end, as it already did.
+    var seen by remember { mutableIntStateOf(0) }
+    var unseen by remember { mutableStateOf(false) }
+    LaunchedEffect(rows) {
+        val info = listState.layoutInfo
+        val wasAtEnd = seen == 0 || info.visibleItemsInfo.any { it.index == seen - 1 && it.offset < info.viewportEndOffset }
+        val grew = rows > seen
+        seen = rows // before animating: a cancelled animation does not leave the old count
+        if (rows == 0) return@LaunchedEffect
+        if (wasAtEnd) {
+            unseen = false
+            listState.animateScrollToItem(rows - 1)
+        } else if (grew) {
+            unseen = true
+        }
+    }
+    LaunchedEffect(listState) { snapshotFlow { !listState.canScrollForward }.collect { if (it) unseen = false } }
     val terminalOn = terminalShown && terminal != null
 
     Scaffold(
@@ -120,20 +146,29 @@ fun ChatScreen(
             if (items.isEmpty() && tools.isEmpty() && LinkStatus.of(state, cut, configured) == LinkStatus.CONNECTED) {
                 ChatEmptyState(Modifier.weight(weight).fillMaxSize())
             } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.weight(weight).fillMaxSize(),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(items, key = { it.key }) { item ->
-                        MessageRow(
-                            item, downloads,
-                            onLink = { u -> Links.domain(u)?.let { link = u to it } },
-                            onAttachment = actions.attachment, onRetry = actions.retry, onDiscard = actions.discard,
-                        )
+                Box(Modifier.weight(weight).fillMaxSize()) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(items, key = { it.key }) { item ->
+                            MessageRow(
+                                item, downloads,
+                                onLink = { u -> Links.domain(u)?.let { link = u to it } },
+                                onAttachment = actions.attachment, onRetry = actions.retry, onDiscard = actions.discard,
+                            )
+                        }
+                        if (tools.isNotEmpty()) item(key = "tools") { ToolStripView(tools) }
                     }
-                    if (tools.isNotEmpty()) item(key = "tools") { ToolStripView(tools) }
+                    if (unseen) {
+                        val scope = rememberCoroutineScope()
+                        FilledTonalButton(
+                            onClick = { scope.launch { listState.animateScrollToItem(rows - 1) } },
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                        ) { Text(stringResource(R.string.chat_new_messages)) }
+                    }
                 }
             }
             if (terminalOn) QuickKeysRow { terminal!!.input(it.bytes) }
