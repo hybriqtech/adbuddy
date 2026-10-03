@@ -173,8 +173,7 @@ Dos runners Linux en la misma distro y con el mismo usuario `runner` (sin sudo) 
 
    ```sh
    TOKEN=$(gh api -X POST repos/hybriqtech/adbuddy/actions/runners/registration-token --jq .token)
-   printf '%s
-' "$TOKEN" | wsl.exe -d Ubuntu -u runner --exec sh -c 'read -r T; cd ~/actions-runner-2 && env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C.UTF-8 ./config.sh --unattended --url https://github.com/hybriqtech/adbuddy --token "$T" --name <PC>-wsl-adbuddy-local-2 --labels adbuddy-local --work _work'
+   printf '%s\n' "$TOKEN" | wsl.exe -d Ubuntu -u runner --exec sh -c 'read -r T; cd ~/actions-runner-2 && env -i HOME="$HOME" PATH=/usr/bin:/bin LANG=C.UTF-8 ./config.sh --unattended --url https://github.com/hybriqtech/adbuddy --token "$T" --name <PC>-wsl-adbuddy-local-2 --labels adbuddy-local --work _work'
    unset TOKEN
    ```
 
