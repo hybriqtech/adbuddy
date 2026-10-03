@@ -68,11 +68,11 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
 
     // What the host says (notice) and what it refuses (chat, uploads), as the host wrote it.
     LaunchedEffect(app) {
-        merge(app.notices, app.chat.errors, app.drafts.errors).collect { snackbar.showSnackbar(it) }
+        merge(app.notices, app.chat.errors, app.drafts.errors).collect { scope.launch { snackbar.notify(it) } }
     }
 
     // Photos and files go through the system pickers: no storage permission asked.
-    fun attach(uri: Uri) = app.attachUri(uri) { text -> scope.launch { snackbar.showSnackbar(text.ifEmpty { attachFailed }) } }
+    fun attach(uri: Uri) = app.attachUri(uri) { text -> scope.launch { snackbar.notify(text.ifEmpty { attachFailed }) } }
     val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(Composer.MAX_ATTACHMENTS)) { uris -> uris.forEach(::attach) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) attach(uri) }
 
@@ -117,7 +117,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
                 }
                 scope.launch {
                     // Without the permission (or if the change did not stick), the person does it by hand.
-                    val r = snackbar.showSnackbar(message, actionLabel = if (ok) null else developerOptions)
+                    val r = snackbar.notify(message, actionLabel = if (ok) null else developerOptions)
                     if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
                 }
             },
@@ -146,7 +146,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
             Route.CHAT -> holder.SaveableStateProvider("chat") {
                 ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured) {
-                    RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
+                    RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
                 }
             }
             Route.ACTIVITY -> {
