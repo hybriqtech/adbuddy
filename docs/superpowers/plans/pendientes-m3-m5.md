@@ -402,7 +402,6 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
 ## Tests de UI en la JVM (validaciones 27 y 34)
 
 - **Qué hay** (plan `2026-10-03-adbuddy-tests-ui-jvm.md`): Robolectric (SDK 34, por Java 17), Compose `ui-test` y Roborazzi; imágenes de referencia verificadas al píxel en Windows y solo comparadas en Linux y macOS hasta comprobar que salen iguales (validación 1 de ese plan). Lo que sigue necesitando el Pixel está en las validaciones 27 y 34 de M5c. `android.yml` corre hoy en `ubuntu-latest` salvo que `CI_RUNNER_ANDROID` diga otra cosa: ahí las imágenes solo avisan (`::warning`).
-- **Hallazgo de UI:** al 200 % en español el título "Acceso a las notificaciones" ocupa dos líneas y se sale de la barra superior de 64 dp (`KNOWN_UI_ISSUES` en `screens/ScreenTestSupport.kt`). Comprobarlo en el Pixel (validación 27 de M5c); el arreglo es de la app y, al hacerlo, se quita la entrada y se regraban sus imágenes.
 - **Sesiones que toquen el onboarding, Ajustes, la lista de apps protegidas o el acceso a notificaciones:** en Windows `testDebugUnitTest` verifica sus imágenes; en la misma tarea, regrabar solo la clase afectada (`-Padbuddy.screens=record --tests '*SettingsScreensTest'`), mirar cada imagen que cambie y hacer commit de ellas.
 - **Diferidos (con motivo):**
   - Ruido `Invalid ID 0x00000000.` de Robolectric en system-err: sin rastrear; no falla nada.
@@ -411,6 +410,19 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
   - T3: `access_unknown_marked` no tiene imagen; el párrafo final del acceso a 200 % queda sin cubrir por imagen.
   - T3: los shots `_below` y `_rows` son condicionales y no hay test de huérfanos; candidato: un test que compare los PNG de `screenshots/` con los nombres de shot esperados.
   - T3: faltan asserts de la razón de Mi Banco, de que WhatsApp no lleva razón, y de Guardar desactivado en la búsqueda sin resultados.
+
+## Revisión UX (P1)
+
+P1 · barra y accesibilidad base (rama `ux/revision`, plan `docs/superpowers/plans/2026-10-03-ux-p1-barra-y-a11y.md`; informe de la revisión en `docs/superpowers/plans/2026-10-03-ux-revision.md`). Los paquetes siguientes (P2 en adelante) se añaden aquí cuando lleguen a `main`.
+
+- **Hecho:** cuatro pantallas usan `AdbuddyTopBar`; `assertTitleFitsTheTopBar` mide la barra pintada y `KNOWN_UI_ISSUES` queda vacío (el título de Acceso a las notificaciones al 200 % en español ya cabe; el TopAppBar de Material ya crecía solo). `SecondaryActionButton` compartido para el «Ahora no» del paso 2 de 2 y de apps protegidas. La fila del modo remoto es accionable entera y TalkBack la lee como un solo interruptor con nombre; el diálogo de confirmación sigue apareciendo antes de abrir o cerrar nada. Pistas de TalkBack en la descarga de ficheros («Toca para cancelar», etiqueta de la acción según el estado) y en la tarjeta de pregunta del agente (anuncio del resumen, título como cabecera); `heading()` también en `StepHeader` y en los títulos de las barras. Imágenes regrabadas: 17 PNG al 200 % (`access_*_font_200` x7, `protected_apps_*` x6, `settings_*` x4) y 6 `onboarding_2_notification_access_*`.
+- **Sigue necesitando el Pixel con TalkBack** (no se pide al usuario ahora; el resto lo cubren tests de semántica e imágenes en la JVM):
+  - lectura real del interruptor del modo remoto como un solo interruptor con nombre («Modo remoto, interruptor, desactivado»);
+  - anuncio de la tarjeta del agente al aparecer;
+  - la descarga que dice «Toca para cancelar».
+- **Aplazado:**
+  - C23 (borrar de 18 dp en los chips de borrador): cambiar el tamaño del chip pide diseño propio; va a P3 con el resto de adjuntos.
+  - `SecondaryActionButton` en ConsentScreen: queda para P5, que toca ese fichero.
 
 ## V46 · Apps protegidas en vivo (plan `docs/superpowers/plans/2026-10-02-adbuddy-v46.md`)
 
