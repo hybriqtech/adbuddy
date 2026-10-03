@@ -2,6 +2,7 @@ package emutest
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -422,9 +423,52 @@ func (e *emu) unlockOnBouncer(t *testing.T) {
 // unlock brings up the bouncer from the lock screen with a swipe up and types the PIN.
 func (e *emu) unlock(t *testing.T) {
 	t.Helper()
-	e.shell(t, "input swipe 540 1800 540 600 300")
+	w, h := e.screenSize(t)
+	x, y0, y1 := swipeUpPoints(w, h)
+	e.shell(t, fmt.Sprintf("input swipe %d %d %d %d 300", x, y0, x, y1))
 	e.waitNodes(t, "bouncer after swiping up on the lock screen", 10*time.Second, bouncer)
 	e.unlockOnBouncer(t)
+}
+
+// screenSize reads the physical size from wm size ("Physical size: 720x1600").
+func (e *emu) screenSize(t *testing.T) (w, h int) {
+	t.Helper()
+	w, h, ok := parseWMSize(e.shell(t, "wm size"))
+	if !ok {
+		t.Fatal("wm size is not understood")
+	}
+	return w, h
+}
+
+var wmSizeRe = regexp.MustCompile(`(?:Override|Physical) size: (\d+)x(\d+)`)
+
+// parseWMSize reads the size from wm size: the override, if any, wins over the
+// physical size (it is printed last).
+func parseWMSize(out string) (w, h int, ok bool) {
+	ms := wmSizeRe.FindAllStringSubmatch(out, -1)
+	if len(ms) == 0 {
+		return 0, 0, false
+	}
+	m := ms[len(ms)-1]
+	w, _ = strconv.Atoi(m[1])
+	h, _ = strconv.Atoi(m[2])
+	return w, h, w > 0 && h > 0
+}
+
+// swipeUpPoints is the swipe up that brings up the bouncer, relative to the
+// screen: from three quarters of the height to a third, down the middle.
+func swipeUpPoints(w, h int) (x, y0, y1 int) { return w / 2, h * 3 / 4, h / 3 }
+
+func TestSwipeUpPoints(t *testing.T) {
+	if w, h, ok := parseWMSize("Physical size: 720x1600\nOverride size: 1080x2400\n"); !ok || w != 1080 || h != 2400 {
+		t.Errorf("parseWMSize: %d %d %v", w, h, ok)
+	}
+	if _, _, ok := parseWMSize("nope"); ok {
+		t.Error("parseWMSize accepted junk")
+	}
+	if x, y0, y1 := swipeUpPoints(720, 1600); x != 360 || y0 != 1200 || y1 != 533 {
+		t.Errorf("swipeUpPoints(720, 1600) = %d %d %d", x, y0, y1)
+	}
 }
 
 // waitNodes waits up to d for the screen to be as ok wants and returns its nodes, or fails.

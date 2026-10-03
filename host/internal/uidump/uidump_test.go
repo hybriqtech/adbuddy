@@ -243,6 +243,12 @@ func TestServiceOn(t *testing.T) {
 	if !ServiceOn(on) || ServiceOn("User state[\n  Enabled services:{}\n") {
 		t.Fatal("ServiceOn")
 	}
+	// Another app whose package starts with ADBuddy's is not ADBuddy: the
+	// slash after the package is what tells them apart.
+	other := "User state[\n  Enabled services:{{tech.hybriq.adbuddy2/tech.hybriq.adbuddy2.Svc}}\n"
+	if ServiceOn(other) {
+		t.Fatal("ServiceOn took tech.hybriq.adbuddy2 for ADBuddy")
+	}
 }
 
 // An injected line (a wakelock label with a line break, say) cannot hide the

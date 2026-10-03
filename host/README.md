@@ -89,6 +89,7 @@ Use the android-34 image (install it with `sdkmanager "system-images;android-34;
 ```sh
 (cd android && gradle :app:assembleDebug :app:assembleDebugAndroidTest)
 export ADBUDDY_EMU_IMAGE='system-images;android-34;google_apis;x86_64' ADBUDDY_EMU_AVD=adbuddy-dev34 ADBUDDY_EMU_STABLE_SECS=120
+# Optional: ADBUDDY_EMU_RAM=1536 (plain MB) lowers the guest's RAM; scripts/emulator.sh mem prints the emulator's host memory.
 eval "$(scripts/emulator.sh start)"   # from the repository root
 cd host && go test -timeout 15m -count=1 ./internal/emutest
 ```
