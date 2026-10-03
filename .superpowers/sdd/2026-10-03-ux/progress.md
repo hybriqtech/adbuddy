@@ -29,3 +29,5 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - Task 2 (P1): complete (commits 0a1c48d..cf80635, review clean; minor: assertEquals en vez de assertTrue en SecondaryActionButtonTest:53).
 - Task 3 (P1): complete (commits 15f9001..0b7e897, review opus clean).
 - Task 3: minor (deferred, limpieza en el dispatch de la Task 4): tests extra de RemoteCardSemanticsTest (remoto activo: tocar abre remote_disable_title y no envía; PENDING: la fila no es accionable); KDoc de RemoteCard.kt:48-49 dice que al apagar "does not ask" y el código siempre pregunta.
+- Task 4 (P1): complete (commits dfbbf2d..49acc22, review clean; incluye limpieza de menores 1-3: OptIn/imports, tests de RemoteCard con remoto activo, KDoc exacto; test PENDING omitido: estado local no construible).
+- Task 4: minor (se arregla en la Task 5): es usa "archivo" en file_action_download/open y "fichero" en el resto del fichero (3 vs 2): unificar a "fichero".
