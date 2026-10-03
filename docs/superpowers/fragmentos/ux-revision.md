@@ -70,11 +70,11 @@ Ninguna se pide al usuario ahora: el banner del chat con TalkBack (se anuncia un
 
 ### Qué cambió
 
-- Task 1, "Parar" (C5): con el agente trabajando y la barra vacía (sin texto ni adjunto listo), el botón de enviar pasa a ser "Parar" y envía `agent.interrupt`. Con texto o un adjunto listo sigue siendo "Enviar". Tras pulsarlo queda deshabilitado 3 s y se rehabilita antes si `working` cambia.
+- Task 1, "Parar" (C5): con el agente trabajando y la barra vacía (sin texto y sin ningún adjunto, aunque se esté subiendo o haya fallado), el botón de enviar pasa a ser "Parar" y envía `agent.interrupt`. Con algo escrito o cualquier adjunto sigue siendo "Enviar" (deshabilitado mientras `canSend` sea falso), para que quien redacta nunca vea "Parar" por error. Tras pulsarlo queda deshabilitado 3 s y se rehabilita antes si `working` cambia.
 - Task 2, chips de adjuntos (C17, C23): un adjunto que se está preparando muestra una barra de progreso (indeterminada si aún no se sabe el tamaño); el botón de quitar tiene tamaño táctil de 48 dp y el reintento de un adjunto fallido está solo en la etiqueta, nunca en la X.
 - Task 3, terminal sin conexión (C18): el terminal avisa de que no hay conexión con el PC en vez de quedarse mudo, y las teclas rápidas se desactivan.
 - Task 4, avisos largos (C11): `notify` elige la duración por el texto: los largos duran más y los que llevan acción no desaparecen solos (botón de cerrar).
-- Task 5, diario (C26): el filtro y cada entrada dicen el nivel con palabras (`level_chip`), cada entrada lleva su hora (solo la hora si es de hoy, fecha y hora si no) y hay dos vacíos distintos (sin entradas / ningún aviso de ese nivel).
+- Task 5, diario (C26): los filtros dicen el nivel con palabras (`level_chip`: emoji y nombre; las filas siguen mostrando solo el emoji, ver la nota de accesibilidad abajo), cada entrada lleva su hora (solo la hora si es de hoy, fecha y hora si no) y hay dos vacíos distintos (sin entradas / ningún aviso de ese nivel).
 - Task 6, burbuja con el terminal plegado (C12): la burbuja arranca con el terminal plegado (es de ~600 dp de alto); el chat a pantalla completa lo sigue desplegando por defecto (blindado por un test del flujo).
 - Task 7, limpieza de menores: orden de imports, zona táctil del reintento sin cambiar el aspecto, tests de reposo/reinicio de "Parar", aviso con acción que sigue tras 60 s, aviso de deshacer solo con estado `ok` e id válido, frontera de día por zona.
 
@@ -90,9 +90,11 @@ C19 (accesibilidad, tamaño del terminal y teclas ←, →, Shift+Tab) pide ajus
 
 - "Parar" se deshabilita 3 s tras pulsarse: `agent.interrupt` no tiene respuesta, y el reposo evita enviar un segundo Esc seguido.
 - El aviso de deshacer del diario solo sale con estado `ok`, inverso presente y no deshecho, e id con la forma `j_<alfanumérico>`: `adbuddy undo <id>` (sin id, deshace lo último, no esa entrada).
-- Scroll de avisos: cada aviso va en su corrutina y una ráfaga de avisos largos se encola (aceptado).
+- Cola de avisos: cada aviso va en su corrutina y una ráfaga de avisos largos se encola (aceptado).
 - Las imágenes en español del diario muestran la hora en formato inglés porque la JVM de test usa `Locale.getDefault()` inglés; no es del producto.
-- El aviso del terminal sin conexión y el cableado de `connected` en `ChatScreen` no se pintan en la JVM (el WebView no se pinta); lo cubren los tests de semántica.
+- El aviso del terminal sin conexión y el cableado de `connected` en `ChatScreen` no se pintan en la JVM (el WebView no se pinta): solo se prueban `QuickKeysRow` y `TerminalOfflineNotice` por separado, y el cableado queda para la validación manual de abajo.
+
+- Accesibilidad del diario (aplazado): las filas muestran solo el emoji del nivel (TalkBack leerá "círculo verde"); una `contentDescription` con `levelName` lo arreglaría. Tampoco se refresca "hoy" si la pantalla sigue abierta pasada la medianoche, ni "Parar" avisa si `bridge.send` falla justo en la transición de la conexión.
 
 ### Validaciones manuales pendientes (Pixel)
 
