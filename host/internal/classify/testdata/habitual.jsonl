@@ -2,7 +2,8 @@
 {"sh":"getprop","level":"green"}
 {"sh":"getprop ro.build.version.sdk && getprop ro.product.manufacturer","level":"green"}
 {"sh":"getprop | grep -i version","level":"green"}
-{"sh":"dumpsys","level":"green"}
+# dumpsys of every service includes the notification service, whose redacted dump keeps the start of each ticker (T2 of the manual validations, measured on the emulator): red, not special
+{"sh":"dumpsys","level":"red"}
 {"sh":"dumpsys battery","level":"green"}
 {"sh":"dumpsys diskstats","level":"green"}
 {"sh":"dumpsys package com.android.chrome | grep version","level":"green"}
@@ -217,8 +218,12 @@
 {"sh":"dumpsys -t 10 activity top","level":"green"}
 {"sh":"dumpsys -T 500 battery","level":"green"}
 {"sh":"dumpsys --proto battery","level":"green"}
-{"sh":"dumpsys --priority CRITICAL","level":"green"}
-{"sh":"dumpsys --skip meminfo","level":"green"}
+# T2: the notification service has its records in its CRITICAL dump, not in HIGH or NORMAL; --skip notification leaves it out
+{"sh":"dumpsys --priority CRITICAL","level":"red"}
+{"sh":"dumpsys --priority HIGH","level":"green"}
+{"sh":"dumpsys --skip meminfo","level":"red"}
+{"sh":"dumpsys --skip notification","level":"green"}
+{"sh":"dumpsys notification","level":"red"}
 {"sh":"dumpsys window","level":"green"}
 {"sh":"dumpsys window windows | grep mCurrentFocus","level":"green"}
 {"sh":"dumpsys window displays","level":"green"}

@@ -158,8 +158,10 @@ func TestNoCorpusCommandPanics(t *testing.T) {
 			}
 		}
 	}
-	if r, ok := safeClassify(t, c, sh("dumpsys")); ok && r.Level != Green {
-		t.Errorf("dumpsys: %v (%s: %s), want green", r.Level, r.Primary.Rule, r.Primary.Reason)
+	// 🔴 since T2 of the manual validations: it includes the notification
+	// service's dump (TestDumpsysOfTheNotificationsIsRed).
+	if r, ok := safeClassify(t, c, sh("dumpsys")); ok && (r.Level != Red || r.Primary.Rule != "android.dumpsys") {
+		t.Errorf("dumpsys: %v (%s: %s), want red by android.dumpsys", r.Level, r.Primary.Rule, r.Primary.Reason)
 	}
 }
 
