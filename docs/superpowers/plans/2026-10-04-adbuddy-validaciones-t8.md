@@ -2,6 +2,8 @@
 
 > **Plan v2:** incorpora la revisión opus del plan (`.superpowers/sdd/2026-10-03-adbuddy-validaciones-t8/plan-review.md`: 0 críticos, 7 importantes, 7 menores) y las decisiones del controlador: I1 `sameAdbd` muestrea 5 s; I2 los tests que reinician adbd van detrás de `ADBUDDY_EMULATOR_ADBD=1` y se dice qué corre en la CI; I3 M5b-13 medido con honestidad (respuesta perdida de verdad, RED en el producto `RemoteCard.kt:69`, pendiente de ejecutar); I4 el reinicio de VB-41 entra en la ejecución prevista; I5 la Tarea 4 solo marca "hecha" lo que tenga GREEN y RED en el ledger, con filas completas en dos variantes; I6 la única RED de producto de M6a-2 es la del shrink; I7 fuera `TestTheHostRejectsTheSection5Attacks` (lo cubre `phoneapp/apksig_test.go`); menores 1-7.
 >
+> **Adenda v3 (ruling del supervisor sobre VB-41):** nueva **Tarea 5**, tras la 4, con un test que **afirma** (no solo registra) que el "off" del host cierra también un puerto de `persist.adb.tcp.port`; RED esperado hoy, y la forma del arreglo para un plan aparte. Las Tareas 1-4 y su código (ya implementado: 35a625d, 2731594, a075578, 5e30c1e) no cambian.
+>
 > **Para quien ejecute:** REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`. Los pasos usan casillas (`- [ ]`). Implementador y re-revisiones en Sonnet (`adbuddy-implementer`, `adbuddy-rereviewer`; si BLOCKED o ronda 4-5, `adbuddy-implementer-opus`). Las tres tareas de código tocan el modo remoto y la confianza de la app (🔒): las revisa `adbuddy-reviewer-opus`; la tarea de docs, `adbuddy-reviewer`. Nunca Haiku.
 
 **Meta:** cerrar en el emulador propio API 34 la tarea T8 del inventario (`docs/superpowers/plans/2026-10-03-validaciones-manuales.md`): las filas **M5b-12, M5b-13, VB-37, VB-41** (modo remoto y puertos de adbd) y **M6a-2, M6a-3** (la app de release con R8 y lo que la spec M6a da por hecho de Android). Son tests de host en `host/internal/emutest/` (`remote_test.go`, `release_test.go`, `install_test.go`) que hacen de `serve` sobre el adbd real del emulador, y una tarea de docs que pasa a "Automatizado" en el inventario **solo lo que tenga evidencia** GREEN y RED en el ledger. **No se toca código de producción.** Si un test descubre un defecto, se registra como hallazgo para el controlador ("Hallazgos para el controlador"); no se arregla aquí.
@@ -50,6 +52,7 @@ El APK de release se construye con Gradle **offline** (R8 y shrink, como `releas
 | Test | ¿En la CI? | Por qué |
 |---|---|---|
 | `TestTheRemoteModeOpensAndClosesThePort`, `TestOffWithTheModeOffOnlyClosesAnOpenPort`, `TestPersistTCPPortAgainstUSBAndRestarts`, `TestTheCardSaysUnknownWhenTheAnswerIsLost` | **No** (`SKIP`) | Reinician adbd, usan `adb tcpip 7777` (sin medir: puede dejar el emulador sin transporte) o `su 0 setprop persist.adb.tcp.port` (si la limpieza falla, sobrevive en el AVD conservado). Solo con `ADBUDDY_EMULATOR_ADBD=1`, como `TestCutAccessAndReactivate` con `ADBUDDY_EMULATOR_CUT=1`. El reinicio de VB-41 pide además `ADBUDDY_EMULATOR_REBOOT=1`. |
+| `TestOffClosesAPersistTCPPort` (Tarea 5) | **No** (`SKIP`) | Reinicia adbd y fija `persist.adb.tcp.port` con `su 0`: tras `ADBUDDY_EMULATOR_ADBD=1`. Es un RED esperado hasta el arreglo; no puede entrar en la CI en rojo. |
 | `TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey`, `TestTheReleaseAppTalksOverTheLink` | **No** (`SKIP`) | La CI no compila el APK de release (`releaseHint`). `TestVersionLess` sí corre (es puro). |
 | `TestTheInstalledAppReadsBackByteForByte` | **Sí** | Instala y desinstala el APK de debug; no deja nada. |
 | `TestASecondProviderOnTheAuthorityIsRefused` | **Sí, si** el runner tiene build-tools y JDK (si no, `SKIP`) | Instala el debug, desactiva su provider (lo reactiva y desinstala en el cleanup) e intenta instalar un APK de aapt2 que Android rechaza. |
@@ -92,6 +95,7 @@ Lo que no es automatizable se queda en la checklist del Pixel ("Paso mínimo del
 
 ## Hallazgos para el controlador (no se arreglan aquí)
 
+- **VB-41, hueco de seguridad (ruling del supervisor):** un adbd que sigue escuchando por TCP tras `remote off` o `EnsureNoTCPPort` es un puerto abierto que el usuario cree cerrado. La Tarea 5 lo afirma con `TestOffClosesAPersistTCPPort` (RED esperado); el arreglo va en una rama y un plan aparte ("Forma del arreglo", en la Tarea 5).
 - **VB-41 (hipótesis, la mide el reinicio):** ver arriba. Si se confirma, el test escribe `FINDING (VB-41) …` y deja `hostReadsPersistPort = false`; con un arreglo del host, se pone a `true` y el paso del reinicio exige que `Disable` cierre el puerto.
 
 ## Mapa de ficheros
@@ -102,6 +106,7 @@ Lo que no es automatizable se queda en la checklist del Pixel ("Paso mínimo del
 | `host/internal/emutest/remote_test.go` | 1 | nuevo: `memStore`, `fakeClock`, ayudantes de adbd, `adbdTests`, cuatro tests |
 | `host/internal/emutest/release_test.go` | 2 | nuevo: `sdkTools` y ayudantes, `installRelease`, tres tests |
 | `host/internal/emutest/install_test.go` | 3 | nuevo: dos tests y ayudantes |
+| `host/internal/emutest/persist_test.go` | 5 | nuevo: `TestOffClosesAPersistTCPPort` (RED esperado) y sus ayudantes |
 | `docs/superpowers/plans/2026-10-03-validaciones-manuales.md` | 4 | seis filas y la entrada T8, según la evidencia del ledger |
 | `.superpowers/sdd/2026-10-03-adbuddy-validaciones-t8/progress.md` | 1-3 | evidencia GREEN/RED de cada ejecución (fuera de git) |
 
@@ -1364,6 +1369,197 @@ func threeInts(s string) (a, b, c int64, ok bool) {
 
 ---
 
+### Task 5: "off" cierra también un puerto de `persist.adb.tcp.port` (VB-41, seguridad) 🔒 — RED esperado
+
+**Por qué (ruling del supervisor):** un adbd que sigue escuchando por TCP después de `remote off` o del invariante de `serve` (`EnsureNoTCPPort`) es justo el puerto abierto que el usuario cree cerrado y que ADBuddy debe impedir. La Tarea 1 solo **registra** el hueco (`TestPersistTCPPortAgainstUSBAndRestarts`, `FINDING (VB-41)`); esta tarea añade un test que lo **afirma**. No cambia nada de lo ya implementado (35a625d, 2731594, a075578, 5e30c1e): es un fichero nuevo que reutiliza los ayudantes de `remote_test.go`.
+
+**Files:** `host/internal/emutest/persist_test.go` (nuevo).
+
+- Produces: `TestOffClosesAPersistTCPPort` (subtests `Disable after adb tcpip` y `EnsureNoTCPPort with service.adb.tcp.port empty`), `persistPort`, `withPersist`, `closedAfterOff`.
+- Reutiliza de `remote_test.go`: `adbdTests`, `closedAtStartAndEnd`, `adbd`, `adbdNow`, `restartedTo`, `sameAdbd`, `portClosed`, `memStore`, `rebootAndWait`, `tryShell`, `restartHint`; de `link_test.go`, `poll`. El controlador real `remote.New` y `device.EnsureNoTCPPort`, como en la Tarea 1.
+
+**Qué afirma.** Con `persist.adb.tcp.port=5555` (puesto con `su 0`: el usuario `shell` puede no poder), tras el "off" del host:
+1. `getprop persist.adb.tcp.port` vacío;
+2. `service.adb.tcp.port` cerrado: **vacío o `0`**. Son los valores medidos (inventario, "Datos medidos": `adb usb` lo deja en `0`; al arrancar, vacío) y el criterio del host (`portClosed`, `device.TCPPort`). `-1` no está medido: el host lo trataría como abierto (lado seguro) y aquí cuenta como no cerrado;
+3. adbd **reiniciado**: un pid nuevo y estable (`sameAdbd` 5 s), porque un adbd que no se reinició puede seguir escuchando en el puerto de `persist` que tomó al arrancar.
+
+Dos caminos del "off":
+- **`Disable after adb tcpip`:** `persist` y el puerto abierto a mano (`adb tcpip 5555`); `ctl.Disable` con el modo apagado (`memStore` sin caducidad).
+- **`EnsureNoTCPPort with service.adb.tcp.port empty`:** `persist` y `service.adb.tcp.port` vacío, el estado de después de un reinicio (adbd de AOSP lee `persist` solo con la propiedad de servicio vacía). Con `ADBUDDY_EMULATOR_REBOOT=1` se llega con `adb reboot`; sin él, con `su 0 setprop service.adb.tcp.port ''` y `su 0 setprop ctl.restart adbd` (no medido: si la propiedad no queda vacía, el subtest hace `Skip` y pide `ADBUDDY_EMULATOR_REBOOT=1`). Luego `device.EnsureNoTCPPort(ctx, e.adb, "")`, el invariante de `serve` sin modo remoto.
+
+**Qué se espera hoy, leyendo el código: ROJO.**
+- `host/internal/remote/remote.go` (`Disable`, `disable`, `Reconcile`, `Enable`) y `host/internal/device/device.go` (`TCPPort`, `EnsureNoTCPPort`) solo leen `service.adb.tcp.port`; **nadie lee ni limpia `persist.adb.tcp.port`**.
+- Subtest 1: `Disable` ve `5555` y lanza `adb usb` (pid nuevo, `service.adb.tcp.port` a `0`), pero `adb usb` de adbd solo escribe la propiedad de servicio: `persist` sigue en `5555` → **falla la afirmación 1** (`persist.adb.tcp.port = "5555" after off`). (Lo que deja `adb usb` en `persist` también lo registra la Tarea 1, `persist.adb.tcp.port after adb usb`.)
+- Subtest 2: `TCPPort` lee `""` y devuelve "sin puerto"; `EnsureNoTCPPort` no lanza `adb usb` → **fallan la 1 y la 3** (`persist` sigue en `5555` y `adbd still has pid … after off`), mientras adbd, según AOSP, escucha en el `5555` de `persist` (en el emulador no se ve: escucha siempre en 5555).
+
+**El test es un RED esperado y es el test de aceptación del arreglo.** Si sale rojo con emulador, **no se arregla en esta rama**: el arreglo va en una rama y un plan cortos aparte (ver "Forma del arreglo"), que pondrán este test en verde (y `hostReadsPersistPort = true` en la Tarea 1). Si saliera verde, se anota en el ledger y la hipótesis de VB-41 queda descartada. Mientras el arreglo no exista, este test no entra en la CI (va tras `ADBUDDY_EMULATOR_ADBD=1`) y la Tarea 4 no lo cuenta como "hecho".
+
+- [ ] **Step 1: `host/internal/emutest/persist_test.go`,** completo:
+
+```go
+package emutest
+
+import (
+	"context"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/device"
+	"github.com/hybriqtech/adbuddy/host/internal/remote"
+)
+
+// persistPort is the port the test leaves in persist.adb.tcp.port: 5555, the
+// emulator's own transport port (M2.5b S5), so a persist the cleanup failed to
+// clear never moves the emulator's adbd to an unmeasured port.
+const persistPort = remote.Port
+
+// withPersist sets persist.adb.tcp.port (su 0: the shell user may be denied)
+// and makes sure the cleanup empties it again and restarts adbd, so the
+// emulator ends without a persist port nor an adbd that took one. Cleanups run
+// last first: this one runs before closedAtStartAndEnd's adb usb.
+func (e *emu) withPersist(t *testing.T) func() string {
+	t.Helper()
+	persist := func() string { return e.shell(t, "su 0 getprop persist.adb.tcp.port") }
+	if p := persist(); p != "" {
+		t.Fatalf("persist.adb.tcp.port = %q before the test: left over; clear it with `adb shell su 0 setprop persist.adb.tcp.port ''`", p)
+	}
+	t.Cleanup(func() {
+		c := *e
+		c.ctx = context.WithoutCancel(e.ctx)
+		if c.state() != "device" {
+			t.Errorf("the emulator is %q at the cleanup: persist.adb.tcp.port may be left at %s; %s", c.state(), persistPort, restartHint)
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.ctx, time.Minute)
+		defer cancel()
+		_, _, _, _ = c.adb.Output(ctx, "shell", "su 0 setprop persist.adb.tcp.port ''")
+		pid, _, _ := c.adbdNow()
+		_, _, _, _ = c.adb.Output(ctx, "shell", "su 0 setprop ctl.restart adbd")
+		if !poll(60*time.Second, func() bool {
+			now, _, ok := c.adbdNow()
+			return ok && now != pid && c.tryShell("su 0 getprop persist.adb.tcp.port") == ""
+		}) {
+			t.Errorf("persist.adb.tcp.port not empty, or adbd not back, after the cleanup; %s", restartHint)
+		}
+	})
+	e.shell(t, "su 0 setprop persist.adb.tcp.port "+persistPort)
+	if p := persist(); p != persistPort {
+		t.Fatalf("persist.adb.tcp.port = %q after su 0 setprop, want %s", p, persistPort)
+	}
+	return persist
+}
+
+// closedAfterOff is what this test asks of the host's "off" with a persist
+// port set: persist.adb.tcp.port emptied, service.adb.tcp.port closed (empty
+// or 0: the values measured after adb usb and at boot, and the host's own
+// criterion, portClosed; -1 is not measured and the host would take it as
+// open, the safe side) and adbd restarted (a new pid that stays: it cannot
+// still be listening on the persist port it took when it started).
+func (e *emu) closedAfterOff(t *testing.T, persist func() string, before string) {
+	t.Helper()
+	if p := persist(); p != "" {
+		t.Errorf("persist.adb.tcp.port = %q after off, want it emptied: adbd takes it again at its next start with service.adb.tcp.port empty (a reboot)", p)
+	}
+	pid, port, ok := e.adbdNow()
+	if !ok {
+		t.Fatalf("could not read adbd after off (emulator %q)", e.state())
+	}
+	if !portClosed(port) {
+		t.Errorf("service.adb.tcp.port = %q after off, want empty or 0", port)
+	}
+	if pid == before {
+		t.Errorf("adbd still has pid %s after off: it was not restarted, and may still listen on the persist port it took when it started", pid)
+		return
+	}
+	e.sameAdbd(t, pid, port)
+}
+
+// Security of VB-41 (supervisor's ruling): "off" must leave adbd without a
+// TCP port, persist.adb.tcp.port included. The host's two "off" paths, the
+// real remote controller's Disable (mode off) and device.EnsureNoTCPPort (the
+// invariant at serve's start), run against the emulator's adbd with
+// persist.adb.tcp.port=5555. RED EXPECTED TODAY: remote.go and device.go read
+// only service.adb.tcp.port and never touch persist, so persist stays 5555
+// (and with service.adb.tcp.port empty they do not even restart adbd). A red
+// run is the finding: the fix goes in its own branch and plan; this test is
+// its acceptance test.
+func TestOffClosesAPersistTCPPort(t *testing.T) {
+	adbdTests(t)
+	e := newEmu(t)
+	e.closedAtStartAndEnd(t)
+
+	// persist set and the port opened by hand (adb tcpip): Disable with the
+	// mode off sees 5555 and runs adb usb, which leaves persist as it was.
+	t.Run("Disable after adb tcpip", func(t *testing.T) {
+		persist := e.withPersist(t)
+		pid, _ := e.adbd(t)
+		e.run(t, "tcpip", remote.Port)
+		pid = e.restartedTo(t, pid, remote.Port)
+		ctl := remote.New(e.adb, &memStore{}, nil)
+		if s, err := ctl.Disable(e.ctx); err != nil || s != (remote.State{}) {
+			t.Fatalf("Disable: %+v, %v", s, err)
+		}
+		poll(10*time.Second, func() bool { now, _, ok := e.adbdNow(); return ok && now != pid })
+		e.closedAfterOff(t, persist, pid)
+	})
+
+	// persist set and service.adb.tcp.port empty, as after a reboot: adbd took
+	// the persist port at its start (AOSP adbd reads persist only when the
+	// service property is empty), and the host reads "closed".
+	t.Run("EnsureNoTCPPort with service.adb.tcp.port empty", func(t *testing.T) {
+		persist := e.withPersist(t)
+		if os.Getenv("ADBUDDY_EMULATOR_REBOOT") == "1" {
+			e.rebootAndWait(t)
+		} else {
+			// Without a reboot: the service property emptied and adbd
+			// restarted by init. Not measured yet: if the property does not
+			// read empty, this case needs ADBUDDY_EMULATOR_REBOOT=1.
+			pid, _ := e.adbd(t)
+			_, _, _, _ = e.adb.Output(e.ctx, "shell", "su 0 setprop service.adb.tcp.port ''")
+			_, _, _, _ = e.adb.Output(e.ctx, "shell", "su 0 setprop ctl.restart adbd")
+			e.restartedTo(t, pid, "", "0")
+		}
+		pid, port := e.adbd(t)
+		if port != "" {
+			t.Skipf("service.adb.tcp.port = %q, not empty: this case needs ADBUDDY_EMULATOR_REBOOT=1", port)
+		}
+		if p := persist(); p != persistPort {
+			t.Fatalf("persist.adb.tcp.port = %q before off, want %s", p, persistPort)
+		}
+		restarted, err := device.EnsureNoTCPPort(e.ctx, e.adb, "")
+		if err != nil {
+			t.Fatalf("EnsureNoTCPPort: %v", err)
+		}
+		t.Logf("EnsureNoTCPPort ran adb usb: %v", restarted)
+		poll(10*time.Second, func() bool { now, _, ok := e.adbdNow(); return ok && now != pid })
+		e.closedAfterOff(t, persist, pid)
+	})
+}
+```
+
+- [ ] **Step 2: compila y tests sin emulador.** `cd host && GOOS=windows go build ./... && gofmt -l internal/emutest && GOOS=windows go vet ./internal/emutest/... && go test -count=1 -timeout 5m ./internal/emutest/` → `ok`; `TestOffClosesAPersistTCPPort` hace `SKIP` sin `ADBUDDY_EMULATOR_ADBD=1`.
+
+- [ ] **Step 3: la ejecución (RED esperado), con emulador libre.** Con el bloque de variables de "Global Constraints":
+```bash
+cd host && ADBUDDY_EMULATOR_ADBD=1 ADBUDDY_EMULATOR_REBOOT=1 go test -count=1 -timeout 30m -v -run TestOffClosesAPersistTCPPort ./internal/emutest/
+```
+Salida entera al ledger. Lo esperado: `FAIL` en los dos subtests con los mensajes de arriba. Después, comprobar a mano que el emulador quedó como estaba: `adb -P 5090 -s emulator-5630 shell su 0 getprop persist.adb.tcp.port` vacío y `getprop service.adb.tcp.port` vacío o `0` (los cleanups lo hacen; si no, `su 0 setprop persist.adb.tcp.port ''`, `su 0 setprop ctl.restart adbd` y, si hace falta, `adb usb`). Apagar el emulador por su serial (`scripts/emulator.sh stop`) y comprobar por PID; nunca matar por nombre.
+  - **Control de que el test mira lo que dice** (en lugar de una RED, que hoy es el estado normal): con la línea `e.shell(t, "su 0 setprop persist.adb.tcp.port "+persistPort)` de `withPersist` comentada (y su comprobación), el subtest 1 debe pasar (persist vacío, `adb usb` real): prueba que el rojo de hoy viene de `persist` y no del resto. Revertir.
+
+- [ ] **Step 4: commit.** `test(emutest): off debe cerrar también persist.adb.tcp.port (VB-41, RED esperado)`, con el trailer exacto.
+
+#### Forma del arreglo (para el siguiente plan; sin código)
+
+- **Dónde:** un solo criterio de "puerto TCP abierto" en `device` (p. ej. leer `service.adb.tcp.port` y `persist.adb.tcp.port` en una orden), usado por `device.TCPPort`/`EnsureNoTCPPort` y por `remote` (`Disable`, `disable`, `Reconcile`, la rama de fallo de `Enable`), en lugar de los cinco `getprop service.adb.tcp.port` sueltos de hoy. Abierto = servicio con puerto, **o** `persist` con puerto.
+- **Leer `persist` sin root:** no está medido. Si SELinux deniega la lectura al usuario `shell`, `getprop` devuelve vacío con código 0 (es lo que pasa con `service.adb.tls.port`, T1-12; `service.adb.tcp.port` sí se lee) y el host no podría distinguir "vacío" de "denegado". Lo primero del plan siguiente es medirlo en el emulador sin `su` (y en el Pixel en la pasada de solo lectura).
+- **Limpiar `persist` sin root:** `setprop persist.adb.tcp.port ""` como `shell` puede estar denegado en un móvil de producción (la Tarea 1 registra si en la imagen userdebug lo está). Sin root no hay otra forma de borrar una propiedad `persist`.
+- **Lo que sí se puede sin root:** `adb usb` escribe `service.adb.tcp.port=0` y reinicia adbd; con la propiedad de servicio no vacía, adbd de AOSP **no** lee `persist`, así que el puerto queda cerrado **hasta el siguiente arranque** (al arrancar la propiedad de servicio vuelve vacía y `persist` manda otra vez). De ahí: (a) el invariante de `serve` tiene que lanzar `adb usb` también cuando `service.adb.tcp.port` está vacío y `persist` tiene puerto (el caso del subtest 2); (b) si no puede vaciar `persist`, decirlo al usuario en `serve` y en `doctor` (alguien con root fijó un puerto que se reabre en cada arranque) en lugar de darlo por cerrado.
+- **El test de aceptación:** este. Si limpiar `persist` resulta imposible sin root, la afirmación 1 no se puede cumplir con ningún arreglo del host: el plan siguiente decide con el usuario si se relaja a "cerrado hasta el arranque, con aviso" (afirmaciones 2 y 3, más el aviso) y lo dice en el test.
+- **Fuera del arreglo:** el clasificador ya hace 🔴 `setprop persist.adb…` para el agente; esto es lo que hace el host con sus propias órdenes, que no pasan por el shim.
+
+---
+
 ## Réplica acumulada (resultado)
 
 Sobre `git archive origin/main` (2b8c07d, tras `git fetch`; `main` no había avanzado), aplicando el texto de este plan:
@@ -1373,6 +1569,8 @@ Sobre `git archive origin/main` (2b8c07d, tras `git fetch`; `main` no había ava
 - **RED del shrink** (réplica de la v1, mismo test): con `isMinifyEnabled = false` e `isShrinkResources = false`, `--- FAIL: TestTheReleaseAPKIsShrunkAndSignedWithAThrowawayKey … Ltech/hybriq/adbuddy/ui/RemoteUi; is in the release APK's dex: it was not shrunk by R8`; revertido y reconstruido, `ok`. `build.gradle.kts` quedó idéntico a `origin/main`.
 - **APK de conflicto** (la cadena de `buildConflictAPK`, a mano): `aapt2 link` del manifiesto con la autoridad `tech.hybriq.adbuddy.bridge` → APK de 799 bytes (`AndroidManifest.xml`, `resources.arsc`); `zipalign` y `apksigner` con una clave temporal de `keytool` → firmado; `aapt2 dump badging` → `package: name='tech.hybriq.adbuddy.conflict'`.
 - **Sin emulador** no se ejecutó: ningún GREEN ni RED de adbd, de la tarjeta (incluida la RED de producto de `RemoteCard.kt:69`), del release instalado ni de la instalación. La RED de `RemoteCard.kt:69` no tiene camino en la JVM (ningún test ejercita la rama `reply == null`): queda pendiente de ejecutar en el emulador.
+
+**Tarea 5 (adenda v3):** sobre `git archive` de la rama en 5e30c1e (las Tareas 1-3 ya implementadas; `origin/main` sigue en 2b8c07d), con `persist_test.go` añadido desde el texto de este plan: `GOOS=windows go build ./...` sin salida, `gofmt -l internal/emutest` vacío, `GOOS=windows go vet ./internal/emutest/...` sin salida, `go test -count=1 -timeout 5m ./internal/emutest/` → `ok`, y `-v -run TestOffClosesAPersistTCPPort` → `--- SKIP` (sin `ADBUDDY_EMULATOR_ADBD=1`). Sin emulador: el RED esperado no se ha ejecutado.
 
 ## Validaciones manuales pendientes (lo que T8 deja en el Pixel)
 
