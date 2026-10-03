@@ -303,14 +303,13 @@ func TestOffWithTheModeOffOnlyClosesAnOpenPort(t *testing.T) {
 }
 
 // hostReadsPersistPort says whether remote and device.EnsureNoTCPPort read
-// persist.adb.tcp.port. They do not (remote.go and device.go read only
-// service.adb.tcp.port; pendientes, diferidos B, T2). Hypothesis the reboot
-// step measures: after a reboot with persist set, service.adb.tcp.port reads
-// empty while adbd listens on the persist port (AOSP adbd reads persist only
-// when the service property is empty), and the host reads "closed". If it is
-// measured so, it is a finding for the controller; with a fix, set this to
-// true and the reboot step then wants Disable to close the port.
-const hostReadsPersistPort = false
+// persist.adb.tcp.port. They do since the fix of VB-41 (plan
+// 2026-10-04-adbuddy-vb41-persist-port: device.ReadTCP). Measured before it
+// (T8): after a reboot with persist set, service.adb.tcp.port reads empty
+// while adbd listens on the persist port (AOSP adbd reads persist only when
+// the service property is empty), and the host read "closed". With the fix
+// the reboot step wants Disable to close the port.
+const hostReadsPersistPort = true
 
 // rebootAndWait reboots the emulator and waits up to 3 min for it to boot
 // (with -no-snapshot the AVD keeps its data: T1-9).
@@ -396,11 +395,12 @@ func TestPersistTCPPortAgainstUSBAndRestarts(t *testing.T) {
 	t.Logf("persist.adb.tcp.port after adb usb: %q", persist())
 
 	// With the service property at 0 a restart keeps it at 0 (AOSP adbd then
-	// ignores persist), and "off" with the mode off leaves adbd alone.
+	// ignores persist), and "off" with the mode off leaves adbd alone; it
+	// reports the persist port (VB-41).
 	_, _, _, _ = e.adb.Output(e.ctx, "shell", "su 0 setprop ctl.restart adbd")
 	pid = e.restartedTo(t, pid, "0")
 	ctl := remote.New(e.adb, &memStore{}, nil)
-	if s, err := ctl.Disable(e.ctx); err != nil || s != (remote.State{}) {
+	if s, err := ctl.Disable(e.ctx); err != nil || s != (remote.State{Persist: remote.Port}) {
 		t.Fatalf("Disable: %+v, %v", s, err)
 	}
 	e.sameAdbd(t, pid, "0")
@@ -410,7 +410,8 @@ func TestPersistTCPPortAgainstUSBAndRestarts(t *testing.T) {
 		return
 	}
 	// After a reboot the service property is empty and persist is still set:
-	// adbd takes the persist port, and the host reads "closed".
+	// adbd takes the persist port, and the host reads it there (device.ReadTCP)
+	// and closes it with adb usb.
 	if p := persist(); p != remote.Port {
 		t.Logf("persist.adb.tcp.port = %q before the reboot (adb usb cleared it?): the reboot step has nothing to show", p)
 		return
@@ -419,7 +420,7 @@ func TestPersistTCPPortAgainstUSBAndRestarts(t *testing.T) {
 	e.rebootAndWait(t)
 	pid, port = e.adbd(t)
 	t.Logf("after the reboot: service.adb.tcp.port %q, persist.adb.tcp.port %q", port, persist())
-	if s, err := ctl.Disable(e.ctx); err != nil || s != (remote.State{}) {
+	if s, err := ctl.Disable(e.ctx); err != nil || s != (remote.State{Persist: remote.Port}) {
 		t.Fatalf("Disable after the reboot: %+v, %v", s, err)
 	}
 	switch {

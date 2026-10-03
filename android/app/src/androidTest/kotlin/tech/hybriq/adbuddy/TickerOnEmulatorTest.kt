@@ -71,8 +71,11 @@ class TickerOnEmulatorTest {
         const val ID = 7301
         const val DONE = "tech.hybriq.adbuddy.test.TICKER_DONE"
         // The ticker starts with the code, as many verification messages do (the redacted dump keeps its first
-        // characters, AOSP NotificationRecord.dump); the text carries another one.
-        const val TICKER = "G-482913 is your ADBuddy test code"
-        const val TEXT = "Your other ADBuddy test code is 735102"
+        // 8 characters, AOSP NotificationRecord.dump); the text carries another one. Both are marks with letters
+        // that no dump holds by chance (a 6-digit code alone can appear among the numbers of a 15 MB dump): the
+        // host (notification_dump_test.go) looks for "ADBZQ-48", the ticker's first 8 characters, and for the
+        // text's whole "ZXQ-735102-KWV".
+        const val TICKER = "ADBZQ-482913 is your ADBuddy test code"
+        const val TEXT = "Your other ADBuddy test code is ZXQ-735102-KWV"
     }
 }

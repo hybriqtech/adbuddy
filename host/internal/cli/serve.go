@@ -22,6 +22,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
@@ -171,12 +172,16 @@ func newServeCmd(app *App) *cobra.Command {
 				fmt.Fprintln(app.Stderr, remoteOnNoticeIn(app.speaks(), rs))
 			}
 			// Host invariant (spec §3.3): no adb network port while remote mode is off.
-			if err := applyInvariant(ctx, active.Runner(), deviceWait, app.Log(), "adbuddy serve", keep); err != nil {
+			tcp, err := invariantTCP(ctx, active.Runner(), deviceWait, app.Log(), "adbuddy serve", keep)
+			if err != nil {
 				if ctx.Err() != nil {
 					return Interrupted()
 				}
 				return err
 			}
+			// VB-41: `adbuddy remote status` says what persist.adb.tcp.port
+			// holds from the start, not only after the first "off".
+			ctl.Note(tcp)
 
 			secret, err := ipc.EnsureSecret(e.dirs.Data)
 			if err != nil {
@@ -219,6 +224,7 @@ func newServeCmd(app *App) *cobra.Command {
 				Active: active, Runner: hostRunner, Serial: serial,
 				Cfg: store.Config, RemoteOn: func() bool { return !store.Until().IsZero() }, Log: app.Log(),
 				Every: watchEvery, Misses: watchMisses, TryWait: watchTryWait,
+				Port: tcp, Seen: ctl.Note, ReadWait: device.ReadTCPWait,
 			})
 			ui, protected := link.helpers()
 			d := daemon.New(daemon.Options{
