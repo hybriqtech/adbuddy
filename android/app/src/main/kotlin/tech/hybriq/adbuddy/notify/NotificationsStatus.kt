@@ -31,6 +31,10 @@ fun openNotificationSettings(ctx: Context) {
     try {
         ctx.startActivity(intent)
     } catch (_: ActivityNotFoundException) {
-        ctx.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        try {
+            ctx.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: ActivityNotFoundException) {
+            // No settings screen at all: nothing to open, and the app must not close.
+        }
     }
 }

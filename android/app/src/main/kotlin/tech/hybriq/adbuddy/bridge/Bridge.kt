@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.bridge
 
+import androidx.annotation.VisibleForTesting
 import java.net.Proxy
 import java.security.SecureRandom
 import java.time.Instant
@@ -61,7 +62,7 @@ class Bridge internal constructor(
     val state: StateFlow<BridgeState> = _state.asStateFlow()
 
     /** Tests only: puts the state the host would have left, without a socket. */
-    @androidx.annotation.VisibleForTesting
+    @VisibleForTesting
     internal fun setStateForTest(s: BridgeState) { _state.value = s }
 
     /** Guards socket, loop and link, and every state change that depends on which socket is current. */
