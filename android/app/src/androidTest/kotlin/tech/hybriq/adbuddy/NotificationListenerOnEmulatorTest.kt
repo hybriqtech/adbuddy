@@ -45,7 +45,13 @@ import tech.hybriq.adbuddy.listener.RawNotification
  *   NotificationGate.read with the very lambdas of UiHelpers.install (the chain `adbuddy notifications` goes through),
  *   and reports them as instrumentation status lines `adbuddy.<name>=<value>` for the host to judge. With
  *   `-e unbind 1` it then asks the system to unbind the listener (requestUnbind, the access stays allowed: "allowed but
- *   not bound"), reads again, and asks it to bind it back (requestRebind).
+ *   not bound"), reads again, and asks it to bind it back (requestRebind). am instrument restarts the app's process
+ *   and the system binds the listener anew in it, and every new binding clears the user's mark (onListenerConnected,
+ *   M5c-32 b): what this half reads as `mark` is false whatever the host did before, so it never proves that a step
+ *   cleared it (the host reads the app's file or asks over the real channel for that). With `-e confirm 1` it first
+ *   confirms in its own process, once the listener is bound, as the screen's button does. Only the main sources are
+ *   held to "nothing but the button sets the mark" (NotificationGateTest.nothingButTheButtonSetsTheMark scans
+ *   src/main): this test may call confirm().
  * - `-e adbuddyListener content` posts notifications of its own (BigText, MessagingStyle without EXTRA_TEXT,
  *   VISIBILITY_SECRET, ongoing, a 🔴 question as ConfirmNotifier posts it, and enough to pass 50) and checks what the
  *   real listener reads of them (AgentNotificationListener.read) and what NotificationReport.build makes of that:
@@ -66,6 +72,14 @@ class NotificationListenerOnEmulatorTest {
         onlyOnAnEmulator()
         val waitMs = args.getString("waitMs")?.toLongOrNull() ?: 25_000L
         val out = Bundle()
+        if (args.getString("confirm") == "1") {
+            // am instrument restarted the process and the system bound the listener in it again, which cleared the
+            // user's mark (onListenerConnected, M5c-32 b): a tap on the host's side does not reach this process. Once
+            // the listener is bound (as the screen's button needs), this process confirms itself and reads.
+            out.putString("$KEY.fresh.connected", awaitConnected(true, waitMs).toString())
+            out.putString("$KEY.fresh.mark", NotificationConsent.of(context).confirmed().toString())
+            NotificationConsent.of(context).confirm()
+        }
         read(out, "", waitMs)
         if (args.getString("unbind") == "1") {
             // Allowed in the system but not bound, as after a reboot or a dead process the system has not bound

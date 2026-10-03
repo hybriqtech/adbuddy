@@ -19,7 +19,10 @@ import (
 // notification` (T1-1: it binds and unbinds in under 2 s), kills the app's
 // process, reboots, and taps ADBuddy's own confirm button with uiautomator;
 // the app's half (listenerGateTest, listenerContentTest) reads, in the app's
-// process, what `adbuddy notifications` would get.
+// process, what `adbuddy notifications` would get. Every new binding of the
+// listener clears the user's mark (M5c-32 b): whether a step cleared it is
+// read from the app's file (markOnDisk) or over the real channel, never by
+// the app's half, whose am instrument binds the listener anew.
 
 const (
 	listenerComponent = phoneapp.Package + "/" + phoneapp.Package + ".listener.AgentNotificationListener"
@@ -197,7 +200,11 @@ func TestParseGate(t *testing.T) {
 
 // gateRead runs listenerGateTest (am instrument restarts the app's process,
 // as T1 saw: what it reads is what a fresh process reads) with the extra
-// instrumentation arguments, and returns what it read.
+// instrumentation arguments, and returns what it read. The system binds the
+// listener again in that fresh process and the new binding clears the
+// user's mark (onListenerConnected): its `mark` is false whatever happened
+// before, so it never proves that something else cleared it (markOnDisk and
+// the real channel do); with -e confirm 1 the test confirms in its own process.
 func (e *emu) gateRead(t *testing.T, extra ...string) map[string]string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(e.ctx, instrumentTimeout)
@@ -406,8 +413,19 @@ func TestRevokingClearsTheMark(t *testing.T) {
 		if now := e.pidNow(); now != pid {
 			t.Fatalf("the app's process went from %s to %q while the access was revoked: not the live app's case", pid, now)
 		}
-		e.allowListener(t, true)
+		// The live listener's own unbinding cleared it (onListenerDisconnected), in the file.
+		e.waitMarkCleared(t, "revoked with the app alive")
+		// And read in a fresh process with the access off: no listener, so no
+		// new binding clears it there, and `mark` is read before the gate's own
+		// onRevoked does.
 		g := e.gateRead(t)
+		wantGate(t, "revoked with the app alive", g, map[string]string{
+			"listed": "NO", "connected": "false", "state": "NOT_GRANTED",
+			"mark": "false", "effective": "OFF", "gate": "NoAccess",
+		})
+		e.allowListener(t, true)
+		// The system's state allowed again (the mark here proves nothing: a gateRead's binding clears it anyway).
+		g = e.gateRead(t)
 		wantGate(t, "revoked and allowed again with the app alive", g, map[string]string{
 			"listed": "YES", "connected": "true", "state": "GRANTED",
 			"mark": "false", "effective": "NEEDS_CONFIRMATION", "gate": "NotConfirmed",
@@ -420,12 +438,16 @@ func TestRevokingClearsTheMark(t *testing.T) {
 	})
 
 	t.Run("b_dead", func(t *testing.T) {
-		e := listenerEmu(t)
-		if sdk := strings.TrimSpace(e.tryShell("getprop ro.build.version.sdk")); sdk != "34" {
-			t.Skipf("measured on API 34 only (this image is API %s): how the system restarts the listener varies", sdk)
-		}
+		// With the real channel: the mark is checked by `notifications`, which
+		// does not restart the app's process.
+		l := openLink(t)
+		e := l.e
+		e.listenerSetup(t)
 		e.allowListener(t, true)
 		e.confirmOnScreen(t)
+		if !e.markOnDisk(t) {
+			t.Fatal("the user's mark is not in the app's file after the tap: the case is not tested")
+		}
 		pid := e.pidOf(t)
 		// The process must be dead when the access is revoked, and stay so. Not
 		// with am force-stop: the system asks to bind the listener again within
@@ -439,31 +461,24 @@ func TestRevokingClearsTheMark(t *testing.T) {
 		if !strings.HasSuffix(out, "dead") {
 			t.Fatalf("the app's process was back when the access was revoked (%q): not the dead app's case", out)
 		}
-		// What the system does next (measured, 2026-10-03): the restart it had
-		// scheduled still runs, and it binds the listener it has just
-		// disallowed, without ever calling onListenerDisconnected.
+		// What the system does next (measured on API 34, 2026-10-03): the
+		// restart it had scheduled still runs, and it binds the listener it has
+		// just disallowed, without ever calling onListenerDisconnected. Before
+		// the fix the mark survived that and, allowed again (the agent can, with
+		// `adbuddy tap` in Settings), the gate read without a new tap (M5c-32 b).
+		// The new binding now clears it (onListenerConnected).
 		time.Sleep(3 * time.Second)
-		t.Logf("3 s after the revocation: process %q, listener bound %v", e.pidNow(), e.listenerBound(t))
+		t.Logf("3 s after the revocation: process %q, listener bound %v, mark in the file %v", e.pidNow(), e.listenerBound(t), e.markOnDisk(t))
 		e.allowListener(t, true)
+		// No gateRead before these checks: it restarts the process and its own
+		// binding would clear the mark whatever happened here.
+		e.waitMarkCleared(t, "revoked with the app dead and allowed again")
+		wantUnavailable(t, "revoked with the app dead and allowed again", l.notifications(t, "b_1"), notConfirmedText)
 		g := e.gateRead(t)
 		wantGate(t, "revoked with the app dead and allowed again", g, map[string]string{
 			"listed": "YES", "connected": "true", "state": "GRANTED",
+			"mark": "false", "effective": "NEEDS_CONFIRMATION", "gate": "NotConfirmed",
 		})
-		// KNOWN RISK (ruling 15 of M5c), the user's decision after v1: see pendientes-m3-m5.md. FINDING (M5c-32 b),
-		// measured on API 34 on 2026-10-03: the mark survives a revocation with
-		// the app dead, and allowed again the gate reads without a new tap. This
-		// pins today's behaviour; the cheap fix (clear the mark in
-		// onListenerConnected too: the system's late restart above calls it)
-		// would turn it into mark=false, gate=NotConfirmed, at the cost of a tap
-		// after every rebind (reboot, update, kill), and would also change what
-		// TestTheListenerStaysBound expects.
-		wantGate(t, "revoked with the app dead and allowed again (today's behaviour, a known risk)", g, map[string]string{
-			"mark": "true", "effective": "ON",
-		})
-		if !strings.HasPrefix(g["gate"], "Ok:") {
-			t.Errorf("revoked with the app dead and allowed again: the gate reads %q, today Ok (a known risk)", g["gate"])
-		}
-		t.Logf("FINDING (M5c-32 b, ruling 15's known risk): the mark survived a revocation with the app dead; the gate reads %s without a new tap", g["gate"])
 	})
 }
 
@@ -551,8 +566,12 @@ func TestTheListenerGateStates(t *testing.T) {
 	// Allowed but not bound (the listener asks the system to unbind it; the
 	// access stays allowed): Unknown, and the read says no at once instead of
 	// waiting. Unbinding clears the mark (onListenerDisconnected), so bound
-	// again it needs a new tap.
-	g = e.gateRead(t, "-e unbind 1")
+	// again it needs a new tap. am instrument restarts the process and the
+	// system's new binding there clears the tap above (onListenerConnected,
+	// M5c-32 b): the instrumented test confirms in its own process once the
+	// listener is bound (-e confirm 1), as the button would, and reads.
+	g = e.gateRead(t, "-e confirm 1", "-e unbind 1")
+	wantGate(t, "a fresh process", g, map[string]string{"fresh.connected": "true", "fresh.mark": "false"})
 	wantGate(t, "confirmed", g, map[string]string{
 		"listed": "YES", "connected": "true", "state": "GRANTED", "mark": "true", "effective": "ON",
 	})
@@ -573,7 +592,12 @@ func TestTheListenerGateStates(t *testing.T) {
 
 	// Confirmed again, then revoked: not allowed, and allowed again it asks again.
 	e.confirmOnScreen(t)
+	if !e.markOnDisk(t) {
+		t.Fatal("the user's mark is not in the app's file after the tap: the revocation is not tested")
+	}
 	e.allowListener(t, false)
+	// The listener's unbinding cleared it before anyone asked (the gate's own onRevoked comes with n_4).
+	e.waitMarkCleared(t, "revoked")
 	wantUnavailable(t, "revoked", l.notifications(t, "n_4"), notAllowedText)
 	g = e.gateRead(t)
 	wantGate(t, "revoked", g, map[string]string{
@@ -630,13 +654,25 @@ func TestTheListenerContent(t *testing.T) {
 // M5c-29: the listener stays bound with the app in the background: after
 // `su 0 kill -9` (am kill does not kill it, T1-9), after am force-stop and,
 // with ADBUDDY_EMULATOR_REBOOT=1, after adb reboot (the AVD keeps its data),
-// the system binds it again without opening the app, and the user's mark
-// stays (the same access: the process went, the access did not).
+// the system binds it again without opening the app. The user's mark does NOT
+// survive any of them: each new binding clears it (onListenerConnected, the
+// close of M5c-32 b), and the agent cannot read until the person taps again;
+// one tap after the rebinding is enough, and no late binding takes it away.
+// Before each step the person confirms; after it the mark is read from the
+// app's file (markOnDisk), never by a gateRead, which restarts the process.
 func TestTheListenerStaysBound(t *testing.T) {
-	e := listenerEmu(t)
+	l := openLink(t)
+	e := l.e
+	e.listenerSetup(t)
 	e.allowListener(t, true)
-	e.confirmOnScreen(t)
 
+	confirmed := func(step string) {
+		t.Helper()
+		e.confirmOnScreen(t)
+		if !e.markOnDisk(t) {
+			t.Fatalf("before %s: the user's mark is not in the app's file after the tap", step)
+		}
+	}
 	rebound := func(step, before string) {
 		t.Helper()
 		start := time.Now()
@@ -648,32 +684,46 @@ func TestTheListenerStaysBound(t *testing.T) {
 			t.Fatalf("after %s: the listener is not bound again in a new process in 20 s (pid %q, was %s)", step, pid, before)
 		}
 		t.Logf("after %s: bound again in process %s within %.1f s", step, pid, time.Since(start).Seconds())
+		e.waitMarkCleared(t, "after "+step)
 	}
+	confirmed("kill -9")
 	pid := e.pidOf(t)
 	e.shell(t, "su 0 kill -9 "+pid)
 	rebound("kill -9", pid)
 
+	confirmed("am force-stop")
 	pid = e.pidOf(t)
 	e.shell(t, "am force-stop "+phoneapp.Package)
 	rebound("am force-stop", pid)
 
 	if os.Getenv("ADBUDDY_EMULATOR_REBOOT") == "1" {
+		confirmed("adb reboot")
 		e.rebootAndWait(t)
 		// The first bind after the boot may fail and the next one binds (T1-9).
 		if !poll(60*time.Second, func() bool { return e.listenerBound(t) }) {
 			t.Fatal("after adb reboot: the listener is not bound 60 s after the boot")
 		}
 		t.Logf("after adb reboot: bound again (process %s)", e.pidNow())
+		e.waitMarkCleared(t, "after adb reboot")
+		// The reboot took the reverse of the channel's port with it.
+		if err := phoneapp.Tunnel(e.ctx, e.adb, l.port); err != nil {
+			t.Fatalf("adb reverse after the reboot: %v", err)
+		}
 	} else {
 		t.Log("the reboot step needs ADBUDDY_EMULATOR_REBOOT=1")
 	}
 
-	g := e.gateRead(t)
-	wantGate(t, "after the kills", g, map[string]string{
-		"listed": "YES", "connected": "true", "state": "GRANTED", "mark": "true", "effective": "ON",
-	})
-	if !strings.HasPrefix(g["gate"], "Ok:") {
-		t.Errorf("after the kills: the gate reads %q, want Ok", g["gate"])
+	// Rebound, the agent gets `unavailable` until the person taps again; one tap is enough.
+	wantUnavailable(t, "after the kills, without a new tap", l.notifications(t, "s_1"), notConfirmedText)
+	confirmed("the last read")
+	r := l.notifications(t, "s_2")
+	if !r.OK {
+		t.Errorf("after the kills and a new tap: notifications answered %+v (error %+v), want the list", r, r.Error)
+	}
+	// No late binding took the tap away.
+	time.Sleep(5 * time.Second)
+	if !e.markOnDisk(t) {
+		t.Error("after the kills and a new tap: the mark went again 5 s later without a revocation")
 	}
 }
 
