@@ -39,3 +39,6 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - Ruling: ChatHeader toma altura del contenido (AdbuddyTopBarSpec) y TOP_BAR_TAG — el TopAppBar no recorta y con 200 % titulo+subtitulo pasan de 64 dp — cuesta: barra algo mas alta con letra grande.
 - Ruling: Task 6 (scroll) calcula "estaba abajo" con layoutInfo y fila vista, no con canScrollForward — canScrollForward cambia al crecer el contenido y mezcla cresce con subio — cuesta: algo mas de logica; 6 tests lo vigilan.
 - Ruling: chat_empty_ready sin promesa absoluta de seguridad ("Los comandos delicados piden tu confirmacion") — hay modos donde la pregunta sale en el PC — cuesta: texto menos reconfortante.
+- Rama: P2 en ux/p2 (desde ux/revision, el PR de P1 no cambia: ux/revision reposicionada en 9e25b29). Cada paquete en su rama (ux/p3...). Un solo worktree: ux.
+- P2 Task 1: complete (commits 77c5c9d..63ab8d8; fix round 1/5: recordatorio del pie al cuerpo con scroll — 1 addressed, 0 open). Implementer a2db977b, reviewer a19fde65, re-reviewer a53abd94.
+- P2 Task 1: minor (deferred, limpieza final de P2): test que el recordatorio access_later_hint NO existe con Effective.ON (stepTwoWithTheAccessOnHasNoNotNow); la rama fila de ActionFooterTest no se prueba con etiqueta larga.
