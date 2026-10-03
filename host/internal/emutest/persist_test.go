@@ -114,8 +114,9 @@ func TestOffClosesAPersistTCPPort(t *testing.T) {
 			e.rebootAndWait(t)
 		} else {
 			// Without a reboot: the service property emptied and adbd
-			// restarted by init. Not measured yet: if the property does not
-			// read empty, this case needs ADBUDDY_EMULATOR_REBOOT=1.
+			// restarted by init. Measured in the emulator with ADBD=1 and
+			// no REBOOT (it ran, no skip); if the property does not read
+			// empty, this case needs ADBUDDY_EMULATOR_REBOOT=1.
 			pid, _ := e.adbd(t)
 			_, _, _, _ = e.adb.Output(e.ctx, "shell", "su 0 setprop service.adb.tcp.port ''")
 			_, _, _, _ = e.adb.Output(e.ctx, "shell", "su 0 setprop ctl.restart adbd")
