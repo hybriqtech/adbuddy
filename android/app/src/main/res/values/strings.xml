@@ -87,6 +87,11 @@
     <string name="cut_failed">Debugging could not be turned off. Turn off USB debugging and wireless debugging in Developer options.</string>
     <string name="restore_failed">Debugging could not be turned back on. Turn it on in Developer options.</string>
     <string name="filter_all">All</string>
+    <string name="level_green">Safe</string>
+    <string name="level_yellow">Caution</string>
+    <string name="level_red">Delicate</string>
+    <string name="activity_filter_empty">Nothing at this level yet.</string>
+    <string name="activity_undo_hint">Undo it on the PC: adbuddy undo %1$s</string>
     <string name="overlay_pill">Agent using the screen · Pause</string>
 
     <string name="action_cancel">Cancel</string>

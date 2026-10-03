@@ -85,6 +85,11 @@
     <string name="cut_failed">No se ha podido apagar la depuración. Apaga la depuración USB y la depuración inalámbrica en Opciones de desarrollador.</string>
     <string name="restore_failed">No se ha podido volver a activar la depuración. Actívala en Opciones de desarrollador.</string>
     <string name="filter_all">Todo</string>
+    <string name="level_green">Seguro</string>
+    <string name="level_yellow">Cuidado</string>
+    <string name="level_red">Delicado</string>
+    <string name="activity_filter_empty">Nada de este nivel todavía.</string>
+    <string name="activity_undo_hint">Para deshacerlo, en el PC: adbuddy undo %1$s</string>
     <string name="overlay_pill">Agente usando la pantalla · Pausar</string>
 
     <string name="action_cancel">Cancelar</string>
