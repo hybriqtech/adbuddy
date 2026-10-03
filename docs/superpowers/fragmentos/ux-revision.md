@@ -99,3 +99,49 @@ C19 (accesibilidad, tamaño del terminal y teclas ←, →, Shift+Tab) pide ajus
 ### Validaciones manuales pendientes (Pixel)
 
 Ninguna se pide al usuario ahora: "Parar" contra un agente real trabajando (el host recibe `agent.interrupt` y la sesión lo refleja), el aviso de "sin conexión" sobre el terminal real (el WebView no se pinta en la JVM) y las teclas desactivadas, y las horas del diario con zonas horarias reales. Lo demás está cubierto por tests de semántica y por las imágenes en la JVM.
+
+## P4 · notificaciones
+
+### Qué cambió
+
+- Task 1, aviso de la pregunta del agente: cuando el agente pide permiso (`ask`) y la app no está delante, sale un aviso propio, genérico y sin botones, con la descripción de los canales ajustada. `foreground` no parpadea al recrear la actividad por un cambio de configuración (`isChangingConfigurations`), así que girar el móvil no dispara ni cancela avisos.
+- Task 2, banner (`notifications_banner_*`): el chat muestra un banner cuando las notificaciones están bloqueadas (desactivadas en la app o canal de confirmaciones/preguntas silenciado), con atajo a los ajustes de notificaciones de la app. Si el sistema no tiene esa pantalla, abre los ajustes generales; si tampoco hay actividad, no hace nada y no cierra la app.
+- Task 3, permiso (`notifications_rationale_*`): el permiso de notificaciones se pide una sola vez, con un diálogo que explica el motivo y fuera de la pantalla de configuración. El motivo cede si llega una pregunta del agente con él abierto.
+- Task 4, limpieza de menores: import de `VisibleForTesting` en `Bridge.kt` y segundo `try/catch (ActivityNotFoundException)` en el respaldo de `openNotificationSettings`.
+
+### Imágenes nuevas
+
+`notifications_banner_*` y `notifications_rationale_*`. Ninguna imagen existente cambia.
+
+### Qué cierra y qué deja desfasado
+
+Este fragmento no edita esos ficheros; el controlador de integración debe actualizarlos.
+
+- Cierra el pendiente de `docs/superpowers/plans/pendientes-m3-m5.md` (~línea 325: canal alto para el aviso).
+- Deja desfasada la spec de M4, `docs/superpowers/specs/2026-10-01-adbuddy-m4-claude-code-design.md` (~líneas 125-127: «el aviso es silencioso en M4…»): ahora el aviso suena y sale en pantalla.
+
+### Aplazado con motivo
+
+- `CATEGORY_CALL`, la visibilidad de la 🔴 en pantalla bloqueada y el botón "Rechazar" en el bloqueo: van con P5 (opus), porque tocan la seguridad de las confirmaciones.
+- El armado del diálogo 🔴 no se hace aquí: es de `seguridad`, en su rama `fix/confirm-arming`. Hueco preexistente anotado por el revisor: en `ConfirmDialog` "Permitir" no tiene armado; lo cubre `seguridad`.
+- La fila de "notificaciones" en Ajustes que pedía O4: el banner del chat ya cubre el aviso permanente y la fila pediría un estado más en Ajustes.
+- Los iconos del sistema y de lanzador.
+- El `LinkDialog` que no sobrevive a la rotación.
+- El botón del terminal con ↑/↓.
+
+### Notas honestas
+
+- El aviso de la pregunta del agente es genérico y sin botones.
+- Con la sesión en pausa o el acceso cortado el aviso SÍ sale, porque la pregunta caduca igual.
+- Una segunda pregunta mientras sigue la primera avisa otra vez, y una reconexión con la pregunta aún pendiente también.
+- El aviso no se repinta al cambiar de idioma.
+- Con las notificaciones desactivadas, `ask` no publica, pero el id queda como avisado hasta que la app pase a primer plano y vuelva.
+- `foreground` no baja en un cambio de configuración (`isChangingConfigurations`).
+- El permiso se pide una sola vez; el banner es el recordatorio permanente.
+- No hay diálogo del motivo en la burbuja ni con una pregunta pendiente (el motivo cede si la pregunta llega con él abierto).
+- `Bridge.setStateForTest` es `internal` y `@VisibleForTesting`.
+- `BridgeService` no tiene test de servicio: las llamadas `cancelAsk` de `onCreate`/`onDestroy` y el colector solo se comprobaron leyendo.
+
+### Validaciones manuales pendientes (Pixel)
+
+Ninguna se pide al usuario ahora: el aviso de la pregunta del agente con la app en segundo plano y la pantalla apagada (suena y sale en pantalla, sin mostrar nada de la pregunta), el diálogo del sistema tras el motivo (Android 13+), y el banner al desactivar las notificaciones en los ajustes y volver. Lo demás está cubierto por tests de semántica, de la notificación construida y por las imágenes en la JVM.
