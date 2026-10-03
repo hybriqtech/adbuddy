@@ -32,8 +32,8 @@ type remoteServer interface {
 	Reply(req bridge.Message, typ string, payload any) error
 }
 
-// tlsPortTimeout bounds looking up the wireless debugging port (adb mdns
-// services).
+// tlsPortTimeout bounds looking up the wireless debugging port (both adb
+// devices and adb mdns services).
 const tlsPortTimeout = 5 * time.Second
 
 // phoneConn is where the remote link finds the phone's wireless debugging
