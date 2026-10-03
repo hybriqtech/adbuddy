@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,7 +59,14 @@ type link struct {
 func openLink(t *testing.T) *link {
 	t.Helper()
 	e := newEmu(t)
-	v := e.installApp(t)
+	return e.linkTo(t, e.installApp(t))
+}
+
+// linkTo is openLink for the app v checked, already installed (and
+// uninstalled at cleanup) by its caller: the debug app (installApp) or
+// another build, such as the release one (installRelease).
+func (e *emu) linkTo(t *testing.T, v phoneapp.Verified) *link {
+	t.Helper()
 	if err := phoneapp.AllowBackground(e.ctx, e.adb, v); err != nil {
 		t.Fatalf("battery optimisation: %v", err)
 	}
@@ -649,8 +657,9 @@ func (l *link) publishRID(t *testing.T, req bridge.Message, typ string, p any) {
 // uiNode is a node of a uiautomator dump.
 type uiNode struct {
 	Text, Desc, ID, Class string
-	Focused               bool
+	Focused, Enabled      bool
 	X, Y                  int // the middle of its bounds
+	Parent                int // the index of its parent in the dump's nodes; -1 at the top
 }
 
 var boundsRe = regexp.MustCompile(`^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$`)
@@ -658,6 +667,7 @@ var boundsRe = regexp.MustCompile(`^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$`)
 // uiNodes reads the nodes of a uiautomator dump.
 func uiNodes(dump string) ([]uiNode, error) {
 	var nodes []uiNode
+	var open []int // the nodes not closed yet, innermost last
 	d := xml.NewDecoder(strings.NewReader(dump))
 	for {
 		tok, err := d.Token()
@@ -667,11 +677,18 @@ func uiNodes(dump string) ([]uiNode, error) {
 		if err != nil {
 			return nodes, err
 		}
+		if ee, ok := tok.(xml.EndElement); ok && ee.Name.Local == "node" && len(open) > 0 {
+			open = open[:len(open)-1]
+			continue
+		}
 		se, ok := tok.(xml.StartElement)
 		if !ok || se.Name.Local != "node" {
 			continue
 		}
-		var n uiNode
+		n := uiNode{Parent: -1}
+		if len(open) > 0 {
+			n.Parent = open[len(open)-1]
+		}
 		for _, a := range se.Attr {
 			switch a.Name.Local {
 			case "text":
@@ -684,6 +701,8 @@ func uiNodes(dump string) ([]uiNode, error) {
 				n.Class = a.Value
 			case "focused":
 				n.Focused = a.Value == "true"
+			case "enabled":
+				n.Enabled = a.Value == "true"
 			case "bounds":
 				if m := boundsRe.FindStringSubmatch(a.Value); m != nil {
 					l, _ := strconv.Atoi(m[1])
@@ -694,18 +713,23 @@ func uiNodes(dump string) ([]uiNode, error) {
 				}
 			}
 		}
+		open = append(open, len(nodes))
 		nodes = append(nodes, n)
 	}
 }
 
 func TestUINodes(t *testing.T) {
-	dump := `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0"><node text="Not now" resource-id="" class="android.widget.TextView" content-desc="" bounds="[407,2216][544,2269]"><node text="" resource-id="a:id/b" class="android.view.View" content-desc="Send &amp; go" bounds="[965,2222][1028,2285]" /></node></hierarchy>`
+	dump := `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0"><node text="Not now" resource-id="" class="android.widget.TextView" content-desc="" enabled="true" bounds="[407,2216][544,2269]"><node text="" resource-id="a:id/b" class="android.view.View" content-desc="Send &amp; go" enabled="false" bounds="[965,2222][1028,2285]" /></node><node text="Next" class="android.widget.TextView" bounds="[0,0][20,20]" /></hierarchy>`
 	got, err := uiNodes(dump)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []uiNode{{Text: "Not now", Class: "android.widget.TextView", X: 475, Y: 2242}, {ID: "a:id/b", Class: "android.view.View", Desc: "Send & go", X: 996, Y: 2253}}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+	want := []uiNode{
+		{Text: "Not now", Class: "android.widget.TextView", Enabled: true, X: 475, Y: 2242, Parent: -1},
+		{ID: "a:id/b", Class: "android.view.View", Desc: "Send & go", X: 996, Y: 2253, Parent: 0},
+		{Text: "Next", Class: "android.widget.TextView", X: 10, Y: 10, Parent: -1},
+	}
+	if !slices.Equal(got, want) {
 		t.Errorf("uiNodes = %+v, want %+v", got, want)
 	}
 }

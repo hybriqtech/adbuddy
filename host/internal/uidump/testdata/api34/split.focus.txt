@@ -1,0 +1,1 @@
+  mCurrentFocus=Window{2fad849 u0 com.android.settings/com.android.settings.Settings}

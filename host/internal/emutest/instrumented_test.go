@@ -29,13 +29,18 @@ var requiredClasses = []string{"TokenProviderTest", "AdbWifiObserverTest", "Loca
 // class#method: CutAccessOnEmulatorTest cuts the emulator's adb, so it runs
 // only from TestCutAccessAndReactivate, with -e adbuddyCut 1, and
 // TickerOnEmulatorTest holds a notification until the host releases it, so it
-// runs only from TestNotificationReadsAndTheCodes, with -e adbuddyTicker 1:
-// this suite passes neither.
-var allowedSkips = map[string]bool{cutTest: true, tickerTest: true}
+// runs only from TestNotificationReadsAndTheCodes, with -e adbuddyTicker 1;
+// GuardOnEmulatorTest holds a heads-up or a bubble for the guard's tests
+// (guard_test.go), with -e adbuddyGuard: this suite passes none of them.
+var allowedSkips = map[string]bool{cutTest: true, tickerTest: true, guardTest: true}
 
 // tickerTest is the app's instrumented half of TestNotificationReadsAndTheCodes
 // (android/app/src/androidTest/…/TickerOnEmulatorTest.kt).
 const tickerTest = phoneapp.Package + ".TickerOnEmulatorTest#postAndHold"
+
+// guardTest is the app's instrumented half of the guard's tests with a
+// heads-up or the bubble (android/app/src/androidTest/…/GuardOnEmulatorTest.kt).
+const guardTest = phoneapp.Package + ".GuardOnEmulatorTest#postAndHold"
 
 var (
 	okRe       = regexp.MustCompile(`(?m)^OK \((\d+) tests?\)`)
@@ -99,13 +104,14 @@ func parseInstrument(out string) (tests int, classes, skipped []string, failed b
 }
 
 // minInstrumentedTests is how many tests the app's APK has (the cut and the
-// ticker, skipped here, included): fewer means a class was dropped from the run.
-const minInstrumentedTests = 17
+// ticker and the guard's, skipped here, included): fewer means a class was
+// dropped from the run.
+const minInstrumentedTests = 18
 
 func enoughInstrumentedTests(n int) bool { return n >= minInstrumentedTests }
 
 func TestEnoughInstrumentedTests(t *testing.T) {
-	for n, want := range map[int]bool{0: false, 16: false, 17: true, 18: true} {
+	for n, want := range map[int]bool{0: false, 17: false, 18: true, 19: true} {
 		if got := enoughInstrumentedTests(n); got != want {
 			t.Errorf("%d tests: enough = %v, want %v", n, got, want)
 		}
@@ -219,8 +225,9 @@ func TestInstrumentedSuite(t *testing.T) {
 			t.Errorf("class %s did not run (ran: %v)", c, classes)
 		}
 	}
-	// The cut and the ticker must have been skipped here, not run: they are in
-	// the APK and this suite never passes -e adbuddyCut 1 nor -e adbuddyTicker 1.
+	// The cut, the ticker and the guard's must have been skipped here, not run:
+	// they are in the APK and this suite never passes -e adbuddyCut 1, -e
+	// adbuddyTicker 1 nor -e adbuddyGuard.
 	if len(skipped) != len(allowedSkips) {
 		t.Errorf("skipped %v, want each of %v skipped once", skipped, allowedSkips)
 	}

@@ -5,3 +5,10 @@
 - T2: rama test/ticker-dumpsys (PR abierto por f3), fuga real del ticker en `dumpsys notification` → 🔴; revisión opus Cumple + 3 menores aplicados.
 - T3: rama test/link-harness, 7 commits locales (b3135fe..53ba5f4), sin push, SIN revisar aún (pendiente: adbuddy-reviewer sobre `git diff origin/main..test/link-harness`, luego push + aviso a f3). Cubre M2-7 (solo canal), M3b-1 (ASCII), M3b-4, M3b-6, M5a-2, M6c-6; NO M3b-3 ni M3b-10 (tareas M aparte). Emulador apagado.
 - Siguiente tras reanudar (03:50): revisión de T3 → push → T4 (confirmaciones 🔴 con móvil bloqueado, A4-1, scroll JVM) → T5 → T6; T7/T8 después.
+
+## Estado en pausa total (orden de f3, uso 95%; reanudar tras las 08:50)
+- T2 test/ticker-dumpsys: mergeado/PR por f3. T3 test/link-harness: mergeado. T4 test/confirmations-emulator: PR por f3 (M2-8 post-v1). T5 test/guard-samples: PR por f3 (subida).
+- fix/guard-imagewallpaper (local, SIN push, apilada en test/guard-samples; commits 8590421, 41e3fcd, f61732a): implementada y verde (go vet/test); revisión opus INTERRUMPIDA por la pausa → pendiente: adbuddy-reviewer-opus sobre `git diff test/guard-samples..fix/guard-imagewallpaper` (hay diff en wallpaper-diff.txt; mirar especialmente que keyboard/screen-off/doze/settings pasen a ejecutarse con razón), luego pasada con emulador de guard_test.go (los cambios de emutest no corrieron aún), push, aviso a f3 (si T5 ya está en main, merge de main antes).
+- Luego: android-36 (el usuario confirmó «android-36 si» según f3; AVD adbuddy-dev36, consola 5600, STABLE_SECS=120, solo tras «libre» de puffin y aviso a tern) y T6 (listener/consentimiento 22-32); después T7/T8, T3b, T4b.
+- Reglas: un subagente a la vez; un solo emulador en el PC; nunca kill por nombre; PIN siempre quitado; sin tocar el móvil del usuario.
+- Emulador: apagado (tasklist sin qemu mío).
