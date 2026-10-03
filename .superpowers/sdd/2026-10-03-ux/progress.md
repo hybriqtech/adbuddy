@@ -32,3 +32,10 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - Task 4 (P1): complete (commits dfbbf2d..49acc22, review clean; incluye limpieza de menores 1-3: OptIn/imports, tests de RemoteCard con remoto activo, KDoc exacto; test PENDING omitido: estado local no construible).
 - Task 4: minor (se arregla en la Task 5): es usa "archivo" en file_action_download/open y "fichero" en el resto del fichero (3 vs 2): unificar a "fichero".
 - P1: cerrado (revision final opus limpia; fragmento corregido M1/M2). Rango 3853d58..ac85310 + fix de fragmento.
+
+## Fase 2 - P2 (onboarding y estados del chat)
+- P1 integrable: subida y avisado al lider (9e25b29). Plan P2: docs/superpowers/plans/2026-10-03-ux-p2-onboarding-y-estados.md (b9f90b2), revisado por adbuddy-reviewer (a1a1f08a): 3 bloqueos (flujo de test roto, sintaxis, firma posicional), 7 importantes e importantes de scroll, todos incorporados.
+- Ruling: C13 (tarjeta modo remoto compacta), "pensando" y reconectando/esperando de C20, aviso de depuracion inalambrica y enlace a troubleshooting de O2, pista de retomar en paso 1 de O10 — aplazados — piden diseño o estados nuevos — cuesta: chat con 88 dp fijos de tarjeta y sin indicador de espera unas semanas mas.
+- Ruling: ChatHeader toma altura del contenido (AdbuddyTopBarSpec) y TOP_BAR_TAG — el TopAppBar no recorta y con 200 % titulo+subtitulo pasan de 64 dp — cuesta: barra algo mas alta con letra grande.
+- Ruling: Task 6 (scroll) calcula "estaba abajo" con layoutInfo y fila vista, no con canScrollForward — canScrollForward cambia al crecer el contenido y mezcla cresce con subio — cuesta: algo mas de logica; 6 tests lo vigilan.
+- Ruling: chat_empty_ready sin promesa absoluta de seguridad ("Los comandos delicados piden tu confirmacion") — hay modos donde la pregunta sale en el PC — cuesta: texto menos reconfortante.
