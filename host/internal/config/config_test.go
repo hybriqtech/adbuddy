@@ -211,7 +211,9 @@ func TestAgentModelAndEffort(t *testing.T) {
 		"agent_effort": "agent_effort = \"ultra\"\n",
 	} {
 		q := filepath.Join(dir, key+".toml")
-		os.WriteFile(q, []byte(data), 0o600)
+		if err := os.WriteFile(q, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := Load(q); err == nil || !strings.Contains(err.Error(), key) {
 			t.Errorf("%s: %v", key, err)
 		}
@@ -226,5 +228,15 @@ func TestAgentModelAndEffort(t *testing.T) {
 	}
 	if _, err := Load(filepath.Join(dir, "saved.toml")); err != nil {
 		t.Fatal(err)
+	}
+	// Filled in, they come back as they went.
+	d.AgentModel, d.AgentEffort = "opus[1m]", "xhigh"
+	rt := filepath.Join(dir, "roundtrip.toml")
+	if err := Save(rt, d); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load(rt)
+	if err != nil || back.AgentModel != "opus[1m]" || back.AgentEffort != "xhigh" {
+		t.Fatalf("%+v %v", back, err)
 	}
 }

@@ -42,6 +42,12 @@ func TestArgs(t *testing.T) {
 	if a, u := Args("codex", "x", ""); a != nil || !reflect.DeepEqual(u, []string{"model"}) {
 		t.Fatalf("%v %v", a, u)
 	}
+	if a, u := Args("claude", "", "low"); !reflect.DeepEqual(a, []string{"--effort", "low"}) || u != nil {
+		t.Fatalf("%v %v", a, u)
+	}
+	if a, u := Args("codex", "x", "y"); a != nil || !reflect.DeepEqual(u, []string{"model", "effort"}) {
+		t.Fatalf("%v %v", a, u)
+	}
 }
 
 func TestDescribe(t *testing.T) {

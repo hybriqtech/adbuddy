@@ -274,6 +274,9 @@ func newServeCmd(app *App) *cobra.Command {
 			}
 			fmt.Fprintln(app.Stderr, app.T("serve.adbuddy_is_serving_session_journal", activeSerial, session, workspace.JournalDir(ws)))
 			if noAgent {
+				if model != "" || effort != "" {
+					fmt.Fprintln(app.Stderr, app.T("serve.model_no_agent"))
+				}
 				fmt.Fprintln(app.Stderr, app.T("serve.in_another_terminal", agentName))
 				fmt.Fprintln(app.Stderr)
 			} else {

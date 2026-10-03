@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
+	"github.com/hybriqtech/adbuddy/host/internal/pty"
+	"github.com/hybriqtech/adbuddy/host/internal/session"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 )
@@ -443,4 +446,110 @@ func TestServeReleasesTheLockWhenItFails(t *testing.T) {
 		t.Fatalf("the lock is still held after serve ended: %v", err)
 	}
 	lock.Close()
+}
+
+// --model and --effort are checked before serve touches anything: a bad value
+// is a usage error, and one in config.toml a configuration error.
+func TestServeModelAndEffortAreChecked(t *testing.T) {
+	t.Run("flags", func(t *testing.T) {
+		isolate(t)
+		for _, args := range [][]string{{"--model", "--x"}, {"--effort", "ultra"}} {
+			_, errOut, code := run(t, append([]string{"serve", "--adb", "adb"}, args...)...)
+			want := "--model"
+			if args[0] == "--effort" {
+				want = "--effort"
+			}
+			if code != ExitUsage || !strings.Contains(errOut, want+" (or agent_") {
+				t.Errorf("%v: exit %d, stderr %q", args, code, errOut)
+			}
+		}
+	})
+	t.Run("config.toml", func(t *testing.T) {
+		isolate(t)
+		for key, data := range map[string]string{
+			"agent_model":  "agent_model = \"--x\"\n",
+			"agent_effort": "agent_effort = \"ultra\"\n",
+		} {
+			dir := t.TempDir()
+			t.Setenv("ADBUDDY_CONFIG_DIR", dir)
+			if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, errOut, code := run(t, "serve", "--adb", "adb")
+			// config.Load already refuses it: a configuration error, naming the key.
+			if code != ExitConfig || !strings.Contains(errOut, "CONFIG_INVALID") || !strings.Contains(errOut, key) {
+				t.Errorf("%s: exit %d, stderr %q", key, code, errOut)
+			}
+		}
+	})
+}
+
+// What model and effort say reaches the arguments Claude Code starts with, and
+// no other agent gets them.
+func TestNewSessionPassesModelAndEffort(t *testing.T) {
+	origPTY, origLook := startPTY, lookAgent
+	t.Cleanup(func() { startPTY, lookAgent = origPTY, origLook })
+	var got []string
+	lookAgent = func(name string) (string, error) { return "/bin/" + name, nil }
+	startPTY = func(o pty.Options) (pty.PTY, error) {
+		got = o.Args
+		return nil, errors.New("not started")
+	}
+	app := &App{Stdout: io.Discard, Stderr: io.Discard, Getenv: func(string) string { return "" }}
+	m := newSession(app, t.TempDir(), "dev1", func(session.Info) {}, "opus", "low")
+	t.Cleanup(m.Stop)
+	for agentName, want := range map[string]string{
+		"claude": "--model opus --effort low",
+		"codex":  "",
+	} {
+		got = nil
+		if err := m.Start(agentName, false); err == nil {
+			t.Fatalf("%s: the fake PTY should have failed", agentName)
+		}
+		if strings.Join(got, " ") != want {
+			t.Errorf("%s started with %q, want %q", agentName, got, want)
+		}
+	}
+}
+
+// With --no-agent there is no agent to give them to: serve says so.
+func TestServeModelWithNoAgentSaysItIsNotApplied(t *testing.T) {
+	data := isolate(t)
+	tmp := t.TempDir()
+	script, err := testutil.WriteScript(tmp, testutil.FakeRule{Match: "^devices$", Stdout: "List of devices attached\ndev1\tdevice\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKEADB_SCRIPT", script)
+	t.Setenv("FAKEADB_LOG", filepath.Join(tmp, "adb.log"))
+	adb := fakeADB(t)
+	serveErr := &syncBuffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	served := make(chan int, 1)
+	go func() {
+		served <- mainContext(ctx, []string{"serve", "--adb", adb, "--serial", "dev1", "--workspace", filepath.Join(tmp, "ws"), "--confirm", "terminal", "--no-agent", "--model", "opus"}, strings.NewReader(""), io.Discard, serveErr)
+	}()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := ipc.PingDaemon(context.Background(), data); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("serve did not start:\n%s", serveErr.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case code := <-served:
+		if code != 0 {
+			t.Fatalf("serve exit %d:\n%s", code, serveErr.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not stop")
+	}
+	if !strings.Contains(serveErr.String(), "--model and --effort do not apply with --no-agent") {
+		t.Fatalf("no notice:\n%s", serveErr.String())
+	}
 }
