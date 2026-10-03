@@ -170,7 +170,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 				d.record(e)
 				return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
 			default:
-				data, via = *scr, how+", settled"
+				data, via = *scr, how+", settled="+strconv.FormatBool(scr.Settled)
 			}
 		}
 	}

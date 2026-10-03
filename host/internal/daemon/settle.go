@@ -93,6 +93,12 @@ func (d *Daemon) settle(ctx context.Context, args json.RawMessage, first *bridge
 		if prev == nil {
 			wait = firstWait
 		}
+		// The cap: no new read starts if its wait already goes past the deadline;
+		// the last one read (it passed the guard) is what comes out. Before the
+		// first read of this call there is no via to report, so it is read anyway.
+		if prev != nil && reads > 0 && time.Now().Add(wait).After(deadline) {
+			return &ScreenSettled{UIDump: *prev, Settled: false}, via, "", nil
+		}
 		if !sleepCtx(ctx, wait) {
 			return nil, "", "", nil
 		}
@@ -115,6 +121,9 @@ func (d *Daemon) settle(ctx context.Context, args json.RawMessage, first *bridge
 		}
 		v, how, uf := d.runUI(ctx, bridge.UIOpDump, args, nil)
 		if uf != nil {
+			if ctx.Err() != nil { // the agent or serve went away during the read
+				return nil, "", "", nil
+			}
 			return nil, "", "", uf
 		}
 		cur, ok := asDump(v)

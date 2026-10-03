@@ -41,11 +41,13 @@ type settleApp struct {
 	dumpFn  func(n int) bridge.UIDump
 	dumpErr error
 	// fg answers foreground; afterClick says whether the tap already happened.
-	fg   func(afterClick bool) bridge.UIForeground
-	onOp func(op string, n int) // called before answering; n counts that op
+	fg func(afterClick bool) bridge.UIForeground
+	// failOnCancel makes a dump fail with the context's error once it ended.
+	failOnCancel bool
+	onOp         func(op string, n int) // called before answering; n counts that op
 }
 
-func (a *settleApp) ui(_ context.Context, op string, _ json.RawMessage) (json.RawMessage, error) {
+func (a *settleApp) ui(ctx context.Context, op string, _ json.RawMessage) (json.RawMessage, error) {
 	a.mu.Lock()
 	a.ops = append(a.ops, op)
 	if a.counts == nil {
@@ -68,6 +70,9 @@ func (a *settleApp) ui(_ context.Context, op string, _ json.RawMessage) (json.Ra
 	case bridge.UIOpDump:
 		if derr != nil {
 			return nil, derr
+		}
+		if a.failOnCancel && ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 		return json.Marshal(fn(n))
 	case bridge.UIOpClick:
@@ -186,7 +191,8 @@ func TestSettleStopsWhenTwoReadsMatch(t *testing.T) {
 }
 
 func TestSettleMinimumTime(t *testing.T) {
-	settleTimes(t, time.Millisecond, 40*time.Millisecond, 150*time.Millisecond, 5*time.Second, 20)
+	// The A pairs happen far below settleMin, with room to spare on a slow machine.
+	settleTimes(t, time.Millisecond, 5*time.Millisecond, time.Second, 10*time.Second, 1000)
 	e := newEnv(t)
 	a := e.settleApp()
 	a.dumpFn = func(n int) bridge.UIDump {
@@ -436,6 +442,132 @@ func TestSettleContextCancel(t *testing.T) {
 	})
 }
 
+func TestSettleCancelInsideTheSecondRead(t *testing.T) {
+	settleTimes(t, time.Millisecond, time.Millisecond, 0, 2*time.Second, 8)
+	e := newEnv(t)
+	a := e.settleApp()
+	a.failOnCancel = true
+	a.dumpFn = func(n int) bridge.UIDump { return dumpOf("com.android.settings", "tick "+strconv.Itoa(n)) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	a.onOp = func(op string, n int) {
+		if op == bridge.UIOpDump && n == 2 {
+			cancel()
+		}
+	}
+	s, exit := e.helperScreen(t, ctx, bridge.UIOpClick, xy(1, 1))
+	if exit.Code != 0 {
+		t.Fatalf("exit %+v", exit)
+	}
+	c := decodeClicked(t, s)
+	if !c.Clicked || c.Screen != nil || !strings.HasPrefix(c.Note, notRepeat) {
+		t.Fatalf("result %s", s.data[0])
+	}
+	if j := e.last(t); j.Status != journal.StatusDenied || !strings.Contains(j.Reason, "abandoned") || j.Rule != "helper.screen" {
+		t.Fatalf("journal %+v", j)
+	}
+}
+
+func TestSettleCapStopsNewReads(t *testing.T) {
+	// The gap alone goes past the cap: after the first read no other one starts.
+	settleTimes(t, time.Millisecond, 200*time.Millisecond, 0, 100*time.Millisecond, 1000)
+	e := newEnv(t)
+	a := e.settleApp()
+	a.dumpFn = func(n int) bridge.UIDump { return dumpOf("com.android.settings", "tick "+strconv.Itoa(n)) }
+	s, exit := e.helperScreen(t, context.Background(), bridge.UIOpClick, xy(1, 1))
+	if exit.Code != 0 {
+		t.Fatalf("exit %+v", exit)
+	}
+	c := decodeClicked(t, s)
+	if c.Screen == nil || c.Screen.Settled || c.Screen.Elements[0].Text != "tick 1" || c.Note != "" {
+		t.Fatalf("result %s", s.data[0])
+	}
+	if n := a.count(bridge.UIOpDump); n != 1 {
+		t.Fatalf("%d reads: one started past the cap", n)
+	}
+	if j := e.last(t); j.Status != journal.StatusOK || !strings.Contains(j.Reason, "settled=false") {
+		t.Fatalf("journal %+v", j)
+	}
+}
+
+func TestSettleGuardBlocksMidwayInATap(t *testing.T) {
+	settleTimes(t, time.Millisecond, time.Millisecond, 0, 2*time.Second, 8)
+	e := newEnv(t)
+	a := e.settleApp("com.bank.app")
+	a.dumpFn = func(n int) bridge.UIDump { return dumpOf("com.android.settings", "first read "+strconv.Itoa(n)) }
+	a.fg = func(bool) bridge.UIForeground {
+		// 1: the tap's guard, 2: the first read's, 3: the second read's.
+		if a.count(bridge.UIOpForeground) >= 3 {
+			return bridge.UIForeground{Package: "com.bank.app"}
+		}
+		return bridge.UIForeground{Package: "com.android.settings"}
+	}
+	s, exit := e.helperScreen(t, context.Background(), bridge.UIOpClick, xy(1, 1))
+	if exit.Code != 0 {
+		t.Fatalf("the act happened: exit %+v", exit)
+	}
+	c := decodeClicked(t, s)
+	if !c.Clicked || c.Screen != nil || !strings.HasPrefix(c.Note, notRepeat) || !strings.Contains(c.Note, "com.bank.app is a protected app") {
+		t.Fatalf("result %s", s.data[0])
+	}
+	if strings.Contains(string(s.data[0]), "first read") {
+		t.Fatalf("the first read came out: %s", s.data[0])
+	}
+	if n := a.count(bridge.UIOpDump); n != 1 {
+		t.Fatalf("%d dumps", n)
+	}
+	if j := e.last(t); j.Status != journal.StatusBlocked || j.Rule != "helper.screen" || !strings.Contains(j.Reason, "com.bank.app is a protected app") {
+		t.Fatalf("journal %+v", j)
+	}
+}
+
+func TestTypeWithScreen(t *testing.T) {
+	settleTimes(t, time.Millisecond, time.Millisecond, 0, 2*time.Second, 8)
+	check := func(t *testing.T, e *env, s *stream, exit ipc.Exit) {
+		t.Helper()
+		if exit.Code != 0 || len(s.data) != 1 {
+			t.Fatalf("exit %+v data %q", exit, s.data)
+		}
+		var out TextSetScreen
+		if err := json.Unmarshal(s.data[0], &out); err != nil {
+			t.Fatal(err)
+		}
+		if !out.Set || out.Screen == nil || !out.Screen.Settled || out.Note != "" || !strings.Contains(string(s.data[0]), `"set":true`) {
+			t.Fatalf("result %s", s.data[0])
+		}
+		all := e.entriesAll(t)
+		ty, rd := all[len(all)-2], all[len(all)-1]
+		if ty.Rule != "helper.type" || ty.Status != journal.StatusOK || rd.Rule != "helper.screen" || rd.Status != journal.StatusOK ||
+			!strings.Contains(rd.Reason, "after "+bridge.UIOpSetText) || !strings.Contains(rd.Reason, "settled=true") {
+			t.Fatalf("journal %+v / %+v", ty, rd)
+		}
+	}
+	t.Run("with the app", func(t *testing.T) {
+		e := newEnv(t)
+		e.settleApp()
+		s, exit := e.helperScreen(t, context.Background(), bridge.UIOpSetText, bridge.UISetTextArgs{Text: "hi"})
+		check(t, e, s, exit)
+	})
+	t.Run("without the app", func(t *testing.T) {
+		xml, err := os.ReadFile("../uidump/testdata/settings.xml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := newEnv(t)
+		e.adb.shell["dumpsys accessibility"] = "User state[\n  Enabled services:{}\n"
+		e.adb.out["exec-out uiautomator dump /dev/tty"] = string(xml)
+		s, exit := e.helperScreen(t, context.Background(), bridge.UIOpSetText, bridge.UISetTextArgs{Text: "hi"})
+		check(t, e, s, exit)
+		found := false
+		for _, r := range e.adb.ran() {
+			found = found || r == "shell input text hi"
+		}
+		if !found {
+			t.Fatalf("adb ran %q", e.adb.ran())
+		}
+	})
+}
+
 func TestSettleWithoutTheApp(t *testing.T) {
 	settleTimes(t, time.Millisecond, time.Millisecond, 0, 2*time.Second, 8)
 	xml, err := os.ReadFile("../uidump/testdata/settings.xml")
@@ -499,5 +631,17 @@ func TestNoScreenWithoutTheFlag(t *testing.T) {
 	s, exit = e.helper(t, bridge.UIOpSetText, bridge.UISetTextArgs{Text: "hi"})
 	if exit.Code != 0 || string(s.data[0]) != `{"set":true}` {
 		t.Fatalf("type: %+v %s", exit, s.data)
+	}
+}
+
+func TestScreenSettleJournalSaysSettled(t *testing.T) {
+	settleTimes(t, time.Millisecond, time.Millisecond, 0, 2*time.Second, 8)
+	e := newEnv(t)
+	e.settleApp()
+	if _, exit := e.helperScreen(t, context.Background(), bridge.UIOpDump, bridge.UIDumpArgs{}); exit.Code != 0 {
+		t.Fatalf("exit %+v", exit)
+	}
+	if j := e.last(t); j.Status != journal.StatusOK || !strings.HasSuffix(j.Reason, ", settled=true") {
+		t.Fatalf("journal %+v", j)
 	}
 }

@@ -107,7 +107,7 @@ com.android.settings · 1344×2992
 - "Wi-Fi" Switch (980,700)-(1302,780) click checked=false
 ```
 
-`--settle` (latencia, 2026-10-03) pide al daemon que espere a que la pantalla se asiente antes de devolverla (dos lecturas seguidas iguales, unos 2 s como máximo, cada lectura con la guarda): sirve tras una orden `adb` en bruto (`am start`, `input`). La respuesta añade `settled`; si es `false`, la CLI avisa de que la pantalla seguía cambiando. Sin la bandera, la salida es la de siempre.
+`--settle` (latencia, 2026-10-03) pide al daemon que espere a que la pantalla se asiente antes de devolverla (dos lecturas seguidas iguales, unos 2 s, más lo que tarde una lectura que ya empezó, cada lectura con la guarda): sirve tras una orden `adb` en bruto (`am start`, `input`). La respuesta añade `settled`; si es `false`, la CLI avisa de que la pantalla seguía cambiando. Sin la bandera, la salida es la de siempre.
 
 `[id]` sale si hay `id`, y si no, un `-`. Los textos van entre comillas, recortados a 120 caracteres y escapados con `classify.Printable`: un texto de la pantalla no puede meter secuencias de control en la terminal del agente.
 
