@@ -67,22 +67,46 @@ func recordActions(rec string) []string {
 	return out
 }
 
-var flagsRe = regexp.MustCompile(`Notification\(channel=\S+ .*?flags=0x([0-9a-fA-F]+)`)
+// API 34 prints the flags in hexadecimal (flags=0x...); Android 36 prints them
+// by name (flags=ONGOING_EVENT|CAN_COLORIZE|SILENT), measured on the API 36 emulator.
+var flagsRe = regexp.MustCompile(`Notification\(channel=\S+ .*?flags=([0-9A-Za-z_|]+)`)
 
 // flagLocalOnly is Notification.FLAG_LOCAL_ONLY.
 const flagLocalOnly = 0x100
 
-// recordFlags returns the flags of the notification of a record, or -1.
+// flagNames are the Notification.FLAG_* names dumpsys may print; unknown names
+// are ignored (they add nothing to the mask).
+var flagNames = map[string]int64{
+	"LOCAL_ONLY":         0x100,
+	"ONGOING_EVENT":      0x2,
+	"AUTO_CANCEL":        0x10,
+	"NO_CLEAR":           0x20,
+	"FOREGROUND_SERVICE": 0x40,
+	"GROUP_SUMMARY":      0x200,
+	"CAN_COLORIZE":       0x800,
+	"BUBBLE":             0x1000,
+	"SILENT":             0x2000,
+}
+
+// recordFlags returns the flags of the notification of a record, or -1 (fail
+// closed) if the field is not found or is unreadable.
 func recordFlags(rec string) int64 {
 	m := flagsRe.FindStringSubmatch(rec)
 	if m == nil {
 		return -1
 	}
-	v, err := strconv.ParseInt(m[1], 16, 64)
-	if err != nil {
-		return -1
+	if hex, ok := strings.CutPrefix(m[1], "0x"); ok {
+		v, err := strconv.ParseInt(hex, 16, 64)
+		if err != nil {
+			return -1
+		}
+		return v
 	}
-	return v
+	var mask int64
+	for _, name := range strings.Split(m[1], "|") {
+		mask |= flagNames[name]
+	}
+	return mask
 }
 
 // ask sends r to the app as the host does and waits for its notification;
