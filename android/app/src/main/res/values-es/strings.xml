@@ -19,6 +19,11 @@
     <string name="notif_capture_failed">No se pudo hacer la captura</string>
     <string name="notif_cut_failed">No se pudo cortar el acceso adb</string>
     <string name="channel_confirm">Confirmaciones</string>
+    <string name="channel_ask">Preguntas del agente</string>
+    <string name="channel_ask_description">Te avisa cuando el agente pide tu permiso, para que puedas contestar a tiempo.</string>
+    <string name="channel_conversation_description">La notificación fija con la conversación y sus botones.</string>
+    <string name="channel_done_description">Te avisa cuando el agente ha terminado.</string>
+    <string name="channel_confirm_description">Preguntas sobre comandos delicados, con Permitir y Rechazar.</string>
     <string name="status_connected">Conectado a %1$s</string>
     <string name="status_connecting">Conectando con el PC…</string>
     <string name="status_waiting">Esperando al PC (ejecuta adbuddy serve)</string>
@@ -128,6 +133,8 @@
     <string name="tool_error">falló</string>
     <string name="confirm_label">ADBuddy: acción delicada</string>
     <string name="notif_asking">Claude Code necesita una respuesta</string>
+    <string name="notif_ask_title">El agente necesita una respuesta</string>
+    <string name="notif_ask_text">Abre ADBuddy para contestar.</string>
     <string name="chat_retry">Reintentar</string>
     <string name="chat_discard">Descartar</string>
     <string name="chat_not_sent">No enviado</string>

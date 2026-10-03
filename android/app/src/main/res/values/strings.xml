@@ -20,6 +20,11 @@
     <string name="notif_capture_failed">Could not take the screenshot</string>
     <string name="notif_cut_failed">Could not cut ADB access</string>
     <string name="channel_confirm">Confirmations</string>
+    <string name="channel_ask">Agent questions</string>
+    <string name="channel_ask_description">Tells you when the agent asks your permission, so you can answer in time.</string>
+    <string name="channel_conversation_description">The ongoing notification with the conversation and its buttons.</string>
+    <string name="channel_done_description">Tells you when the agent has finished.</string>
+    <string name="channel_confirm_description">Questions about risky commands, with Allow and Deny.</string>
     <string name="status_connected">Connected to %1$s</string>
     <string name="status_connecting">Connecting to the PC…</string>
     <string name="status_waiting">Waiting for the PC (run adbuddy serve)</string>
@@ -130,6 +135,8 @@
     <string name="tool_error">failed</string>
     <string name="confirm_label">ADBuddy: delicate action</string>
     <string name="notif_asking">Claude Code needs an answer</string>
+    <string name="notif_ask_title">The agent needs an answer</string>
+    <string name="notif_ask_text">Open ADBuddy to answer.</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_discard">Discard</string>
     <string name="chat_not_sent">Not sent</string>
