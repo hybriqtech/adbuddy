@@ -6,16 +6,20 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
 )
@@ -28,8 +32,28 @@ type remoteServer interface {
 	Reply(req bridge.Message, typ string, payload any) error
 }
 
-// tlsPortTimeout bounds reading the wireless debugging port from the phone.
+// tlsPortTimeout bounds looking up the wireless debugging port (both adb
+// devices and adb mdns services).
 const tlsPortTimeout = 5 * time.Second
+
+// phoneConn is where the remote link finds the phone's wireless debugging
+// port. The phone's shell cannot read service.adb.tls.port (SELinux: getprop
+// answers empty, with code 0), so the port comes from the connection the host
+// already has: the serial adb lists the phone with now, and adb's host
+// commands (adb mdns services). serve's activePhone is one.
+type phoneConn interface {
+	Serial() string
+	Host() pairing.ADB
+}
+
+var _ phoneConn = (*activePhone)(nil)
+
+// connOf is the phoneConn behind a, nil when a has none (the fake phones of
+// tests): only the port the app reports is used then.
+func connOf(a phoneapp.ADB) phoneConn {
+	c, _ := a.(phoneConn)
+	return c
+}
 
 // remoteOpTimeout bounds one remote.set and each attempt to expire the mode
 // (adb tcpip or usb, and the check of the port after a failure): a hung adb
@@ -59,7 +83,7 @@ type remoteLink struct {
 	ctx   context.Context // serve's: ends every adb call
 	store *cfgStore
 	ctl   *remote.Controller // nil only in tests: remote.set is then unavailable
-	adb   phoneapp.ADB
+	conn  phoneConn          // nil without one: only the app's port is used
 	log   io.Writer
 
 	// state is the mode as of the last change. The snapshot reads only this:
@@ -82,8 +106,8 @@ type pendingInfo struct {
 	info bridge.DeviceInfo
 }
 
-func newRemoteLink(ctx context.Context, store *cfgStore, ctl *remote.Controller, a phoneapp.ADB, log io.Writer) *remoteLink {
-	r := &remoteLink{ctx: ctx, store: store, ctl: ctl, adb: a, log: log, warned: map[string]bool{}}
+func newRemoteLink(ctx context.Context, store *cfgStore, ctl *remote.Controller, conn phoneConn, log io.Writer) *remoteLink {
+	r := &remoteLink{ctx: ctx, store: store, ctl: ctl, conn: conn, log: log, warned: map[string]bool{}}
 	r.refresh()
 	return r
 }
@@ -357,8 +381,9 @@ func stillOnNoticeIn(lang i18n.Lang, s remote.State) string {
 }
 
 // onDeviceInfo keeps the Tailscale address the app reports, and the port of
-// wireless debugging read from the phone (or the one the app reports). No
-// address means no change (the message may carry only the protected apps).
+// wireless debugging the host's connection shows (see tlsPortOf), or else the
+// one the app reports. No address means no change (the message may carry
+// only the protected apps).
 func (r *remoteLink) onDeviceInfo(m bridge.Message, info bridge.DeviceInfo) {
 	srv := r.server()
 	if srv == nil || !srv.Current(m) { // no app, or a connection already replaced
@@ -379,7 +404,7 @@ func (r *remoteLink) onDeviceInfo(m bridge.Message, info bridge.DeviceInfo) {
 		}
 		return
 	}
-	// Reading the port runs adb: off the app's message loop, one report at a
+	// Finding the port may run adb: off the app's message loop, one report at a
 	// time and in order (a newer report replaces one still waiting).
 	r.mu.Lock()
 	r.pending = &pendingInfo{m: m, info: info}
@@ -407,8 +432,8 @@ func (r *remoteLink) drain() {
 }
 
 func (r *remoteLink) save(m bridge.Message, info bridge.DeviceInfo) {
-	port := r.readTLSPort()
-	if port == 0 && info.WifiADBPort >= 1 && info.WifiADBPort <= 65535 {
+	port := r.tlsPort()
+	if port == 0 && wirelessPort(info.WifiADBPort) {
 		port = info.WifiADBPort
 	}
 	// The connection may have been replaced while adb answered.
@@ -437,19 +462,108 @@ func (r *remoteLink) save(m bridge.Message, info bridge.DeviceInfo) {
 	}
 }
 
-// readTLSPort asks the phone for its wireless debugging port; 0 when it
-// does not say.
-func (r *remoteLink) readTLSPort() int {
+// tlsPort is the phone's wireless debugging port as the host's connection
+// shows it (see tlsPortOf); 0 when it does not, and then the saved port stays.
+func (r *remoteLink) tlsPort() int {
+	if r.conn == nil {
+		return 0
+	}
 	ctx, cancel := context.WithTimeout(r.ctx, tlsPortTimeout)
 	defer cancel()
+	return tlsPortOf(ctx, r.conn.Host(), r.conn.Serial())
+}
+
+// tlsPortOf finds the wireless debugging port of the phone adb lists as
+// serial, without the phone's shell:
+//   - serial ip:port (connected by address, at home or over Tailscale): its
+//     port, while `adb devices` lists it online (see online). Wireless
+//     debugging listens on every interface at the same port, so a LAN address
+//     tells the port of the Tailscale one too. Its IP is not used:
+//     tailscale_ip is only what the app reports;
+//   - serial "<instance>._adb-tls-connect._tcp" (connected by mDNS): the port
+//     of the connect service with exactly that instance name in `adb mdns
+//     services`;
+//   - anything else (USB, an emulator): 0.
+//
+// host is an ADB for host commands, with no serial. A port that cannot be
+// wireless debugging's (see addrPort and wirelessPort) is 0 too.
+func tlsPortOf(ctx context.Context, host pairing.ADB, serial string) int {
+	if inst, ok := strings.CutSuffix(serial, "."+pairing.ConnectType); ok {
+		return mdnsPort(ctx, host, inst)
+	}
+	port := addrPort(serial)
+	if port == 0 || !online(ctx, host, serial) {
+		return 0
+	}
+	return port
+}
+
+// online reports whether `adb devices` lists serial in state "device". adbd
+// takes a new port each time it restarts (`adb tcpip`, `adb usb`), and a
+// connection that dropped (offline, unauthorized or gone) may be to a port it
+// no longer listens on.
+func online(ctx context.Context, host pairing.ADB, serial string) bool {
 	var out, errb bytes.Buffer
-	code, err := r.adb.Run(ctx, "", []string{"shell", "getprop service.adb.tls.port"}, nil, &out, &errb)
+	code, err := host.Run(ctx, "", []string{"devices"}, nil, &out, &errb)
 	if err != nil || code != 0 {
+		return false
+	}
+	for _, d := range adb.ParseDevices(out.String()) {
+		if d.Serial == serial {
+			return d.State == "device"
+		}
+	}
+	return false
+}
+
+// addrPort is the port of addr when addr is ip:port, the IP can be one of
+// the phone's own (not loopback, unspecified or multicast: a tunnel or a
+// local forward has a port of its own) and the port can be wireless
+// debugging's; 0 otherwise.
+func addrPort(addr string) int {
+	h, p, err := net.SplitHostPort(addr)
+	if err != nil {
 		return 0
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(out.String()))
-	if err != nil || n < 1 || n > 65535 {
+	ip, err := netip.ParseAddr(h)
+	if err != nil {
 		return 0
 	}
-	return n
+	if ip = ip.Unmap(); ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
+		return 0
+	}
+	n, err := strconv.ParseUint(p, 10, 16)
+	if err != nil || !wirelessPort(int(n)) {
+		return 0
+	}
+	return int(n)
+}
+
+// mdnsPort is the port of the connect service named inst; 0 when adb fails,
+// lists none, or lists them with different ports (anything on the network can
+// announce the name: then none is believed).
+func mdnsPort(ctx context.Context, host pairing.ADB, inst string) int {
+	ss, err := pairing.Services(ctx, host)
+	if err != nil {
+		return 0
+	}
+	port := 0
+	for _, s := range ss {
+		if s.Type != pairing.ConnectType || s.Name != inst {
+			continue
+		}
+		n := addrPort(s.Addr)
+		if n == 0 || port != 0 && n != port {
+			return 0
+		}
+		port = n
+	}
+	return port
+}
+
+// wirelessPort reports whether p can be the wireless debugging port: from 1
+// to 65535, and not the remote mode's 5555 (that is `adb tcpip`, and the phone
+// may be connected through it).
+func wirelessPort(p int) bool {
+	return p >= 1 && p <= 65535 && strconv.Itoa(p) != remote.Port
 }
