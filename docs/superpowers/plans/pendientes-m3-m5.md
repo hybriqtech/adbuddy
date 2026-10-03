@@ -502,7 +502,7 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
 Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 
 - **Documentado (`docs/ci-self-hosted.md` y `docs/releasing.md`), sin cierre técnico:**
-  - A5-1: riesgo ACEPTADO por el usuario solo con repo privado y ramas solo de nuestros agentes, mientras el runner Windows corra con su cuenta (una rama llama al `adb` del PATH y llega al servidor 5037 con el móvil). El cierre es la cuenta dedicada de Windows, decisión del usuario. El requisito nombra ya `CI_RUNNER_ANDROID` y el ejemplo con el runner Windows deja de recomendarlo.
+  - A5-1: decisión del usuario pendiente (cuenta de Windows dedicada, el usuario dijo "más adelante"); mientras tanto el riesgo se mantiene acotado porque el repositorio es privado y solo empujan ramas nuestros agentes; no hacer público el repositorio con el runner registrado. Riesgo: el runner Windows corre con su cuenta (una rama llama al `adb` del PATH y llega al servidor 5037 con el móvil). El cierre es la cuenta dedicada de Windows. El requisito nombra ya `CI_RUNNER_ANDROID` y el ejemplo con el runner Windows deja de recomendarlo.
   - A5-2: no crear los secretos de release/firma hasta tener un revisor obligatorio efectivo en el environment `release` (nunca como secretos del repositorio); antes de aprobar `sign`, comprobar que el commit está en `main` y revisar el diff de `release.yml`.
   - A5-3: objetivo documentado, runner con SDK de Android, JDK y Go propios; hoy no se cumple (decisión del usuario, junto a la cuenta dedicada).
   - A5-5: persistencia entre jobs en el runner Windows (`_work/_tool`, cachés, `.env`/`.path`); ningún workflow lo limpia, se limpia a mano.
