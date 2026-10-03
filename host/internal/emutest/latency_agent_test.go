@@ -1,13 +1,13 @@
 package emutest
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,84 +19,20 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
+	"github.com/hybriqtech/adbuddy/host/internal/testutil/latbench"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 )
 
-// The model half of the latency harness (docs/superpowers/plans/2026-10-03-latencia.md):
-// the real agent (Claude Code, headless) does a few typical tasks on the
-// emulator through the host's daemon, once per configuration, and each run
-// records the time, the turns, the tokens, the cost and how long the commands
-// took, so the model's share of the wait can be told from the phone's. It
-// spends tokens, so it needs ADBUDDY_LATENCY_AGENT=1 besides ADBUDDY_LATENCY=1;
-// ADBUDDY_LATENCY_CONFIGS ("opus:medium,sonnet:low,…", model alias or id : effort)
-// and ADBUDDY_LATENCY_TASKS (the tasks' numbers, "1,3") narrow it. Every run
-// has a budget (ADBUDDY_LATENCY_BUDGET, 1.5 dollars by default) and 6 minutes.
-
-type benchTask struct {
-	name   string
-	prompt string
-}
-
-var benchTasks = []benchTask{
-	{"1 read: Android version and battery", "What Android version is the phone running and what is its battery level? Answer in one short line."},
-	{"2 open an app and read it", "Open the Settings app and tell me the first three entries on its main screen. Answer in one short line."},
-	{"3 navigate two screens", "In the Settings app, open Network & internet and list the names of the entries it shows. Answer in one short line."},
-	{"4 list installed apps", "How many third-party (user-installed) apps does the phone have? Name them. Answer in one short line."},
-	{"5 search and type", "In the Settings app, tap the search bar, type the word wifi and tell me the title of the first result. Answer in one short line."},
-}
-
-// modelIDs turns the aliases of the configurations into model ids.
-var modelIDs = map[string]string{"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "fable": "claude-fable-5-1"}
-
-type benchUsage struct {
-	In         int64 `json:"input_tokens"`
-	Out        int64 `json:"output_tokens"`
-	CacheRead  int64 `json:"cache_read_input_tokens"`
-	CacheWrite int64 `json:"cache_creation_input_tokens"`
-}
-
-// benchRunResult is the part of claude's JSON that is flat.
-type benchRunResult struct {
-	IsError    bool    `json:"is_error"`
-	Result     string  `json:"result"`
-	NumTurns   int     `json:"num_turns"`
-	DurationMs int64   `json:"duration_ms"`
-	APIMs      int64   `json:"duration_api_ms"`
-	Cost       float64 `json:"total_cost_usd"`
-}
-
-type benchRun struct {
-	Task, Model, Effort string
-	WallMs              int64
-	benchRunResult
-	Usage       benchUsage
-	Commands    []string
-	CommandMs   []int64
-	CommandsSum int64
-	Err         string
-}
-
-// callLog records each request of the agent with how long the host took.
-type callLog struct {
-	mu    sync.Mutex
-	names []string
-	ms    []int64
-}
-
-func (c *callLog) add(name string, d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.names = append(c.names, name)
-	c.ms = append(c.ms, d.Milliseconds())
-}
-
-func (c *callLog) take() ([]string, []int64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	n, m := c.names, c.ms
-	c.names, c.ms = nil, nil
-	return n, m
-}
+// The model half of the latency harness on the emulator (docs/superpowers/plans/2026-10-03-latencia.md):
+// the real agent (Claude Code, headless) does the typical tasks of latbench
+// through the host's daemon, once per configuration, and each run records the
+// time, the turns, the tokens, the cost and how long the commands took, so the
+// model's share of the wait can be told from the phone's. It spends tokens, so
+// it needs ADBUDDY_LATENCY_AGENT=1 besides ADBUDDY_LATENCY=1;
+// ADBUDDY_LATENCY_CONFIGS ("opus:medium,sonnet:low,…", model alias or id : effort),
+// ADBUDDY_LATENCY_TASKS (the tasks' numbers, "1,3") and ADBUDDY_LATENCY_MAXRUNS
+// narrow it. Every run has a budget (ADBUDDY_LATENCY_BUDGET, 1.5 dollars by
+// default) and 6 minutes.
 
 // serialUI is appUI that is safe off the test's goroutine: it fails with an
 // error, not the test.
@@ -138,12 +74,11 @@ func TestLatencyAgent(t *testing.T) {
 	if err != nil {
 		t.Skip("claude is not installed")
 	}
-	configs := strings.Split(envOr("ADBUDDY_LATENCY_CONFIGS", "opus:medium,sonnet:low,sonnet:medium"), ",")
+	configs := latbench.ParseConfigs(latbench.EnvOr("ADBUDDY_LATENCY_CONFIGS", "opus:medium,sonnet:low,sonnet:medium"))
 	wantTask := map[string]bool{}
-	for _, s := range strings.Split(envOr("ADBUDDY_LATENCY_TASKS", "1,2,3,4,5"), ",") {
+	for _, s := range strings.Split(latbench.EnvOr("ADBUDDY_LATENCY_TASKS", "1,2,3,4,5"), ",") {
 		wantTask[strings.TrimSpace(s)] = true
 	}
-	budget := envOr("ADBUDDY_LATENCY_BUDGET", "1.5")
 
 	l := openLink(t)
 	e := l.e
@@ -168,17 +103,17 @@ func TestLatencyAgent(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := newLatencyHost(t, e, l.serialUI())
-	calls := &callLog{}
+	calls := &latbench.CallLog{}
 	srv, err := ipc.Listen(data, secret, func(ctx context.Context, req ipc.Request, c *ipc.Conn) ipc.Exit {
 		t0 := time.Now()
 		exit := h.d.Handle(ctx, req, c)
 		name := req.UIOp
 		if req.Kind == ipc.KindExec {
-			name = "adb " + clip(strings.Join(req.Argv, " "), 50)
+			name = "adb " + latbench.Clip(strings.Join(req.Argv, " "), 50)
 		} else if req.Kind == ipc.KindUI {
 			name = "adbuddy " + req.UIOp
 		}
-		calls.add(name, time.Since(t0))
+		calls.Add(name, time.Since(t0))
 		return exit
 	})
 	if err != nil {
@@ -210,83 +145,26 @@ func TestLatencyAgent(t *testing.T) {
 	}
 	env = append(env, "ADBUDDY_DATA_DIR="+data, "ADBUDDY_CONFIG_DIR="+filepath.Join(tmp, "cfg"), "ADBUDDY_LANG=en")
 
-	var all []benchRun
-	var rep strings.Builder
+	runner := latbench.Env{Claude: claudePath, Dir: ws, Env: env, Budget: latbench.EnvOr("ADBUDDY_LATENCY_BUDGET", "1.5"), Calls: calls}
+	maxRuns, _ := strconv.Atoi(latbench.EnvOr("ADBUDDY_LATENCY_MAXRUNS", "100"))
+	var runs []latbench.Run
 	defer func() {
-		out := os.Getenv("ADBUDDY_LATENCY_OUT")
-		if out == "" {
-			return
-		}
-		if f, err := os.OpenFile(out, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-			defer f.Close()
-			fmt.Fprintf(f, "\n### Agent runs (real Claude Code on the emulator, one run per task and configuration)\n\n| task | model:effort | wall s | api s | commands s | turns | commands | in tok | out tok | cache read | cache write | $ | error |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n%s\n", rep.String())
-		}
-		if f, err := os.OpenFile(out+".agent.jsonl", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-			defer f.Close()
-			for _, r := range all {
-				b, _ := json.Marshal(r)
-				fmt.Fprintln(f, string(b))
-			}
-		}
+		latbench.Write(os.Getenv("ADBUDDY_LATENCY_OUT"), "Agent runs on the emulator (real Claude Code, one run per task and configuration)", runs)
 	}()
-
-	for _, task := range benchTasks {
-		if !wantTask[task.name[:1]] {
+	for _, task := range latbench.Tasks {
+		if !wantTask[task.Name[:1]] {
 			continue
 		}
 		for _, cfg := range configs {
-			alias, effort, _ := strings.Cut(cfg, ":")
-			model := modelIDs[alias]
-			if model == "" {
-				model = alias
+			if len(runs) >= maxRuns {
+				return
 			}
 			// Back to the launcher, as when the user starts from the chat.
 			e.shell(t, "input keyevent KEYCODE_HOME")
 			time.Sleep(1500 * time.Millisecond)
-			calls.take()
-			ctx, cancel := context.WithTimeout(e.ctx, 6*time.Minute)
-			cmd := exec.CommandContext(ctx, claudePath, "-p", task.prompt, "--model", model, "--effort", effort, "--output-format", "json",
-				"--permission-mode", "dontAsk", "--max-budget-usd", budget, "--no-session-persistence",
-				"--setting-sources", "project,local", "--strict-mcp-config")
-			cmd.Dir, cmd.Env = ws, env
-			var out, errb bytes.Buffer
-			cmd.Stdout, cmd.Stderr = &out, &errb
-			t0 := time.Now()
-			runErr := cmd.Run()
-			cancel()
-			r := benchRun{Task: task.name, Model: model, Effort: effort, WallMs: time.Since(t0).Milliseconds()}
-			r.Commands, r.CommandMs = calls.take()
-			for _, ms := range r.CommandMs {
-				r.CommandsSum += ms
-			}
-			if runErr != nil {
-				r.Err = clip(runErr.Error()+" "+errb.String(), 200)
-			}
-			var raw struct {
-				benchRunResult
-				Usage benchUsage `json:"usage"`
-			}
-			if json.Unmarshal(out.Bytes(), &raw) == nil {
-				r.benchRunResult, r.Usage = raw.benchRunResult, raw.Usage
-				if raw.IsError && r.Err == "" {
-					r.Err = clip(raw.Result, 200)
-				}
-			} else if r.Err == "" {
-				r.Err = "unreadable output: " + clip(out.String(), 200)
-			}
-			all = append(all, r)
-			fmt.Fprintf(&rep, "| %s | %s:%s | %.1f | %.1f | %.1f | %d | %d | %d | %d | %d | %d | %.3f | %s |\n", task.name, alias, effort,
-				float64(r.WallMs)/1000, float64(r.APIMs)/1000, float64(r.CommandsSum)/1000, r.NumTurns, len(r.Commands),
-				r.Usage.In, r.Usage.Out, r.Usage.CacheRead, r.Usage.CacheWrite, r.Cost, r.Err)
-			t.Logf("%s %s:%s wall %.1fs api %.1fs commands %.1fs turns %d $%.3f err=%q\n  answer: %s", task.name, alias, effort,
-				float64(r.WallMs)/1000, float64(r.APIMs)/1000, float64(r.CommandsSum)/1000, r.NumTurns, r.Cost, r.Err, clip(r.Result, 200))
+			r := runner.Do(e.ctx, task, cfg)
+			runs = append(runs, r)
+			t.Log(r.Describe())
 		}
 	}
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
 }
