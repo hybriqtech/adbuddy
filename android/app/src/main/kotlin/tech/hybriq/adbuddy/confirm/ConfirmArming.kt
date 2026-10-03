@@ -33,6 +33,10 @@ class ConfirmArming(private val clock: () -> Long = SystemClock::elapsedRealtime
     @Synchronized
     fun isArmed(id: String): Boolean = ConfirmUi.armed(shownAt[id], clock())
 
+    /** RED stub. */
+    @Synchronized
+    fun rearmAll() {}
+
     /** Forgets every question but ids (those still pending). */
     @Synchronized
     fun retain(ids: Set<String>) {

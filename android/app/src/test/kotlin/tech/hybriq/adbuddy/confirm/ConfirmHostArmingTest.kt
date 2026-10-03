@@ -84,6 +84,11 @@ class ConfirmHostArmingTest {
 
     private fun button(id: Int): SemanticsNodeInteraction = compose.onNodeWithText(app.getString(id))
 
+    /** A click as TalkBack sends it (no frame in between), when the button offers one. */
+    private fun accessibilityClick(id: Int) {
+        if (SemanticsActions.OnClick in button(id).fetchSemanticsNode().config) button(id).performSemanticsAction(SemanticsActions.OnClick)
+    }
+
     @Test fun allowWaitsSixHundredMilliseconds() {
         show(request("j_1"))
         button(R.string.action_allow).assertIsNotEnabled().performClick()
@@ -134,5 +139,41 @@ class ConfirmHostArmingTest {
         advance(ConfirmUi.ARMING_MS + 100)
         button(R.string.action_allow).assertIsEnabled().performClick()
         assertEquals(listOf("j_1" to Decision.ALLOW), replies)
+    }
+
+    // Offline and back (its buttons gone, then back where Close was): it waits again, from the first frame it is
+    // answerable again, even for a tap that lands before the arming coroutine has run.
+    @Test fun answerableAgainItWaitsAgain() {
+        show(request("j_1"))
+        advance(ConfirmUi.ARMING_MS + 100)
+        button(R.string.action_allow).assertIsEnabled()
+        bridge = bridge.copy(connection = BridgeState.Connection.CONNECTING)
+        frame()
+        button(R.string.action_allow).assertDoesNotExist()
+        bridge = bridge.copy(connection = BridgeState.Connection.CONNECTED)
+        frame()
+        button(R.string.action_allow).assertIsNotEnabled()
+        accessibilityClick(R.string.action_allow)
+        advance(ConfirmUi.ARMING_MS - 50)
+        button(R.string.action_allow).assertIsNotEnabled()
+        assertEquals("no answer before it is armed again", emptyList<Pair<String, String>>(), replies)
+        advance(200)
+        button(R.string.action_allow).assertIsEnabled().performClick()
+        assertEquals(listOf("j_1" to Decision.ALLOW), replies)
+    }
+
+    // Offline and back between two taps with no frame drawn in between: the tap still finds it not armed.
+    @Test fun offlineAndBackWithinAFrameIsNotArmed() {
+        show(request("j_1"))
+        advance(ConfirmUi.ARMING_MS + 100)
+        bridge = bridge.copy(connection = BridgeState.Connection.CONNECTING)
+        frame()
+        bridge = bridge.copy(connection = BridgeState.Connection.CONNECTED)
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeByFrame()
+        // The first frame answerable again: whatever the effect has run, it is drawn off and a tap is not an answer.
+        button(R.string.action_allow).assertIsNotEnabled()
+        accessibilityClick(R.string.action_allow)
+        assertEquals(emptyList<Pair<String, String>>(), replies)
     }
 }

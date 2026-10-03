@@ -79,6 +79,27 @@ class ConfirmArmingTest {
         assertFalse(arming.isArmed("j_2"))
     }
 
+    // The screen turned on (BridgeService, ACTION_SCREEN_ON): every known Allow waits again from now, so the first
+    // tap on the lock screen or the shade is not an answer; an unknown question stays unknown.
+    @Test fun turningTheScreenOnRearmsEveryKnownQuestion() {
+        arming.shown("j_1")
+        arming.shown("j_2")
+        clock += 5_000
+        assertTrue(arming.isArmed("j_1"))
+        arming.rearmAll()
+        assertFalse(arming.isArmed("j_1"))
+        assertFalse(arming.isArmed("j_2"))
+        assertEquals(setOf("j_1", "j_2"), arming.tracked())
+        assertFalse("an unknown question is still not armed", arming.isArmed("j_3"))
+        clock += 599
+        assertFalse(arming.isArmed("j_1"))
+        clock += 1
+        assertTrue(arming.isArmed("j_1"))
+        assertTrue(arming.isArmed("j_2"))
+        assertFalse(arming.isArmed("j_3"))
+        assertEquals("rearmAll adds nothing", setOf("j_1", "j_2"), arming.tracked())
+    }
+
     // --- what the notification buttons send (ConfirmReceiver) ---
 
     private val now = Instant.parse("2026-09-30T10:00:00Z").toEpochMilli() // the host's clock

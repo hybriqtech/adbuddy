@@ -101,6 +101,9 @@ class ChatController(
         _answering.update { a -> a.filter { it in ids }.toSet() }
     }
 
+    /** RED stub. */
+    fun rearmGuard() {}
+
     /** Milliseconds before the card may be answered (its promote guard); 0 when it may, or when it never may (then [canAnswer] says no). Finite: fit for PermissionUi.nextTickMs. */
     fun guardLeftMs(id: String): Long = guard.leftMs(id) ?: 0L
 
