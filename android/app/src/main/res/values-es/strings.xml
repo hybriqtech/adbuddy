@@ -88,6 +88,7 @@
     <string name="level_green">Seguro</string>
     <string name="level_yellow">Cuidado</string>
     <string name="level_red">Delicado</string>
+    <string name="level_chip">%1$s %2$s</string>
     <string name="activity_filter_empty">Nada de este nivel todavía.</string>
     <string name="activity_undo_hint">Para deshacerlo, en el PC: adbuddy undo %1$s</string>
     <string name="overlay_pill">Agente usando la pantalla · Pausar</string>

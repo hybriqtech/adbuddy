@@ -52,6 +52,8 @@ class OnboardingFlowTest {
         step(2).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.onboarding_skip)).performClick()
         compose.onNodeWithContentDescription(text(R.string.action_menu)).assertIsDisplayed()
+        // The full-screen chat (not the bubble) starts with the terminal unfolded: guards ChatRoot's default.
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_hide)).assertIsDisplayed()
         step(1).assertDoesNotExist()
         step(2).assertDoesNotExist()
         assertTrue(Onboarding.of(app).done())

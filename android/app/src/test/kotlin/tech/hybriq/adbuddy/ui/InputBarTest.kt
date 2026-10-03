@@ -1,5 +1,8 @@
 package tech.hybriq.adbuddy.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -95,8 +98,40 @@ class InputBarTest {
         stop.assertIsNotEnabled()
         stop.performClick()
         assertEquals("a second tap adds nothing", 1, stopped)
-        compose.mainClock.advanceTimeBy(3_500)
+        compose.mainClock.advanceTimeBy(2_000)
+        stop.assertIsNotEnabled()
+        compose.mainClock.advanceTimeBy(1_500)
         stop.assertIsEnabled()
+    }
+
+    @Test fun stoppingIsResetWhenWorkingChanges() {
+        compose.mainClock.autoAdvance = false
+        var working by mutableStateOf(true)
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                InputBar("", {}, emptyList(), {}, {}, {}, onSend = { sent++ }, working = working, onStop = { stopped++ })
+            }
+        }
+        compose.onNodeWithContentDescription(s(R.string.chat_stop)).performClick()
+        compose.mainClock.advanceTimeBy(100)
+        Snapshot.sendApplyNotifications()
+        compose.mainClock.advanceTimeByFrame()
+        assertEquals(1, stopped)
+        compose.onNodeWithContentDescription(s(R.string.chat_stop)).assertIsNotEnabled()
+        // The agent stopped and started again: the new run can be stopped without waiting for the 3 s.
+        working = false
+        Snapshot.sendApplyNotifications()
+        compose.mainClock.advanceTimeByFrame()
+        working = true
+        Snapshot.sendApplyNotifications()
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithContentDescription(s(R.string.chat_stop)).assertIsEnabled()
+    }
+
+    @Test fun aFailedDraftWithAnEmptyBarWhileWorkingStillShowsSend() {
+        show("", working = true, drafts = listOf(draft(DraftStatus.FAILED)))
+        compose.onNodeWithContentDescription(s(R.string.chat_send)).assertExists()
+        compose.onNodeWithContentDescription(s(R.string.chat_stop)).assertDoesNotExist()
     }
 }
 

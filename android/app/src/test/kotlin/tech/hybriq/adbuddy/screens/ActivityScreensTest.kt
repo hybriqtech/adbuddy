@@ -1,12 +1,13 @@
 package tech.hybriq.adbuddy.screens
 
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.TimeZone
@@ -104,6 +105,22 @@ class ActivityScreensTest(private val mode: ScreenMode) {
         show(BridgeState(journal = listOf(odd)))
         compose.onNodeWithText(odd.description).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.activity_undo_hint, odd.id)).assertDoesNotExist()
+    }
+
+    private fun hostileId(id: String) {
+        show(BridgeState(journal = listOf(yellow.copy(id = id))))
+        compose.onNodeWithText("Change the screen timeout").assertIsDisplayed()
+        compose.onAllNodes(hasText("adbuddy undo", substring = true)).assertCountEquals(0)
+    }
+
+    @Test fun anIdWithAValidPrefixAndATrailingCommandShowsNoUndoHint() = hostileId("j_1; rm -rf")
+
+    @Test fun anIdWithAValidPrefixAndANewlineShowsNoUndoHint() = hostileId("j_1\nrm")
+
+    @Test fun aDeniedEntryWithAnInverseShowsNoUndoHint() {
+        show(BridgeState(journal = listOf(yellow.copy(status = "denied"))))
+        compose.onNodeWithText("Change the screen timeout").assertIsDisplayed()
+        compose.onAllNodes(hasText("adbuddy undo", substring = true)).assertCountEquals(0)
     }
 
     companion object {

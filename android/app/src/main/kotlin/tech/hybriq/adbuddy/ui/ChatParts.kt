@@ -30,8 +30,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -322,8 +322,9 @@ fun DraftChips(drafts: List<Draft>, onRemove: (String) -> Unit, onRetry: (String
                 Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     // The retry tap is on the label only: the X is its sibling, so tapping it can never retry.
                     Column(
-                        Modifier.widthIn(max = 180.dp).padding(vertical = 8.dp)
-                            .then(if (failed) Modifier.clickable(role = Role.Button, onClick = { onRetry(d.key) }) else Modifier),
+                        Modifier.widthIn(max = 180.dp)
+                            .then(if (failed) Modifier.clickable(role = Role.Button, onClick = { onRetry(d.key) }) else Modifier)
+                            .padding(vertical = 8.dp),
                     ) {
                         Text(
                             if (failed) d.error.ifEmpty { stringResource(R.string.draft_failed) } else d.name,

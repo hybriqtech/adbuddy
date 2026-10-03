@@ -3,11 +3,11 @@ package tech.hybriq.adbuddy.ui
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -38,8 +38,17 @@ class SnackbarDurationTest {
 
     @Test fun noticeWithActionHasActionAndDismiss() {
         val host = SnackbarHostState()
-        compose.setContent { SnackbarHost(host) }
-        CoroutineScope(Dispatchers.Main).launch { host.notify("x", actionLabel = "Open") }
+        lateinit var scope: CoroutineScope
+        compose.setContent {
+            scope = rememberCoroutineScope()
+            SnackbarHost(host)
+        }
+        scope.launch { host.notify("x", actionLabel = "Open") }
+        compose.waitForIdle()
+        compose.onNodeWithText("Open").assertExists()
+        compose.onNodeWithContentDescription("Dismiss").assertExists()
+        // An action keeps it up: it never times out.
+        compose.mainClock.advanceTimeBy(60_000)
         compose.waitForIdle()
         compose.onNodeWithText("Open").assertExists()
         compose.onNodeWithContentDescription("Dismiss").assertExists()
@@ -47,8 +56,12 @@ class SnackbarDurationTest {
 
     @Test fun shortNoticeGoesAway() {
         val host = SnackbarHostState()
-        compose.setContent { SnackbarHost(host) }
-        CoroutineScope(Dispatchers.Main).launch { host.notify("Done") }
+        lateinit var scope: CoroutineScope
+        compose.setContent {
+            scope = rememberCoroutineScope()
+            SnackbarHost(host)
+        }
+        scope.launch { host.notify("Done") }
         compose.waitForIdle()
         compose.onNodeWithText("Done").assertExists()
         compose.mainClock.advanceTimeBy(5_000)

@@ -49,7 +49,7 @@ fun ActivityScreen(state: BridgeState, onBack: () -> Unit, now: () -> Long = { S
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = filter == null, onClick = { filter = null }, label = { Text(stringResource(R.string.filter_all)) })
                 for (level in listOf("green", "yellow", "red")) {
-                    FilterChip(selected = filter == level, onClick = { filter = level }, label = { Text(levelIcon(level) + " " + levelName(level)) })
+                    FilterChip(selected = filter == level, onClick = { filter = level }, label = { Text(stringResource(R.string.level_chip, levelIcon(level), levelName(level))) })
                 }
             }
             // distinctBy: LazyColumn keys must be unique, whatever the host sends.
@@ -89,7 +89,7 @@ private fun EntryRow(e: JournalEntry, now: Long) {
                     )
                     // Without the id, `adbuddy undo` undoes the LAST entry, not this one. The id may carry text the agent
                     // influences: only the shape the host gives is drawn.
-                    if (JOURNAL_ID.matches(e.id)) {
+                    if (e.status == "ok" && JOURNAL_ID.matches(e.id)) {
                         Text(
                             stringResource(R.string.activity_undo_hint, e.id),
                             style = MaterialTheme.typography.labelMedium,
