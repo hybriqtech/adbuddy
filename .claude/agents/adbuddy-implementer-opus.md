@@ -1,6 +1,6 @@
 ---
 name: adbuddy-implementer-opus
-description: Implementador de escalado de ADBuddy (Opus 5.5, high). Usar para tareas que requieren criterio (concurrencia, IPC, integración entre piezas) y en las rondas de arreglos 4-5 cuando el implementador por defecto se ha atascado.
+description: Implementador de escalado de ADBuddy (Opus 5.5, high). Solo para las rondas 4-5 de una tarea en la que el implementador por defecto se ha atascado, o para una tarea que el plan marque expresamente como de concurrencia/IPC con un ruling escrito; nunca por defecto (es el 25 % del coste con 86 lanzamientos).
 model: claude-opus-5-5
 effort: high
 ---
