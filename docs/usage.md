@@ -41,6 +41,8 @@ If the phone is not found, serve stops with `DEVICE_NOT_FOUND`: see [Troubleshoo
 
 By default `adbuddy serve` starts the agent for you, inside the host: Claude Code unless you chose another one in setup. Claude Code continues its last conversation. ADBuddy marks the environment folder as trusted in Claude Code's own settings, so Claude Code does not ask. Reach the agent in one of three ways.
 
+By default the agent uses the model and effort you have configured in Claude Code. To set them only for ADBuddy: `adbuddy serve --model claude-sonnet-5-5 --effort medium`, or `agent_model` and `agent_effort` in `config.toml`. For `adbuddy run`: `adbuddy run claude -- --model … --effort …`. In our measurements the model does not change the latency (see `docs/superpowers/plans/2026-10-03-latencia.md`); it changes the cost. Only Claude Code takes these settings, and neither the agent nor the phone can change them.
+
 ### From the phone
 
 Open the ADBuddy app. It shows the chat. See [The app on the phone](#the-app-on-the-phone).

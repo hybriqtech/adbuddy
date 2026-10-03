@@ -76,6 +76,9 @@ type Options struct {
 	// it is at the time of the call, and must not call back into the Manager
 	// while holding its own locks.
 	OnInfo func(Info)
+	// Args are extra command-line arguments for the agent's program, after
+	// --continue: the model and effort the user chose (agent.Args). May be nil.
+	Args func(agent string) []string
 	// Lang is the language of what the manager writes to a person's terminal
 	// (the notice that the agent ended); English if empty.
 	Lang i18n.Lang
@@ -183,8 +186,12 @@ func (m *Manager) startLocked(agent string, resume bool) error {
 		m.o.PreTrust(agent, m.o.Dir)
 	}
 	var args []string
-	if resume && agent == "claude" {
+	resumed := resume && agent == "claude"
+	if resumed {
 		args = []string{"--continue"}
+	}
+	if m.o.Args != nil {
+		args = append(args, m.o.Args(agent)...)
 	}
 	m.mu.Lock()
 	cols, rows := m.sizeLocked()
@@ -193,7 +200,7 @@ func (m *Manager) startLocked(agent string, resume bool) error {
 	if err != nil {
 		return err
 	}
-	pr := &proc{p: p, agent: agent, resumed: len(args) > 0, started: time.Now(), grace: readGrace, gap: pasteGap, gen: m.gen, done: make(chan struct{}),
+	pr := &proc{p: p, agent: agent, resumed: resumed, started: time.Now(), grace: readGrace, gap: pasteGap, gen: m.gen, done: make(chan struct{}),
 		q: make(chan *writeJob, writeQueue), stopped: make(chan struct{}), wdone: make(chan struct{})}
 	pr.screen = term.New(newID("e_"), cols, rows)
 	pr.quiet = time.AfterFunc(time.Hour, func() { m.quietFor(pr) })

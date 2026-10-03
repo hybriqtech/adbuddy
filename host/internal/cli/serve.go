@@ -41,6 +41,7 @@ var deviceWait = 45 * time.Second
 func newServeCmd(app *App) *cobra.Command {
 	var adbPath, serial, wsDir, confirmMode string
 	var noAgent bool
+	var model, effort string
 	cmd := &cobra.Command{
 		Use:     "serve",
 		Short:   app.T("help.serve.short"),
@@ -59,6 +60,18 @@ func newServeCmd(app *App) *cobra.Command {
 			e, err := loadEnv(app)
 			if err != nil {
 				return err
+			}
+			if model == "" {
+				model = e.cfg.AgentModel
+			}
+			if effort == "" {
+				effort = e.cfg.AgentEffort
+			}
+			if model != "" && !agent.ValidModel(model) {
+				return UsageErrorT("err.serve.usage_model_invalid")
+			}
+			if effort != "" && !agent.ValidEffort(effort) {
+				return UsageErrorT("err.serve.usage_effort_invalid")
 			}
 			adbPath = configuredADB(e, adbPath)
 			if adbPath == "" {
@@ -248,7 +261,7 @@ func newServeCmd(app *App) *cobra.Command {
 				OnNotice:  func(n string) { fmt.Fprintln(app.Stderr, "⏳ "+n) },
 			})
 			link.OnPause(d.CancelConfirmations)
-			sess := newSession(app, ws, activeSerial, link.sessionInfo)
+			sess := newSession(app, ws, activeSerial, link.sessionInfo, model, effort)
 			defer sess.Stop()
 			link.useSession(sess)
 			link.useWorkspace(ws)
@@ -264,6 +277,13 @@ func newServeCmd(app *App) *cobra.Command {
 				fmt.Fprintln(app.Stderr, app.T("serve.in_another_terminal", agentName))
 				fmt.Fprintln(app.Stderr)
 			} else {
+				if model != "" || effort != "" {
+					if _, unused := agent.Args(agentName, model, effort); len(unused) > 0 {
+						fmt.Fprintln(app.Stderr, app.T("serve.model_not_applied", agentName))
+					} else {
+						fmt.Fprintln(app.Stderr, app.T("serve.model_applied", agent.Describe(model, effort)))
+					}
+				}
 				startAgent(app, sess, agentName)
 				fmt.Fprintln(app.Stderr)
 			}
@@ -281,6 +301,8 @@ func newServeCmd(app *App) *cobra.Command {
 	cmd.Flags().StringVar(&serial, "serial", "", app.T("help.serve.flag.serial"))
 	cmd.Flags().StringVar(&wsDir, "workspace", "", app.T("help.serve.flag.workspace"))
 	cmd.Flags().BoolVar(&noAgent, "no-agent", false, app.T("help.serve.flag.no_agent"))
+	cmd.Flags().StringVar(&model, "model", "", app.T("help.serve.flag.model"))
+	cmd.Flags().StringVar(&effort, "effort", "", app.T("help.serve.flag.effort"))
 	cmd.Flags().StringVar(&confirmMode, "confirm", "auto", app.T("help.serve.flag.confirm"))
 	return cmd
 }

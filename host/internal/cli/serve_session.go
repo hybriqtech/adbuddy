@@ -29,7 +29,7 @@ var lookAgent = exec.LookPath
 // newSession makes the manager of the agent's session in serve (spec M3 §3):
 // the agent runs in a PTY with the environment of `adbuddy run`, and Claude
 // Code finds the environment already trusted.
-func newSession(app *App, ws, serial string, onInfo func(session.Info)) *session.Manager {
+func newSession(app *App, ws, serial string, onInfo func(session.Info), model, effort string) *session.Manager {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = ""
@@ -54,6 +54,10 @@ func newSession(app *App, ws, serial string, onInfo func(session.Info)) *session
 			if _, err := agent.TrustFolder(cfg, dir); err != nil {
 				fmt.Fprintln(app.Stderr, app.T("serve_session.could_not_mark_as_trusted", dir, classify.Printable(err.Error())))
 			}
+		},
+		Args: func(name string) []string {
+			a, _ := agent.Args(name, model, effort)
+			return a
 		},
 		OnInfo: onInfo,
 	})

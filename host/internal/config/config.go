@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/hybriqtech/adbuddy/host/internal/agent"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
@@ -33,6 +34,8 @@ type Config struct {
 	TailscaleIP    string   `toml:"tailscale_ip"`    // the phone's Tailscale IPv4, as its app reported it; empty = unknown
 	TailscalePort  int      `toml:"tailscale_port"`  // wireless debugging port, from the host's connection to the phone (its ip:port or its mDNS service); 0 = unknown
 	RemoteUntil    string   `toml:"remote_until"`    // RFC 3339: remote mode (adb tcpip 5555) is on until then; empty = off
+	AgentModel     string   `toml:"agent_model"`     // model passed to Claude Code (--model) by `adbuddy serve` only (`adbuddy run` takes it after --); empty = the one the user configured in it
+	AgentEffort    string   `toml:"agent_effort"`    // effort passed to Claude Code (--effort) by `adbuddy serve` only; empty = the user's own
 }
 
 // Duration is a time.Duration written as text ("2m") in TOML.
@@ -112,6 +115,12 @@ func (c Config) Validate() error {
 		if _, err := time.Parse(time.RFC3339, c.RemoteUntil); err != nil {
 			return fmt.Errorf("remote_until must be an RFC 3339 time (2026-10-02T09:00:00Z), got %q", c.RemoteUntil)
 		}
+	}
+	if c.AgentModel != "" && !agent.ValidModel(c.AgentModel) {
+		return fmt.Errorf("agent_model is not a model name: %q", c.AgentModel)
+	}
+	if c.AgentEffort != "" && !agent.ValidEffort(c.AgentEffort) {
+		return fmt.Errorf("agent_effort must be one of low, medium, high, xhigh, max, got %q", c.AgentEffort)
 	}
 	switch c.Language {
 	case "", "en", "es":
