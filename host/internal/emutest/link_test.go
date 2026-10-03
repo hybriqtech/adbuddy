@@ -3,7 +3,9 @@ package emutest
 import (
 	"context"
 	"encoding/json"
+	"html"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
+	"github.com/hybriqtech/adbuddy/host/internal/shq"
 )
 
 // linkWait is how long openLink waits for the app's first device.info.
@@ -383,5 +386,94 @@ func TestTheLinkIsUndoneAtCleanup(t *testing.T) {
 	out := e.run(t, "reverse", "--list")
 	if strings.Contains(out, "tcp:"+strconv.Itoa(port)) {
 		t.Errorf("the reverse of port %d is still there after the test: %q", port, out)
+	}
+}
+
+// restoreAtCleanup puts back the value of a setting read before a test
+// changed it ("null": it was not set, so it is deleted).
+func (e *emu) restoreAtCleanup(t *testing.T, namespace, key, prev string) {
+	if prev == "null" || prev == "" {
+		e.atCleanup(t, "shell", shq.Join("settings", "delete", namespace, key))
+		return
+	}
+	e.atCleanup(t, "shell", shq.Join("settings", "put", namespace, key, prev))
+}
+
+// uiRequest sends a ui.request and returns the app's ui.response to it.
+func (l *link) uiRequest(t *testing.T, id, op string, args any) bridge.UIResponse {
+	t.Helper()
+	raw, err := json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.send(t, bridge.TypeUIRequest, bridge.UIRequest{ID: id, Op: op, Args: raw, ExpiresAt: time.Now().Add(10 * time.Second).UTC()})
+	for {
+		r := payload[bridge.UIResponse](t, l.waitFor(t, bridge.TypeUIResponse, 15*time.Second))
+		if r.ID == id {
+			return r
+		}
+	}
+}
+
+// searchField reads the text of Settings' search field from a uiautomator
+// dump of the screen ("" and false when it is not on screen).
+func searchField(dump string) (string, bool) {
+	node := regexp.MustCompile(`<node [^>]*resource-id="com\.google\.android\.settings\.intelligence:id/open_search_view_edit_text"[^>]*>`).FindString(dump)
+	m := regexp.MustCompile(` text="([^"]*)"`).FindStringSubmatch(node)
+	if m == nil {
+		return "", false
+	}
+	return html.UnescapeString(m[1]), true
+}
+
+func TestSearchField(t *testing.T) {
+	dump := `<hierarchy rotation="0"><node index="0" text="&#191;Qu&#233; tal? &amp; 👋" resource-id="com.google.android.settings.intelligence:id/open_search_view_edit_text" class="android.widget.EditText" focused="true" /></hierarchy>`
+	if got, ok := searchField(dump); !ok || got != "¿Qué tal? & 👋" {
+		t.Errorf("searchField = %q, %v", got, ok)
+	}
+	if _, ok := searchField(`<hierarchy><node text="x" resource-id="android:id/title" /></hierarchy>`); ok {
+		t.Error("a field read where there is none")
+	}
+}
+
+// Validation 2 of M5a: the agent's `type` (ui.request setText by the real
+// channel) writes Unicode text into another app's field, here the focused
+// search field of Settings, with ADBuddy's accessibility service on as setup
+// leaves it; uiautomator reads the field back.
+func TestTypeWritesUnicodeIntoAField(t *testing.T) {
+	l := openLink(t)
+	e := l.e
+	const text = "¿Qué tal? 👋"
+	e.restoreAtCleanup(t, "secure", "enabled_accessibility_services", e.shell(t, "settings get secure enabled_accessibility_services"))
+	e.restoreAtCleanup(t, "secure", "accessibility_enabled", e.shell(t, "settings get secure accessibility_enabled"))
+	if _, err := phoneapp.EnableAccessibility(e.ctx, e.adb, l.v); err != nil {
+		t.Fatalf("accessibility: %v", err)
+	}
+	e.atCleanup(t, "shell", "am force-stop com.google.android.settings.intelligence")
+	e.atCleanup(t, "shell", "input keyevent KEYCODE_HOME")
+	e.shell(t, "am start -W -a android.settings.APP_SEARCH_SETTINGS")
+
+	// The service binds a moment after the setting (until then the app says
+	// unavailable), and the field takes the focus a moment after the activity
+	// starts (not_found).
+	var r bridge.UIResponse
+	for i := 1; ; i++ {
+		r = l.uiRequest(t, "u_"+strconv.Itoa(i), bridge.UIOpSetText, bridge.UISetTextArgs{Text: text})
+		if r.OK || r.Error == nil || r.Error.Code != bridge.CodeUnavailable && r.Error.Code != bridge.CodeNotFound || i == 20 {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	if !r.OK {
+		t.Fatalf("setText refused: %+v", r.Error)
+	}
+	var got string
+	var dump string
+	if !poll(10*time.Second, func() bool {
+		dump = e.shell(t, "uiautomator dump /sdcard/adbuddy-emutest.xml >/dev/null && cat /sdcard/adbuddy-emutest.xml; rm -f /sdcard/adbuddy-emutest.xml")
+		got, _ = searchField(dump)
+		return got == text
+	}) {
+		t.Errorf("Settings' search field holds %q, want %q", got, text)
 	}
 }
