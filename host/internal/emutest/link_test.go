@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"html"
+	"io"
 	"net"
 	"regexp"
 	"strconv"
@@ -57,6 +58,9 @@ func openLink(t *testing.T) *link {
 		t.Fatalf("battery optimisation: %v", err)
 	}
 	e.atCleanup(t, "shell", "dumpsys deviceidle whitelist -"+phoneapp.Package)
+	// The tests look for the app's English texts ("Not now", "Send", "Retry"):
+	// the app's own language, whatever the emulator's.
+	e.shell(t, "cmd locale set-app-locales "+phoneapp.Package+" --locales en")
 	// As after the app's first run, where it asks: otherwise its notifications
 	// (the conversation's, the questions') are not shown.
 	e.shell(t, "pm grant "+phoneapp.Package+" android.permission.POST_NOTIFICATIONS")
@@ -89,7 +93,7 @@ func (l *link) listen(t *testing.T, port int) {
 		t.Fatalf("listen on 127.0.0.1:%d: %v", port, err)
 	}
 	l.port = ln.Addr().(*net.TCPAddr).Port
-	l.srv = bridge.New(bridge.Options{
+	srv := bridge.New(bridge.Options{
 		Token:       l.token,
 		Session:     "emutest",
 		HostVersion: "emutest",
@@ -103,17 +107,21 @@ func (l *link) listen(t *testing.T, port int) {
 			return true
 		},
 	})
+	l.srv = srv
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = l.srv.Serve(ctx, ln)
+		_ = srv.Serve(ctx, ln)
 	}()
 	var once sync.Once
 	l.stop = func() {
 		once.Do(func() {
 			cancel()
 			<-done
+			// What the old server's connection had in flight must not reach
+			// the next one's tests: wait until it is gone.
+			poll(5*time.Second, func() bool { return !srv.Connected() })
 		})
 	}
 }
@@ -266,6 +274,7 @@ func payload[T any](t *testing.T, m bridge.Message) T {
 // atCleanup runs adb with args at cleanup, while the emulator is online (as
 // uninstallAtCleanup), ignoring its answer.
 func (e *emu) atCleanup(t *testing.T, args ...string) {
+	t.Helper()
 	t.Cleanup(func() {
 		c := *e
 		c.ctx = context.WithoutCancel(e.ctx)
@@ -323,13 +332,15 @@ func poll(d time.Duration, cond func() bool) bool {
 	return true
 }
 
+var pidRe = regexp.MustCompile(`^\d+$`)
+
 // pidOf returns the pid of the app's process, waiting up to 15 s for one.
 func (e *emu) pidOf(t *testing.T) string {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		out, _, _, _ := e.adb.Output(e.ctx, "shell", "pidof "+phoneapp.Package)
-		if pid := strings.TrimSpace(strings.ReplaceAll(out, "\r", "")); pid != "" && !strings.Contains(pid, " ") {
+		if pid := strings.TrimSpace(strings.ReplaceAll(out, "\r", "")); pidRe.MatchString(pid) {
 			return pid
 		}
 		if time.Now().After(deadline) {
@@ -349,30 +360,33 @@ func TestTheLinkComesBack(t *testing.T) {
 	e := l.e
 
 	l.drain()
+	n := len(l.Hellos())
 	l.cut()
 	if !poll(10*time.Second, func() bool { return !l.connected() }) {
 		t.Fatal("still connected 10 s after the host's side stopped")
 	}
 	l.resume(t)
-	l.waitHellos(t, 2, 40*time.Second)
+	l.waitHellos(t, n+1, 40*time.Second)
 	l.waitFor(t, bridge.TypeDeviceInfo, linkWait)
 
 	l.drain()
+	n = len(l.Hellos())
 	pid := e.pidOf(t)
 	e.shell(t, "su 0 kill -9 "+pid)
-	l.waitHellos(t, 3, 40*time.Second)
+	l.waitHellos(t, n+1, 40*time.Second)
 	l.waitFor(t, bridge.TypeDeviceInfo, linkWait)
 	if now := e.pidOf(t); now == pid {
 		t.Errorf("the app's process is still %s after kill -9", pid)
 	}
 
 	l.drain()
+	n = len(l.Hellos())
 	e.shell(t, "am force-stop "+phoneapp.Package)
 	if !poll(10*time.Second, func() bool { return !l.connected() }) {
 		t.Fatal("still connected 10 s after am force-stop")
 	}
 	l.handshake(t)
-	l.waitHellos(t, 4, 20*time.Second)
+	l.waitHellos(t, n+1, 20*time.Second)
 	l.waitFor(t, bridge.TypeDeviceInfo, linkWait)
 	var dump string
 	if !poll(20*time.Second, func() bool {
@@ -387,16 +401,22 @@ func TestTheLinkComesBack(t *testing.T) {
 func TestTheLinkIsUndoneAtCleanup(t *testing.T) {
 	e := newEmu(t)
 	port := 0
-	t.Run("open", func(t *testing.T) { port = openLink(t).port })
-	out := e.run(t, "reverse", "--list")
-	if strings.Contains(out, "tcp:"+strconv.Itoa(port)) {
-		t.Errorf("the reverse of port %d is still there after the test: %q", port, out)
+	if !t.Run("open", func(t *testing.T) { port = openLink(t).port }) {
+		return
+	}
+	open, err := phoneapp.TunnelOpen(e.ctx, e.adb, port)
+	if err != nil {
+		t.Fatalf("reverse --list: %v", err)
+	}
+	if open {
+		t.Errorf("the reverse of port %d is still there after the test", port)
 	}
 }
 
 // restoreAtCleanup puts back the value of a setting read before a test
 // changed it ("null": it was not set, so it is deleted).
 func (e *emu) restoreAtCleanup(t *testing.T, namespace, key, prev string) {
+	t.Helper()
 	if prev == "null" || prev == "" {
 		e.atCleanup(t, "shell", shq.Join("settings", "delete", namespace, key))
 		return
@@ -475,7 +495,7 @@ func TestTypeWritesUnicodeIntoAField(t *testing.T) {
 	var got string
 	var dump string
 	if !poll(10*time.Second, func() bool {
-		dump = e.shell(t, "uiautomator dump /sdcard/adbuddy-emutest.xml >/dev/null && cat /sdcard/adbuddy-emutest.xml; rm -f /sdcard/adbuddy-emutest.xml")
+		dump = e.dumpScreen(t)
 		got, _ = searchField(dump)
 		return got == text
 	}) {
@@ -504,6 +524,7 @@ func notificationRecord(dump, pkg, channel string) string {
 func TestSpanishAppEnglishHost(t *testing.T) {
 	l := openLink(t)
 	e := l.e
+	e.atCleanup(t, "shell", "cmd locale set-app-locales "+phoneapp.Package+" --locales en")
 	e.shell(t, "cmd locale set-app-locales "+phoneapp.Package+" --locales es")
 	l.send(t, bridge.TypeConfirmReq, bridge.ConfirmRequest{
 		ID: "j_1", Level: "red", Title: "Restart the phone", Detail: "may restart",
@@ -541,13 +562,16 @@ type uiNode struct {
 var boundsRe = regexp.MustCompile(`^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$`)
 
 // uiNodes reads the nodes of a uiautomator dump.
-func uiNodes(dump string) []uiNode {
+func uiNodes(dump string) ([]uiNode, error) {
 	var nodes []uiNode
 	d := xml.NewDecoder(strings.NewReader(dump))
 	for {
 		tok, err := d.Token()
+		if err == io.EOF {
+			return nodes, nil
+		}
 		if err != nil {
-			return nodes
+			return nodes, err
 		}
 		se, ok := tok.(xml.StartElement)
 		if !ok || se.Name.Local != "node" {
@@ -582,7 +606,10 @@ func uiNodes(dump string) []uiNode {
 
 func TestUINodes(t *testing.T) {
 	dump := `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0"><node text="Not now" resource-id="" class="android.widget.TextView" content-desc="" bounds="[407,2216][544,2269]"><node text="" resource-id="a:id/b" class="android.view.View" content-desc="Send &amp; go" bounds="[965,2222][1028,2285]" /></node></hierarchy>`
-	got := uiNodes(dump)
+	got, err := uiNodes(dump)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := []uiNode{{Text: "Not now", Class: "android.widget.TextView", X: 475, Y: 2242}, {ID: "a:id/b", Class: "android.view.View", Desc: "Send & go", X: 996, Y: 2253}}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Errorf("uiNodes = %+v, want %+v", got, want)
@@ -592,7 +619,17 @@ func TestUINodes(t *testing.T) {
 // screen returns the nodes on the emulator's screen now.
 func (e *emu) screen(t *testing.T) []uiNode {
 	t.Helper()
-	return uiNodes(e.shell(t, "uiautomator dump /sdcard/adbuddy-emutest.xml >/dev/null && cat /sdcard/adbuddy-emutest.xml; rm -f /sdcard/adbuddy-emutest.xml"))
+	nodes, err := uiNodes(e.dumpScreen(t))
+	if err != nil {
+		t.Fatalf("uiautomator dump: %v", err)
+	}
+	return nodes
+}
+
+// dumpScreen returns the uiautomator dump of the emulator's screen now.
+func (e *emu) dumpScreen(t *testing.T) string {
+	t.Helper()
+	return e.shell(t, "uiautomator dump /sdcard/adbuddy-emutest.xml >/dev/null && cat /sdcard/adbuddy-emutest.xml; rm -f /sdcard/adbuddy-emutest.xml")
 }
 
 // waitNode waits up to d for a node that match accepts, or fails.
