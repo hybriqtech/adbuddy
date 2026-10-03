@@ -67,6 +67,20 @@ class NotificationListenerOnEmulatorTest {
         val waitMs = args.getString("waitMs")?.toLongOrNull() ?: 25_000L
         val out = Bundle()
         read(out, "", waitMs)
+        if (args.getString("unbind") == "1") {
+            // Allowed in the system but not bound, as after a reboot or a dead process the system has not bound
+            // again yet: the listener asks to be unbound, the access stays allowed (the setting keeps it).
+            val service = listener()
+            assertNotNull("no bound listener to unbind", service)
+            service!!.requestUnbind()
+            out.putString("$KEY.unbound.disconnected", awaitConnected(false, 10_000L).toString())
+            read(out, "unbound.", 0L)
+            val started = SystemClock.elapsedRealtime()
+            out.putString("$KEY.unbound.read", AgentNotificationListener.read()?.size?.toString() ?: "null")
+            out.putString("$KEY.unbound.readMs", (SystemClock.elapsedRealtime() - started).toString())
+            NotificationListenerService.requestRebind(ComponentName(context, AgentNotificationListener::class.java))
+            read(out, "rebound.", waitMs)
+        }
         instrumentation.sendStatus(STATUS_CODE, out)
     }
 

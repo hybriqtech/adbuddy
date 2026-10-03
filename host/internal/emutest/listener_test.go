@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
 )
 
@@ -409,4 +410,129 @@ func TestRevokingClearsTheMark(t *testing.T) {
 		}
 		t.Logf("FINDING (M5c-32 b, ruling 15's accepted risk): the mark survived a revocation with the app dead; the gate reads %s without a new tap", g["gate"])
 	})
+}
+
+// notifications asks the app for the notifications over the real channel, as
+// `adbuddy notifications` does (UiExecutor and the gate of UiHelpers.install).
+// After am instrument, which restarts the app's process and so drops the
+// channel, it hands the app the token again first, as serve does.
+func (l *link) notifications(t *testing.T, id string) bridge.UIResponse {
+	t.Helper()
+	if !l.connected() {
+		n := len(l.Hellos())
+		l.handshake(t)
+		l.waitHellos(t, n+1, 40*time.Second)
+	}
+	return l.uiRequest(t, id, bridge.UIOpNotifications, bridge.Empty{})
+}
+
+// restarted waits for the channel to drop after am instrument restarted the
+// app's process.
+func (l *link) restarted(t *testing.T) {
+	t.Helper()
+	if !poll(15*time.Second, func() bool { return !l.connected() }) {
+		t.Fatal("the channel is still up 15 s after am instrument restarted the app")
+	}
+}
+
+// wantUnavailable fails unless r is `unavailable` with a text that contains why.
+func wantUnavailable(t *testing.T, step string, r bridge.UIResponse, why string) {
+	t.Helper()
+	if r.OK || r.Error == nil || r.Error.Code != bridge.CodeUnavailable || !strings.Contains(r.Error.Text, why) {
+		t.Errorf("%s: notifications answered %+v (error %+v), want unavailable with %q", step, r, r.Error, why)
+	}
+}
+
+// M5c-22, M5c-23 and M5c-28 (the gate's states): with the access not allowed,
+// allowed without the user's tap, confirmed, allowed but not bound, revoked
+// and allowed again, what the system says (the setting and its own answer),
+// what the app reads in a fresh process (listenerGateTest), what its screen
+// shows and what `notifications` answers over the real channel.
+func TestTheListenerGateStates(t *testing.T) {
+	l := openLink(t)
+	e := l.e
+	e.listenerSetup(t)
+
+	// Not allowed: the system does not list it, the app says so.
+	if e.listenerListed(t) {
+		t.Fatal("a fresh install is listed in enabled_notification_listeners")
+	}
+	wantUnavailable(t, "not allowed", l.notifications(t, "n_1"), notAllowedText)
+	g := e.gateRead(t)
+	wantGate(t, "not allowed", g, map[string]string{
+		"api": "false", "listed": "NO", "connected": "false", "state": "NOT_GRANTED",
+		"mark": "false", "effective": "OFF", "gate": "NoAccess",
+	})
+	if s := g["setting"]; s != "NO" && s != "null" && s != "empty" {
+		t.Errorf("not allowed: the app reads the setting as %q, want NO, null or empty", s)
+	}
+	l.restarted(t)
+	e.openAccessStep(t)
+	if nodes := e.waitAccessState(t, accessNotAllowed); hasConfirm(nodes) {
+		t.Errorf("not allowed, yet the screen offers the confirm button: %+v", nodes)
+	}
+
+	// Allowed in the system: the listener binds although it is not exported
+	// (the system binds it), and still nothing is read without the user's tap.
+	e.allowListener(t, true)
+	wantUnavailable(t, "allowed, not confirmed", l.notifications(t, "n_2"), notConfirmedText)
+	g = e.gateRead(t)
+	wantGate(t, "allowed, not confirmed", g, map[string]string{
+		"setting": "YES", "api": "true", "listed": "YES", "connected": "true", "state": "GRANTED",
+		"mark": "false", "effective": "NEEDS_CONFIRMATION", "gate": "NotConfirmed",
+	})
+	l.restarted(t)
+
+	// The user's tap: the gate reads.
+	e.confirmOnScreen(t)
+	r := l.notifications(t, "n_3")
+	if !r.OK {
+		t.Errorf("confirmed: notifications answered %+v (error %+v), want the list", r, r.Error)
+	} else {
+		list := payload[bridge.UINotifications](t, bridge.Message{Type: bridge.TypeUIResponse, Payload: r.Result})
+		t.Logf("confirmed: notifications gives %d (truncated %v)", len(list.Notifications), list.Truncated)
+	}
+
+	// Allowed but not bound (the listener asks the system to unbind it; the
+	// access stays allowed): Unknown, and the read says no at once instead of
+	// waiting. Unbinding clears the mark (onListenerDisconnected), so bound
+	// again it needs a new tap.
+	g = e.gateRead(t, "-e unbind 1")
+	wantGate(t, "confirmed", g, map[string]string{
+		"listed": "YES", "connected": "true", "state": "GRANTED", "mark": "true", "effective": "ON",
+	})
+	if !strings.HasPrefix(g["gate"], "Ok:") {
+		t.Errorf("confirmed: the gate reads %q, want Ok", g["gate"])
+	}
+	wantGate(t, "allowed but not bound", g, map[string]string{
+		"unbound.disconnected": "true", "unbound.setting": "YES", "unbound.api": "true", "unbound.listed": "YES",
+		"unbound.connected": "false", "unbound.state": "UNKNOWN", "unbound.effective": "UNKNOWN",
+		"unbound.read": "null", "unbound.mark": "false", "unbound.gate": "NotConfirmed",
+		"rebound.listed": "YES", "rebound.connected": "true", "rebound.state": "GRANTED",
+		"rebound.mark": "false", "rebound.effective": "NEEDS_CONFIRMATION", "rebound.gate": "NotConfirmed",
+	})
+	l.restarted(t)
+
+	// Confirmed again, then revoked: not allowed, and allowed again it asks again.
+	e.confirmOnScreen(t)
+	e.allowListener(t, false)
+	wantUnavailable(t, "revoked", l.notifications(t, "n_4"), notAllowedText)
+	g = e.gateRead(t)
+	wantGate(t, "revoked", g, map[string]string{
+		"api": "false", "listed": "NO", "state": "NOT_GRANTED", "mark": "false", "effective": "OFF", "gate": "NoAccess",
+	})
+	l.restarted(t)
+	e.allowListener(t, true)
+	wantUnavailable(t, "allowed again", l.notifications(t, "n_5"), notConfirmedText)
+	e.openAccessStep(t)
+	if nodes := e.waitAccessState(t, accessNeedsTap); !hasConfirm(nodes) {
+		t.Errorf("allowed again, the screen does not offer the confirm button: %+v", nodes)
+	}
+
+	// The process dead: the setting still lists the listener.
+	e.shell(t, "input keyevent KEYCODE_HOME")
+	e.shell(t, "am force-stop "+phoneapp.Package)
+	if !e.listenerListed(t) {
+		t.Error("with the app's process dead, the listener is no longer in enabled_notification_listeners")
+	}
 }
