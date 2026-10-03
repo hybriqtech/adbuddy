@@ -513,13 +513,19 @@ var unlockAndRetry = i18n.M("doctor.unlock")
 // mode on (mode: remote_until in config.toml as the controller reads it, so
 // an expiry beyond its lifetime counts as expired) that is expected, and it
 // says until when; with serve stopped nothing closes it, even after that.
+// persist.adb.tcp.port is read too (device.ReadTCP, VB-41): a port it names
+// is never "closed", and a read that fails is "could not read".
 func checkRemotePort(ctx context.Context, phone adb.Runner, mode remoteInfo, serveRunning bool) check {
-	port, err := callWithin(ctx, func(c context.Context) (string, error) { return device.TCPPort(c, phone) })
+	t, err := callWithin(ctx, func(c context.Context) (device.TCP, error) { return device.ReadTCP(c, phone) })
+	port := t.Now
 	switch {
 	case err != nil:
 		return mk("network port", checkWarn, i18n.M("doctor.port.read_failed", causeMsg(err))).withGuide(unlockAndRetry)
-	case port == "" || port == "0":
+	case port == "" && t.Persist == "":
 		return mk("network port", checkOK, i18n.M("doctor.port.closed"))
+	case port == "":
+		// VB-41: closed now, but adbd takes persist again when the phone restarts.
+		return mk("network port", checkWarn, i18n.M("doctor.port.persist", t.Persist)).withGuide(i18n.M("doctor.port.persist_fix"))
 	}
 	if mode.Enabled && mode.ExpiresAt != nil {
 		hm := mode.ExpiresAt.Local().Format("15:04")
@@ -532,7 +538,16 @@ func checkRemotePort(ctx context.Context, phone adb.Runner, mode remoteInfo, ser
 		}
 		return c.withGuide(i18n.M("doctor.port.serve_stopped", hm))
 	}
-	return mk("network port", checkWarn, i18n.M("doctor.port.open", port)).withGuide(i18n.M("doctor.port.nothing_to_do"))
+	c := mk("network port", checkWarn, i18n.M("doctor.port.open", port))
+	switch {
+	case t.Persist != "":
+		// serve's adb usb closes it, but only until the phone restarts.
+		return c.withGuide(i18n.M("doctor.port.persist_fix"))
+	case serveRunning:
+		// serve closes it only when it starts; on a reconnection it only warns.
+		return c.withGuide(i18n.M("doctor.port.serve_running"))
+	}
+	return c.withGuide(i18n.M("doctor.port.nothing_to_do"))
 }
 
 // checkApp: the phone app is optional; everything here is a warning at most.

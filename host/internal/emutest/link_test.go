@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"fmt"
 	"html"
 	"io"
 	"net"
@@ -43,6 +44,10 @@ type link struct {
 	wake   chan struct{} // closed and replaced on each message or hello
 	msgs   []bridge.Message
 	hellos []bridge.Hello // tokens blanked
+
+	// onFrame, when set, receives the app's binary frames (see setOnFrame).
+	// It lives in the link, not in the Server, so it survives resume.
+	onFrame func(id bridge.FrameID, offset int64, data []byte)
 }
 
 // openLink installs the app on the emulator (as installApp, in the
@@ -106,6 +111,7 @@ func (l *link) listen(t *testing.T, port int) {
 		Session:     "emutest",
 		HostVersion: "emutest",
 		OnMessage:   l.put,
+		OnFrame:     l.frame,
 		Admit: func(_ context.Context, h bridge.Hello) bool {
 			h.Token = ""
 			l.mu.Lock()
@@ -132,6 +138,28 @@ func (l *link) listen(t *testing.T, port int) {
 			poll(5*time.Second, func() bool { return !srv.Connected() })
 		})
 	}
+}
+
+// frame hands a binary frame of the app to the handler set with setOnFrame.
+// The server only lends data during the call: it is copied here.
+func (l *link) frame(id bridge.FrameID, offset int64, data []byte) {
+	l.mu.Lock()
+	fn := l.onFrame
+	l.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	fn(id, offset, append([]byte(nil), data...))
+}
+
+// setOnFrame sets (nil: removes) the handler of the app's binary frames; it
+// holds for the servers resume starts too. The handler runs on the
+// connection's reader: it must never call cut (stop waits for the reader),
+// and what it keeps is its own copy of the data.
+func (l *link) setOnFrame(fn func(id bridge.FrameID, offset int64, data []byte)) {
+	l.mu.Lock()
+	l.onFrame = fn
+	l.mu.Unlock()
 }
 
 // handshake hands the token and the port to the app again, as serve does
@@ -264,6 +292,72 @@ func (l *link) reply(t *testing.T, req bridge.Message, typ string, p any) {
 	if err := l.srv.Reply(req, typ, p); err != nil {
 		t.Fatalf("reply %s: %v", typ, err)
 	}
+}
+
+// serveOpts are the ways a host can misbehave when it serves a file.
+type serveOpts struct {
+	// limit > 0: only that many bytes from the offset asked for, and no
+	// file.end: the host stalls there (the test then cuts or cancels).
+	limit int64
+	// corrupt damages the first byte of every frame it sends.
+	corrupt bool
+	// fromZero ignores the offset the app asked for and serves from 0.
+	fromZero bool
+	// endSize, when not 0, is the Size file.end carries instead of the real one.
+	endSize int64
+}
+
+// sendFile serves req, a file.get of the app, from data (the whole file): the
+// binary frames from the offset asked for, in frames of MaxFrameData, and then
+// file.end as a reply; the queue sends them in that order (spec M3 §6.2). It
+// blocks while the app is slow to take them.
+func (l *link) sendFile(t *testing.T, req bridge.Message, data []byte) {
+	t.Helper()
+	l.serveFile(t, req, data, serveOpts{})
+}
+
+// serveFile is sendFile with the host's misbehaviour of opt.
+func (l *link) serveFile(t *testing.T, req bridge.Message, data []byte, opt serveOpts) {
+	t.Helper()
+	g := payload[bridge.FileGet](t, req)
+	id, err := bridge.ParseFrameID(g.ID)
+	if err != nil {
+		t.Fatalf("file.get id %q: %v", g.ID, err)
+	}
+	if g.Offset < 0 || g.Offset > int64(len(data)) {
+		t.Fatalf("file.get offset %d outside the %d bytes of the file", g.Offset, len(data))
+	}
+	from, end := g.Offset, int64(len(data))
+	if opt.fromZero {
+		from = 0
+	}
+	if opt.limit > 0 {
+		end = min(end, from+opt.limit)
+	}
+	for off := from; off < end; {
+		n := min(int64(bridge.MaxFrameData), end-off)
+		chunk := data[off : off+n]
+		if opt.corrupt {
+			chunk = append([]byte(nil), chunk...)
+			chunk[0] ^= 0xff
+		}
+		frame, err := bridge.EncodeFrame(id, off, chunk)
+		if err != nil {
+			t.Fatalf("frame at %d: %v", off, err)
+		}
+		if err := l.srv.SendFrameTo(l.e.ctx, req, frame); err != nil {
+			t.Fatalf("send the frame at %d: %v", off, err)
+		}
+		off += n
+	}
+	if opt.limit > 0 && end < int64(len(data)) {
+		return
+	}
+	size := int64(len(data))
+	if opt.endSize != 0 {
+		size = opt.endSize
+	}
+	l.reply(t, req, bridge.TypeFileEnd, bridge.FileEnd{ID: g.ID, Size: size})
 }
 
 // connected reports whether the app is connected now.
@@ -651,9 +745,31 @@ func (e *emu) screen(t *testing.T) []uiNode {
 }
 
 // dumpScreen returns the uiautomator dump of the emulator's screen now.
+//
+// uiautomator dump sometimes fails (exit 255, "could not get idle state") while
+// the screen is changing or the app is starting cold (the terminal's WebView
+// keeps the UI busy for ~9 s). The shell's exit code is the dump's (rc is kept
+// across the rm), and an empty dump counts as a failure too (it would read as
+// an empty screen). It is tried again; the last failure is reported with its
+// stderr.
 func (e *emu) dumpScreen(t *testing.T) string {
 	t.Helper()
-	return e.shell(t, "uiautomator dump /sdcard/adbuddy-emutest.xml >/dev/null && cat /sdcard/adbuddy-emutest.xml; rm -f /sdcard/adbuddy-emutest.xml")
+	const f = "/sdcard/adbuddy-emutest.xml"
+	const cmd = "uiautomator dump " + f + " >/dev/null && cat " + f + "; rc=$?; rm -f " + f + "; exit $rc"
+	var last string
+	for try := 1; try <= 5; try++ {
+		ctx, cancel := context.WithTimeout(e.ctx, 3*time.Minute)
+		out, errOut, code, err := e.adb.Output(ctx, "shell", cmd)
+		cancel()
+		out = strings.TrimSpace(strings.ReplaceAll(out, "\r", ""))
+		if err == nil && code == 0 && out != "" {
+			return out
+		}
+		last = fmt.Sprintf("exit %d, %v, stderr %q, %d bytes of dump", code, err, strings.TrimSpace(errOut), len(out))
+		time.Sleep(time.Second)
+	}
+	t.Fatalf("uiautomator dump failed 5 times: %s", last)
+	return ""
 }
 
 // waitNode waits up to d for a node that match accepts, or fails.
@@ -698,7 +814,8 @@ func (l *link) openChat(t *testing.T) {
 		if step == 2 {
 			want = "Message the agent"
 		}
-		e.waitNode(t, want, 15*time.Second, func(n uiNode) bool { return n.Text == want })
+		// A cold start is slow here: the terminal's WebView loads (~9 s) and the UI is not idle.
+		e.waitNode(t, want, 60*time.Second, func(n uiNode) bool { return n.Text == want })
 	}
 }
 

@@ -214,33 +214,85 @@ func WriteJSON(dir string, p Profile) error {
 	return os.Rename(tmp.Name(), filepath.Join(dir, "device.json"))
 }
 
-// TCPPort returns the TCP port adbd listens on, or "" when it listens on
-// none (service.adb.tcp.port empty or 0). It only reads.
-func TCPPort(ctx context.Context, a ADB) (string, error) {
-	port, err := shell(ctx, a, "getprop service.adb.tcp.port")
-	if err != nil || port == "0" {
-		return "", err
+// TCP is adbd's TCP port as its properties read (spec §3.3, VB-41). Both
+// fields come from the phone: trimmed, cut to maxPortRunes and printable, so
+// they can be shown as they are.
+type TCP struct {
+	// Now is the port adbd listens on, "" when none: service.adb.tcp.port,
+	// or persist.adb.tcp.port when service.adb.tcp.port is empty (AOSP adbd
+	// takes persist at its start only then, as after a reboot). Any value but
+	// empty or 0 counts as a port, even one that is not a number: never a
+	// false "closed".
+	Now string
+	// Persist is persist.adb.tcp.port when it names a port ("" when empty or
+	// 0). `adb usb` does not clear it and it survives a reboot (measured,
+	// VB-41): adbd takes it again at its next start with service.adb.tcp.port
+	// empty. ADBuddy never sets it and cannot clear it: the shell user may
+	// not (setprop exits 1) and the host never runs su.
+	Persist string
+}
+
+// maxPortRunes bounds a port property as the host keeps and shows it.
+const maxPortRunes = 16
+
+// ReadTCPWait bounds one ReadTCP where a caller has a longer budget for more
+// than the read (the remote controller and `remote off` before `adb usb`, the
+// watcher of the connection): a hung getprop must not eat it. A variable so
+// a test can shorten it; read it before starting goroutines.
+var ReadTCPWait = 10 * time.Second
+
+// portValue is a property read as a port: "" when empty or 0; otherwise the
+// value, cut to maxPortRunes and printable.
+func portValue(v string) string {
+	if v == "" || v == "0" {
+		return ""
 	}
-	return port, nil
+	if utf8.RuneCountInString(v) > maxPortRunes {
+		v = string([]rune(v)[:maxPortRunes]) + "…"
+	}
+	return classify.Printable(v)
+}
+
+// ReadTCP reads adbd's TCP port: service.adb.tcp.port, then
+// persist.adb.tcp.port. It only reads. If either read fails the error says
+// so: the port is unknown then, never closed.
+func ReadTCP(ctx context.Context, a ADB) (TCP, error) {
+	service, err := shell(ctx, a, "getprop service.adb.tcp.port")
+	if err != nil {
+		return TCP{}, err
+	}
+	persist, err := shell(ctx, a, "getprop persist.adb.tcp.port")
+	if err != nil {
+		return TCP{}, err
+	}
+	t := TCP{Now: portValue(service), Persist: portValue(persist)}
+	if service == "" {
+		t.Now = t.Persist
+	}
+	return t, nil
 }
 
 // EnsureNoTCPPort applies the host invariant (spec §3.3): if adbd listens on
-// a TCP port (service.adb.tcp.port neither empty nor 0) and remote mode is
-// not on, `adb usb` closes it. adbd restarts, so the caller must wait for
-// the phone again when this returns true. keep is a port that must stay open
-// (remote mode's 5555); another open port is still closed.
-func EnsureNoTCPPort(ctx context.Context, a ADB, keep string) (bool, error) {
-	port, err := TCPPort(ctx, a)
-	if err != nil || port == "" || keep != "" && port == keep {
-		return false, err
+// a TCP port (TCP.Now) other than keep (remote mode's 5555, "" when the mode
+// is off), `adb usb` closes it: adbd sets service.adb.tcp.port to 0 and
+// restarts, and with it at 0 ignores persist.adb.tcp.port until the next
+// reboot. It returns what it read and whether it ran `adb usb`: adbd
+// restarts, so the caller must wait for the phone and read the port again. A
+// persist port with service.adb.tcp.port at 0 is nothing to close now
+// (`adb usb` would only restart adbd again, at every start): the caller warns
+// about it. A read that fails is an error, and nothing runs.
+func EnsureNoTCPPort(ctx context.Context, a ADB, keep string) (TCP, bool, error) {
+	t, err := ReadTCP(ctx, a)
+	if err != nil || t.Now == "" || keep != "" && t.Now == keep {
+		return t, false, err
 	}
 	var out, errb bytes.Buffer
 	code, err := a.Run(ctx, "", []string{"usb"}, nil, &out, &errb)
 	if err != nil {
-		return false, err
+		return t, false, err
 	}
 	if code != 0 {
-		return false, fmt.Errorf("adb usb: %s", classify.Printable(strings.TrimSpace(errb.String()+" "+out.String())))
+		return t, false, fmt.Errorf("adb usb: %s", classify.Printable(strings.TrimSpace(errb.String()+" "+out.String())))
 	}
-	return true, nil
+	return t, true, nil
 }

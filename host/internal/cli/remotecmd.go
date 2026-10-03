@@ -15,6 +15,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
@@ -34,17 +35,22 @@ const exitRemoteDenied = 126
 // remoteInfo is the remote mode as `adbuddy remote` reports it. Closing
 // means the expiry passed and the port is not known to be closed yet: it is
 // still enabled, never "off". Serve says whether `adbuddy serve` answered
-// (otherwise it was read from config.toml).
+// (otherwise it was read from config.toml). PersistPort is
+// persist.adb.tcp.port when the last read found it naming a port (VB-41: adbd
+// listens on it again when the phone restarts), and PersistUnknown says that
+// read failed: an "off" with either is never a plain "closed".
 type remoteInfo struct {
-	Enabled   bool       `json:"enabled"`
-	Closing   bool       `json:"closing,omitempty"`
-	Address   string     `json:"address,omitempty"`
-	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
-	Serve     bool       `json:"serve"`
+	Enabled        bool       `json:"enabled"`
+	Closing        bool       `json:"closing,omitempty"`
+	Address        string     `json:"address,omitempty"`
+	ExpiresAt      *time.Time `json:"expiresAt,omitempty"`
+	Serve          bool       `json:"serve"`
+	PersistPort    string     `json:"persistPort,omitempty"`
+	PersistUnknown bool       `json:"persistUnknown,omitempty"`
 }
 
 func infoOf(s remote.State, serve bool) remoteInfo {
-	i := remoteInfo{Enabled: s.Enabled, Closing: s.Closing, Address: s.Address, Serve: serve}
+	i := remoteInfo{Enabled: s.Enabled, Closing: s.Closing, Address: s.Address, Serve: serve, PersistPort: s.Persist, PersistUnknown: s.PersistUnknown}
 	if s.Enabled {
 		t := s.ExpiresAt.UTC()
 		i.ExpiresAt = &t
@@ -148,9 +154,22 @@ func remoteTextIn(lang i18n.Lang, op string, i remoteInfo) string {
 	if i.ExpiresAt != nil {
 		until = i.ExpiresAt.Local().Format("15:04")
 	}
+	// VB-41: off with a persist port, or with persist unread, is not closed
+	// for good.
+	var persist string
 	switch {
+	case i.PersistPort != "":
+		persist = lang.T("remote.text.persist", i.PersistPort)
+	case i.PersistUnknown:
+		persist = lang.T("remote.text.persist_unknown")
+	}
+	switch {
+	case !i.Enabled && op == "off" && persist != "":
+		return lang.T("remote.text.off_mode") + " " + persist
 	case !i.Enabled && op == "off":
 		return lang.T("remote.text.off_closed")
+	case !i.Enabled && persist != "":
+		return sentence(lang.T("remote.text.off")) + ". " + persist
 	case !i.Enabled:
 		return sentence(lang.T("remote.text.off"))
 	case i.Closing && i.Serve:
@@ -197,7 +216,9 @@ func remoteStatusWithoutServe(e env) remoteInfo {
 
 // remoteOffWithoutServe closes the port directly: `adb usb` on the phone, and
 // only when it worked the expiry is cleared (if it fails the mode stays on).
-// There is no serve to hold config.toml, so this is its one writer now.
+// There is no serve to hold config.toml, so this is its one writer now. It
+// reads persist.adb.tcp.port first (VB-41: `adb usb` does not clear it, and
+// right after it adbd restarts) and says what it holds.
 func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, error) {
 	adbPath := configuredADB(e, "")
 	if adbPath == "" {
@@ -222,6 +243,10 @@ func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, er
 	runner.Serial = k.Active
 	octx, cancel := context.WithTimeout(ctx, remoteOpTimeout)
 	defer cancel()
+	// Its own short deadline: a hung read must not eat the budget of adb usb.
+	rctx, rcancel := context.WithTimeout(ctx, device.ReadTCPWait)
+	t, rerr := device.ReadTCP(rctx, runner)
+	rcancel()
 	var out, errb strings.Builder
 	code, err := runner.Run(octx, "", []string{"usb"}, nil, &out, &errb)
 	switch {
@@ -240,7 +265,7 @@ func remoteOffWithoutServe(ctx context.Context, app *App, e env) (remoteInfo, er
 	if err := config.Save(e.dirs.ConfigFile(), cfg); err != nil {
 		return remoteInfo{}, NewErrorT("CONFIG_UNWRITABLE", "err.remotecmd.config_unwritable", "err.remotecmd.config_unwritable.fix", err.Error(), e.dirs.ConfigFile())
 	}
-	return remoteInfo{}, nil
+	return remoteInfo{PersistPort: t.Persist, PersistUnknown: rerr != nil}, nil
 }
 
 // remoteConfirmTitle is the question's title, in the user's language.
