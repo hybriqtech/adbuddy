@@ -3,6 +3,7 @@ package tech.hybriq.adbuddy.ui
 import android.view.View
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import java.util.WeakHashMap
 
@@ -52,3 +53,9 @@ fun ObscuredTouchGuard() {
         onDispose { viewCounts.exit(root) }
     }
 }
+
+/** Whether a MotionEvent's flags say another app's window covered this one, wholly or in part. */
+internal fun isObscured(flags: Int): Boolean = false
+
+/** Refuses a gesture on this element when another app's window covers it (stub). */
+fun Modifier.refuseObscuredTouches(): Modifier = this

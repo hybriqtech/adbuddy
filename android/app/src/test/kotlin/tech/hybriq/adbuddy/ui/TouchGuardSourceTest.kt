@@ -122,6 +122,31 @@ class TouchGuardSourceTest {
         }
     }
 
+    /**
+     * The terminal's quick keys (Esc, Ctrl+C, arrows, Tab, Enter, 1, 2, 3) answer the agent's prompts on the PC: each
+     * of them refuses covered gestures by itself (the window flag would block the whole chat under any overlay).
+     */
+    private val filter = "refuseObscuredTouches()"
+    private val tappables = listOf(
+        "AssistChip", "ElevatedAssistChip", "SuggestionChip", "ElevatedSuggestionChip", "FilterChip", "ElevatedFilterChip",
+        "InputChip", "Button", "TextButton", "OutlinedButton", "ElevatedButton", "FilledTonalButton", "IconButton",
+        "FilledIconButton", "FilledTonalIconButton", "OutlinedIconButton", "Surface",
+    )
+
+    /** The keys of [body] that do not refuse covered gestures, and any raw clickable (it would bypass the check). */
+    private fun keysWithoutFilter(body: String): List<String> =
+        tappables.flatMap { calls(body, it) }.filter { filter !in it } +
+            Regex("""\b(clickable|combinedClickable|selectable|toggleable)\b""").findAll(body).map { it.value }
+
+    private fun keysOf(body: String) = tappables.flatMap { calls(body, it) }
+
+    @Test fun theQuickKeysRefuseCoveredTouches() {
+        val body = functionBody(CodeScan.code(File(uiDir, "ChatParts.kt").readText()), "QuickKeysRow")
+        assertTrue("ChatParts.kt has no function QuickKeysRow any more: update this test", body != null)
+        assertTrue("no key found in QuickKeysRow: the scanner is looking in the wrong place", keysOf(body!!).isNotEmpty())
+        assertEquals("a quick key without $filter", emptyList<String>(), keysWithoutFilter(body))
+    }
+
     @Test fun theCheckerRejectsBadExamples() {
         assertEquals(1, windowsWithoutGuard("AlertDialog(onDismissRequest = {}, text = { Text(\"x\") })").size)
         assertEquals(1, windowsWithoutGuard("AlertDialog(text = { Text(f(a)) }, title = { ObscuredTouchGuard } )").size)
@@ -145,5 +170,14 @@ class TouchGuardSourceTest {
         assertEquals(0, aliasesOfWindows("import android.graphics.Color as AColor; import androidx.compose.ui.window.Dialog").size)
         assertEquals(null, functionBody("fun Other() { ObscuredTouchGuard() }", "ConsentScreen"))
         assertFalse(guard in functionBody("fun A() { x() } fun B() { ObscuredTouchGuard() }", "A")!!)
+        // The quick keys: the filter in the key's own call, not in a comment, a string or next to it.
+        assertEquals(1, keysWithoutFilter(CodeScan.code("{ for (k in K) AssistChip(onClick = { on(k) }, label = { Text(k.label) }) }")).size)
+        assertEquals(0, keysWithoutFilter(CodeScan.code("{ AssistChip(onClick = {}, modifier = Modifier.refuseObscuredTouches(), label = {}) }")).size)
+        assertEquals(1, keysWithoutFilter(CodeScan.code("{ AssistChip(onClick = {}, label = {} /* Modifier.refuseObscuredTouches() */) }")).size)
+        assertEquals(1, keysWithoutFilter(CodeScan.code("{ AssistChip(onClick = {}, label = { Text(\"refuseObscuredTouches()\") }) }")).size)
+        assertEquals(1, keysWithoutFilter(CodeScan.code("{ Modifier.refuseObscuredTouches(); AssistChip(onClick = {}, label = {}) }")).size)
+        assertEquals(1, keysWithoutFilter(CodeScan.code("{ AssistChip(onClick = {}, modifier = Modifier.refuseObscuredTouches()) {}; FilterChip(false, {}, {}) }")).size)
+        assertEquals(1, keysWithoutFilter(CodeScan.code("{ Box(Modifier.refuseObscuredTouches().clickable { on(k) }) }")).size)
+        assertEquals(0, keysOf("{ Text(\"x\") }").size)
     }
 }
