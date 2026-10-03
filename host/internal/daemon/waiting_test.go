@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -150,10 +151,17 @@ func TestCommandsAreBlockedWhileAQuestionWaits(t *testing.T) {
 			t.Fatalf("%q after the answer: %+v", argv, exit)
 		}
 	}
-	// input tap is guarded: the guard reads the foreground first (M5 spec
-	// §4.3), then the shade and the system windows (M5b Task 10).
-	if ran := e.adb.ran(); strings.Join(ran, "|") != "shell reboot|precheck: dumpsys activity activities|precheck: "+fixedFocusCmd+"|precheck: "+fixedWindowsCmd+"|shell input tap 1 1|shell getprop ro.product.model" {
+	// input tap is guarded: the guard reads the foreground (M5 spec §4.3),
+	// the shade and the system windows (M5b Task 10), all before the tap and
+	// at the same time, so in any order among them.
+	ran := e.adb.ran()
+	at := slices.Index(ran, "shell input tap 1 1")
+	if at < 1 || ran[0] != "shell reboot" || !slices.Equal(ran[at:], []string{"shell input tap 1 1", "shell getprop ro.product.model"}) {
 		t.Fatalf("adb ran %q", ran)
+	}
+	reads := slices.Sorted(slices.Values(ran[1:at]))
+	if want := []string{"precheck: dumpsys activity activities", "precheck: " + fixedWindowsCmd, "precheck: " + fixedFocusCmd}; !slices.Equal(reads, want) {
+		t.Fatalf("the guard read %q, want %q (in any order)", ran[1:at], want)
 	}
 }
 
