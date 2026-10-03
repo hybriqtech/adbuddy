@@ -522,7 +522,7 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 - **Post-v1 (aplazado):**
   - A5-4: `gradle/verification-metadata.xml` (`gradle --write-verification-metadata sha256 ...`), versionado y actualizado por una persona al cambiar `libs.versions.toml`; hoy `release.yml` firma con la clave real un APK construido sin verificación de dependencias.
   - A5-6 (lo pasa puffin): `concurrency` de `emulator.yml` por `github.ref` con puertos y AVD fijos; con dos runners en la misma máquina una PR se validaría contra el emulador de otra. Un grupo por runner (`vars.CI_RUNNER_EMULATOR`) o un grupo fijo con `cancel-in-progress: false`; mientras tanto, un solo runner de emulador por máquina.
-  - A5-8 (cerrado en la sección «Dependabot» más abajo): `dependabot.yml` solo para `github-actions` (las acciones fijadas por SHA no reciben correcciones) y excluir `dependabot[bot]` en la guarda de los jobs con runner propio (`github.actor != 'dependabot[bot]'`).
+  - A5-8 (cerrado en la sección «Dependabot» más abajo): `dependabot.yml` solo para `github-actions` (las acciones fijadas por SHA no reciben correcciones) y mandar los PRs que no son del propietario a runners de GitHub: cerrado con una lista blanca por autor (`github.event.pull_request.user.login == github.repository_owner`), no con la lista negra `github.actor != 'dependabot[bot]'` que se propuso primero.
 
 ## v1 · V44-V45 (plan `docs/superpowers/plans/2026-10-02-adbuddy-v44-v45.md`)
 
@@ -554,3 +554,5 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
   - M2: Gradle, el Go de `setup-go` y `goreleaser` quedan fuera de Dependabot; varias mayores de la misma acción (checkout v4/v5/v7, setup-gradle v4/v6) llegarán como PR individuales y pueden romper entradas.
   - Riesgo I6 aceptado: revisar el diff no revisa el código de la dependencia, que tras el merge corre en los runners propios; falta `gradle/verification-metadata.xml` y la cuenta de Windows dedicada. Opcional: subir `semver-major-days` del cooldown de gradle.
   - Si los PR del propietario los abre otra cuenta (un agente): lista `CI_TRUSTED_PR_AUTHORS` en la regla (anotada en §6, no implementada).
+
+- DEFER (menores de la revisión del diff de Dependabot): `scripts/check-ci-runner-rules.py` tiene la lista de jobs fija en el código (añadir una comprobación de estructura que falle si algún job con `vars.` en `runs-on`/matriz no está cubierto) y su evaluador no reconoce los literales `true`/`false`/`null`; opción más estricta del predicado de confianza: `&& !startsWith(github.event.pull_request.head.ref, 'dependabot/')` (cubre al propietario abriendo a mano un PR desde una rama `dependabot/**`).
