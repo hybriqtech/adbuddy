@@ -218,11 +218,13 @@
 {"sh":"dumpsys -t 10 activity top","level":"green"}
 {"sh":"dumpsys -T 500 battery","level":"green"}
 {"sh":"dumpsys --proto battery","level":"green"}
-# T2: the notification service has its records in its CRITICAL dump, not in HIGH or NORMAL; --skip notification leaves it out
+# T2: the notification service keeps the first 8 characters of each ticker in its CRITICAL dump (in the full dump too); dumpsys --priority CRITICAL and --skip of another service show them
 {"sh":"dumpsys --priority CRITICAL","level":"red"}
-{"sh":"dumpsys --priority HIGH","level":"green"}
 {"sh":"dumpsys --skip meminfo","level":"red"}
-{"sh":"dumpsys --skip notification","level":"green"}
+# CI emulator (android-34, after other tests, notification posted): dumpsys --priority NORMAL and --skip notification, which leave the notification service out, showed the 6-digit code of the text (origin unconfirmed: another service, or chance in 15 MB of numbers); dumpsys of several services is red, whatever it leaves out
+{"sh":"dumpsys --priority HIGH","level":"red"}
+{"sh":"dumpsys --priority NORMAL","level":"red"}
+{"sh":"dumpsys --skip notification","level":"red"}
 {"sh":"dumpsys notification","level":"red"}
 {"sh":"dumpsys window","level":"green"}
 {"sh":"dumpsys window windows | grep mCurrentFocus","level":"green"}
