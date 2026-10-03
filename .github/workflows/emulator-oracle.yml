@@ -1,0 +1,152 @@
+name: emulator-oracle
+# Runners come from repository variables (docs/ci-self-hosted.md); with none
+# set, GitHub-hosted runners are used.
+
+# The classifier's oracle (what the phone's mksh does with each differential
+# case) and the read-only examples of the skills (they must run on the phone's
+# toybox). The app's tests have their own workflow (emulator-app.yml). Only on
+# pull requests, by hand (workflow_dispatch) and weekly on main, and on
+# pull requests only when what it checks changes: the offline tests
+# (TestWhatMkshRunsIsSpecial, TestAdmittedSinksStayBelowRed, in host.yml) check
+# the evaluator against the recorded oracle.jsonl, so a change of the
+# evaluator's code with the corpus intact does not need the emulator. It does
+# not run on pushes to main: merges to main are fast-forwards of a pull request
+# that already passed it, so main's tree is the one it validated.
+# A required check that a path filter skips stays pending: neither this
+# workflow nor emulator-app.yml may be made a required check
+# (docs/ci-self-hosted.md).
+# The weekly run (a schedule runs on the default branch only) exists because
+# the system image's mksh can change without any pull request. It runs on the
+# self-hosted Windows runner at 04:17 UTC on Mondays; if the PC is off the job
+# waits in the queue (at most 24 hours, then it is cancelled), when it runs it
+# competes for RAM with development emulators, and a failure is reported to
+# whoever last edited the cron line, so docs/ci-self-hosted.md names who reads
+# the run list each week (the supervisor).
+on:
+  pull_request:
+    paths: ["host/internal/classify/testdata/**", "host/internal/classify/differential_test.go", "host/internal/classify/corpus_test.go", "host/internal/workspace/skills/**", "host/internal/workspace/skills.go", "host/internal/cli/skills_*_test.go", "scripts/emulator.sh", ".github/workflows/emulator-oracle.yml"]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the run in progress: two runs would
+# share the emulator port and RAM of the runner. Cancelling still runs the steps
+# with if: always(), so the emulator is stopped.
+concurrency:
+  group: emulator-oracle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mksh:
+    name: oracle against the emulator's mksh
+    # Fork pull requests never reach a self-hosted runner.
+    if: ${{ vars.CI_RUNNER_EMULATOR != '"none"' && (vars.CI_RUNNER_EMULATOR == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_EMULATOR || '"ubuntu-latest"') }}
+    timeout-minutes: 60
+    # Its own AVD, emulator port and adb server, so it never collides with an
+    # emulator started by hand with the script's defaults (just names), nor with
+    # the app workflow's (5592 and 5051). One emulator fits in RAM at a time:
+    # with a single runner carrying the emulator label the two workflows run one
+    # after the other; with two runners on the same machine they would run
+    # together, and neither the RAM nor the log file adbuddy-emulator.log
+    # (shared, in the temp folder) would hold: see docs/ci-self-hosted.md.
+    env:
+      ADBUDDY_EMU_AVD: adbuddy-ci-api37
+      ADBUDDY_EMU_PORT: "5590"
+      ADBUDDY_EMU_ADB_PORT: "5049"
+      # Its adb server never auto-connects a phone over mDNS.
+      ADB_MDNS: "0"
+      ADB_MDNS_AUTO_CONNECT: "0"
+    defaults:
+      run:
+        shell: bash -e {0}
+    # On the runner avdmanager writes the AVD under $XDG_CONFIG_HOME/.android
+    # whatever ANDROID_AVD_HOME says, and the emulator looks under
+    # ANDROID_AVD_HOME or $HOME/.android: the step "Point the emulator at the
+    # AVD" makes the emulator look where avdmanager wrote it.
+    # adb on Windows loads %USERPROFILE%\.android\adbkey whatever HOME/USERPROFILE/ANDROID_USER_HOME say (measured),
+    # so isolating the environment does not protect the key; see docs/ci-self-hosted.md section 6.
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: host/go.mod
+          cache: ${{ runner.environment == 'github-hosted' }}
+          cache-dependency-path: host/go.sum
+      # sdkmanager and avdmanager are Java.
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Point the emulator at the AVD (Linux runners)
+        if: runner.os == 'Linux'
+        run: '[ -z "$XDG_CONFIG_HOME" ] || echo "ANDROID_AVD_HOME=$XDG_CONFIG_HOME/.android/avd" >> "$GITHUB_ENV"'
+      - name: Enable KVM
+        if: runner.os == 'Linux'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # The image's SDK package is "android-37.0", as in android.yml.
+      # On Windows sdkmanager is sdkmanager.bat.
+      - name: Install the emulator and the system image
+        run: |
+          sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -e "$sm" ] || sm="$sm.bat"
+          yes | "$sm" emulator "system-images;android-37.0;google_apis;x86_64" > /dev/null
+      - name: Clear a leftover emulator of this job
+        run: scripts/emulator.sh stop
+      - name: Start the emulator
+        shell: bash # with pipefail: a failed start fails this step, not the next one
+        run: scripts/emulator.sh start | sed "s/^export //; s/'//g" >> "$GITHUB_ENV"
+      - name: Record the oracle
+        working-directory: host
+        # Without the variables the test would skip and the step would pass.
+        # Go's own timeout (45m) fires before the job's (60m).
+        run: test -n "$ADBUDDY_MKSH_SERIAL" && go test -timeout 45m -count=1 -run TestRecordOracle ./internal/classify
+      - name: The recorded oracle is the one in the repository
+        run: git diff --exit-code -- host/internal/classify/testdata
+      - name: The skills' read-only examples run on the emulator
+        working-directory: host
+        # Without the variables the test would skip and the step would pass.
+        run: test -n "$ADBUDDY_MKSH_SERIAL" && test -n "$ADBUDDY_MKSH_ADB" && go test -timeout 20m -count=1 -run TestSkillsReadOnlyOnEmulator ./internal/cli
+      - name: Emulator memory after the oracle
+        if: always()
+        run: scripts/emulator.sh mem || true
+      # Evidence for a failed start or recording: why the emulator did not
+      # boot. The emulator has its own adb server (scripts/emulator.sh).
+      - name: Emulator diagnostics
+        if: failure() && runner.os == 'Linux'
+        env:
+          ANDROID_ADB_SERVER_PORT: ${{ env.ADBUDDY_EMU_ADB_PORT }}
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          tail -n 200 /tmp/adbuddy-emulator.log || true
+          env | grep -E "^(ANDROID|XDG|HOME)" | sort || true
+          find / -name "$ADBUDDY_EMU_AVD*" -not -path "/proc/*" 2>/dev/null | head || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" list avd || true
+          "$ANDROID_HOME/emulator/emulator" -list-avds || true
+          "$ADB" devices -l || true
+          timeout 20 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" shell getprop | grep -E "boot|init.svc.(surfaceflinger|zygote|system_server)" || true
+          timeout 30 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" logcat -d -b crash,system | tail -n 150 || true
+      # The same on Windows, with the job's own adb server (never 5037). The log
+      # is the one of the emulator started by this job.
+      - name: Emulator diagnostics (Windows)
+        if: failure() && runner.os == 'Windows'
+        shell: bash
+        env:
+          ANDROID_ADB_SERVER_PORT: ${{ env.ADBUDDY_EMU_ADB_PORT }}
+        run: |
+          ADB="$ANDROID_HOME/platform-tools/adb.exe"
+          tail -n 200 "${TMPDIR:-/tmp}/adbuddy-emulator.log" || true
+          echo "job AVD: $ADBUDDY_EMU_AVD; running AVD:"
+          timeout 20 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" emu avd name || true
+          "$ADB" devices -l || true
+      - name: Stop the emulator
+        if: always()
+        run: scripts/emulator.sh stop
