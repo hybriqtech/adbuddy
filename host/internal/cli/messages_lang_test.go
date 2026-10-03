@@ -92,8 +92,8 @@ func TestSkillLinesInSpanish(t *testing.T) {
 		if got := strings.Join(groupSkillLines(i18n.ES, verb, paths), "\n"); got != strings.Join(w, "\n") {
 			t.Errorf("%s:\n%s\nwant\n%s", verb, got, strings.Join(w, "\n"))
 		}
-		// English keeps its old wording, "1 skills" included (the existing test reads it).
-		if got := groupSkillLines(i18n.EN, verb, paths); got[2] != "  "+verb+" 1 skills in .agents/skills" {
+		// English has its singular too.
+		if got := groupSkillLines(i18n.EN, verb, paths); got[2] != "  "+verb+" 1 skill in .agents/skills" {
 			t.Errorf("English changed: %q", got)
 		}
 	}

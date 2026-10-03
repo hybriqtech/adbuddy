@@ -309,7 +309,7 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 		add(serverDown(e.cfg.ADBServerPort, err, running, perr))
 	} else {
 		serverUp = true
-		// Plural by count (TN's convention: the count is %[1]d); the English is the same in both forms.
+		// Plural by count (TN's convention: the count is %[1]d).
 		if n := len(online); n == 1 {
 			add(mk("adb server", checkOK, i18n.M("doctor.server.ok.one", n, e.cfg.ADBServerPort)))
 		} else {

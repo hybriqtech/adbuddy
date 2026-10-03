@@ -258,7 +258,7 @@ func TestServeSavedAddressesGoneSaysWhichWereTried(t *testing.T) {
 func TestSetupQRHintWhenNoPhoneIsVisible(t *testing.T) {
 	setVar(t, &qrHintDelay, 50*time.Millisecond)
 	setVar(t, &pairingWait, 600*time.Millisecond)
-	const hint = "I can't see any phone with wireless debugging on this network. If the phone is on another network (for example Tailscale) or this Wi-Fi blocks mDNS, press Ctrl+C and run `adbuddy setup --code`."
+	const hint = "No phone with wireless debugging is visible on this network. If the phone is on another network (for example Tailscale) or this Wi-Fi blocks mDNS, press Ctrl+C and run `adbuddy setup --code`."
 	for name, c := range map[string]struct {
 		mdns string
 		want int

@@ -103,7 +103,7 @@ Toca el elemento con ese texto (o descripción), el que tiene ese id, o un
 punto, como los lista `adbuddy screen`. Exactamente uno de ellos."""
 
 # helpers.go: flag
-"help.tap.flag.id" = "el id del elemento, como lo lista `adbuddy screen`"
+"help.tap.flag.id" = "el id del elemento, como lo lista 'adbuddy screen'"
 "help.tap.flag.xy" = "un punto de la pantalla, x,y en píxeles"
 
 # helpers.go: cobra
@@ -140,7 +140,7 @@ va a screenshots/ en esta carpeta."""
 # journal.go: flag
 "help.journal.flag.session" = "solo esta sesión: su id (s_…), o current para la que serve tiene en marcha ahora"
 "help.journal.flag.limit" = "enseña solo las últimas N entradas (0 = todas)"
-"help.journal.flag.workspace" = "entorno del agente (por defecto: el que vigila `adbuddy serve`, y si no, ~/ADBuddy/default)"
+"help.journal.flag.workspace" = "entorno del agente (por defecto: el que vigila 'adbuddy serve', y si no, ~/ADBuddy/default)"
 
 # remotecmd.go: cobra
 "help.remote.short" = "Abre el puerto de red 5555 de adb durante 12 horas (modo remoto), lo cierra, o enseña su estado"
@@ -166,7 +166,7 @@ con el adb de ADBuddy el primero en su PATH y el móvil seleccionado. Necesita
 quieres arrancar el agente tú. El código de salida es el del agente."""
 
 # run.go: flag
-"help.run.flag.workspace" = "entorno del agente; debe ser el que vigila `adbuddy serve` (por defecto: ese)"
+"help.run.flag.workspace" = "entorno del agente; debe ser el que vigila 'adbuddy serve' (por defecto: ese)"
 
 # send.go: cobra
 "help.send.short" = "Envía un fichero del entorno al móvil del usuario (para el agente)"
@@ -189,8 +189,8 @@ en otra terminal con `adbuddy run`."""
 "help.serve.flag.adb" = "ruta del adb real (por defecto: adb_path de config.toml, y si no, el adb que instala adbuddy setup)"
 "help.serve.flag.serial" = "el móvil que se usa cuando hay varios conectados"
 "help.serve.flag.workspace" = "entorno del agente (por defecto: workspace de config.toml, y si no, ~/ADBuddy/default)"
-"help.serve.flag.no_agent" = "no arranca el agente aquí: ejecútalo tú con `adbuddy run` (sin chat desde el móvil)"
-"help.serve.flag.confirm" = "dónde se confirman los comandos 🔴: auto (esta terminal si es interactiva, y si no, denegar), terminal (lee las respuestas de la entrada estándar aunque no sea interactiva, p. ej. una tubería) o deny"
+"help.serve.flag.no_agent" = "no arranca el agente aquí: ejecútalo tú con 'adbuddy run' (sin chat desde el móvil)"
+"help.serve.flag.confirm" = "dónde se confirman los comandos 🔴 cuando la app del móvil no está conectada: auto (esta terminal si la hay, y si no, denegar), terminal o deny"
 
 # setup.go: cobra
 "help.setup.short" = "Configura ADBuddy: consigue adb, empareja el móvil por Wi-Fi y prepara el entorno del agente"
@@ -222,7 +222,7 @@ cualquier comando 🔴; los demás se ejecutan sin volver a preguntar. Los cambi
 o cuyo inverso no se confirma, se indican y se saltan. Necesita `adbuddy serve` en marcha."""
 
 # undo.go: flag
-"help.undo.flag.session" = "sesión para `undo session` (por defecto: la actual)"
+"help.undo.flag.session" = "sesión para 'undo session' (por defecto: la actual)"
 
 # version.go: cobra
 "help.version.short" = "Muestra la versión de ADBuddy"
@@ -392,7 +392,7 @@ Códigos de salida:
 
 # errores que i18nize deja (un arreglo en una constante, una tabla de arreglos por código, una pista de otro paquete)
 "err.connect.wrong_phone" = "el móvil en %[1]s no es el móvil que configuraste"
-"err.connect.wrong_phone.fix" = "esa dirección es de otro móvil; comprueba la IP y el puerto en el móvil que configuraste"
+"err.connect.wrong_phone.fix" = "Esa dirección es de otro móvil; comprueba la IP y el puerto en el móvil que configuraste."
 "err.connect.wrong_phone_mdns" = "el móvil encontrado como %[1]s no es el móvil que configuraste"
 "err.connect.wrong_phone_mdns.fix" = "Algo más en esta red responde con el nombre de tu móvil: desactiva la depuración inalámbrica en tus otros dispositivos y vuelve a intentarlo."
 "err.remotecmd.agent_session" = "`adbuddy remote` no se puede ejecutar desde la sesión del agente"
@@ -500,7 +500,7 @@ Prepara tu móvil (solo una vez):
   3. %[1]s
 Guía paso a paso con imágenes (escanéala con la cámara del móvil):
 """
-"setup.no_phone_hint" = "No veo ningún móvil con la depuración inalámbrica activada en esta red. Si el móvil está en otra red (por ejemplo Tailscale) o esta Wi-Fi bloquea mDNS, pulsa Ctrl+C y ejecuta `adbuddy setup --code`."
+"setup.no_phone_hint" = "No se ve ningún móvil con la depuración inalámbrica en esta red. Si el móvil está en otra red (por ejemplo Tailscale) o esta Wi-Fi bloquea mDNS, pulsa Ctrl+C y ejecuta `adbuddy setup --code`."
 "setup.on_the_phone_qr" = """
 En el móvil: Depuración inalámbrica → Vincular dispositivo con código QR, y escanea:
 %[1]s"""
