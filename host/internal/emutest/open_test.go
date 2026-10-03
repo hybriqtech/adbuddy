@@ -115,8 +115,7 @@ func (l *link) download(t *testing.T, msgID string, f hostFile, openCards int) {
 	l.drain()
 	l.say(t, msgID, f)
 	e := l.e
-	e.tap(t, e.waitText(t, "Tap to download", 10*time.Second))
-	g, req := l.nextGet(t, 10*time.Second)
+	g, req := l.tapForGet(t, "Tap to download")
 	if g.ID != f.att.ID || g.Offset != 0 {
 		t.Fatalf("the tap asked %+v, want %s from 0", g, f.att.ID)
 	}
@@ -226,11 +225,18 @@ func TestOpenAndShare(t *testing.T) {
 	if e.startLine(t, 15*time.Second, "act=android.intent.action.CHOOSER", "cmp=com.android.intentresolver/") == "" {
 		t.Fatalf("no CHOOSER START after the VIEW with no target:\n%s", e.shell(t, "logcat -d -s ActivityTaskManager:I"))
 	}
+	// The VIEW with no target comes first and the share sheet after it.
+	if log := e.shell(t, "logcat -d -s ActivityTaskManager:I"); strings.Index(log, "result code=-91") > strings.Index(log, "act=android.intent.action.CHOOSER") {
+		t.Errorf("the CHOOSER START is before the VIEW that found no target:\n%s", log)
+	}
 	e.waitNode(t, "Sharing 1 file", 15*time.Second, func(n uiNode) bool {
 		return n.ID == "com.android.intentresolver:id/headline" && n.Text == "Sharing 1 file"
 	})
 	e.waitNode(t, "the shared file's name", 5*time.Second, func(n uiNode) bool {
-		return n.ID == "com.android.intentresolver:id/content_preview_filename" && n.Text == oddFile
+		// The cache's name is the id plus the name: that the sheet shows the id of
+		// 32 hex digits is a finding of T1 about the product, not a contract, so
+		// only the end is required.
+		return n.ID == "com.android.intentresolver:id/content_preview_filename" && strings.HasSuffix(n.Text, "-odd.xyz")
 	})
 	checkGrants(t, e.sampleGrants(t, oddFile, 10*time.Second), oddFile, "com.android.intentresolver", wantMode)
 	e.shell(t, "input keyevent KEYCODE_BACK")

@@ -17,8 +17,10 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 )
 
-// Files over the channel (validation 3 of M3b, a and b; the downloads, c-e, are in downloads_test.go): the upload of a file
-// chosen in the phone's picker, with the SHA-256 of the bytes the host got.
+// Files over the channel (validation 3 of M3b). Here, a and b: the upload of a
+// file chosen in the phone's picker, with the SHA-256 of the bytes the host got.
+// The downloads (c) are in downloads_test.go, open and share (d) in
+// open_test.go and the cache (e) in cache_test.go.
 //
 // Mutations. Each test must go red when the host's side misbehaves; the
 // variable ADBUDDY_EMUTEST_MUTATE makes the harness misbehave on purpose, so
@@ -38,8 +40,9 @@ import (
 //
 //	ADBUDDY_EMUTEST_MUTATE=corrupt-byte go test -count=1 -run TestUploadSendsTheRealBytes ./internal/emutest
 //
-// A test run with a mutation it does not take skips; without the variable
-// the tests are the real ones.
+// A test that calls mutation() and does not take the one asked for skips;
+// the tests that do not call it (TestDownloadCancel) run as ever. Without the
+// variable all the tests are the real ones.
 const mutateEnv = "ADBUDDY_EMUTEST_MUTATE"
 
 // mutation returns the value of ADBUDDY_EMUTEST_MUTATE, skipping the test

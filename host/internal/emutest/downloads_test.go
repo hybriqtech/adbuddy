@@ -102,6 +102,25 @@ func (l *link) noGet(t *testing.T, what string, d time.Duration) {
 	}
 }
 
+// tapForGet taps the card that says text and returns the file.get it brings.
+// A tap right after the card appears can be lost (the list is still
+// recomposing), so it is repeated, up to 3 times, while no file.get comes in
+// about 3 s.
+func (l *link) tapForGet(t *testing.T, text string) (bridge.FileGet, bridge.Message) {
+	t.Helper()
+	e := l.e
+	card := e.waitText(t, text, 10*time.Second)
+	for try := 1; try <= 3; try++ {
+		e.tap(t, card)
+		if m, ok := l.take(bridge.TypeFileGet, 3*time.Second); ok {
+			return payload[bridge.FileGet](t, m), m
+		}
+		card = e.waitText(t, text, 10*time.Second)
+	}
+	t.Fatalf("no file.get after 3 taps on %q", text)
+	return bridge.FileGet{}, bridge.Message{}
+}
+
 // runAs runs command as the app (run-as: the debug build allows it).
 func (e *emu) runAs(t *testing.T, command string) string {
 	t.Helper()
@@ -248,8 +267,7 @@ func TestDownloadResumesAfterACut(t *testing.T) {
 
 	l.drain()
 	cm := l.say(t, "r1", pdf)
-	e.tap(t, e.waitText(t, "Tap to download", 10*time.Second))
-	g, req := l.nextGet(t, 10*time.Second)
+	g, req := l.tapForGet(t, "Tap to download")
 	if g.ID != pdf.att.ID || g.Offset != 0 {
 		t.Fatalf("the tap asked %+v, want %s from 0", g, pdf.att.ID)
 	}
@@ -306,8 +324,7 @@ func TestDownloadRetriesOnceThenFails(t *testing.T) {
 
 	l.drain()
 	l.say(t, "w1", pdf)
-	e.tap(t, e.waitText(t, "Tap to download", 10*time.Second))
-	g, req := l.nextGet(t, 10*time.Second)
+	g, req := l.tapForGet(t, "Tap to download")
 	if g.ID != pdf.att.ID || g.Offset != 0 {
 		t.Fatalf("the tap asked %+v, want %s from 0", g, pdf.att.ID)
 	}
@@ -351,8 +368,7 @@ func TestDownloadCancel(t *testing.T) {
 
 	l.drain()
 	l.say(t, "c1", pdf)
-	e.tap(t, e.waitText(t, "Tap to download", 10*time.Second))
-	_, req := l.nextGet(t, 10*time.Second)
+	_, req := l.tapForGet(t, "Tap to download")
 	l.serveFile(t, req, pdf.data, serveOpts{limit: stall})
 	running := e.waitNode(t, "the download running", 10*time.Second, func(n uiNode) bool { return strings.HasPrefix(n.Text, "Downloading") })
 	if !poll(20*time.Second, func() bool { return e.partSize(t, pdf.att.ID) == stall }) {
