@@ -54,8 +54,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -400,9 +402,20 @@ fun InputBar(
 
 /** Esc, Ctrl+C, up, down, Tab, Enter, 1, 2, 3 (QuickKey.entries), horizontally scrollable. */
 @Composable
-fun QuickKeysRow(onKey: (QuickKey) -> Unit) {
+fun QuickKeysRow(enabled: Boolean = true, onKey: (QuickKey) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (k in QuickKey.entries) AssistChip(onClick = { onKey(k) }, label = { Text(k.label) })
+        for (k in QuickKey.entries) AssistChip(onClick = { onKey(k) }, enabled = enabled, label = { Text(k.label) })
+    }
+}
+
+/** Over the terminal while there is no channel to the PC: what is typed would not arrive. */
+@Composable
+fun TerminalOfflineNotice(modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Text(stringResource(R.string.terminal_offline), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
     }
 }
 

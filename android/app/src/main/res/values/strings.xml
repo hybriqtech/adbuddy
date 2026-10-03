@@ -105,6 +105,7 @@
     <string name="chat_capture">Screenshot</string>
     <string name="chat_terminal_show">Show the terminal</string>
     <string name="chat_terminal_hide">Hide the terminal</string>
+    <string name="terminal_offline">No connection with the PC: keys are not sent</string>
     <string name="perm_title">Claude Code asks</string>
     <string name="perm_summary">Agent’s description: %1$s</string>
     <string name="perm_allow">Yes</string>

@@ -150,6 +150,7 @@ fun ChatScreen(
     // go straight to CONNECTING, and its banner would then say something that no longer holds.
     SideEffect { lastBanner = bannerStatus.takeIf { it == LinkStatus.WAITING || it == LinkStatus.NOT_SET_UP } }
 
+    val connected = state.connection == BridgeState.Connection.CONNECTED
     Scaffold(
         topBar = {
             ChatHeader(
@@ -164,7 +165,10 @@ fun ChatScreen(
             if (bannerStatus != null) LinkBanner(bannerStatus)
             remoteCard()
             if (terminalOn) {
-                TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.weight(0.45f).fillMaxSize())
+                Box(Modifier.weight(0.45f).fillMaxSize()) {
+                    TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.fillMaxSize())
+                    if (!connected) TerminalOfflineNotice(Modifier.align(Alignment.TopCenter))
+                }
             }
             val weight = if (terminalOn) 0.55f else 1f
             if (items.isEmpty() && tools.isEmpty() && status == LinkStatus.CONNECTED) {
@@ -194,7 +198,7 @@ fun ChatScreen(
                     }
                 }
             }
-            if (terminalOn) QuickKeysRow { terminal!!.input(it.bytes) }
+            if (terminalOn) QuickKeysRow(enabled = connected) { terminal!!.input(it.bytes) }
             if (chat != null) {
                 PermissionCards(state.chat.permissions, state.connection == BridgeState.Connection.CONNECTED, hostNow, chat)
             }
