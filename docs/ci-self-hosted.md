@@ -297,7 +297,47 @@ The real barriers are:
 
 The fork guard in the workflows is only an extra, and it acts only when the job's variable is defined: a pull request runs the workflow files of its own merge commit, so it can remove the guard. The real barrier is the repository configuration.
 
-Bots and agents that open pull requests from branches of the repository itself pass the guard and run their code on the runner. There is no `dependabot.yml` today.
+Bots and agents that open pull requests from branches of the repository itself pass the head-repository guard above. What stops the pull requests of Dependabot and of any other author that is not the repository owner is the rule of the next subsection; agent branches pushed by the owner's account are not covered by it (see the practical route below).
+
+### Pull requests from anyone but the owner (Dependabot)
+
+`.github/dependabot.yml` opens weekly pull requests for GitHub Actions, Go modules (`host/`) and Gradle (`android/`). Their branches live in this repository, so the head-repository guard lets them through; they would run the new dependency's code (`go test`, Gradle) on the self-hosted runners as the user. The workflows therefore apply a whitelist by the author of the pull request, not a blacklist of `dependabot[bot]` (a blacklist fails open for any other bot, a collaborator or a reopened branch). A pull request is trusted when `github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner`. The author of the pull request is used, not `github.actor`: a re-run or a push by someone else changes the actor, not the code.
+
+For a pull request that is not trusted:
+
+- `android.yml` and the three jobs of `release-check.yml` use `ubuntu-latest` whatever `CI_RUNNER_ANDROID`, `CI_RUNNER_RELEASE` or `CI_RUNNER_SIGN` say (an empty variable already falls back to `ubuntu-latest`). Their `if:` does not change, so `"none"` still skips them.
+- `host.yml` runs a matrix of one cell, `ubuntu-latest`, whatever `CI_HOST_MATRIX` says (macOS and Windows hosted cells, which cost more, are not used).
+- `emulator.yml` skips its job: it only lives on the self-hosted runner and takes about an hour. `workflow_dispatch` still runs it.
+- `push` to `main` and `workflow_dispatch` are not pull requests and are not affected; after the merge, `push` runs on the self-hosted runners as before.
+
+GitHub treats the runs that Dependabot triggers as fork runs: the `GITHUB_TOKEN` is read-only and Actions secrets are not passed (only Dependabot secrets, none here). Dependabot's own jobs (the ones that create the pull requests) run on GitHub and do not use Actions minutes; the CI of its pull requests does. These workflows have no secrets and use `pull_request`, never `pull_request_target`.
+
+The table below is the contract; `python scripts/check-ci-runner-rules.py` evaluates the real expressions of the workflows for every cell (events: owner, Dependabot, other bot, collaborator, fork, `push`, `workflow_dispatch`; variable: empty, self-hosted, `"none"`).
+
+| Event | Variable | `runs-on` | `host.yml` matrix | `emulator.yml` job |
+| --- | --- | --- | --- | --- |
+| PR of the owner | empty | `ubuntu-latest` | the three hosted cells | runs on `ubuntu-latest` |
+| PR of the owner | self-hosted | the variable | the variable | runs on the variable |
+| PR of the owner | `"none"` | job skipped | n/a (`"none"` is invalid here) | job skipped |
+| PR of Dependabot, another bot or a collaborator | empty | `ubuntu-latest` | `ubuntu-latest` only | skipped |
+| PR of Dependabot, another bot or a collaborator | self-hosted | `ubuntu-latest` | `ubuntu-latest` only | skipped |
+| PR of Dependabot, another bot or a collaborator | `"none"` | job skipped | n/a | skipped |
+| `push` to `main` | any | as today | as today | no `push` trigger |
+| `workflow_dispatch` | any | as today | n/a | runs as today |
+
+If the pull requests of the owner are ever opened by another account (an agent), add `contains(fromJSON(vars.CI_TRUSTED_PR_AUTHORS || '[]'), github.event.pull_request.user.login) ||` to the predicate. Not implemented: nothing needs it today.
+
+**Approving a Dependabot pull request** (the merge is the review of the dependency, because the `push` to `main` that follows does run on the self-hosted runners):
+
+1. Check in the log of the first runs that `runs-on` was `ubuntu-latest`, the `host` matrix had one cell and `emulator` was `skipped`.
+2. Review the diff: `go.mod`/`go.sum`, `libs.versions.toml`, the action SHA and its `# vX` comment. Several majors of the same action exist in the workflows (`actions/checkout` v4, v5, v7; `setup-gradle` v4, v6): they arrive as individual pull requests and can break inputs (for example `cache-disabled`); review them one by one.
+3. If the pull request touches something the emulator checks, run `gh workflow run emulator.yml --ref <dependabot branch>`. `workflow_dispatch` takes a branch, not a SHA, and Dependabot can rewrite its branch (rebase, recreate) between the review and the dispatch: after launching, check that the `head_sha` of the run is the SHA you reviewed (`gh run view <id> --json headSha`) and cancel it if not.
+4. Do not merge a Dependabot pull request without that run green on the reviewed SHA when the emulator applies. Nothing enforces it: the repository is private on the free plan (no branch protection) and a `skipped` job counts as success.
+5. Never enable auto-merge for Dependabot. Never enable "Dependabot on self-hosted runners" or give the self-hosted runners the label `dependabot` (by default its runs go to GitHub-hosted runners; GitHub can be configured the other way).
+
+Residual risk (accepted): reviewing the diff of `go.sum` or the version catalogue does not review the code of the dependency, which after the merge runs in `go test` and Gradle on the self-hosted runners with the user's account. What reduces it: the 7-day cooldown of `dependabot.yml` (security updates ignore it), `go.sum` plus sum.golang.org (integrity, not harmlessness) and the toolchain majors kept out of Dependabot. There is no `gradle/verification-metadata.xml`. While the Windows runner runs under the user's account, merging a Dependabot pull request exposes that runner; pointing the `CI_*` variables at GitHub-hosted runners until the dedicated account exists is the alternative.
+
+Dependabot does not manage: Gradle 9.8.0 (`gradle-version:` in the workflows; there is no wrapper), the Go version of `setup-go` (it comes from `host/go.mod`) or `goreleaser version:` in `release-check.yml`. `go.mod` says `go 1.27.0`: if the Go of Dependabot's updater is older, the `gomod` pull requests may fail; check the first one.
 
 The practical route to the key-reading risk is the branches that local coding agents push. An agent that is tricked (a poisoned web page, a malicious dependency, a prompt injection in an issue) can add a test or a script to a branch of this very repository, and the runner will run it as the PC's user, with no fork involved and past every guard above. Reviewing the diff before the runner picks it up is not realistic for agent branches.
 
@@ -360,6 +400,8 @@ What is applied today (replace `OWNER/REPO`):
   ```
 
 - **Run workflows from fork pull requests:** already off by default in private repositories (not changed by us). Check: `gh api repos/OWNER/REPO/actions/permissions/fork-pr-workflows-private-repos` returns `run_workflows_from_fork_pull_requests: false`.
+
+- **Dependabot (the owner does these, in this order).** (1) Merge the branch that adds `.github/dependabot.yml` and the workflow rule to `main`. (2) Only then, in Settings > Advanced Security (Code security): turn on **Dependency graph**, **Dependabot alerts** and **Dependabot security updates** (alerts alone open no pull requests). If they are turned on before step 1, Dependabot opens security pull requests against the old `main`, whose workflows lack the rule and run on the self-hosted runners. Version updates are enabled by the file itself. (3) Optionally create the labels `ci`, `go` and `android` (`gh label create`); if they do not exist they are ignored. (4) Do not turn on auto-merge. (5) Do not turn on "Dependabot on self-hosted runners" (Settings > Code security) and do not give a self-hosted runner the label `dependabot`. Alerts were off when this was written (`gh api repos/OWNER/REPO/dependabot/alerts` returned 403 "Dependabot alerts are disabled"). Dependabot only raises versions of actions already in the workflows, so every action it proposes already passes `allowed_actions=selected` and `sha_pinning_required`. Its own jobs do not use Actions minutes; the CI of its pull requests does (hosted `ubuntu-latest` only, see section 6).
 
 What is not applied, and why:
 

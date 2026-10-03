@@ -522,7 +522,7 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 - **Post-v1 (aplazado):**
   - A5-4: `gradle/verification-metadata.xml` (`gradle --write-verification-metadata sha256 ...`), versionado y actualizado por una persona al cambiar `libs.versions.toml`; hoy `release.yml` firma con la clave real un APK construido sin verificación de dependencias.
   - A5-6 (lo pasa puffin): `concurrency` de `emulator.yml` por `github.ref` con puertos y AVD fijos; con dos runners en la misma máquina una PR se validaría contra el emulador de otra. Un grupo por runner (`vars.CI_RUNNER_EMULATOR`) o un grupo fijo con `cancel-in-progress: false`; mientras tanto, un solo runner de emulador por máquina.
-  - A5-8: `dependabot.yml` solo para `github-actions` (las acciones fijadas por SHA no reciben correcciones) y excluir `dependabot[bot]` en la guarda de los jobs con runner propio (`github.actor != 'dependabot[bot]'`).
+  - A5-8 (cerrado en la sección «Dependabot» más abajo): `dependabot.yml` solo para `github-actions` (las acciones fijadas por SHA no reciben correcciones) y excluir `dependabot[bot]` en la guarda de los jobs con runner propio (`github.actor != 'dependabot[bot]'`).
 
 ## v1 · V44-V45 (plan `docs/superpowers/plans/2026-10-02-adbuddy-v44-v45.md`)
 
@@ -536,3 +536,21 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 - **Las salidas de ADBuddy son estrechas a propósito:** Inicio solo con `3` o `KEYCODE_HOME` exactos (`HOME`, `03`, `cmd input keyevent 3`, `input -d 0 keyevent 3` y `--longpress` siguen bloqueados), y abrir solo con `monkey -p <paquete> -c android.intent.category.LAUNCHER 1` exacto y con la app (sin la app, Inicio primero). Por la app, con ADBuddy arriba y un banco en la otra mitad de una pantalla dividida, o con el chat en burbuja (`ChatBubbleActivity`) sobre un banco, las dos pasan (la app no dice qué hay detrás; no lo tocan ni lo leen, y la orden siguiente ya lo ve; revisión M5). Con otra app arriba y ADBuddy en la otra mitad no hay salida, y el motivo es el genérico de app protegida.
 - **Skill `home-screen` y regla 8 de `AGENTS.md`:** ya dicen que seguir la salida del propio motivo (Inicio, `monkey … LAUNCHER 1`, esperar 10 s y reintentar una vez) no es un rodeo. Revisarlas si en las validaciones 44 o 45 el agente no sale de ADBuddy o no reintenta.
 - Validaciones en dispositivo 44 y 45: en "Validaciones manuales pendientes" del plan.
+
+## Dependabot (plan `docs/superpowers/plans/2026-10-03-adbuddy-dependabot.md`)
+
+- **Hecho:** `dependabot.yml` (actions, gomod, gradle), y los workflows mandan a los PR de autores que no son el propietario a runners de GitHub (lista blanca por autor; `scripts/check-ci-runner-rules.py` comprueba la tabla). Cierra A5-8. Regla y proceso en `docs/ci-self-hosted.md` §6.
+- **No comprobado (lo confirma el primer PR de Dependabot):**
+  - Con el token de `gh` actual (sin `admin:repo_hook`) no se puede consultar `security_and_analysis`: no se sabe qué más está activo en el repositorio.
+  - Cómo trata Dependabot las acciones fijadas por SHA con comentario `# vX` (se espera: sube el SHA y el comentario y mantiene el fijado).
+  - La sintaxis de `schedule` (`day`, `time`, `timezone`), los `groups` con `patterns` y `update-types`, y los patrones de `ignore` con comodín sobre los nombres de plugins de Gradle (`com.android.application*`, `org.jetbrains.kotlin.*`).
+  - Alerts y security updates en repositorios privados del plan Free.
+  - Si Dependabot admite `go 1.27.0` en el updater de `gomod` (los PR pueden fallar).
+  - Que `runs-on` cae en `ubuntu-latest`, la matriz de `host` tiene una celda y `emulator` sale `skipped` en ese primer PR: revisar los logs a mano.
+  - Que las etiquetas `ci`, `go` y `android` inexistentes se ignoran sin fallar (documentado por GitHub, no probado aquí).
+- **DEFER:**
+  - I2: `workflow_dispatch` solo acepta una rama y Dependabot puede reescribirla entre la revisión y el lanzamiento; hoy se mitiga comprobando `head_sha` a mano.
+  - I3: nada obliga a pasar el emulador (sin protección de rama en el plan Free, y un job `skipped` cuenta como éxito); es regla de proceso.
+  - M2: Gradle, el Go de `setup-go` y `goreleaser` quedan fuera de Dependabot; varias mayores de la misma acción (checkout v4/v5/v7, setup-gradle v4/v6) llegarán como PR individuales y pueden romper entradas.
+  - Riesgo I6 aceptado: revisar el diff no revisa el código de la dependencia, que tras el merge corre en los runners propios; falta `gradle/verification-metadata.xml` y la cuenta de Windows dedicada. Opcional: subir `semver-major-days` del cooldown de gradle.
+  - Si los PR del propietario los abre otra cuenta (un agente): lista `CI_TRUSTED_PR_AUTHORS` en la regla (anotada en §6, no implementada).
