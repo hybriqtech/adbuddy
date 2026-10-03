@@ -100,13 +100,14 @@ func TestDumpsysOfTheNotificationsIsRed(t *testing.T) {
 }
 
 // The CI's emulator (android-34, after other tests of the suite, with the
-// notification posted) showed the whole text of a notification, code included,
-// in dumpsys --priority NORMAL and dumpsys --skip notification: some service
-// other than the notification one held it, in a state the local emulator did
-// not reproduce. So dumpsys of several services is 🔴 whatever it leaves out;
+// notification posted) showed the 6-digit code of a notification's text in
+// dumpsys --priority NORMAL and dumpsys --skip notification, which leave the
+// notification service out: another service, or chance among the numbers of
+// 15 MB of dump (not confirmed, not reproduced locally). So dumpsys of several services is 🔴 whatever it leaves out;
 // what stays 🟢 is one service named, the list of services, the usage and the
 // options that print only PIDs, threads, clients or stability (they never call
-// a service's dump).
+// a service's dump). An empty word where the service goes is 🔴: dumpsys looks
+// for a service named "" (measured: "Can't find service: "), no known read.
 func TestDumpsysOfSeveralServicesIsRed(t *testing.T) {
 	c := mustNew(t, "")
 	var cases []tc
@@ -118,6 +119,9 @@ func TestDumpsysOfSeveralServicesIsRed(t *testing.T) {
 		"dumpsys --priority NORMAL --skip notification", "dumpsys -t 10", "dumpsys -T 500", "dumpsys --dump",
 		"dumpsys --pid --dump", "dumpsys --thread --dump",
 		"dumpsys --priority NORMAL | grep -i code",
+		// An empty word where the service goes is no service: not the list,
+		// not the usage, not a known read.
+		"dumpsys ''", "dumpsys -- ''", "dumpsys -t 10 ''", `dumpsys ""`, "dumpsys '' battery",
 	} {
 		cases = append(cases, tc{sh(line), Red, "android.dumpsys", "", false})
 	}

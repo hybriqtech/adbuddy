@@ -70,6 +70,7 @@ var reasonsES = map[string]string{
 	"dumpsys notification shows the start of each notification's ticker, codes included": "dumpsys notification muestra el principio del ticker de cada notificación, códigos incluidos",
 	"dumpsys of every service includes the notifications, with the start of each ticker": "dumpsys de todos los servicios incluye las notificaciones, con el principio de cada ticker",
 	"dumpsys of several services may show the text of notifications, codes included":     "dumpsys de varios servicios puede mostrar el texto de las notificaciones, códigos incluidos",
+	"dumpsys with an empty word is not a known way of reading":                           "dumpsys con una palabra vacía no es una forma conocida de leer",
 	"dumpsys option that clears data":                                                    "opción de dumpsys que borra datos",
 	"dumpsys options before deviceidle":                                                  "opciones de dumpsys antes de deviceidle",
 	"dumpsys with --priority repeated may include the notifications":                     "dumpsys con --priority repetido puede incluir las notificaciones",

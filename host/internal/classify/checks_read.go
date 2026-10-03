@@ -267,7 +267,7 @@ func checkDate(ws []Word) checkResult {
 // notification service (dumpsysNotifications): redacted, it still shows the
 // start of each ticker (T2 of the manual validations, M5b-18). And so is any
 // dump of several services (dumpsysSeveral), whatever it leaves out: another
-// service can hold a notification's whole text.
+// service may hold a notification's text.
 func checkDumpsys(ws []Word) checkResult {
 	v := values(ws)
 	if revealsNotifications(v) {
@@ -289,8 +289,12 @@ func checkDumpsys(ws []Word) checkResult {
 		return red(reason("dumpsys of every service includes the notifications, with the start of each ticker"))
 	case dumpsysSeveral(v):
 		return red(reason("dumpsys of several services may show the text of notifications, codes included"))
+	case contains(v[1:], ""):
+		// dumpsys takes an empty word where the service goes as a service:
+		// not the list, the usage or a known read.
+		return red(reason("dumpsys with an empty word is not a known way of reading"))
 	case svc == "":
-		return ok() // the list of services, the usage, or only PIDs, threads, clients or stability
+		return ok() // the list of services (-l), the usage (--help), or only PIDs, threads, clients or stability
 	case dumpsysVerbs[svc]:
 		return red(reason("dumpsys command that changes state"))
 	case svc == "deviceidle":
@@ -366,11 +370,12 @@ loop:
 // dumpsysSeveral reports whether a dumpsys line, with only options dumpsys
 // has, dumps services without naming one: every service, those of a
 // --priority, or all but those after --skip. The CI's emulator (android-34,
-// after other tests of the suite, with a notification posted) showed the whole
-// text of the notification, code included, in dumpsys --priority NORMAL and
-// dumpsys --skip notification: another service than the notification one held
-// it, in a state the local emulator did not reproduce (2026-10-03). So no such
-// dump is 🟢 whatever it leaves out. -l and --help print the list of services
+// after other tests of the suite, with a notification posted) showed the
+// 6-digit code of the notification's text in dumpsys --priority NORMAL and
+// dumpsys --skip notification, which leave the notification service out
+// (2026-10-03). Whether another service held it or the 6 digits turned up by
+// chance among the numbers of 15 MB of dump is not confirmed, and the local
+// emulator did not reproduce it. So no such dump is 🟢 whatever it leaves out. -l and --help print the list of services
 // or the usage; --pid, --thread, --clients and --stability without --dump
 // print only that, without calling any service's dump.
 func dumpsysSeveral(v []string) bool {
