@@ -49,7 +49,7 @@ func TestAppWorkflowPathsCoverDependencies(t *testing.T) {
 	missing := map[string]bool{}
 	for _, imp := range strings.Fields(out.String()) {
 		rest, ok := strings.CutPrefix(strings.TrimSuffix(imp, ".test"), prefix)
-		if !ok || strings.HasPrefix(rest, "[") {
+		if !ok {
 			continue
 		}
 		if path := "host/" + rest + "/**"; !have[path] {

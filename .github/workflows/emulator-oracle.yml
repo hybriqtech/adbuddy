@@ -45,7 +45,9 @@ jobs:
     # Fork pull requests never reach a self-hosted runner.
     if: ${{ vars.CI_RUNNER_EMULATOR != '"none"' && (vars.CI_RUNNER_EMULATOR == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ${{ fromJSON(vars.CI_RUNNER_EMULATOR || '"ubuntu-latest"') }}
-    timeout-minutes: 60
+    # 75 minutes: the recording (45m at most) and the skills' examples (20m at
+    # most) must fit, and Go's own timeouts fire before the job's.
+    timeout-minutes: 75
     # Its own AVD, emulator port and adb server, so it never collides with an
     # emulator started by hand with the script's defaults (just names), nor with
     # the app workflow's (5592 and 5051). One emulator fits in RAM at a time:
@@ -107,7 +109,7 @@ jobs:
       - name: Record the oracle
         working-directory: host
         # Without the variables the test would skip and the step would pass.
-        # Go's own timeout (45m) fires before the job's (60m).
+        # Go's own timeout (45m) fires before the job's (75m).
         run: test -n "$ADBUDDY_MKSH_SERIAL" && go test -timeout 45m -count=1 -run TestRecordOracle ./internal/classify
       - name: The recorded oracle is the one in the repository
         run: git diff --exit-code -- host/internal/classify/testdata

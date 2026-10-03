@@ -203,7 +203,7 @@ This is the procedure that was tested. The Linux runner lives in a WSL2 Ubuntu d
      ```
 
      Neither `/tmp/w.exe` nor `/init /tmp/w.exe` may ever print your Windows `computer\user`.
-   - Ports 5037, 5038, 5039 and 5049 are closed on `127.0.0.1` and on the gateway (`ip route show default`): `timeout 3 bash -c '</dev/tcp/HOST/PORT'` must fail for each.
+   - Ports 5037, 5038, 5039, 5049 and 5051 are closed on `127.0.0.1` and on the gateway (`ip route show default`): `timeout 3 bash -c '</dev/tcp/HOST/PORT'` must fail for each.
    - `python3 -m http.server 5999 --bind 127.0.0.1` in WSL is not reachable from Windows: `Test-NetConnection 127.0.0.1 -Port 5999` must fail.
    - `/mnt/wslg` and `/tmp/.X11-unix` are empty or do not exist.
    - `ls -l /dev/dxg` shows mode 600, owner root.
@@ -337,7 +337,7 @@ The Windows runner is not ephemeral either, and nothing cleans it automatically:
 - Take the runners down (remove them in the repository settings and delete the runner folders) before making the repository public.
 - The workflows use `pull_request` and `push`, never `pull_request_target`, and these jobs have no secrets.
 - One job runs at a time per runner. Register a second runner in another folder to run jobs in parallel.
-- The emulator workflows use and stop the AVDs `adbuddy-ci-api37` (emulator port 5590, adb server 5049; oracle) and `adbuddy-ci-api34` (emulator port 5592, adb server 5051; app) on the runner's machine: do not use them by hand meanwhile. It no longer uses the script's default AVD and ports, which can be used by hand at the same time.
+- The emulator workflows use and stop the AVDs `adbuddy-ci-api37` (emulator port 5590, adb server 5049; oracle) and `adbuddy-ci-api34` (emulator port 5592, adb server 5051; app) on the runner's machine: do not use them by hand meanwhile. They no longer use the script's default AVD and ports, which can be used by hand at the same time.
 - Two emulators at once need about 5 GB of RAM each.
 - A Linux runner needs /dev/kvm accessible through the kvm group for the emulator workflows (WSL2 here has no /dev/kvm without nested virtualization, so the emulator workflows stay on the Windows runner). Never give the runner user sudo: root in the distribution can mount C: and read your adb key.
 
