@@ -720,9 +720,20 @@ func (e *emu) screen(t *testing.T) []uiNode {
 }
 
 // dumpScreen returns the uiautomator dump of the emulator's screen now.
+//
+// uiautomator dump sometimes fails (exit 255, "could not get idle state") while
+// the screen is changing, as when an app has just closed: it is tried again.
 func (e *emu) dumpScreen(t *testing.T) string {
 	t.Helper()
-	return e.shell(t, "uiautomator dump /sdcard/adbuddy-emutest.xml >/dev/null && cat /sdcard/adbuddy-emutest.xml; rm -f /sdcard/adbuddy-emutest.xml")
+	const cmd = "uiautomator dump /sdcard/adbuddy-emutest.xml >/dev/null && cat /sdcard/adbuddy-emutest.xml; rm -f /sdcard/adbuddy-emutest.xml"
+	for try := 1; try < 4; try++ {
+		out, _, code, err := e.adb.Output(e.ctx, "shell", cmd)
+		if err == nil && code == 0 {
+			return strings.TrimSpace(strings.ReplaceAll(out, "\r", ""))
+		}
+		time.Sleep(time.Second)
+	}
+	return e.shell(t, cmd)
 }
 
 // waitNode waits up to d for a node that match accepts, or fails.

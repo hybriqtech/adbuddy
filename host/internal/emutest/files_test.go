@@ -30,6 +30,8 @@ import (
 //	corrupt-frame the host damages a byte of every frame it serves      (TestDownloadsBringTheRealBytes, TestDownloadResumesAfterACut)
 //	ignore-offset the host serves from 0 whatever file.get asked        (TestDownloadResumesAfterACut)
 //	heal-on-retry the host stops damaging frames on the app's retry     (TestDownloadRetriesOnceThenFails)
+//	pdf-as-octet  the host announces the PDF as application/octet-stream (TestOpenAndShare)
+//	expect-write  the test expects a write grant, which is not given    (TestOpenAndShare)
 //
 //	ADBUDDY_EMUTEST_MUTATE=corrupt-byte go test -count=1 -run TestUploadSendsTheRealBytes ./internal/emutest
 //
@@ -45,7 +47,8 @@ func mutation(t *testing.T, taken ...string) string {
 	switch m {
 	case "":
 		return ""
-	case "corrupt-byte", "skip-frame", "ready-zero", "corrupt-frame", "ignore-offset", "heal-on-retry":
+	case "corrupt-byte", "skip-frame", "ready-zero", "corrupt-frame", "ignore-offset", "heal-on-retry",
+		"pdf-as-octet", "expect-write":
 	default:
 		t.Fatalf("%s=%q: unknown mutation", mutateEnv, m)
 	}
