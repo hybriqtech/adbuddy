@@ -477,3 +477,44 @@ func TestTypeWritesUnicodeIntoAField(t *testing.T) {
 		t.Errorf("Settings' search field holds %q, want %q", got, text)
 	}
 }
+
+// notificationRecord returns the block of `dumpsys notification --noredact`
+// of pkg's notification on channel, or "" (the system's autogroup summary
+// does not count).
+func notificationRecord(dump, pkg, channel string) string {
+	for _, rec := range strings.Split(dump, "NotificationRecord(")[1:] {
+		// The autogroup summary (tag=ranker_group) shares the channel and has no content.
+		if strings.Contains(rec, "pkg="+pkg+" ") && strings.Contains(rec, "channel="+channel+" ") && !strings.Contains(rec, "tag=ranker_group ") {
+			return rec
+		}
+	}
+	return ""
+}
+
+// Validation 6 of M6c: the phone and the PC in different languages. The app
+// in Spanish (its own language, Android 13+: the system's needs a reboot) and
+// the host in English: the 🔴 question that comes by the real channel shows
+// the host's English title inside the app's Spanish text, with the app's
+// Spanish buttons.
+func TestSpanishAppEnglishHost(t *testing.T) {
+	l := openLink(t)
+	e := l.e
+	e.shell(t, "pm grant "+phoneapp.Package+" android.permission.POST_NOTIFICATIONS")
+	e.shell(t, "cmd locale set-app-locales "+phoneapp.Package+" --locales es")
+	l.send(t, bridge.TypeConfirmReq, bridge.ConfirmRequest{
+		ID: "j_1", Level: "red", Title: "Restart the phone", Detail: "may restart",
+		RawCommand: "adb shell reboot", ExpiresAt: time.Now().Add(2 * time.Minute).UTC(),
+	})
+	var rec string
+	if !poll(20*time.Second, func() bool {
+		rec = notificationRecord(e.shell(t, "dumpsys notification --noredact"), phoneapp.Package, "confirm")
+		return rec != ""
+	}) {
+		t.Fatal("no notification on the confirm channel 20 s after the confirm.request")
+	}
+	for _, want := range []string{"El agente quiere: Restart the phone", `"Permitir"`, `"Rechazar"`} {
+		if !strings.Contains(rec, want) {
+			t.Errorf("the question's notification lacks %s:\n%s", want, rec)
+		}
+	}
+}
