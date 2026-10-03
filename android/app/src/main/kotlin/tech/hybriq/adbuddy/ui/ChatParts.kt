@@ -32,7 +32,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -313,30 +312,32 @@ fun DraftChips(drafts: List<Draft>, onRemove: (String) -> Unit, onRetry: (String
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (d in drafts) {
             val failed = d.status == DraftStatus.FAILED
-            InputChip(
-                selected = failed,
-                onClick = { if (failed) onRetry(d.key) },
-                label = {
-                    Column {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (failed) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // The retry tap is on the label only: the X is its sibling, so tapping it can never retry.
+                    Column(
+                        Modifier.widthIn(max = 180.dp).padding(vertical = 8.dp)
+                            .then(if (failed) Modifier.clickable(role = Role.Button, onClick = { onRetry(d.key) }) else Modifier),
+                    ) {
                         Text(
                             if (failed) d.error.ifEmpty { stringResource(R.string.draft_failed) } else d.name,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 180.dp),
+                            style = MaterialTheme.typography.labelLarge, maxLines = if (failed) 4 else 1, overflow = TextOverflow.Ellipsis,
                         )
-                        if (d.status == DraftStatus.UPLOADING && d.size > 0) {
-                            LinearProgressIndicator(progress = { (d.progress.toFloat() / d.size).coerceIn(0f, 1f) }, modifier = Modifier.widthIn(max = 180.dp))
+                        if (d.status == DraftStatus.UPLOADING) {
+                            // Size 0 is a file still being prepared (or a screenshot being taken): an unknown amount, not an empty one.
+                            if (d.size > 0) LinearProgressIndicator(progress = { (d.progress.toFloat() / d.size).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                            else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
                     }
-                },
-                trailingIcon = {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = stringResource(R.string.chat_discard),
-                        modifier = Modifier.size(18.dp).clickable { onRemove(d.key) },
-                    )
-                },
-            )
+                    IconButton(onClick = { onRemove(d.key) }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.chat_discard))
+                    }
+                }
+            }
         }
     }
 }
