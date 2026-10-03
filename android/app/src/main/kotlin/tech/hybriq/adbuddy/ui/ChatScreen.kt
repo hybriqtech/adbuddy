@@ -2,7 +2,6 @@ package tech.hybriq.adbuddy.ui
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
-import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -111,38 +110,29 @@ fun ChatScreen(
     // news is a new LAST MESSAGE (its key), not more rows: the strip appearing is not news and the strip going while a
     // message arrives (same row count) is. Coming back from Settings the chat recomposes with seen = 0 and jumps to
     // the end, as it already did.
-    // `following`: the effect decided to follow and its animation has not finished. Two changes in a row evaluate the
-    // viewport while it is mid-animation, so while following the reader counts as at the end. It ends when the animation
-    // completes or when the reader drags the list (a DragInteraction: programmatic scrolls emit none, unlike
-    // isScrollInProgress, which an animation also sets).
+    // Two changes in a row evaluate the viewport mid-animation: if the new row is already visible its index is >= seen - 1
+    // and it counts as "at the end" (no state to get stuck); a reader who went up has a smaller last visible index.
     var seen by remember { mutableIntStateOf(0) }
     var seenKey by remember { mutableStateOf<String?>(null) }
-    var following by remember { mutableStateOf(false) }
     var unseen by remember { mutableStateOf(false) }
     // Outside the notice: hiding it must not cancel the scroll its tap started.
     val scope = rememberCoroutineScope()
     val lastKey = items.lastOrNull()?.key
     LaunchedEffect(rows, lastKey) {
         val info = listState.layoutInfo
-        val wasAtEnd = seen == 0 || following ||
-            info.visibleItemsInfo.any { it.index == seen - 1 && it.offset < info.viewportEndOffset }
+        val wasAtEnd = seen == 0 || (info.visibleItemsInfo.lastOrNull()?.index ?: -1) >= seen - 1
         val grew = lastKey != null && lastKey != seenKey
         seen = rows // before animating: a cancelled animation does not leave the old count
         seenKey = lastKey
         if (rows == 0) return@LaunchedEffect
         if (wasAtEnd) {
             unseen = false
-            following = true
             listState.animateScrollToItem(rows - 1)
-            following = false
         } else if (grew) {
             unseen = true
         }
     }
     LaunchedEffect(listState) { snapshotFlow { !listState.canScrollForward }.collect { if (it) unseen = false } }
-    LaunchedEffect(listState) {
-        listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) following = false }
-    }
     val terminalOn = terminalShown && terminal != null
 
     Scaffold(

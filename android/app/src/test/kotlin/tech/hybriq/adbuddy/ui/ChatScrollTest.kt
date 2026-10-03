@@ -134,6 +134,7 @@ class ChatScrollTest {
         state = state.copy(chat = running, sessionState = working)
         compose.waitForIdle()
         notice.assertDoesNotExist()
+        shown("message 0")
     }
 
     @Test fun theStripGoingAndAMessageArrivingWithTheReaderAboveNotices() {
@@ -151,31 +152,23 @@ class ChatScrollTest {
         notice.assertDoesNotExist()
     }
 
-    @Test fun twoArrivalsWhileTheAnimationRunsStillFollow() {
+    private fun twoTallArrivals(second: () -> Unit) {
         start()
         compose.mainClock.autoAdvance = false
-        add(ChatMessage("30", "user", "message 30"))
+        add(ChatMessage("30", "user", "long ".repeat(800)))
         compose.mainClock.advanceTimeBy(1)
-        add(ChatMessage("31", "assistant", "message 31"))
+        second()
         compose.mainClock.advanceTimeBy(1)
         compose.mainClock.autoAdvance = true
         compose.waitForIdle()
-        shown("message 31")
         notice.assertDoesNotExist()
     }
 
-    @Test fun aMessageThenTheStripWhileTheAnimationRunsStillFollows() {
-        start()
-        compose.mainClock.autoAdvance = false
-        add(ChatMessage("30", "user", "message 30"))
-        compose.mainClock.advanceTimeBy(1)
-        state = state.copy(chat = state.chat.copy(tools = running.tools), sessionState = working)
-        compose.mainClock.advanceTimeBy(1)
-        compose.mainClock.autoAdvance = true
-        compose.waitForIdle()
-        shown("Run 1")
-        notice.assertDoesNotExist()
-    }
+    @Test fun twoTallArrivalsWhileTheAnimationRunsStillFollow() =
+        twoTallArrivals { add(ChatMessage("31", "assistant", "long ".repeat(800) + "end")) }
+
+    @Test fun aTallArrivalThenTheStripWhileTheAnimationRunsStillFollows() =
+        twoTallArrivals { state = state.copy(chat = state.chat.copy(tools = running.tools), sessionState = working) }
 
     @Test fun tappingTheNoticeWithATallLastBubbleRemovesIt() {
         start()
