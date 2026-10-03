@@ -16,6 +16,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
 )
 
 const (
@@ -67,6 +68,17 @@ type State struct {
 	Closing   bool   // the expiry passed and the port is not known to be closed yet
 	Address   string // ip:port while enabled
 	ExpiresAt time.Time
+	// Persist is persist.adb.tcp.port as the controller last read it (or was
+	// told with Note), when it names a port (device.TCP.Persist): `adb usb`
+	// does not clear it, and adbd listens on it again when the phone restarts
+	// (VB-41). ADBuddy never sets it and cannot clear it without root. It is
+	// the last read, not a live value: a persist set or emptied since shows
+	// at the next read.
+	Persist string
+	// PersistUnknown says the controller's last read of the port failed:
+	// whether a port opens again when the phone restarts is not known (never
+	// a false "closed").
+	PersistUnknown bool
 }
 
 type Controller struct {
@@ -78,13 +90,22 @@ type Controller struct {
 	// failed (under mu): the next attempt only clears it, without restarting
 	// adbd again. Any other expiry (Enable saved a new one) runs `adb usb`.
 	closedFor time.Time
+	// readWait bounds each read of the port (device.ReadTCPWait as New read
+	// it, before any goroutine).
+	readWait time.Duration
+	// pmu guards persist and persistUnknown, what the last read of the port
+	// said (readTCP, Note). State takes only pmu: the snapshot and `status`
+	// call it while a change may hold mu.
+	pmu            sync.Mutex
+	persist        string
+	persistUnknown bool
 }
 
 func New(a ADB, s Store, now func() time.Time) *Controller {
 	if now == nil {
 		now = time.Now
 	}
-	return &Controller{adb: a, st: s, now: now}
+	return &Controller{adb: a, st: s, now: now, readWait: device.ReadTCPWait}
 }
 
 // until is the saved expiry. One more than Lifetime (plus a minute of slack
@@ -101,15 +122,42 @@ func (c *Controller) until() time.Time {
 }
 
 func (c *Controller) State() State {
-	until := c.until()
-	if until.IsZero() {
-		return State{}
+	var s State
+	if until := c.until(); !until.IsZero() {
+		s = State{Enabled: true, Closing: !until.After(c.now()), ExpiresAt: until}
+		if ip := c.st.TailscaleIP(); ip != "" {
+			s.Address = net.JoinHostPort(ip, Port)
+		}
 	}
-	s := State{Enabled: true, Closing: !until.After(c.now()), ExpiresAt: until}
-	if ip := c.st.TailscaleIP(); ip != "" {
-		s.Address = net.JoinHostPort(ip, Port)
-	}
+	c.pmu.Lock()
+	s.Persist, s.PersistUnknown = c.persist, c.persistUnknown
+	c.pmu.Unlock()
 	return s
+}
+
+// readTCP reads adbd's TCP port (device.ReadTCP: service.adb.tcp.port, or
+// persist.adb.tcp.port when it is empty) and keeps what it said of
+// persist.adb.tcp.port for State; a read that fails makes it unknown. The
+// read has its own deadline (readWait): a hung getprop must not eat the
+// budget of the `adb usb` that follows.
+func (c *Controller) readTCP(ctx context.Context) (device.TCP, error) {
+	rctx, cancel := context.WithTimeout(ctx, c.readWait)
+	defer cancel()
+	t, err := device.ReadTCP(rctx, c.adb)
+	c.pmu.Lock()
+	c.persist, c.persistUnknown = t.Persist, err != nil
+	c.pmu.Unlock()
+	return t, err
+}
+
+// Note keeps a read of the port made elsewhere (serve's invariant at its
+// start, the watcher when the phone comes back) for State, as if the
+// controller had made it: `adbuddy remote status` says what
+// persist.adb.tcp.port holds from serve's start. It takes only pmu.
+func (c *Controller) Note(t device.TCP) {
+	c.pmu.Lock()
+	c.persist, c.persistUnknown = t.Persist, false
+	c.pmu.Unlock()
 }
 
 func (c *Controller) adbCmd(ctx context.Context, args ...string) (string, error) {
@@ -161,10 +209,11 @@ func (c *Controller) Enable(ctx context.Context) (State, error) {
 		}
 		// Otherwise adbd may have got the order and the failure be the cut
 		// connection or the timeout: the expiry is cleared only when the port
-		// is seen NOT to be open. If it cannot be read, the expiry stays (a
-		// false "on" is better than a false "off" with the port open);
-		// Reconcile clears it at the next start if the port turns out closed.
-		if port, perr := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); perr == nil && port != Port {
+		// is seen NOT to be open (persist.adb.tcp.port included). If it cannot
+		// be read, the expiry stays (a false "on" is better than a false "off"
+		// with the port open); Reconcile clears it at the next start if the
+		// port turns out closed.
+		if t, perr := c.readTCP(ctx); perr == nil && t.Now != Port {
 			_ = c.st.SetUntil(time.Time{})
 		}
 		return c.State(), err
@@ -173,37 +222,35 @@ func (c *Controller) Enable(ctx context.Context) (State, error) {
 }
 
 // Disable closes the port (`adb usb`) and only then clears the expiry: if
-// adb fails the mode stays on (and says so) and is tried again. With no
-// expiry saved (off as far as the host knows) it first reads the port:
-// `adb usb` would restart adbd, and drop the phone's connection, for nothing.
-// A port that reads open (5555 or any other), or cannot be read, is closed all the same.
+// adb fails the mode stays on (and says so) and is tried again. It reads the
+// port first (device.TCP), so the state it returns says what
+// persist.adb.tcp.port holds. With no expiry saved (off as far as the host
+// knows), a port that reads closed is left alone: `adb usb` would restart
+// adbd, and drop the phone's connection, for nothing. A port that reads open
+// (5555, any other, or persist's after a restart), or cannot be read, is
+// closed all the same.
 func (c *Controller) Disable(ctx context.Context) (State, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.st.Until().IsZero() {
-		if port, err := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); err == nil && portClosed(port) {
-			return State{}, nil
-		}
+	t, err := c.readTCP(ctx)
+	if c.st.Until().IsZero() && err == nil && t.Now == "" {
+		return c.State(), nil
 	}
-	return c.disable(ctx)
+	return c.disable(ctx, t, err)
 }
 
-// portClosed says whether service.adb.tcp.port reads as no network port (empty
-// or 0, the criterion of device.EnsureNoTCPPort, spec 3.3): any other value,
-// 5555 or not, is open and `adb usb` closes it.
-func portClosed(port string) bool { return port == "" || port == "0" }
-
-// disable runs `adb usb` and clears the expiry. When clearing failed after
-// `adb usb` closed the port, the next call for the same expiry skips `adb usb`
-// (closedFor: each one restarts adbd and the phone's connection) only if the
-// port reads as closed: someone may have reopened 5555 meanwhile, and an
-// unreadable port is not known to be closed.
-func (c *Controller) disable(ctx context.Context) (State, error) {
+// disable runs `adb usb` and clears the expiry. t and rerr are the read of
+// the port just before (readTCP). When clearing failed after `adb usb` closed
+// the port, the next call for the same expiry skips `adb usb` (closedFor: each
+// one restarts adbd and the phone's connection) only if that read says
+// closed: someone may have reopened the port meanwhile, and an unreadable port
+// is not known to be closed. The state it returns keeps what the read said of
+// persist.adb.tcp.port: `adb usb` does not change it (measured, VB-41), and
+// right after it adbd restarts and cannot be read.
+func (c *Controller) disable(ctx context.Context, t device.TCP, rerr error) (State, error) {
 	until := c.st.Until()
-	if !c.closedFor.IsZero() && until.Equal(c.closedFor) {
-		if port, err := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port"); err != nil || !portClosed(port) {
-			c.closedFor = time.Time{}
-		}
+	if !c.closedFor.IsZero() && until.Equal(c.closedFor) && (rerr != nil || t.Now != "") {
+		c.closedFor = time.Time{}
 	}
 	if c.closedFor.IsZero() || !until.Equal(c.closedFor) {
 		if _, err := c.adbCmd(ctx, "usb"); err != nil {
@@ -215,7 +262,7 @@ func (c *Controller) disable(ctx context.Context) (State, error) {
 		return c.State(), err
 	}
 	c.closedFor = time.Time{}
-	return State{}, nil
+	return c.State(), nil
 }
 
 // Expire closes the mode when its time has passed. The bool says the state
@@ -227,15 +274,18 @@ func (c *Controller) Expire(ctx context.Context) (State, bool, error) {
 	if until.IsZero() || until.After(c.now()) {
 		return c.State(), false, nil
 	}
-	s, err := c.disable(ctx)
+	t, rerr := c.readTCP(ctx)
+	s, err := c.disable(ctx, t, rerr)
 	return s, err == nil, err
 }
 
 // Reconcile is run once when serve starts, with the phone connected. No
 // expiry: off. Port 5555 not open: the expiry is stale (the phone restarted)
 // and is cleared. Port open with an expiry in the future: kept. Port open
-// with the expiry passed: closed now. If the port cannot be read, nothing
-// changes (the next start looks again).
+// with the expiry passed: closed now. The port is device.TCP.Now: after a
+// restart with persist.adb.tcp.port=5555, adbd listens on 5555 again and the
+// mode is still on. If the port cannot be read, nothing changes (the next
+// start looks again).
 func (c *Controller) Reconcile(ctx context.Context) (State, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -243,18 +293,18 @@ func (c *Controller) Reconcile(ctx context.Context) (State, error) {
 	if until.IsZero() {
 		return State{}, nil
 	}
-	port, err := c.adbCmd(ctx, "shell", "getprop service.adb.tcp.port")
+	t, err := c.readTCP(ctx)
 	if err != nil {
 		return c.State(), err
 	}
 	switch {
-	case port != Port:
+	case t.Now != Port:
 		if err := c.st.SetUntil(time.Time{}); err != nil {
 			return c.State(), err
 		}
-		return State{}, nil
+		return c.State(), nil
 	case until.After(c.now()):
 		return c.State(), nil
 	}
-	return c.disable(ctx)
+	return c.disable(ctx, t, nil)
 }

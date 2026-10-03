@@ -9,9 +9,15 @@ import (
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
+	"github.com/hybriqtech/adbuddy/host/internal/device"
 )
 
-const getprop = "shell getprop service.adb.tcp.port"
+const (
+	getprop    = "shell getprop service.adb.tcp.port"
+	getpersist = "shell getprop persist.adb.tcp.port"
+	// readPort is the read of the port as the events log it: both properties.
+	readPort = "adb " + getprop + "|adb " + getpersist
+)
 
 var t0 = time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
 
@@ -21,6 +27,9 @@ type env struct {
 	events    []string
 	port      string // answer of getprop
 	portFails bool
+	persist   string // answer of getprop persist.adb.tcp.port
+	persFails bool
+	persHang  bool // getprop persist.adb.tcp.port waits for its context to end
 	tcpipFail bool
 	tcpipErr  string // stderr of a failing tcpip (default "error: closed")
 	tcpipGo   error  // error of the adb run itself for tcpip (no exit code)
@@ -35,7 +44,7 @@ func newEnv() *env {
 	return &env{ip: "100.64.0.5", now: t0}
 }
 
-func (e *env) Run(_ context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (int, error) {
+func (e *env) Run(ctx context.Context, _ string, args []string, _ io.Reader, stdout, stderr io.Writer) (int, error) {
 	key := strings.Join(args, " ")
 	e.events = append(e.events, "adb "+key)
 	switch key {
@@ -45,6 +54,16 @@ func (e *env) Run(_ context.Context, _ string, args []string, _ io.Reader, stdou
 			return 1, nil
 		}
 		io.WriteString(stdout, e.port+"\r\n")
+	case getpersist:
+		if e.persHang {
+			<-ctx.Done()
+			return -1, ctx.Err()
+		}
+		if e.persFails {
+			io.WriteString(stderr, "error: device offline")
+			return 1, nil
+		}
+		io.WriteString(stdout, e.persist+"\r\n")
 	case "tcpip 5555":
 		if e.tcpipGo != nil {
 			return 0, e.tcpipGo
@@ -208,7 +227,7 @@ func TestDisableRunsUsbThenClears(t *testing.T) {
 	if err != nil || s != (State{}) {
 		t.Fatalf("state %+v err %v", s, err)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
+	if got := strings.Join(e.events, "|"); got != readPort+"|adb usb|save zero" {
 		t.Fatalf("events %q", got)
 	}
 }
@@ -236,7 +255,7 @@ func TestExpire(t *testing.T) {
 	if err != nil || !changed || s != (State{}) {
 		t.Fatalf("after: %+v %v %v", s, changed, err)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
+	if got := strings.Join(e.events, "|"); got != readPort+"|adb usb|save zero" {
 		t.Fatalf("events %q", got)
 	}
 	// Nothing saved: nothing to expire.
@@ -272,7 +291,7 @@ func TestReconcileClearsStaleUntil(t *testing.T) {
 		if err != nil || s != (State{}) || !e.until.IsZero() {
 			t.Fatalf("port %q: %+v %v until %v", port, s, err, e.until)
 		}
-		if got := strings.Join(e.events, "|"); got != "adb "+getprop+"|save zero" {
+		if got := strings.Join(e.events, "|"); got != readPort+"|save zero" {
 			t.Fatalf("port %q: events %q", port, got)
 		}
 	}
@@ -299,7 +318,7 @@ func TestReconcileClosesExpiredOpenPort(t *testing.T) {
 	if err != nil || s != (State{}) || !e.until.IsZero() {
 		t.Fatalf("%+v %v until %v", s, err, e.until)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb "+getprop+"|adb usb|save zero" {
+	if got := strings.Join(e.events, "|"); got != readPort+"|adb usb|save zero" {
 		t.Fatalf("events %q", got)
 	}
 }
@@ -334,7 +353,7 @@ func TestUntilBeyondLifetimeCountsAsExpired(t *testing.T) {
 	if err != nil || !changed || st != (State{}) {
 		t.Fatalf("%+v %v %v", st, changed, err)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
+	if got := strings.Join(e.events, "|"); got != readPort+"|adb usb|save zero" {
 		t.Fatalf("events %q", got)
 	}
 }
@@ -463,16 +482,18 @@ func TestDisableWithoutTheModeLooksAtThePortFirst(t *testing.T) {
 		portFails bool
 		want      string
 	}{
-		{"closed", "", false, "adb " + getprop},
-		{"zero", "0", false, "adb " + getprop},
-		{"another port", "37123", false, "adb " + getprop + "|adb usb|save zero"},
-		{"open", "5555", false, "adb " + getprop + "|adb usb|save zero"},
+		{"closed", "", false, readPort},
+		{"zero", "0", false, readPort},
+		{"another port", "37123", false, readPort + "|adb usb|save zero"},
+		{"open", "5555", false, readPort + "|adb usb|save zero"},
 		{"unreadable", "", true, "adb " + getprop + "|adb usb|save zero"},
 	} {
 		e := newEnv()
 		e.port, e.portFails = c.port, c.portFails
 		s, err := e.controller().Disable(context.Background())
-		if err != nil || s != (State{}) {
+		// Unreadable: off, but whether a port comes back after a restart is
+		// not known (VB-41).
+		if err != nil || s != (State{PersistUnknown: c.portFails}) {
 			t.Fatalf("%s: state %+v err %v", c.name, s, err)
 		}
 		if got := strings.Join(e.events, "|"); got != c.want {
@@ -496,14 +517,14 @@ func TestExpireAfterAFailedSaveDoesNotRunUsbAgain(t *testing.T) {
 	if s, changed, err := c.Expire(context.Background()); err == nil || changed || !s.Enabled || !s.Closing {
 		t.Fatalf("second: %+v %v %v", s, changed, err)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb usb|adb "+getprop {
+	if got := strings.Join(e.events, "|"); got != readPort+"|adb usb|"+readPort {
 		t.Fatalf("events %q: adb usb ran again", got)
 	}
 	e.saveFail = false
 	if s, changed, err := c.Expire(context.Background()); err != nil || !changed || s != (State{}) {
 		t.Fatalf("third: %+v %v %v", s, changed, err)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb usb|adb "+getprop+"|adb "+getprop+"|save zero" {
+	if got := strings.Join(e.events, "|"); got != readPort+"|adb usb|"+readPort+"|"+readPort+"|save zero" {
 		t.Fatalf("events %q", got)
 	}
 	// A failed save again, then a new expiry: its port is closed with adb usb.
@@ -519,7 +540,7 @@ func TestExpireAfterAFailedSaveDoesNotRunUsbAgain(t *testing.T) {
 	if _, changed, err := c.Expire(context.Background()); err != nil || !changed {
 		t.Fatalf("after Enable: %v %v", changed, err)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb usb|save 12h0m0s|adb tcpip 5555|adb usb|save zero" {
+	if got := strings.Join(e.events, "|"); got != readPort+"|adb usb|save 12h0m0s|adb tcpip 5555|"+readPort+"|adb usb|save zero" {
 		t.Fatalf("events %q", got)
 	}
 }
@@ -551,7 +572,7 @@ func TestEnableForgetsTheExpiryItsPortWasClosedFor(t *testing.T) {
 	if _, changed, err := c.Expire(context.Background()); err != nil || !changed {
 		t.Fatalf("Expire: changed %v err %v", changed, err)
 	}
-	if got := strings.Join(e.events, "|"); got != "adb usb|save zero" {
+	if got := strings.Join(e.events, "|"); got != readPort+"|adb usb|save zero" {
 		t.Fatalf("events %q: the port was not closed again", got)
 	}
 }
@@ -567,10 +588,10 @@ func TestRetryAfterAFailedSaveLooksAtThePortBeforeSkippingUsb(t *testing.T) {
 		portFails bool
 		want      string
 	}{
-		{"closed", "", false, "adb " + getprop + "|save zero"},
-		{"zero", "0", false, "adb " + getprop + "|save zero"},
-		{"another port", "37123", false, "adb " + getprop + "|adb usb|save zero"},
-		{"reopened", "5555", false, "adb " + getprop + "|adb usb|save zero"},
+		{"closed", "", false, readPort + "|save zero"},
+		{"zero", "0", false, readPort + "|save zero"},
+		{"another port", "37123", false, readPort + "|adb usb|save zero"},
+		{"reopened", "5555", false, readPort + "|adb usb|save zero"},
 		{"unreadable", "", true, "adb " + getprop + "|adb usb|save zero"},
 	} {
 		e := newEnv()
@@ -583,11 +604,257 @@ func TestRetryAfterAFailedSaveLooksAtThePortBeforeSkippingUsb(t *testing.T) {
 		}
 		e.saveFail, e.events = false, nil
 		e.port, e.portFails = c.port, c.portFails
-		if s, changed, err := ctl.Expire(context.Background()); err != nil || !changed || s != (State{}) {
+		if s, changed, err := ctl.Expire(context.Background()); err != nil || !changed || s != (State{PersistUnknown: c.portFails}) {
 			t.Fatalf("%s: %+v %v %v", c.name, s, changed, err)
 		}
 		if got := strings.Join(e.events, "|"); got != c.want {
 			t.Fatalf("%s: events %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// VB-41: AOSP adbd takes persist.adb.tcp.port at its start when
+// service.adb.tcp.port is empty (after a reboot). "off" with the mode off
+// reads both: a persist port with the service property empty is open and is
+// closed; with the service property at 0 `adb usb` already ran since the boot
+// and is not run again (no loop). A persist property that cannot be read is
+// not known to be closed: it is closed all the same, as an unreadable port.
+func TestDisableWithoutTheModeReadsPersistToo(t *testing.T) {
+	for _, c := range []struct {
+		name, port, persist string
+		persFails, wantUSB  bool
+	}{
+		{"persist after a reboot", "", "5555", false, true},
+		{"another persist port", "", "7777", false, true},
+		{"not a number", "", "abc", false, true},
+		{"huge", "", "99999999999999999999999", false, true},
+		{"persist unreadable", "", "", true, true},
+		{"persist 0", "", "0", false, false},
+		{"nothing", "", "", false, false},
+		{"service at 0", "0", "5555", false, false},
+		{"both set", "5555", "5555", false, true},
+	} {
+		e := newEnv()
+		e.port, e.persist, e.persFails = c.port, c.persist, c.persFails
+		if _, err := e.controller().Disable(context.Background()); err != nil {
+			t.Errorf("%s: %v", c.name, err)
+		}
+		if e.ran("usb") != c.wantUSB {
+			t.Errorf("%s: adb usb ran %v, want %v (%q)", c.name, e.ran("usb"), c.wantUSB, e.events)
+		}
+	}
+}
+
+// After a reboot with persist.adb.tcp.port=5555 and a live expiry, adbd
+// listens on 5555 again: the mode is still on, not a stale expiry to clear
+// (that would leave 5555 open with the host saying "off").
+func TestReconcileKeepsTheModeOnAPersistPort(t *testing.T) {
+	e := newEnv()
+	e.until = t0.Add(time.Hour)
+	e.persist = "5555"
+	s, err := e.controller().Reconcile(context.Background())
+	if err != nil || !s.Enabled || !e.until.Equal(t0.Add(time.Hour)) || e.ran("usb") {
+		t.Fatalf("%+v %v until %v (%q)", s, err, e.until, e.events)
+	}
+}
+
+// Reconcile with persist.adb.tcp.port unreadable changes nothing, as with the
+// service property unreadable.
+func TestReconcilePersistUnreadableChangesNothing(t *testing.T) {
+	e := newEnv()
+	e.until = t0.Add(time.Hour)
+	e.persFails = true
+	s, err := e.controller().Reconcile(context.Background())
+	if err == nil || !s.Enabled || !e.until.Equal(t0.Add(time.Hour)) || e.ran("usb") {
+		t.Fatalf("%+v %v until %v (%q)", s, err, e.until, e.events)
+	}
+}
+
+// tcpip failing for any reason but "no phone": the expiry is cleared only when
+// the port reads closed, persist.adb.tcp.port included.
+func TestEnableTcpipFailsWithAPersistPortKeepsUntil(t *testing.T) {
+	for name, set := range map[string]func(*env){
+		"persist 5555":       func(e *env) { e.persist = "5555" },
+		"persist unreadable": func(e *env) { e.persFails = true },
+	} {
+		e := newEnv()
+		e.tcpipFail = true
+		set(e)
+		s, err := e.controller().Enable(context.Background())
+		if err == nil || !e.until.Equal(t0.Add(Lifetime)) || !s.Enabled {
+			t.Errorf("%s: until %v state %+v err %v", name, e.until, s, err)
+		}
+	}
+}
+
+// After `adb usb` closed the port and clearing the expiry failed, the retry
+// skips `adb usb` only if the port reads closed: a persist port with the
+// service property empty is open.
+func TestRetryAfterAFailedSaveSeesAPersistPort(t *testing.T) {
+	e := newEnv()
+	e.until = t0.Add(time.Hour)
+	e.now = t0.Add(2 * time.Hour)
+	e.saveFail = true
+	ctl := e.controller()
+	if _, _, err := ctl.Expire(context.Background()); err == nil {
+		t.Fatal("the save did not fail")
+	}
+	e.saveFail, e.events = false, nil
+	e.persist = "5555"
+	if _, changed, err := ctl.Expire(context.Background()); err != nil || !changed || !e.ran("usb") {
+		t.Fatalf("changed %v err %v (%q)", changed, err, e.events)
+	}
+}
+
+// Every "off" returns what it read of persist.adb.tcp.port, and State keeps
+// it: off is never a plain State{} while persist names a port, or while it
+// could not be read.
+func TestOffSaysWhatPersistHolds(t *testing.T) {
+	type off func(*env, *Controller) (State, error)
+	disable := func(_ *env, c *Controller) (State, error) { return c.Disable(context.Background()) }
+	expire := func(e *env, c *Controller) (State, error) {
+		e.now = t0.Add(2 * time.Hour)
+		s, _, err := c.Expire(context.Background())
+		return s, err
+	}
+	reconcile := func(e *env, c *Controller) (State, error) {
+		e.now, e.port = t0.Add(2*time.Hour), "5555"
+		return c.Reconcile(context.Background())
+	}
+	for _, c := range []struct {
+		name  string
+		until bool // the mode is on (an expiry saved)
+		port  string
+		do    off
+		keeps bool // an unreadable port changes nothing (and is an error)
+	}{
+		{"Disable, mode off, service at 0", false, "0", disable, false},
+		{"Disable, mode off, service empty", false, "", disable, false},
+		{"Disable, mode on", true, "5555", disable, false},
+		{"Expire", true, "5555", expire, false},
+		{"Reconcile past the expiry", true, "5555", reconcile, true},
+	} {
+		for _, p := range []struct {
+			persist   string
+			persFails bool
+			want      State
+		}{
+			{"5555", false, State{Persist: "5555"}},
+			{"7777", false, State{Persist: "7777"}},
+			{"", false, State{}},
+			{"0", false, State{}},
+			{"", true, State{PersistUnknown: true}},
+		} {
+			e := newEnv()
+			if c.until {
+				e.until = t0.Add(time.Hour)
+			}
+			e.port, e.persist, e.persFails = c.port, p.persist, p.persFails
+			ctl := e.controller()
+			s, err := c.do(e, ctl)
+			if c.keeps && p.persFails {
+				if err == nil || !s.Enabled || !s.PersistUnknown || e.ran("usb") {
+					t.Errorf("%s, persist unreadable: %+v %v (%q)", c.name, s, err, e.events)
+				}
+				continue
+			}
+			if err != nil || s != p.want || ctl.State() != p.want {
+				t.Errorf("%s, persist %q (fails %v): returned %+v, State %+v, err %v; want %+v (%q)", c.name, p.persist, p.persFails, s, ctl.State(), err, p.want, e.events)
+			}
+		}
+	}
+}
+
+// No restart loop: with persist set, `adb usb` runs once (the service property
+// was empty, as after a reboot); it leaves the service property at 0, and the
+// next "off" only reads and says so again.
+func TestPersistDoesNotRestartAdbdAgain(t *testing.T) {
+	e := newEnv()
+	e.persist = "5555"
+	ctl := e.controller()
+	for i := 0; i < 3; i++ {
+		s, err := ctl.Disable(context.Background())
+		if err != nil || s != (State{Persist: "5555"}) {
+			t.Fatalf("off %d: %+v %v", i+1, s, err)
+		}
+		e.port = "0" // what adb usb leaves
+	}
+	if got := strings.Join(e.events, "|"); got != readPort+"|adb usb|save zero|"+readPort+"|"+readPort {
+		t.Fatalf("events %q: want one adb usb", got)
+	}
+}
+
+// A later read replaces the earlier one: persist emptied (with root) is no
+// longer reported, and a read that fails turns it unknown.
+func TestStateKeepsTheLastReadOfPersist(t *testing.T) {
+	e := newEnv()
+	e.port, e.persist = "0", "5555"
+	ctl := e.controller()
+	if s, _ := ctl.Disable(context.Background()); s.Persist != "5555" {
+		t.Fatalf("%+v", s)
+	}
+	e.persist = ""
+	if s, _ := ctl.Disable(context.Background()); s != (State{}) || ctl.State() != (State{}) {
+		t.Fatalf("emptied: %+v %+v", s, ctl.State())
+	}
+	e.persFails = true
+	if s, _ := ctl.Disable(context.Background()); s != (State{PersistUnknown: true}) {
+		t.Fatalf("unreadable: %+v", s)
+	}
+}
+
+// `adb usb` failing with a persist port: an error, the mode as it was (on
+// stays on, with its expiry), and the persist port still in the state.
+func TestUsbFailsWithAPersistPort(t *testing.T) {
+	e := newEnv()
+	e.until = t0.Add(time.Hour)
+	e.persist, e.usbFail = "5555", true
+	s, err := e.controller().Disable(context.Background())
+	if err == nil || !s.Enabled || s.Persist != "5555" || !e.until.Equal(t0.Add(time.Hour)) {
+		t.Fatalf("mode on: %+v %v until %v", s, err, e.until)
+	}
+	e = newEnv()
+	e.persist, e.usbFail = "5555", true
+	if s, err := e.controller().Disable(context.Background()); err == nil || s != (State{Persist: "5555"}) || !e.ran("usb") {
+		t.Fatalf("mode off: %+v %v (%q)", s, err, e.events)
+	}
+}
+
+// The read of the port has its own deadline (device.ReadTCPWait): a hung
+// getprop of persist ends as "unknown" and `adb usb` still runs within the
+// caller's budget.
+func TestReadTCPHasItsOwnWait(t *testing.T) {
+	old := device.ReadTCPWait
+	device.ReadTCPWait = 20 * time.Millisecond
+	defer func() { device.ReadTCPWait = old }()
+	e := newEnv()
+	e.until = t0.Add(time.Hour)
+	e.persHang = true
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	s, err := e.controller().Disable(ctx)
+	if err != nil || s != (State{PersistUnknown: true}) || !e.ran("usb") || time.Since(start) > 5*time.Second {
+		t.Fatalf("%+v %v after %s (%q)", s, err, time.Since(start), e.events)
+	}
+}
+
+// Note: a read made elsewhere (serve's invariant) feeds State from the start;
+// a later read of the controller replaces it.
+func TestNoteFeedsState(t *testing.T) {
+	e := newEnv()
+	ctl := e.controller()
+	ctl.Note(device.TCP{Persist: "5555"})
+	if s := ctl.State(); s != (State{Persist: "5555"}) {
+		t.Fatalf("%+v", s)
+	}
+	e.port = "0"
+	if s, err := ctl.Disable(context.Background()); err != nil || s != (State{}) || ctl.State() != (State{}) {
+		t.Fatalf("after a read: %+v %v", s, err)
+	}
+	e.events = nil
+	ctl.Note(device.TCP{})
+	if len(e.events) != 0 {
+		t.Fatalf("Note ran adb: %q", e.events)
 	}
 }

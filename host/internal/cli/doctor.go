@@ -514,11 +514,12 @@ var unlockAndRetry = i18n.M("doctor.unlock")
 // an expiry beyond its lifetime counts as expired) that is expected, and it
 // says until when; with serve stopped nothing closes it, even after that.
 func checkRemotePort(ctx context.Context, phone adb.Runner, mode remoteInfo, serveRunning bool) check {
-	port, err := callWithin(ctx, func(c context.Context) (string, error) { return device.TCPPort(c, phone) })
+	t, err := callWithin(ctx, func(c context.Context) (device.TCP, error) { return device.ReadTCP(c, phone) })
+	port := t.Now
 	switch {
 	case err != nil:
 		return mk("network port", checkWarn, i18n.M("doctor.port.read_failed", causeMsg(err))).withGuide(unlockAndRetry)
-	case port == "" || port == "0":
+	case port == "":
 		return mk("network port", checkOK, i18n.M("doctor.port.closed"))
 	}
 	if mode.Enabled && mode.ExpiresAt != nil {

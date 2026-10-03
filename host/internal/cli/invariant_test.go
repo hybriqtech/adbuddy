@@ -22,6 +22,9 @@ const (
 	phoneGone   = "List of devices attached\n"
 )
 
+// tcpPortCalls is how the host reads adbd's TCP port (device.ReadTCP).
+const tcpPortCalls = "shell getprop service.adb.tcp.port|shell getprop persist.adb.tcp.port"
+
 // invariantRunner points the fake adb at rules and returns a runner for the
 // phone and the fake adb's log.
 func invariantRunner(t *testing.T, rules ...testutil.FakeRule) (adb.Runner, string) {
@@ -85,7 +88,7 @@ func cancelWhen(t *testing.T, buf *syncBuffer, s string, cancel context.CancelFu
 func TestApplyInvariant(t *testing.T) {
 	setVar(t, &usbDropWait, 300*time.Millisecond)
 	setVar(t, &invariantPoll, 20*time.Millisecond)
-	getprop := "shell getprop service.adb.tcp.port"
+	getprop := tcpPortCalls
 
 	t.Run("closed", func(t *testing.T) {
 		r, log := invariantRunner(t, testutil.FakeRule{Match: tcpPortRule, Stdout: "\n"})
@@ -164,7 +167,7 @@ func TestApplyInvariant(t *testing.T) {
 				usb++
 			}
 		}
-		if got[len(got)-1] != getprop || usb != 1 {
+		if !strings.HasSuffix(strings.Join(got, "|"), "|"+getprop) || usb != 1 {
 			t.Fatalf("calls %q: want one `adb usb` and the port checked again", got)
 		}
 	})

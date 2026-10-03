@@ -652,7 +652,7 @@ func TestRemoteSetOffRunsUsb(t *testing.T) {
 	if st := stateOfMsg(t, msgs[0]); st.Enabled || msgs[0].rid != "r2" {
 		t.Fatalf("answer %+v", msgs[0])
 	}
-	if calls := g.phone.called(); len(calls) != 1 || calls[0] != "usb" {
+	if calls := g.phone.called(); strings.Join(calls, "|") != tcpPortCalls+"|usb" {
 		t.Fatalf("adb %v", calls)
 	}
 }
@@ -1036,7 +1036,7 @@ func TestRemoteSetRunsInOrder(t *testing.T) {
 	if msgs[0].rid != "a" || msgs[1].rid != "b" || stateOfMsg(t, msgs[1]).Enabled {
 		t.Fatalf("answers %+v", msgs)
 	}
-	if calls := g.phone.called(); strings.Join(calls, "|") != "tcpip 5555|usb" {
+	if calls := g.phone.called(); strings.Join(calls, "|") != "tcpip 5555|"+tcpPortCalls+"|usb" {
 		t.Fatalf("adb %v", calls)
 	}
 	var s bridge.Snapshot

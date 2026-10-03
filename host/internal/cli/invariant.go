@@ -24,7 +24,7 @@ var (
 // what the user runs again after a failure. When ctx ends, the error is whatever the step returned: callers turn it into
 // Interrupted.
 func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, log io.Writer, command, keep string) error {
-	restarted, err := device.EnsureNoTCPPort(ctx, runner, keep)
+	_, restarted, err := device.EnsureNoTCPPort(ctx, runner, keep)
 	if err != nil {
 		return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix", err.Error())
 	}
@@ -42,14 +42,14 @@ func applyInvariant(ctx context.Context, runner adb.Runner, wait time.Duration, 
 		return TransientErrorT("DEVICE_NOT_FOUND", "err.invariant.device_not_found", "err.invariant.device_not_found.fix", command)
 	}
 	// Only read the port now: another `adb usb` would restart adbd again.
-	port, err := device.TCPPort(ctx, runner)
+	t, err := device.ReadTCP(ctx, runner)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		return NewErrorT("DEVICE_UNREADABLE", "error.cause", "err.invariant.device_unreadable.fix_2", err.Error())
 	}
-	if port != "" && port != keep {
+	if t.Now != "" && t.Now != keep {
 		return NewErrorT("DEVICE_PORT_OPEN", "err.invariant.device_port_open", "err.invariant.device_port_open.fix", command)
 	}
 	return nil

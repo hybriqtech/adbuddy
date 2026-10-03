@@ -479,7 +479,7 @@ func TestRemoteOffQueuesBehindTheAppsOn(t *testing.T) {
 		t.Fatalf("%+v", exit)
 	}
 	calls := h.g.phone.called()
-	if len(calls) != 2 || calls[0] != "tcpip 5555" || calls[1] != "usb" || !h.g.store.Until().IsZero() {
+	if strings.Join(calls, "|") != "tcpip 5555|"+tcpPortCalls+"|usb" || !h.g.store.Until().IsZero() {
 		t.Fatalf("calls %v until %v", calls, h.g.store.Until())
 	}
 }
