@@ -4,12 +4,12 @@
 
 **Goal:** the oracle (about 16 minutes of the emulator job) stops running on pull requests that do not change its inputs, the app tests' path list covers everything `emutest` depends on, and a weekly run of the oracle on `main` catches a change of the system image.
 
-**Basis:** `docs/superpowers/plans/2026-10-03-optimizar-runners-local.md` (measured study; PR1 there is "P2a and P2b"). Today one workflow, `.github/workflows/emulator.yml` (job `mksh`), runs the oracle on android-37 and then, after a restart, the app tests on android-34 in two groups. It triggers on 55 of the last 80 commits; the oracle depends on far fewer paths than it is triggered by, and the app-test paths miss `daemon`, `device`, `ipc`, `pairing`, `pathguard`, `precheck`, `remote`, `screenshot` and `uidump`.
+**Basis:** `docs/superpowers/plans/2026-10-03-optimizar-runners-local.md` (measured study, commit d36d66a of `origin/ci/runners-optimizacion`; PR1 there is "P2a and P2b"; the file may not be in this branch). Today one workflow, `.github/workflows/emulator.yml` (job `mksh`), runs the oracle on android-37 and then, after a restart, the app tests on android-34 in two groups. It triggers on 55 of the last 80 commits; the oracle depends on far fewer paths than it is triggered by, and the app-test paths miss `daemon`, `device`, `ipc`, `pairing`, `pathguard`, `precheck`, `remote`, `screenshot` and `uidump`.
 
 **Architecture:** two workflows. `emulator-oracle.yml` (job `mksh`, same name as today: "oracle against the emulator's mksh") keeps the android-37 emulator, the oracle recording, the `git diff` check and the skills' read-only examples; it also runs weekly on `main`. `emulator-app.yml` (job `app`, name "the app on the emulator") builds the app, starts the android-34 emulator and runs the guard group, the restart and the rest. A Go test keeps the app workflow's `paths` in step with `go list -test -deps ./internal/emutest`. `emulator.yml` is deleted.
 
 **What does NOT change (security, say it in the PR):**
-- The oracle still re-records the real mksh's answers and fails if the recording differs from the repository, and runs the skills' read-only examples, whenever its inputs change: `host/internal/classify/testdata/**`, `host/internal/classify/differential_test.go`, `host/internal/classify/corpus_test.go`, `host/internal/workspace/skills/**`, `host/internal/cli/skills_*_test.go`, `scripts/emulator.sh`, its own workflow.
+- The oracle still re-records the real mksh's answers and fails if the recording differs from the repository, and runs the skills' read-only examples, whenever its inputs change: `host/internal/classify/testdata/**`, `host/internal/classify/differential_test.go`, `host/internal/classify/corpus_test.go`, `host/internal/workspace/skills/**`, `host/internal/workspace/skills.go` (the embed), `host/internal/cli/skills_*_test.go`, `scripts/emulator.sh`, its own workflow.
 - What changes: it no longer runs when only the evaluator's code changed with the corpus intact, because `TestWhatMkshRunsIsSpecial` and `TestAdmittedSinksStayBelowRed` check the evaluator against the recorded `oracle.jsonl` offline in `host.yml`; the weekly run on `main` catches a new mksh in the system image, which a classify pull request would reveal today. The app tests run on MORE paths than today (the missing dependencies).
 - `-race`, gofmt, golden screens, guard tests and the signing check are untouched.
 
@@ -44,24 +44,25 @@ package emutest
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
-	"os"
 
 	"gopkg.in/yaml.v3"
 )
 
 // TestAppWorkflowPathsCoverDependencies keeps the path filter of
-// .github/workflows/emulator-app.yml in step with what the package depends
+// .github/workflows/emulator-app.yml in step with what this package depends
 // on: a change in a package emutest imports (directly or not) must run the
-// app tests. (The filter had silently missed several packages.)
+// app tests. The filter had silently missed several packages. It fails, never
+// skips: a renamed workflow or a broken go must not let it pass.
 func TestAppWorkflowPathsCoverDependencies(t *testing.T) {
 	raw, err := os.ReadFile(filepath.FromSlash("../../../.github/workflows/emulator-app.yml"))
 	if err != nil {
-		t.Skipf("the workflow is not in this checkout: %v", err)
+		t.Fatalf("the app workflow: %v", err)
 	}
 	var wf struct {
 		On struct {
@@ -73,6 +74,9 @@ func TestAppWorkflowPathsCoverDependencies(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &wf); err != nil {
 		t.Fatal(err)
 	}
+	if len(wf.On.PullRequest.Paths) == 0 {
+		t.Fatal("no on.pull_request.paths parsed from emulator-app.yml")
+	}
 	have := map[string]bool{}
 	for _, p := range wf.On.PullRequest.Paths {
 		have[p] = true
@@ -81,34 +85,34 @@ func TestAppWorkflowPathsCoverDependencies(t *testing.T) {
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
-		t.Skipf("go list failed (%v): %s", err, errb.String())
+		t.Fatalf("go list: %v: %s", err, errb.String())
 	}
 	const prefix = "github.com/hybriqtech/adbuddy/host/"
-	var missing []string
+	missing := map[string]bool{}
 	for _, imp := range strings.Fields(out.String()) {
-		imp = strings.TrimSuffix(imp, ".test")
-		rest, ok := strings.CutPrefix(imp, prefix)
-		if !ok || !strings.HasPrefix(rest, "internal/") {
+		rest, ok := strings.CutPrefix(strings.TrimSuffix(imp, ".test"), prefix)
+		if !ok || strings.HasPrefix(rest, "[") {
 			continue
 		}
-		pkg := strings.SplitN(rest, " ", 2)[0]
-		if i := strings.Index(pkg, " ["); i >= 0 {
-			pkg = pkg[:i]
-		}
-		if !have["host/"+pkg+"/**"] {
-			missing = append(missing, "host/"+pkg+"/**")
+		if path := "host/" + rest + "/**"; !have[path] {
+			missing[path] = true
 		}
 	}
-	sort.Strings(missing)
-	if len(missing) > 0 {
-		t.Errorf("emulator-app.yml paths miss packages emutest depends on: add %v", missing)
+	var list []string
+	for m := range missing {
+		list = append(list, m)
+	}
+	sort.Strings(list)
+	if len(list) > 0 {
+		t.Errorf("emulator-app.yml paths miss packages emutest depends on: add %v", list)
 	}
 }
 ```
 
-(The implementer fixes the details so it compiles and passes on Windows and Linux: `go list` runs in the package directory, so import paths for the package itself and its test variant must be deduplicated; use a set; skip the test's own package `internal/emutest` only if the path is already present. Remove the unused import if any.) The test must FAIL when a dependency is missing from `paths`: demonstrate it once by removing one path locally, running it, and restoring it (state the output in the report).
+(The `[...]` tokens of `go list -test` are test variants and are skipped; `emutest.test` is trimmed. The implementer makes it compile and pass on Windows and Linux, and updates `host/internal/emutest/doc.go`, which says every test of the package skips without an emulator: this one does not.) The test must FAIL when a dependency is missing from `paths`: demonstrate it once by removing one path locally, running it, and restoring it (state the output in the report).
 
-- [ ] **Step 3: verify** `python -c "import yaml; yaml.safe_load(open('.github/workflows/emulator-app.yml'))"`, `cd host && go vet ./internal/emutest && go test -count=1 -run TestAppWorkflowPathsCoverDependencies ./internal/emutest`.
+- [ ] **Step 2b: `host.yml`** gets `".github/workflows/emulator-app.yml"` in both its `paths` lists, so a pull request that only edits the app workflow's path list still runs the guard test on `host.yml` at once instead of 30 minutes later inside the app job.
+- [ ] **Step 3: verify** `gofmt -l host` (empty), `python -c "import yaml; yaml.safe_load(open('.github/workflows/emulator-app.yml'))"`, `cd host && go vet ./internal/emutest && go test -count=1 -run TestAppWorkflowPathsCoverDependencies ./internal/emutest`.
 
 - [ ] **Step 4: Commit** `ci(emulator): the app tests in their own workflow, with complete paths and a guard test`.
 
@@ -120,11 +124,27 @@ func TestAppWorkflowPathsCoverDependencies(t *testing.T) {
 - Create: `.github/workflows/emulator-oracle.yml`
 - Delete: `.github/workflows/emulator.yml`
 
-- [ ] **Step 1: `emulator-oracle.yml`.** `name: emulator-oracle`. Triggers: `pull_request` with `paths: ["host/internal/classify/testdata/**", "host/internal/classify/differential_test.go", "host/internal/classify/corpus_test.go", "host/internal/workspace/skills/**", "host/internal/cli/skills_*_test.go", "scripts/emulator.sh", ".github/workflows/emulator-oracle.yml"]`, `workflow_dispatch`, and `schedule: [{cron: "17 4 * * 1"}]` (weekly, Monday 04:17 UTC; a schedule runs on the default branch only, and a comment says why: the system image's mksh can change without any pull request). Comment: why the oracle depends on these paths only (the offline tests check the evaluator against the recorded oracle), and that a required check skipped by a path filter stays pending. `concurrency: {group: emulator-oracle-${{ github.ref }}, cancel-in-progress: true}`. Job `mksh`, `name: oracle against the emulator's mksh`, same `if`, `runs-on`, `timeout-minutes: 60`, job env as today's (`adbuddy-ci-api37`, 5590, 5049, mDNS off). Steps from today's job up to and including "The skills' read-only examples run on the emulator" (checkout, setup-go, setup-java, setup-gradle is NOT needed here: drop it and the app build step), "Point the emulator at the AVD", "Enable KVM", "Install the emulator and the system image" (android-37), "Clear a leftover emulator of this job", "Start the emulator", "Record the oracle", "The recorded oracle is the one in the repository", the skills step, then a memory report (`scripts/emulator.sh mem || true`, `if: always()`), the Linux and Windows diagnostics steps, and the `if: always()` stop. Remove everything about android-34, the build and the restart. In the guard of "The recorded oracle is the one in the repository" nothing changes.
+- [ ] **Step 1: `emulator-oracle.yml`.** `name: emulator-oracle`. Triggers: `pull_request` with `paths: ["host/internal/classify/testdata/**", "host/internal/classify/differential_test.go", "host/internal/classify/corpus_test.go", "host/internal/workspace/skills/**", "host/internal/workspace/skills.go", "host/internal/cli/skills_*_test.go", "scripts/emulator.sh", ".github/workflows/emulator-oracle.yml"]`, `workflow_dispatch`, and `schedule: [{cron: "17 4 * * 1"}]` (weekly, Monday 04:17 UTC; a schedule runs on the default branch only, and a comment says why: the system image's mksh can change without any pull request). Comment: why the oracle depends on these paths only (the offline tests check the evaluator against the recorded oracle), and that a required check skipped by a path filter stays pending. `concurrency: {group: emulator-oracle-${{ github.ref }}, cancel-in-progress: true}`. Job `mksh`, `name: oracle against the emulator's mksh`, same `if`, `runs-on`, `timeout-minutes: 60` and the recording step's `go test -timeout 45m` (so Go's own timeout fires before the job's), job env as today's (`adbuddy-ci-api37`, 5590, 5049, mDNS off). Steps from today's job up to and including "The skills' read-only examples run on the emulator" (checkout, setup-go, setup-java, setup-gradle is NOT needed here: drop it and the app build step), "Point the emulator at the AVD", "Enable KVM", "Install the emulator and the system image" (android-37), "Clear a leftover emulator of this job", "Start the emulator", "Record the oracle", "The recorded oracle is the one in the repository", the skills step, then a memory report (`scripts/emulator.sh mem || true`, `if: always()`), the Linux and Windows diagnostics steps, and the `if: always()` stop. Remove everything about android-34, the build and the restart. In the guard of "The recorded oracle is the one in the repository" nothing changes.
 
 - [ ] **Step 2: delete `.github/workflows/emulator.yml`.**
 
-- [ ] **Step 3: verify** YAML loads; each of the two workflows contains every step of the old file exactly once between them (list the step names of the old file and say where each went); `git grep -n "emulator.yml"` shows the remaining references (Task 3 fixes them).
+- [ ] **Step 3: verify** the YAML of both loads; every step of the old file is where this table says, and nowhere else:
+
+| Step of the old `emulator.yml` | Goes to |
+| --- | --- |
+| checkout, setup-go, setup-java (`sdkmanager` and `avdmanager` are Java) | both |
+| setup-gradle, "Build the app and its instrumented tests" | app only |
+| "Point the emulator at the AVD", "Enable KVM" | both |
+| "Install the emulator and the system image" (android-37) | oracle |
+| "Install the android-34 system image" | app, merged with installing the `emulator` package |
+| "Clear a leftover emulator", "Start the emulator" | both (in the app, id `start34`) |
+| "Record the oracle", "The recorded oracle is the one in the repository", the skills step, "Emulator memory after the oracle" | oracle |
+| "Stop the android-37 emulator", "Start the android-34 emulator" | disappear: the app workflow has one start and one final stop |
+| guard group, memory, "Restart" (`restart34`), rest group, memory | app |
+| "Emulator diagnostics" (Linux and Windows), "Stop the emulator" with `if: always()` | both |
+
+Update the Windows diagnostics comment in each file: "the log is the last emulator started (android-37 or android-34)" is no longer true in either. Add to both workflows a comment: with a single runner carrying the emulator label the two workflows run one after the other; with two runners on the same machine they would run together, and neither the RAM nor the log file `adbuddy-emulator.log` (shared, in the temp folder) would hold: see `docs/ci-self-hosted.md`. Add to the oracle workflow a comment on the weekly schedule: it runs on the self-hosted Windows runner at 04:17 UTC on Mondays; if the PC is off the job waits in the queue (at most 24 hours, then it is cancelled), when it runs it competes for RAM with development emulators, and a failure is reported to whoever last edited the cron line, so the docs name who reads the run list each week (the supervisor).
+- `git grep -n "emulator.yml"` lists what Task 3 must fix.
 
 - [ ] **Step 4: Commit** `ci(emulator): the oracle in its own workflow, weekly on main; delete emulator.yml`.
 
@@ -133,7 +153,8 @@ func TestAppWorkflowPathsCoverDependencies(t *testing.T) {
 ### Task 3: docs
 
 **Files:**
-- Modify: `docs/ci-self-hosted.md`, `android/README.md`, `.github/workflows/android.yml` (its step name says "emulator.yml runs them"), `host/README.md` if it names `emulator.yml`
+- Modify: `docs/ci-self-hosted.md` (the `CI_RUNNER_ANDROID` duration; the variables table row of `CI_RUNNER_EMULATOR`; the triggers paragraph, with the weekly run; "the job restarts the emulator after the oracle"; every "emulator job" mention; the sentence that says the emulator job stops the android-37 emulator and starts the android-34 one on the same port, false now; the `emulator.yml` mentions in the security sections; the AVD and ports line: add `adbuddy-ci-api34`, 5592 and 5051), `.github/workflows/android.yml` (its step name says "emulator.yml runs them"), `docs/superpowers/plans/pendientes-m3-m5.md` (mark "split emulator.yml in two" as done), `host/internal/emutest/doc.go`; `android/README.md` and `host/README.md` only if `git grep` finds `emulator.yml` there.
+- Do NOT rewrite the historical plans and specs under `docs/superpowers/` nor `.superpowers/`.
 
 - [ ] **Step 1:** replace every mention of `emulator.yml` by the right workflow (`emulator-oracle.yml` for the oracle and skills; `emulator-app.yml` for the app's tests); in the variables table both use `CI_RUNNER_EMULATOR`; the section about the emulator job says there are two workflows with their own paths, the ports (5590/5049 and 5592/5051), the weekly oracle on `main`, that the app workflow's paths are checked by `TestAppWorkflowPathsCoverDependencies`, and that neither workflow may be a required check while path filters can skip it. Update the durations (oracle about 16-26 minutes, app about 30-40).
 - [ ] **Step 2:** `cd host && go test ./internal/... -run TestDocs` passes (no personal paths, no angle-bracket placeholders in prose, no private IPs).
@@ -144,6 +165,6 @@ func TestAppWorkflowPathsCoverDependencies(t *testing.T) {
 ## Validaciones manuales pendientes (CLAUDE.md)
 
 The controller does them with one emulator at a time, once the PR's own CI runs:
-1. A pull request that touches only `host/internal/classify/testdata/**` runs `emulator-oracle` and not `emulator-app` (except through the app paths, which include `classify/**`: it runs both); one that touches only `host/internal/daemon/**` runs `emulator-app` only.
+1. Pull requests by what they touch: only `host/internal/classify/testdata/**` runs both workflows (it is under `classify/**`); only `host/internal/classify/*.go` or `host/internal/daemon/**` runs the app workflow only; only `host/internal/workspace/skills/**` runs the oracle only.
 2. The weekly schedule fires on `main` (check the run list after the first Monday) and the dispatch works from the Actions tab.
 3. The first run of each workflow on the Windows runner: green, with the memory lines.
