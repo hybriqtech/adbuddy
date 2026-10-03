@@ -281,7 +281,7 @@ func TestLatencyDevice(t *testing.T) {
 
 	back := func() {
 		e.shell(t, "input keyevent KEYCODE_BACK")
-		time.Sleep(700 * time.Millisecond)
+		time.Sleep(2 * time.Second) // after Back the app says "protected" for a while (a window without content during the transition: TestLatencySettle)
 	}
 	tapNet := bridge.UIClickArgs{Text: "Network & internet"}
 
