@@ -44,10 +44,11 @@ type link struct {
 }
 
 // openLink installs the app on the emulator (as installApp, in the
-// background and out of battery optimisation, as setup leaves it), opens the
-// channel and waits for the app's hello and its first device.info. Everything
-// is undone at cleanup: the bridge stops, the emulator's reverses go and the
-// app is uninstalled.
+// background, out of battery optimisation as setup leaves it, and allowed to
+// post notifications as after its first run), opens the channel and waits
+// for the app's hello and its first device.info. Everything is undone at
+// cleanup: the bridge stops, the emulator's reverses go and the app is
+// uninstalled.
 func openLink(t *testing.T) *link {
 	t.Helper()
 	e := newEmu(t)
@@ -56,6 +57,9 @@ func openLink(t *testing.T) *link {
 		t.Fatalf("battery optimisation: %v", err)
 	}
 	e.atCleanup(t, "shell", "dumpsys deviceidle whitelist -"+phoneapp.Package)
+	// As after the app's first run, where it asks: otherwise its notifications
+	// (the conversation's, the questions') are not shown.
+	e.shell(t, "pm grant "+phoneapp.Package+" android.permission.POST_NOTIFICATIONS")
 	token, err := bridge.NewToken()
 	if err != nil {
 		t.Fatal(err)
@@ -500,7 +504,6 @@ func notificationRecord(dump, pkg, channel string) string {
 func TestSpanishAppEnglishHost(t *testing.T) {
 	l := openLink(t)
 	e := l.e
-	e.shell(t, "pm grant "+phoneapp.Package+" android.permission.POST_NOTIFICATIONS")
 	e.shell(t, "cmd locale set-app-locales "+phoneapp.Package+" --locales es")
 	l.send(t, bridge.TypeConfirmReq, bridge.ConfirmRequest{
 		ID: "j_1", Level: "red", Title: "Restart the phone", Detail: "may restart",
@@ -618,12 +621,11 @@ func (e *emu) tap(t *testing.T, n uiNode) {
 	e.shell(t, "input tap "+strconv.Itoa(n.X)+" "+strconv.Itoa(n.Y))
 }
 
-// openChat opens the app on its chat, skipping the first-run steps (with
-// notifications already allowed, so that their dialog does not show).
+// openChat opens the app on its chat, skipping the first-run steps
+// (notifications are allowed already: their dialog does not show).
 func (l *link) openChat(t *testing.T) {
 	t.Helper()
 	e := l.e
-	e.shell(t, "pm grant "+phoneapp.Package+" android.permission.POST_NOTIFICATIONS")
 	e.atCleanup(t, "shell", "input keyevent KEYCODE_HOME")
 	e.shell(t, "am start -W -n "+phoneapp.Activity)
 	for step := 1; step <= 2; step++ {
@@ -748,5 +750,61 @@ func TestTheChatSendsOneMessage(t *testing.T) {
 	}
 	if extra, ok := l.take(bridge.TypeChatSend, 3*time.Second); ok {
 		t.Errorf("another chat.send after Retry: %s", extra.Payload)
+	}
+}
+
+// answerCapture answers the app's next capture.request with a screenshot the
+// host "took", with id (its bytes are never asked for here).
+func (l *link) answerCapture(t *testing.T, id string) {
+	t.Helper()
+	req := l.waitFor(t, bridge.TypeCaptureReq, 10*time.Second)
+	l.reply(t, req, bridge.TypeCaptureReady, bridge.CaptureReady{Attachment: bridge.Attachment{
+		ID: id, Name: "screen-" + id[:4] + ".png", MIME: "image/png", Size: 1234,
+		SHA256: strings.Repeat("ab", 32),
+	}})
+}
+
+// Validation 4 of M3b: a screenshot from the chat's button and from the
+// notification's action reaches the host as capture.request, and what the
+// host answers comes back: the screenshot as an attachment of the next
+// chat.send, or, with access cut, the host's own text on screen. A real cut
+// leaves the emulator without adb (S7): the host's refusal is what is played.
+func TestTheScreenshotGoesToTheHost(t *testing.T) {
+	l := openLink(t)
+	e := l.e
+	l.openChat(t)
+	attach := func() {
+		e.tap(t, e.waitNode(t, "Attach", 10*time.Second, func(n uiNode) bool { return n.Desc == "Attach" }))
+		e.tap(t, e.waitNode(t, "Screenshot", 10*time.Second, func(n uiNode) bool { return n.Text == "Screenshot" }))
+	}
+
+	// The button: the screenshot goes with the next message.
+	const fromButton = "0123456789abcdef0123456789abcdef"
+	l.drain()
+	attach()
+	l.answerCapture(t, fromButton)
+	e.waitNode(t, "the screenshot in the draft", 10*time.Second, func(n uiNode) bool { return strings.Contains(n.Text+n.Desc, "screen-0123") })
+	e.tap(t, e.waitNode(t, "Send", 5*time.Second, func(n uiNode) bool { return n.Desc == "Send" }))
+	cs := payload[bridge.ChatSend](t, l.waitFor(t, bridge.TypeChatSend, 10*time.Second))
+	if len(cs.Attachments) != 1 || cs.Attachments[0] != fromButton {
+		t.Errorf("chat.send after the button's screenshot carries %q, want [%s]", cs.Attachments, fromButton)
+	}
+
+	// Access cut: the host refuses and says why.
+	const why = "Access is cut from the phone: resume it to take a screenshot."
+	attach()
+	req := l.waitFor(t, bridge.TypeCaptureReq, 10*time.Second)
+	l.reply(t, req, bridge.TypeError, bridge.ErrorReply{Code: bridge.CodeFailed, Text: why})
+	e.waitNode(t, "the host's text", 10*time.Second, func(n uiNode) bool { return strings.Contains(n.Text, why) })
+
+	// The notification's action sends the screenshot at once.
+	const fromNotification = "fedcba9876543210fedcba9876543210"
+	e.atCleanup(t, "shell", "cmd statusbar collapse")
+	e.shell(t, "cmd statusbar expand-notifications")
+	e.tap(t, e.waitNode(t, "Send screenshot", 10*time.Second, func(n uiNode) bool { return strings.EqualFold(n.Text, "Send screenshot") }))
+	l.answerCapture(t, fromNotification)
+	cs = payload[bridge.ChatSend](t, l.waitFor(t, bridge.TypeChatSend, 10*time.Second))
+	if len(cs.Attachments) != 1 || cs.Attachments[0] != fromNotification {
+		t.Errorf("chat.send after the notification's screenshot carries %q, want [%s]", cs.Attachments, fromNotification)
 	}
 }
