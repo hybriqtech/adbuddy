@@ -463,6 +463,9 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 		e.longerUITimeout(t)
 		vol := e.shell(t, "settings get system volume_music_speaker")
 		e.shell(t, "input keyevent KEYCODE_VOLUME_DOWN")
+		if !poll(10*time.Second, func() bool { return slices.Contains(e.systemWindows(t), "VolumeDialogImpl") }) {
+			t.Fatal("the volume dialog is not on screen 10 s after the volume key")
+		}
 		g.blocks(t, "VolumeDialogImpl", screencap...)
 		s := e.snapshot(t, "volume-dialog")
 		if !slices.Contains(s.unknown, "VolumeDialogImpl") || shade(s.focus) {
@@ -540,9 +543,9 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 	// with the screen off, the exact wake key go through, and nothing else.
 	t.Run("locked", func(t *testing.T) {
 		e.openSettings(t)
-		e.guardSetPIN(t)
+		e.lockWithPIN(t)
 		e.sleepScreen(t)
-		if !poll(10*time.Second, func() bool { return e.deviceLocked(t) }) {
+		if !poll(10*time.Second, func() bool { return e.locked(t) }) {
 			t.Fatal("not locked 10 s after the screen went off with a PIN")
 		}
 		s := e.snapshot(t, "locked-off")
@@ -557,7 +560,7 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 		}
 		time.Sleep(time.Second)
 		s = e.snapshot(t, "locked")
-		if s.asleep || !shade(s.focus) || !e.deviceLocked(t) {
+		if s.asleep || !shade(s.focus) || !e.locked(t) {
 			t.Errorf("locked, screen on: %+v", s)
 		}
 		for _, argv := range [][]string{screencap, tapMiddle, dumpUI, keyWake} {
@@ -566,7 +569,7 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 		g.helperBlocks(t, why, bridge.UIOpDump, bridge.UIDumpArgs{})
 		g.passes(t, keyBack...)
 		g.passes(t, keyHome...)
-		if !e.deviceLocked(t) {
+		if !e.locked(t) {
 			t.Error("Back and Home unlocked the device")
 		}
 	})
@@ -748,51 +751,6 @@ func (e *emu) guardPost(t *testing.T, kind, id string) (release func()) {
 			t.Fatalf("the notification %s is not posted 90 s after am instrument", key)
 		}
 	}
-}
-
-// guardPIN is the PIN the lock state sets on the emulator; always cleared.
-const guardPIN = "1111"
-
-// guardNoLock reports whether the emulator has no lock credential.
-func (e *emu) guardNoLock(ctx context.Context) (bool, string) {
-	out, errOut, _, err := e.adb.Output(ctx, "shell", "locksettings verify")
-	s := strings.TrimSpace(out + " " + errOut)
-	return err == nil && strings.Contains(s, "verified successfully"), s
-}
-
-// guardSetPIN sets guardPIN. It is cleared at cleanup even when the test
-// fails, with a context of its own, and checked: an emulator left with a PIN
-// would lock every later test out.
-func (e *emu) guardSetPIN(t *testing.T) {
-	t.Helper()
-	if ok, _ := e.guardNoLock(e.ctx); !ok {
-		// A leftover PIN of a run that died by -timeout: clear only the test's own.
-		_, _, _, _ = e.adb.Output(e.ctx, "shell", "locksettings clear --old "+guardPIN)
-		if ok, out := e.guardNoLock(e.ctx); !ok {
-			t.Fatalf("the emulator already has a lock credential (%s) that is not the test's PIN: clear it by hand first", out)
-		}
-	}
-	if d, ok := t.Deadline(); ok && time.Until(d) < 4*time.Minute {
-		t.Skipf("only %s left before the test timeout: not setting a PIN that the cleanup might not get to clear", time.Until(d).Round(time.Second))
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(e.ctx), 2*time.Minute)
-		defer cancel()
-		out, errOut, _, err := e.adb.Output(ctx, "shell", "locksettings clear --old "+guardPIN)
-		if ok, v := e.guardNoLock(ctx); !ok {
-			t.Errorf("THE EMULATOR KEEPS THE PIN %s: clear --old gave %q %q %v, verify %q; run `adb shell locksettings clear --old %s` or wipe the data of the AVD adbuddy-dev34",
-				guardPIN, out, errOut, err, v, guardPIN)
-		}
-		_, _, _, _ = e.adb.Output(ctx, "shell", "input keyevent KEYCODE_WAKEUP")
-		_, _, _, _ = e.adb.Output(ctx, "shell", "wm dismiss-keyguard")
-	})
-	e.shell(t, "locksettings set-pin "+guardPIN)
-}
-
-// deviceLocked reports whether the device is locked (dumpsys trust).
-func (e *emu) deviceLocked(t *testing.T) bool {
-	t.Helper()
-	return strings.Contains(e.shell(t, "dumpsys trust"), "deviceLocked=1")
 }
 
 // sleepScreen turns the screen off and waits until dumpsys power says so.
