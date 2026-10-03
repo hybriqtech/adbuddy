@@ -178,6 +178,9 @@
     <string name="listener_label">Lector de notificaciones de ADBuddy</string>
     <string name="step_progress">Paso %1$d de %2$d</string>
     <string name="onboarding_skip">Ahora no</string>
+    <string name="notifications_rationale_title">¿Recibir avisos?</string>
+    <string name="notifications_rationale_body">ADBuddy puede avisarte cuando el agente te pide permiso o termina. Sin notificaciones solo verías sus preguntas con la app abierta, y caducan.</string>
+    <string name="notifications_rationale_continue">Continuar</string>
     <string name="onboarding_done">Listo</string>
     <string name="protected_count">Apps protegidas: %1$d</string>
     <string name="protected_title">Apps protegidas</string>

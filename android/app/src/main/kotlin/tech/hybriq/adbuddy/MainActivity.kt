@@ -1,9 +1,6 @@
 package tech.hybriq.adbuddy
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -32,11 +29,6 @@ class MainActivity : ComponentActivity() {
         val prefs = BridgePrefs(this)
         if (savedInstanceState == null) {
             handle(intent)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-            }
         } else {
             // A rotation keeps what was on screen; the consent only while the host still waits.
             showConsent = savedInstanceState.getBoolean(STATE_CONSENT) && prefs.consent == "pending"

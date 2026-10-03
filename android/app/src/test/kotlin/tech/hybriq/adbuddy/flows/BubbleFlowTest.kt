@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.flows
 
+import android.Manifest
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.provider.Settings
@@ -41,6 +42,10 @@ import tech.hybriq.adbuddy.ui.Onboarding
 @Config(qualifiers = PHONE)
 class BubbleFlowTest {
     @get:Rule val compose = createAndroidComposeRule<ChatBubbleActivity>()
+
+    init {
+        shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+    }
 
     private val app get() = RuntimeEnvironment.getApplication()
 
@@ -148,5 +153,13 @@ class BubbleFlowTest {
         compose.waitUntil(15_000) { compose.onAllNodes(hasText(text(R.string.access_state_unknown))).fetchSemanticsNodes().isNotEmpty() }
         assertFalse(NotificationConsent.of(app).confirmed())
         compose.onNodeWithText(text(R.string.access_confirm)).assertDoesNotExist()
+    }
+
+    @Test fun theBubbleNeverAsksForTheNotificationPermission() {
+        // Denied and never asked: the app would show the reason, the bubble (600 dp) does not.
+        shadowOf(app).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        compose.activityRule.scenario.recreate()
+        compose.onNodeWithContentDescription(text(R.string.action_menu)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.notifications_rationale_title)).assertDoesNotExist()
     }
 }

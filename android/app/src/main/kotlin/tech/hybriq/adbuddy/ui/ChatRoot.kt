@@ -2,7 +2,10 @@ package tech.hybriq.adbuddy.ui
 
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
@@ -24,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.merge
@@ -39,6 +43,7 @@ import tech.hybriq.adbuddy.control.CutAccess
 import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.DownloadState
 import tech.hybriq.adbuddy.files.FileIntents
+import tech.hybriq.adbuddy.notify.NotificationPermission
 import tech.hybriq.adbuddy.notify.NotificationsStatus
 import tech.hybriq.adbuddy.notify.openNotificationSettings
 
@@ -48,7 +53,7 @@ import tech.hybriq.adbuddy.notify.openNotificationSettings
  * the notification access under it), and the red questions over all of them.
  */
 @Composable
-fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = true, onClose: (String) -> Unit) {
+fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = true, askForNotifications: Boolean = true, onClose: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by app.bridge.state.collectAsStateWithLifecycle()
@@ -170,6 +175,18 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             Route.PROTECTED_APPS -> ProtectedAppsScreen(app, null, onBack = back, onDone = back, onSkip = back)
             Route.NOTIFICATION_ACCESS -> NotificationAccessScreen(null, onBack = back, onDone = back, onSkip = back)
         }
+    }
+    val prefs = remember(context) { BridgePrefs(context) }
+    var asked by remember { mutableStateOf(prefs.notificationsAsked) }
+    val requestPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifications = NotificationsStatus.of(context) }
+    // Composed BEFORE ConfirmHost and never with a question open: the reason must not sit over a decision.
+    val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    val questionPending = state.pending.isNotEmpty() || state.chat.permissions.isNotEmpty()
+    if (askForNotifications && route == Route.CHAT && NotificationPermission.shouldAsk(Build.VERSION.SDK_INT, granted, asked, stepShown = step != null, questionPending = questionPending)) {
+        NotificationsRationaleDialog(
+            onContinue = { prefs.notificationsAsked = true; asked = true; requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS) },
+            onSkip = { prefs.notificationsAsked = true; asked = true },
+        )
     }
     // After both screens, so a question shows wherever the person is.
     ConfirmHost(state, app.bridge, app.clock, focusConfirm, closed, onClose)

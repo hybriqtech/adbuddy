@@ -1,7 +1,10 @@
 package tech.hybriq.adbuddy.flows
 
+import android.Manifest
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -15,12 +18,19 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import tech.hybriq.adbuddy.MainActivity
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.a11y.Packages
 import tech.hybriq.adbuddy.a11y.ProtectedApps
+import tech.hybriq.adbuddy.bridge.BridgeState
+import tech.hybriq.adbuddy.bridge.BridgePrefs
+import tech.hybriq.adbuddy.bridge.ChatState
+import tech.hybriq.adbuddy.bridge.PermissionRequest
+import kotlinx.coroutines.flow.MutableStateFlow
+import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.screens.PHONE
 import tech.hybriq.adbuddy.ui.Onboarding
 
@@ -64,6 +74,7 @@ class OnboardingFlowTest {
     // Before the rule: MainActivity starts on the first step and reads the launcher right away (a @Before comes after).
     init {
         // ADBuddy's own icon makes the launcher read usable. Proposed: the code receivers (WhatsApp, Play services) and what looks protected ("Mi Banco"), not "Notes".
+        shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         installLauncherApps(Packages.ADBUDDY to "ADBuddy", "com.example.mybank" to "Mi Banco", "com.whatsapp" to "WhatsApp", "org.example.notes" to "Notes")
     }
 
@@ -84,5 +95,70 @@ class OnboardingFlowTest {
         pressBack()
         assertTrue(compose.activity.isFinishing)
         assertFalse(Onboarding.of(app).done())
+    }
+}
+
+/** The reason for the notification permission: after the first-run steps, once, never over a question. The permission is denied. */
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(qualifiers = PHONE)
+class NotificationsRationaleFlowTest {
+    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+    private val app get() = RuntimeEnvironment.getApplication()
+
+    private fun text(id: Int, vararg args: Any): String = app.getString(id, *args)
+
+    private val title get() = compose.onNodeWithText(text(R.string.notifications_rationale_title))
+
+    init {
+        shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        installLauncherApps(Packages.ADBUDDY to "ADBuddy")
+    }
+
+    private fun skip() = compose.onNodeWithText(text(R.string.onboarding_skip)).performClick()
+
+    /** The channel's state, as the host would have left it (the bridge keeps it in a private flow). */
+    @Suppress("UNCHECKED_CAST")
+    private fun setBridgeState(s: BridgeState) {
+        val f = tech.hybriq.adbuddy.bridge.Bridge::class.java.getDeclaredField("_state").apply { isAccessible = true }
+        compose.runOnUiThread { (f.get((app as AdbuddyApp).bridge) as MutableStateFlow<BridgeState>).value = s }
+        compose.waitForIdle()
+    }
+
+    @Test fun notOverTheStepsButAfterThemOnceOnly() {
+        compose.onNodeWithText(text(R.string.step_progress, 1, 2)).assertIsDisplayed()
+        title.assertDoesNotExist()
+        skip()
+        compose.onNodeWithText(text(R.string.step_progress, 2, 2)).assertIsDisplayed()
+        title.assertDoesNotExist()
+        skip()
+        // Both steps done: the chat, with the reason on top.
+        title.assertIsDisplayed()
+        assertFalse(BridgePrefs(app).notificationsAsked)
+        // "Not now" inside the dialog closes it for good.
+        compose.onNode(hasText(text(R.string.onboarding_skip)) and hasAnyAncestor(isDialog())).performClick()
+        title.assertDoesNotExist()
+        assertTrue(BridgePrefs(app).notificationsAsked)
+        compose.waitForIdle()
+        title.assertDoesNotExist()
+        compose.activityRule.scenario.recreate()
+        compose.waitForIdle()
+        title.assertDoesNotExist()
+    }
+
+    @Test fun neverOverAQuestionOfTheAgent() {
+        skip()
+        skip()
+        title.assertIsDisplayed()
+        // Start over in a fresh state: the permission was never asked and a question is waiting.
+        compose.onNode(hasText(text(R.string.onboarding_skip)) and hasAnyAncestor(isDialog())).performClick()
+        BridgePrefs(app).notificationsAsked = false
+        val q = PermissionRequest("a", "Bash", "Clean the build folder", "detail", "2026-10-01T10:10:00Z", true)
+        setBridgeState(BridgeState(connection = BridgeState.Connection.CONNECTED, chat = ChatState(permissions = listOf(q))))
+        compose.activityRule.scenario.recreate()
+        compose.waitForIdle()
+        title.assertDoesNotExist()
+        assertFalse(BridgePrefs(app).notificationsAsked)
     }
 }

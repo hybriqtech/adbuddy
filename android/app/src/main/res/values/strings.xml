@@ -180,6 +180,9 @@
     <string name="listener_label">ADBuddy notification reader</string>
     <string name="step_progress">Step %1$d of %2$d</string>
     <string name="onboarding_skip">Not now</string>
+    <string name="notifications_rationale_title">Get notified?</string>
+    <string name="notifications_rationale_body">ADBuddy can tell you when the agent asks your permission or finishes. Without notifications you would only see its questions with the app open, and they expire.</string>
+    <string name="notifications_rationale_continue">Continue</string>
     <string name="onboarding_done">Done</string>
     <string name="protected_count">Protected apps: %1$d</string>
     <string name="protected_title">Protected apps</string>
