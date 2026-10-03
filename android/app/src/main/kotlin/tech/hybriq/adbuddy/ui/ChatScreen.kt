@@ -116,20 +116,25 @@ fun ChatScreen(
             if (terminalOn) {
                 TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.weight(0.45f).fillMaxSize())
             }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(if (terminalOn) 0.55f else 1f).fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(items, key = { it.key }) { item ->
-                    MessageRow(
-                        item, downloads,
-                        onLink = { u -> Links.domain(u)?.let { link = u to it } },
-                        onAttachment = actions.attachment, onRetry = actions.retry, onDiscard = actions.discard,
-                    )
+            val weight = if (terminalOn) 0.55f else 1f
+            if (items.isEmpty() && tools.isEmpty() && LinkStatus.of(state, cut, configured) == LinkStatus.CONNECTED) {
+                ChatEmptyState(Modifier.weight(weight).fillMaxSize())
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(weight).fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(items, key = { it.key }) { item ->
+                        MessageRow(
+                            item, downloads,
+                            onLink = { u -> Links.domain(u)?.let { link = u to it } },
+                            onAttachment = actions.attachment, onRetry = actions.retry, onDiscard = actions.discard,
+                        )
+                    }
+                    if (tools.isNotEmpty()) item(key = "tools") { ToolStripView(tools) }
                 }
-                if (tools.isNotEmpty()) item(key = "tools") { ToolStripView(tools) }
             }
             if (terminalOn) QuickKeysRow { terminal!!.input(it.bytes) }
             if (chat != null) {

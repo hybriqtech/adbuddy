@@ -81,6 +81,7 @@ class ChatScreensTest(private val mode: ScreenMode) {
         )
         compose.onNodeWithText(text(R.string.app_name)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.session_idle)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
         compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)).assertCountEquals(0)
         compose.assertTextsFit()
         compose.assertTitleFitsTheTopBar(text(R.string.session_idle))
@@ -90,12 +91,14 @@ class ChatScreensTest(private val mode: ScreenMode) {
     @Test fun offlineWaitingSaysItShortInTheHeaderAndInFullInTheBanner() {
         show(BridgeState())
         val short = text(R.string.status_short_waiting)
+        compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
         check(short, text(R.string.status_waiting), "chat_offline_waiting")
     }
 
     @Test fun cutSaysSoInTheBanner() {
         show(BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), cut = true)
         compose.onNodeWithText(text(R.string.session_idle)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
         compose.onNodeWithText(text(R.string.status_cut)).assertIsDisplayed()
         compose.assertTextsFit()
         compose.assertTitleFitsTheTopBar(text(R.string.session_idle))
@@ -105,10 +108,18 @@ class ChatScreensTest(private val mode: ScreenMode) {
     @Test fun updateAppShowsTheWholeCommandInTheBanner() {
         show(BridgeState().appOutdated())
         val short = text(R.string.status_short_update)
+        compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
         check(short, text(R.string.status_update_app), "chat_update_app")
         // The banner is announced to TalkBack.
         compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite)).assertIsDisplayed()
         assertEquals(1, lineCount(short))
+    }
+
+    @Test fun connectedAndEmptySaysWhereToWrite() {
+        show(BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"))
+        compose.onNodeWithText(text(R.string.chat_empty_ready)).assertIsDisplayed()
+        compose.assertTextsFit()
+        compose.shot("chat_connected_empty", mode)
     }
 
     @Test fun notSetUpSaysToRunSetup() {

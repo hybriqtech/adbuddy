@@ -81,6 +81,7 @@
     <string name="home_title" translatable="false">ADBuddy</string>
     <string name="home_activity">Activity</string>
     <string name="home_empty">Nothing yet. Every adb command of the agent will appear here.</string>
+    <string name="chat_empty_ready">Write to the agent below. Risky commands ask for your confirmation.</string>
     <string name="cut_done">Debugging is off: the PC cannot reach the phone.</string>
     <string name="cut_restored">Debugging is back on. If remote mode was on, its network port stays open until the PC connects or the phone restarts.</string>
     <string name="cut_failed">Debugging could not be turned off. Turn off USB debugging and wireless debugging in Developer options.</string>

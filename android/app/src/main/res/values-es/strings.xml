@@ -79,6 +79,7 @@
 
     <string name="home_activity">Actividad</string>
     <string name="home_empty">Nada todavía. Aquí aparecerá cada comando adb del agente.</string>
+    <string name="chat_empty_ready">Escribe al agente aquí abajo. Los comandos delicados piden tu confirmación.</string>
     <string name="cut_done">La depuración está apagada: el PC no puede llegar al móvil.</string>
     <string name="cut_restored">La depuración vuelve a estar activa. Si el modo remoto estaba activo, su puerto de red sigue abierto hasta que el PC se conecte o reinicies el móvil.</string>
     <string name="cut_failed">No se ha podido apagar la depuración. Apaga la depuración USB y la depuración inalámbrica en Opciones de desarrollador.</string>
