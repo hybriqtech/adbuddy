@@ -9,8 +9,10 @@ import android.view.View
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performScrollTo
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -58,7 +60,11 @@ class QuickKeysObscuredTest {
         compose.waitForIdle()
     }
 
-    private fun centerOf(label: String): Offset = compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot.center
+    /** The row scrolls sideways and 1, 2, 3 start off screen: the key is scrolled into view first, as a finger would. */
+    private fun centerOf(label: String): Offset {
+        compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+        return compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot.center
+    }
 
     private fun event(downTime: Long, action: Int, at: Offset, flags: Int): MotionEvent {
         val v = view!!
@@ -81,7 +87,8 @@ class QuickKeysObscuredTest {
             val v = view!!
             val events = buildList {
                 add(event(downTime, MotionEvent.ACTION_DOWN, at, downFlags))
-                if (moveFlags != null) add(event(downTime, MotionEvent.ACTION_MOVE, at, moveFlags))
+                // Moved a little (well under the touch slop): Compose does not deliver a move that changes nothing.
+                if (moveFlags != null) add(event(downTime, MotionEvent.ACTION_MOVE, at + Offset(2f, 0f), moveFlags))
                 add(event(downTime, MotionEvent.ACTION_UP, at, upFlags))
             }
             for (e in events) {
@@ -137,7 +144,7 @@ class QuickKeysObscuredTest {
         show()
         tap("1", moveFlags = FLAG_WINDOW_IS_OBSCURED)
         assertEquals(emptyList<QuickKey>(), pressed)
-        tap("1", moveFlags = 0)
+        tap("1", moveFlags = 0)   // the same gesture without the covered move does go through
         assertEquals(listOf(QuickKey.ONE), pressed)
     }
 }

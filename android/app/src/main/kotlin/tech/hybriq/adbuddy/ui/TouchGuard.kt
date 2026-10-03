@@ -1,9 +1,12 @@
 package tech.hybriq.adbuddy.ui
 
+import android.view.MotionEvent
 import android.view.View
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import java.util.WeakHashMap
 
@@ -55,7 +58,28 @@ fun ObscuredTouchGuard() {
 }
 
 /** Whether a MotionEvent's flags say another app's window covered this one, wholly or in part. */
-internal fun isObscured(flags: Int): Boolean = false
+internal fun isObscured(flags: Int): Boolean =
+    flags and (MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED) != 0
 
-/** Refuses a gesture on this element when another app's window covers it (stub). */
-fun Modifier.refuseObscuredTouches(): Modifier = this
+/**
+ * Refuses a gesture on this one element while another app's window covers it, and leaves the rest of the screen alone:
+ * for the buttons that act but live in a screen that must keep working under a harmless overlay (a blue-light filter),
+ * where the window flag of [ObscuredTouchGuard] would block everything. The safest rule: one covered event anywhere in
+ * the gesture refuses the whole gesture. The changes are consumed on the Initial pass, before the element's own
+ * clickable sees them: it ignores a consumed down and takes a consumed up as a cancel.
+ *
+ * A click sent by an accessibility service (ACTION_CLICK) carries no MotionEvent and is not filtered: that is
+ * outside this model, as for the window flag.
+ */
+fun Modifier.refuseObscuredTouches(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        var refused = false
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            if (isObscured(event.motionEvent?.flags ?: 0)) refused = true
+            if (refused) event.changes.forEach { it.consume() }
+            // The gesture ends when no pointer is down any more (an up or a cancel): the next one starts clean.
+            if (event.changes.none { it.pressed }) refused = false
+        }
+    }
+}
