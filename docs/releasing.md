@@ -6,6 +6,13 @@ A release is a git tag. `.github/workflows/release.yml` builds a **draft** relea
 
 Only the repository owner can do these, in their own terminal and on github.com. **Never run them through a coding agent:** the keystore must not end up in a transcript. Nothing else waits for them, but there is no app release until they are done.
 
+**Before creating the secrets (read this first).** On a tag push GitHub runs the `release.yml` of the *tagged commit*, so the "tag is on main" check inside that file can be deleted by editing it on a branch and tagging that branch. The `v*` rule of the `release` environment only looks at the tag's name, not its commit, and a private repository on the free plan has no rulesets. The only thing left between a branch and the key is a required reviewer. Therefore:
+
+- Do **not** create the signing secrets (`ADBUDDY_KEYSTORE_B64`, `ADBUDDY_KEYSTORE_PASSWORD`) until the `release` environment has required reviewers that really stop the job (a public repository, or a plan where environment protection works on a private one). Check it before: run a harmless job on the environment and see that it waits.
+- Never create them as repository secrets, only as secrets of that environment. An `environment: release` that does not exist is created by GitHub on first use with no protection.
+- Before approving `sign`, the reviewer checks that the commit of the run is on `main` (`git merge-base --is-ancestor <sha> origin/main`) and reviews `git diff <previous tag> <sha> -- .github/workflows/release.yml`. Approving by habit defeats the only barrier.
+- Keep the keystore password only in a password manager, never in a file of your profile: any process running as you (coding agents included) can read `release.p12`.
+
 1. **Create the signing key**, outside the repo. It needs `keytool`: install a JDK (`winget install EclipseAdoptium.Temurin.21.JDK`) or use Android Studio's `jbr/bin/keytool`.
 
    ```sh
@@ -18,7 +25,7 @@ Only the repository owner can do these, in their own terminal and on github.com.
    - Deployment branches and tags: *Selected branches and tags*, add the tag rule `v*`.
    - Required reviewers: yourself.
    - Turn off *Allow administrators to bypass configured protection rules*.
-4. **Add its two secrets** with the commands the script printed (`--env release`): `ADBUDDY_KEYSTORE_B64` and `ADBUDDY_KEYSTORE_PASSWORD`. Run them in **Git Bash**, not PowerShell: they use `|` and `<` the POSIX way. They are environment secrets, not repository secrets, so a workflow on another branch cannot read them. The key alias is always `adbuddy`.
+4. **Add its two secrets** with the commands the script printed (`--env release`): `ADBUDDY_KEYSTORE_B64` and `ADBUDDY_KEYSTORE_PASSWORD`. Run them in **Git Bash**, not PowerShell: they use `|` and `<` the POSIX way. They are environment secrets, not repository secrets, so a workflow on another branch cannot read them unless it passes the environment's required reviewer (hence the rule above: no secrets without an effective reviewer). The key alias is always `adbuddy`.
 5. **Rulesets** (Settings › Rules › Rulesets):
    - a tag ruleset on `v*`: restrict creations, updates and deletions; only repository admins bypass;
    - a branch ruleset on `main`: no direct pushes and no force pushes, changes only through pull requests, and **no bypass list** (not even GitHub Actions). The release jobs that may write (`host` and `publish-apk`) then cannot touch `main`.
@@ -34,7 +41,7 @@ Only the repository owner can do these, in their own terminal and on github.com.
 2. If this release fixes a security bug in the app, raise `MinAppVersionCode` in `host/internal/phoneapp/trust.go` to this release's versionCode (`sh scripts/release-version.sh vX.Y.Z`), in the same release.
 3. If the CLI changed (commands, flags or error codes), check `docs/troubleshooting.md` (the table of error codes) and the guides. `go test ./internal/cli/ -run TestDocs` checks commands and links, not error codes or claims. To find the codes: `grep -rhoE '(NewError|ConfigError|TransientError)\("[A-Z_]+"' host/internal --include=*.go | grep -v _test` and `grep -rhoE 'Code: *"[A-Z_]+"' host/internal --include=*.go` miss some (`NO_INVERSE`, `NOT_FOUND`, `ALREADY_UNDONE`, `NOT_APPLIED`, `UNTRUSTED_ENTRY`, `REMOTE_*`, `UI_NOT_FOUND`, `UI_UNAVAILABLE`, `TOO_LARGE`, `OUTSIDE_WORKSPACE`, `NOT_A_FILE`, `DAEMON_ERROR`: they come from `sendFail`, `remoteExit`, `UndoError` and the `helperFixes`/`remoteFixes`/`undoFixes` maps), so also compare every upper-case literal outside tests with the table.
 4. Tag a commit of `main` and push the tag: `git tag v0.3.0 && git push origin v0.3.0`. For a prerelease, use `v0.3.0-rc.1`. Tags must be `vX.Y.Z` or `vX.Y.Z-rc.N`; `scripts/release-version.sh` explains the limits. A tag on a commit that is not on `main` releases nothing.
-5. The `release` workflow runs `version`, then `test`, then `host` and `build-apk`, then `sign` (waits for your approval), then `publish-apk`. Approve `sign` when it asks.
+5. The `release` workflow runs `version`, then `test`, then `host` and `build-apk`, then `sign` (waits for your approval), then `publish-apk`. Before approving `sign`, check on the approval screen that the run's commit is on `main` (`git merge-base --is-ancestor <sha> origin/main`) and that `git diff <previous tag> <sha> -- .github/workflows/release.yml` is empty or reviewed (see "Before creating the secrets"). Then approve it.
 6. Open the draft on GitHub and check its assets: 5 archives, `checksums.txt`, `adbuddy.apk` and `adbuddy.apk.sha256`. Check the notes, and press **Publish release**. Prereleases are never `latest`, so `adbuddy setup` and `install.sh` skip them.
 
 If a job fails, delete the draft and the tag (`git push origin :v0.3.0`), fix the problem and tag again.
