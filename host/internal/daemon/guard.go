@@ -418,7 +418,7 @@ func adbuddyInFrontReason(viaApp bool) string {
 	if viaApp {
 		out = "press Home alone (input keyevent 3), or open the app you need with exactly monkey -p <package> -c android.intent.category.LAUNCHER 1"
 	}
-	return "tech.hybriq.adbuddy is a protected app: ADBuddy itself is in front (the user is probably chatting with you there), and nothing touches its screen. To leave it, " + out + "; or ask the user to do this part"
+	return uidump.AppPackage + " is a protected app: ADBuddy itself is in front (the user is probably chatting with you there), and nothing touches its screen. To leave it, " + out + "; or ask the user to do this part"
 }
 
 // screenProtectedReason is why the app says the screen is protected: not

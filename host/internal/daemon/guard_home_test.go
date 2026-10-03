@@ -151,6 +151,10 @@ func TestNothingElseLeavesADBuddy(t *testing.T) {
 			{[]string{"shell", "input", "keyevent", "--doubletap", "3"}, fromADBuddy},
 			{[]string{"shell", "input", "keyevent", "HOME"}, fromADBuddy},
 			{[]string{"shell", "input", "keyevent", "03"}, fromADBuddy},
+			// Options after an otherwise exact way out.
+			{[]string{"shell", "input", "keyevent", "3", "--longpress"}, fromADBuddy},
+			{[]string{"shell", "input", "keyevent", "KEYCODE_HOME", "--longpress"}, fromADBuddy},
+			{[]string{"shell", "monkey", "-p", "com.supercell.clashroyale", "-c", "android.intent.category.LAUNCHER", "1", "-v"}, fromADBuddy},
 			{[]string{"shell", "input", "-d", "0", "keyevent", "3"}, fromADBuddy},
 			{[]string{"shell", "input", "keyboard", "keyevent", "3"}, fromADBuddy},
 			{[]string{"shell", "cmd", "input", "keyevent", "3"}, fromADBuddy},
