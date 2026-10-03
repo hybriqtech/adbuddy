@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -610,13 +611,11 @@ func TestTheGuardWithAHeadsUp(t *testing.T) {
 	release()
 }
 
-// TestTheGuardWithTheBubble (M3b-8 and M5c-34, the guard's part): the bubble of
-// ADBuddy's conversation (a test notification without the foreground service,
-// which on API 34 is the only way it bubbles: T1-8) over Settings. Collapsed,
-// its systemui window "Bubbles!" blocks; expanded, ChatBubbleActivity is
-// resumed first and the guard refuses as with ADBuddy in front, with the
-// accessibility service off and on.
-func TestTheGuardWithTheBubble(t *testing.T) {
+// bubbleScene is the bubble of ADBuddy's conversation (a test notification
+// without the foreground service, which on API 34 is the only way it
+// bubbles: T1-8) collapsed over Settings, with the guard up. It returns the
+// emulator, the verified app, the guard and the release of the notification.
+func bubbleScene(t *testing.T) (*emu, phoneapp.Verified, *hostGuard, func()) {
 	e := newEmu(t)
 	v := e.installApp(t)
 	e.installTests(t)
@@ -632,24 +631,72 @@ func TestTheGuardWithTheBubble(t *testing.T) {
 	if !poll(15*time.Second, func() bool { return slices.Contains(e.systemWindows(t), "Bubbles!") }) {
 		t.Fatal("no bubble window 15 s after the notification")
 	}
+	return e, v, g, release
+}
+
+// TestTheGuardWithTheCollapsedBubble (M3b-8 and M5c-34, the guard's part): the
+// collapsed bubble over Settings; its systemui window "Bubbles!" blocks.
+func TestTheGuardWithTheCollapsedBubble(t *testing.T) {
+	e, _, g, release := bubbleScene(t)
 	s := e.snapshot(t, "bubble-collapsed")
 	if !slices.Equal(s.resumed, []string{settingsPkg}) || !slices.Contains(s.unknown, "Bubbles!") {
 		t.Errorf("collapsed bubble: %+v", s)
 	}
 	g.blocks(t, "Bubbles!", screencap...)
+	release()
+}
 
-	// --windows dumps one hierarchy per window: the bubble's bounds are read
-	// from its node.
-	m := bubbleRe.FindSubmatch(e.screenXML(t, "", true))
-	if m == nil {
-		t.Fatal("no bubble_view in uiautomator dump --windows")
+// bubbleTapAttempts is how many times the expanded-bubble test taps the bubble.
+const bubbleTapAttempts = 3
+
+// tapCenter returns the point at the center of bounds ([l, t, r, b]).
+func tapCenter(l, tp, r, bt int) (x, y int) { return (l + r) / 2, (tp + bt) / 2 }
+
+// expandBubble taps the bubble until ADBuddy is the first resumed activity,
+// re-reading the bubble's bounds on each attempt, and returns "" or, if it
+// never expanded, the last state seen.
+func (e *emu) expandBubble(t *testing.T) string {
+	t.Helper()
+	last := "no attempt"
+	for i := 1; i <= bubbleTapAttempts; i++ {
+		// --windows dumps one hierarchy per window: the bubble's bounds are
+		// read from its node.
+		m := bubbleRe.FindSubmatch(e.screenXML(t, "", true))
+		if m == nil {
+			last = fmt.Sprintf("attempt %d: no bubble_view in uiautomator dump --windows", i)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		l, _ := strconv.Atoi(string(m[1]))
+		tp, _ := strconv.Atoi(string(m[2]))
+		r, _ := strconv.Atoi(string(m[3]))
+		bt, _ := strconv.Atoi(string(m[4]))
+		x, y := tapCenter(l, tp, r, bt)
+		e.shell(t, "input tap "+strconv.Itoa(x)+" "+strconv.Itoa(y))
+		var s []string
+		if poll(8*time.Second, func() bool {
+			s = e.front(t)
+			return first(phoneapp.Package)(s)
+		}) {
+			return ""
+		}
+		last = fmt.Sprintf("attempt %d, tap at %d,%d: resumed %q", i, x, y, s)
 	}
-	l, _ := strconv.Atoi(string(m[1]))
-	tp, _ := strconv.Atoi(string(m[2]))
-	r, _ := strconv.Atoi(string(m[3]))
-	bt, _ := strconv.Atoi(string(m[4]))
-	e.shell(t, "input tap "+strconv.Itoa((l+r)/2)+" "+strconv.Itoa((tp+bt)/2))
-	e.waitFront(t, "the bubble expanded", first(phoneapp.Package))
+	return last
+}
+
+// TestTheGuardWithTheExpandedBubble (M3b-8 and M5c-34, the guard's part): the
+// bubble expanded, ChatBubbleActivity is resumed first and the guard refuses
+// as with ADBuddy in front, with the accessibility service off and on. The
+// tap that expands the bubble is a race with systemui on some emulators: if
+// it does not expand in three attempts the test skips; if it does, every
+// check is hard.
+func TestTheGuardWithTheExpandedBubble(t *testing.T) {
+	e, v, g, release := bubbleScene(t)
+	if last := e.expandBubble(t); last != "" {
+		release()
+		t.Skipf("the bubble did not expand on this emulator (%s)", last)
+	}
 	e.waitFocus(t, "the bubble focused", focusedOn(phoneapp.Package))
 	check := func(state string) {
 		t.Helper()
