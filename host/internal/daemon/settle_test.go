@@ -645,3 +645,19 @@ func TestScreenSettleJournalSaysSettled(t *testing.T) {
 		t.Fatalf("journal %+v", j)
 	}
 }
+
+// AGENTS.md tells the agent what to look for in a note: the literal it quotes
+// must be how notDone begins.
+func TestAgentsTemplateQuotesNotDone(t *testing.T) {
+	b, err := os.ReadFile("../workspace/templates/AGENTS.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const quoted = "The action was done; do not repeat it"
+	if !strings.Contains(string(b), "`"+quoted+"`") {
+		t.Errorf("AGENTS.md does not quote %q", quoted)
+	}
+	if !strings.HasPrefix(notDone, quoted) {
+		t.Errorf("notDone %q does not begin with %q", notDone, quoted)
+	}
+}

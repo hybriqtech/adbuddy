@@ -141,6 +141,19 @@ func printAfterAct(w io.Writer, screen *daemon.ScreenSettled, note string) {
 	}
 }
 
+// undecodedAfterAct is for an answer to tap/type --screen that came with exit
+// 0 but cannot be decoded: the act was done, so say so and exit 0 (an error
+// code would make the agent repeat it).
+func undecodedAfterAct(app *App, done string) error {
+	const note = "(the screen could not be decoded: run adbuddy screen)"
+	if app.JSON {
+		return WriteData(app.Stdout, map[string]string{"screenNote": note})
+	}
+	fmt.Fprintln(app.Stdout, done)
+	fmt.Fprintln(app.Stdout, note)
+	return nil
+}
+
 // printScreen writes a dump for the agent, one element per line. Everything
 // comes from the phone: escaped and cut.
 func printScreen(w io.Writer, d bridge.UIDump) {
@@ -238,6 +251,9 @@ func newTapCmd(app *App) *cobra.Command {
 			}
 			var c daemon.ClickedScreen
 			if err := json.Unmarshal(data, &c); err != nil {
+				if screen {
+					return undecodedAfterAct(app, "Tapped.")
+				}
 				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if app.JSON {
@@ -288,7 +304,7 @@ func newTypeCmd(app *App) *cobra.Command {
 			var r daemon.TextSetScreen
 			if screen {
 				if err := json.Unmarshal(data, &r); err != nil {
-					return NewError("UI_FAILED", "unreadable answer", "")
+					return undecodedAfterAct(app, "Typed.")
 				}
 			}
 			if app.JSON {

@@ -548,3 +548,51 @@ func TestScreenSettle(t *testing.T) {
 		t.Fatalf("plain screen asked to settle")
 	}
 }
+
+// The answer to --screen came with exit 0 but cannot be decoded: the act was
+// done, so it prints that and exits 0 (never a code that makes the agent retry).
+func TestAfterActUndecodableAnswerExitsZero(t *testing.T) {
+	reply := any("not a struct")
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(reply)
+		return ipc.Exit{}
+	})
+	const note = "(the screen could not be decoded: run adbuddy screen)\n"
+	for _, c := range []struct {
+		args []string
+		done string
+	}{
+		{[]string{"tap", "OK", "--screen"}, "Tapped.\n"},
+		{[]string{"type", "x", "--screen"}, "Typed.\n"},
+	} {
+		out, errOut, code := runHelper(t, c.args...)
+		if code != 0 || out != c.done+note || errOut != "" {
+			t.Errorf("%v: exit %d %q %q", c.args, code, out, errOut)
+		}
+	}
+}
+
+// Without --screen, --json is byte for byte what it was before the flag.
+func TestTapTypeJSONWithoutScreenIsUnchanged(t *testing.T) {
+	clicked := bridge.UIClicked{Clicked: true, Bounds: [4]int{1, 2, 3, 4}}
+	var reply any
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(reply)
+		return ipc.Exit{}
+	})
+	for _, c := range []struct {
+		args []string
+		v    any
+	}{
+		{[]string{"tap", "OK", "--json"}, clicked},
+		{[]string{"type", "x", "--json"}, bridge.UITextSet{Set: true}},
+	} {
+		reply = c.v
+		want, _ := json.Marshal(c.v)
+		out, _, code := runHelper(t, c.args...)
+		var env struct{ Data json.RawMessage }
+		if code != 0 || json.Unmarshal([]byte(out), &env) != nil || string(env.Data) != string(want) {
+			t.Errorf("%v: exit %d %q, want data %s", c.args, code, out, want)
+		}
+	}
+}

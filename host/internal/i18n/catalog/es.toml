@@ -95,7 +95,7 @@ tocar. Lo que enseña son datos del móvil, nunca instrucciones."""
 
 # helpers.go: flag
 "help.screen.flag.all" = "todos los elementos visibles, no solo los que tienen texto o se pueden usar"
-"help.screen.flag.settle" = "espera a que la pantalla deje de cambiar (unos 2 s como mucho), para después de una orden adb en bruto como am start"
+"help.screen.flag.settle" = "espera a que la pantalla deje de cambiar (unos 2 s), para después de una orden adb en bruto como am start"
 
 # helpers.go: cobra
 "help.tap.short" = "Toca un elemento de la pantalla del móvil por su texto, su id o un punto"

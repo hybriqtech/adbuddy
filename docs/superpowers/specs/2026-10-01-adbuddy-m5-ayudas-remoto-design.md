@@ -120,7 +120,7 @@ com.android.settings · 1344×2992
 - **Por `id` o por texto:** se busca entre los nodos que `dump` mostraría, por este orden: `id` exacto; texto o descripción exactos; y los mismos sin distinguir mayúsculas. Del nodo que coincide se sube al antepasado pulsable más cercano, y se pulsa con `ACTION_CLICK` (`how: action`). Si coinciden varios pulsables distintos, el error es `ambiguous` (§12), con el número de coincidencias y los límites de las 5 primeras en `text`. El agente repite entonces con `--id` o `--xy`. Si no coincide ninguno, `not_found`.
 - **Por coordenadas:** un toque con `dispatchGesture` (`how: gesture`), 50 ms. Antes de tocar se mira qué ventana tiene encima ese punto. Si es de ADBuddy o de una app protegida, el error es `protected`.
 - La superposición marca el punto (§6).
-- **`--screen`:** el daemon, tras el toque, lee la pantalla asentada (como `screen --settle`) y la CLI la imprime a continuación del `Tapped …`; así el agente no necesita otra llamada. Si la guarda impide leerla (el toque abrió una app protegida, por ejemplo), la respuesta trae `screenNote` en vez de `screen` y la CLI la imprime y sale con 0: el toque sí ocurrió y un código de error haría reintentarlo. Deja **dos entradas** en el diario: la del toque y una `adbuddy screen` de la lectura.
+- **`--screen`:** el daemon, tras el toque, lee la pantalla asentada (como `screen --settle`) y la CLI la imprime a continuación del `Tapped …`; así el agente no necesita otra llamada. Si la guarda impide leerla (el toque abrió una app protegida, por ejemplo), la respuesta trae `screenNote` en vez de `screen` (también si hay pausa, una pregunta 🔴 pendiente, un fallo de la app o «stopped», no solo por la guarda) y la CLI la imprime y sale con 0: el toque sí ocurrió y un código de error haría reintentarlo. Deja **dos entradas** en el diario: la del toque y una `adbuddy screen` de la lectura.
 
 ### 3.3 `setText` → `adbuddy type "<texto>" [--screen]`
 
@@ -175,7 +175,7 @@ Una ayuda recorre en el daemon el mismo camino que `exec`:
 | Con una pregunta 🔴 pendiente | Bloqueada, como toda orden de adb (`admit` del daemon) | Bloqueada: un toque podría pulsar Permitir |
 | Admisión en vuelo | No cuenta | Cuenta: retrasa la pregunta siguiente, como un `input` en marcha |
 | Guarda de §4.3 | Sí | Sí |
-| Diario | Una entrada con `argv` `["adbuddy", "<op>", …]`, `source` del agente y la descripción de la regla | Igual |
+| Diario | Una entrada con `argv` `["adbuddy", "<op>", …]`, `source` del agente y la descripción de la regla | Igual; con `--screen`/`--settle` son dos: la de la acción y una `adbuddy screen` de la lectura, que puede quedar `blocked` mientras la acción queda `ok`. No se escribe el contenido de la pantalla, solo el estado |
 
 El `argv` del diario lo construye el daemon a partir de la operación y sus `args` (el del cliente no cuenta), con el texto de `type` recortado a 60 caracteres. Las descripciones salen de reglas propias de las ayudas (`helper.screen`, `helper.tap`…), con título en inglés y en español como las demás. No pasan por el clasificador de shell: su `argv` no es una orden de adb.
 
