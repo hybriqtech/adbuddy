@@ -42,3 +42,4 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - Rama: P2 en ux/p2 (desde ux/revision, el PR de P1 no cambia: ux/revision reposicionada en 9e25b29). Cada paquete en su rama (ux/p3...). Un solo worktree: ux.
 - P2 Task 1: complete (commits 77c5c9d..63ab8d8; fix round 1/5: recordatorio del pie al cuerpo con scroll — 1 addressed, 0 open). Implementer a2db977b, reviewer a19fde65, re-reviewer a53abd94.
 - P2 Task 1: minor (deferred, limpieza final de P2): test que el recordatorio access_later_hint NO existe con Effective.ON (stepTwoWithTheAccessOnHasNoNotNow); la rama fila de ActionFooterTest no se prueba con etiqueta larga.
+- P2 Task 2: complete (commits 6035929..f6991b2, review clean). minor (limpieza final de P2): OnboardingScreensTest.stepTwoNotificationAccess sin assertExists de access_restricted_hint; orden de imports en NotificationAccessScreensTest.
