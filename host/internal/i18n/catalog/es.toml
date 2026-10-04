@@ -106,7 +106,7 @@ punto, como los lista `adbuddy screen`. Exactamente uno de ellos."""
 # helpers.go: flag
 "help.tap.flag.id" = "el id del elemento, como lo lista `adbuddy screen`"
 "help.tap.flag.xy" = "un punto de la pantalla, x,y en píxeles"
-"help.tap.flag.screen" = "imprime también la pantalla ya asentada (hasta unos 3 s), para no hacer una segunda llamada"
+"help.tap.flag.screen" = "imprime también la pantalla ya asentada (hasta unos 4 s en total), para no hacer una segunda llamada"
 
 # helpers.go: cobra
 "help.type.short" = "Escribe texto en el campo con foco del móvil (sustituye lo que tenga el campo)"
@@ -114,7 +114,7 @@ punto, como los lista `adbuddy screen`. Exactamente uno de ellos."""
 Escribe el texto en el campo que tiene el foco: toca antes el campo. Sustituye
 el texto del campo, con Unicode completo mediante la app ADBuddy (solo ASCII
 sin ella). No escribas nunca contraseñas, PIN ni claves: pregunta al usuario."""
-"help.type.flag.screen" = "imprime también la pantalla ya asentada (hasta unos 3 s), para no hacer una segunda llamada"
+"help.type.flag.screen" = "imprime también la pantalla ya asentada (hasta unos 4 s en total), para no hacer una segunda llamada"
 "help.foreground.short" = "Enseña la app y la actividad que están en primer plano en el móvil"
 "help.notifications.short" = "Lista las notificaciones actuales del móvil (las apps protegidas no muestran texto)"
 "help.notifications.long" = """

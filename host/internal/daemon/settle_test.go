@@ -1468,3 +1468,214 @@ func TestAgentsTemplateQuotesNotDone(t *testing.T) {
 		t.Errorf("notDone %q does not begin with %q", notDone, quoted)
 	}
 }
+
+// adbDumpReady makes the fake adb answer a uiautomator read (no ADBuddy
+// accessibility service, Settings on screen), for an app that stops answering.
+func adbDumpReady(t *testing.T, e *env) {
+	t.Helper()
+	xml, err := os.ReadFile("../uidump/testdata/settings.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.adb.mu.Lock()
+	e.adb.shell["dumpsys accessibility"] = "User state[\n  Enabled services:{}\n"
+	e.adb.out["exec-out uiautomator dump /dev/tty"] = string(xml)
+	e.adb.mu.Unlock()
+}
+
+// A read that came another way than the start (uiautomator instead of the
+// app) is not compared with it: a difference of format is not a change. It
+// does not end the wait as a change (only settleIdle does) and Changed is
+// not known.
+func TestSettleMixedRoutes(t *testing.T) {
+	unavailable := &UIError{Code: bridge.CodeUnavailable, Text: "the app is not connected"}
+	t.Run("tap, the start by the app and every read by adb", func(t *testing.T) {
+		c := fastSettle()
+		c.gap, c.idle = 5*time.Millisecond, 200*time.Millisecond
+		settleTimes(t, c)
+		e := newEnv(t)
+		adbDumpReady(t, e)
+		a := e.settleApp()
+		a.dumpFn = func(int) bridge.UIDump { return dumpOf("com.android.settings", "A") }
+		var clickedAt time.Time
+		var mu sync.Mutex
+		a.onOp = func(op string, n int) {
+			if op == bridge.UIOpClick {
+				mu.Lock()
+				clickedAt = time.Now()
+				mu.Unlock()
+			}
+		}
+		a.dumpErr = func(_ int, after bool) error {
+			if after {
+				return unavailable
+			}
+			return nil
+		}
+		s, exit := e.helperScreen(t, context.Background(), bridge.UIOpClick, xy(1, 1))
+		if exit.Code != 0 {
+			t.Fatalf("exit %+v", exit)
+		}
+		mu.Lock()
+		took := time.Since(clickedAt)
+		mu.Unlock()
+		cs := decodeClicked(t, s)
+		if cs.Screen == nil || !cs.Screen.Settled || cs.Screen.Changed != nil || cs.Note != "" || len(cs.Screen.Elements) == 0 {
+			t.Fatalf("result %s", s.data[0])
+		}
+		if strings.Contains(string(s.data[0]), `"changed"`) {
+			t.Fatalf("changed is not known and came out: %s", s.data[0])
+		}
+		if took < c.idle {
+			t.Fatalf("settled %v after the tap, before the idle wait %v: a difference of format counted as a change", took, c.idle)
+		}
+		if j := e.last(t); !strings.Contains(j.Reason, "via adb") || !strings.Contains(j.Reason, "changed=unknown") {
+			t.Fatalf("journal %+v", j)
+		}
+	})
+	t.Run("tap, a change by the app and then adb", func(t *testing.T) {
+		c := fastSettle()
+		c.gap, c.idle = 5*time.Millisecond, 10*time.Second
+		settleTimes(t, c)
+		e := newEnv(t)
+		adbDumpReady(t, e)
+		a := e.settleApp()
+		a.dumpFn = func(n int) bridge.UIDump {
+			if n == 1 {
+				return dumpOf("com.android.settings", "A")
+			}
+			return dumpOf("com.android.settings", "B")
+		}
+		a.dumpErr = func(n int, _ bool) error {
+			if n >= 3 { // the start and one read by the app, then adb
+				return unavailable
+			}
+			return nil
+		}
+		s, exit := e.helperScreen(t, context.Background(), bridge.UIOpClick, xy(1, 1))
+		if exit.Code != 0 {
+			t.Fatalf("exit %+v", exit)
+		}
+		cs := decodeClicked(t, s)
+		if cs.Screen == nil || !cs.Screen.Settled || cs.Screen.Changed != nil || cs.Screen.Package != "com.android.settings" {
+			t.Fatalf("result %s", s.data[0])
+		}
+		if j := e.last(t); !strings.Contains(j.Reason, "via adb") || !strings.Contains(j.Reason, "changed=unknown") {
+			t.Fatalf("journal %+v", j)
+		}
+	})
+	t.Run("screen --settle, the first read by the app and the rest by adb", func(t *testing.T) {
+		c := fastSettle()
+		c.gap, c.idle = 5*time.Millisecond, 200*time.Millisecond
+		settleTimes(t, c)
+		e := newEnv(t)
+		adbDumpReady(t, e)
+		a := e.settleApp()
+		a.dumpErr = func(n int, _ bool) error {
+			if n >= 2 {
+				return unavailable
+			}
+			return nil
+		}
+		start := time.Now()
+		s, exit := e.helperScreen(t, context.Background(), bridge.UIOpDump, bridge.UIDumpArgs{})
+		if exit.Code != 0 {
+			t.Fatalf("exit %+v", exit)
+		}
+		if took := time.Since(start); took < c.idle {
+			t.Fatalf("settled after %v, before the idle wait %v", took, c.idle)
+		}
+		d := decodeSettled(t, s)
+		if !d.Settled || d.Changed != nil || len(d.Elements) == 0 {
+			t.Fatalf("result %s", s.data[0])
+		}
+	})
+}
+
+// Changed is about the screen that comes out: one that changed and came back
+// to the start is the start (and the CLI says the tap did nothing visible).
+func TestSettleChangedIsAboutTheScreenThatComesOut(t *testing.T) {
+	c := fastSettle()
+	c.gap, c.idle = 20*time.Millisecond, 10*time.Second
+	settleTimes(t, c)
+	e := newEnv(t)
+	a := e.settleApp()
+	a.dumpFn = func(n int) bridge.UIDump {
+		if n == 2 { // the start is A; then B for a moment and A again
+			return dumpOf("com.android.settings", "B")
+		}
+		return dumpOf("com.android.settings", "A")
+	}
+	s, exit := e.helperScreen(t, context.Background(), bridge.UIOpClick, xy(1, 1))
+	if exit.Code != 0 {
+		t.Fatalf("exit %+v", exit)
+	}
+	cs := decodeClicked(t, s)
+	if cs.Screen == nil || !cs.Screen.Settled || textOf(cs.Screen) != "A" || !is(cs.Screen.Changed, false) {
+		t.Fatalf("result %s", s.data[0])
+	}
+	if n := a.countAfter(bridge.UIOpDump); n < 3 {
+		t.Fatalf("%d reads: it settled before the change", n)
+	}
+	if j := e.last(t); !strings.Contains(j.Reason, "settled=true") || !strings.Contains(j.Reason, "changed=false") {
+		t.Fatalf("journal %+v", j)
+	}
+}
+
+// screen --settle whose first read the app refuses (UI_PROTECTED: the window
+// with no content of a transition) waits like one the guard blocked: the
+// first valid read is the start; a refusal that lasts is a block, with no data.
+func TestScreenSettleFirstReadProtected(t *testing.T) {
+	protected := &UIError{Code: bridge.CodeProtected, Text: "ADBuddy does not read this screen."}
+	t.Run("for a moment", func(t *testing.T) {
+		c := fastSettle()
+		c.blockWait = 10 * time.Second
+		settleTimes(t, c)
+		e := newEnv(t)
+		a := e.settleApp()
+		a.dumpErr = func(n int, _ bool) error {
+			if n <= 2 {
+				return protected
+			}
+			return nil
+		}
+		s, exit := e.helperScreen(t, context.Background(), bridge.UIOpDump, bridge.UIDumpArgs{})
+		if exit.Code != 0 {
+			t.Fatalf("exit %+v", exit)
+		}
+		d := decodeSettled(t, s)
+		if !d.Settled || !is(d.Changed, false) || textOf(&d) != "same" {
+			t.Fatalf("result %s", s.data[0])
+		}
+		if n := a.count(bridge.UIOpDump); n < 4 { // two refused, the start, a read
+			t.Fatalf("%d dumps", n)
+		}
+		all := e.entriesAll(t)
+		if len(all) != 1 || all[0].Status != journal.StatusOK || !strings.HasSuffix(all[0].Reason, ", settled=true") {
+			t.Fatalf("journal %+v", all)
+		}
+	})
+	t.Run("it lasts", func(t *testing.T) {
+		c := fastSettle()
+		c.blockWait = 60 * time.Millisecond
+		settleTimes(t, c)
+		e := newEnv(t)
+		a := e.settleApp()
+		a.dumpErr = func(int, bool) error { return protected }
+		start := time.Now()
+		s, exit := e.helperScreen(t, context.Background(), bridge.UIOpDump, bridge.UIDumpArgs{})
+		if took := time.Since(start); took < c.blockWait {
+			t.Fatalf("gave up after %v, before %v", took, c.blockWait)
+		}
+		if exit.Code != ExitDenied || exit.ErrorCode != "UI_BLOCKED" || !strings.Contains(exit.Error, "ADBuddy does not read this screen") || len(s.data) != 0 {
+			t.Fatalf("exit %+v data %q", exit, s.data)
+		}
+		if n := a.count(bridge.UIOpDump); n < 2 {
+			t.Fatalf("not tried again: %d dumps", n)
+		}
+		all := e.entriesAll(t)
+		if len(all) != 1 || all[0].Status != journal.StatusBlocked || !strings.Contains(all[0].Reason, "ADBuddy does not read this screen") {
+			t.Fatalf("journal %+v", all)
+		}
+	})
+}

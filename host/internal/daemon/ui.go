@@ -200,13 +200,21 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 	} else {
 		data, via, f = d.runUI(ctx, req.UIOp, req.UIArgs, s)
-		// screen with Screen: wait for it to settle; the read above is the start.
-		if f == nil && req.Screen && req.UIOp == bridge.UIOpDump {
-			if first, ok := asDump(data); ok {
-				var done *ipc.Exit
-				if data, via, f, done = d.settleScreen(ctx, e, settleIn{args: req.UIArgs, base: &first, first: &first, via: via, start: time.Now()}); done != nil {
-					return *done
-				}
+		if req.Screen && req.UIOp == bridge.UIOpDump {
+			var done *ipc.Exit
+			switch first, ok := asDump(data); {
+			case f == nil && ok:
+				// screen with Screen: wait for it to settle; the read above is the start.
+				data, via, f, done = d.settleScreen(ctx, e, settleIn{args: req.UIArgs, base: &first, baseVia: via, first: &first, via: via, start: time.Now()})
+			case f != nil && f.exit == ExitDenied && ctx.Err() == nil:
+				// The app's own check refused the first read (UI_PROTECTED): maybe
+				// a transition, as after a block of the guard. Nothing read comes
+				// out of it; the wait's first valid read is the start, and a
+				// refusal that lasts is a block with no data.
+				data, via, f, done = d.settleScreen(ctx, e, settleIn{args: req.UIArgs, start: time.Now(), adopt: true})
+			}
+			if done != nil {
+				return *done
 			}
 		}
 	}
@@ -484,7 +492,7 @@ func (d *Daemon) runUI(ctx context.Context, op string, raw json.RawMessage, s St
 		if err != nil {
 			return nil, "", fail(1, "UI_FAILED", "the ADBuddy app answered something unreadable: "+err.Error())
 		}
-		return v, "the app", nil
+		return v, viaApp, nil
 	}
 	if !fallsBack(err, op == bridge.UIOpDump) {
 		return nil, "", appFailure(ctx, err)
