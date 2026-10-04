@@ -6,6 +6,8 @@
 
 **Regla fija:** nunca se acepta un Permitir, una respuesta o una captura que llegue con el móvil bloqueado salvo que la APP lea `isDeviceLocked == false` después de la entrega y dentro de la ventana. Ante la duda, se descarta como hoy. Denegar no cambia (nunca espera).
 
+**Decisión del controlador (ronda 2):** un Permitir (no Denegar) entregado con el móvil bloqueado y NO armado en el instante de la entrega (`ConfirmNotifier.arming.isArmed(id)` leído en `onReceive`) se descarta sin esperar: cierra el residual «toque desviado al aparecer la notificación + desbloqueo casual con un SystemUI que ignore el flag». Una lectura del bloqueo que falla cuenta como bloqueado.
+
 **Decisiones (revisión opus):** ventana 2000 ms (medido 300 ms; fallo seguro si se pasa); sondeo cada 50 ms; el armado de 600 ms NO se cuenta desde el desbloqueo (el desbloqueo ocurre 0-300 ms antes de reevaluar: anularía la función; con el bouncer de por medio el toque desviado + PIN es un paso deliberado) y `ConfirmArming.isArmed(id)` se mantiene tal cual en la reevaluación; sin atar a `ACTION_USER_PRESENT`/`isKeyguardLocked` (no discriminan un desbloqueo casual); alternativa (b) (actividad translúcida con `requestDismissKeyguard`) NO en este hito: queda en pendientes como plan B; residual aceptado y documentado en `safety.md`: un SystemUI de fabricante que ignore `setAuthenticationRequired` + el dueño desbloqueando por otra vía en <2 s.
 
 ## Código (v2, lo implementa tal cual; ajustes técnicos solo si no compila)
