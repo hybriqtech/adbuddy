@@ -32,7 +32,10 @@ fun NotificationsRationaleDialog(onContinue: () -> Unit, onSkip: () -> Unit) {
     AlertDialog(
         onDismissRequest = onSkip,
         title = { Text(stringResource(R.string.notifications_rationale_title)) },
-        text = { NotificationsRationaleBody() },
+        text = {
+            ObscuredTouchGuard()
+            NotificationsRationaleBody()
+        },
         confirmButton = { TextButton(onClick = onContinue) { Text(stringResource(R.string.notifications_rationale_continue)) } },
         dismissButton = { TextButton(onClick = onSkip) { Text(stringResource(R.string.onboarding_skip)) } },
         properties = DialogProperties(dismissOnClickOutside = false),
