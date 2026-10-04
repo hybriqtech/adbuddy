@@ -397,6 +397,7 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 	e.atCleanup(t, "shell", "input keyevent KEYCODE_HOME")
 	e.atCleanup(t, "shell", "cmd statusbar collapse")
 	e.atCleanup(t, "shell", "input keyevent KEYCODE_WAKEUP")
+	e.cleanStateAtCleanup(t)
 	g := newHostGuard(t, e, nil)
 
 	// Settings in front, nothing over it: the command runs.
@@ -836,6 +837,7 @@ func (e *emu) guardPost(t *testing.T, kind, id string) (release func()) {
 // sleepScreen turns the screen off and waits until dumpsys power says so.
 func (e *emu) sleepScreen(t *testing.T) {
 	t.Helper()
+	e.cleanStateAtCleanup(t)
 	e.shell(t, "input keyevent KEYCODE_SLEEP")
 	if !poll(10*time.Second, func() bool { return uidump.Asleep(e.read(t, "", "power")) }) {
 		t.Fatal("the screen is not off 10 s after KEYCODE_SLEEP")
