@@ -241,11 +241,16 @@ func TestTheQuestionsOfferWhatTheyMay(t *testing.T) {
 	}
 }
 
-// scrollDialog swipes the dialog's text up once, as a finger would.
+// scrollDialog swipes the dialog's text up once, as a finger would. Only the
+// DOWN point matters: it must land on the area that scrolls. That area no
+// longer reaches 600 px below the centre of the command's text (the countdown
+// and the scroll notice sit outside it, and the three stacked buttons make it
+// shorter), so the swipe is short and centred on the command's node: from
+// 250 px below it to 350 px above it (never above y=50).
 func (e *emu) scrollDialog(t *testing.T, at uiNode) {
 	t.Helper()
 	x, y := strconv.Itoa(at.X), at.Y
-	e.shell(t, "input swipe "+x+" "+strconv.Itoa(y+600)+" "+x+" "+strconv.Itoa(y-600)+" 300")
+	e.shell(t, "input swipe "+x+" "+strconv.Itoa(y+250)+" "+x+" "+strconv.Itoa(max(y-350, 50))+" 300")
 }
 
 // dialogButton returns the app's button labelled text, if it is on screen:
@@ -311,7 +316,7 @@ func TestTheDialogAllowsOnlyWhatWasRead(t *testing.T) {
 		t.Fatalf("no command text in the dialog: %+v", nodes)
 	}
 	on := false
-	for i := 0; i < 60 && !on; i++ {
+	for i := 0; i < 120 && !on; i++ {
 		e.scrollDialog(t, text)
 		allow, _ = dialogButton(e.screen(t), txtAllow)
 		on = allow.Enabled
@@ -341,7 +346,7 @@ func TestTheDialogAllowsOnlyWhatWasRead(t *testing.T) {
 	}
 	// What it hides is said after the command: swipe down to it.
 	tooLong := func(n uiNode) bool { return strings.Contains(n.Text, txtTooLong) }
-	for i := 0; i < 80 && !slices.ContainsFunc(nodes, tooLong); i++ {
+	for i := 0; i < 160 && !slices.ContainsFunc(nodes, tooLong); i++ {
 		for _, n := range nodes {
 			if strings.HasPrefix(n.Text, "adb shell echo ddd") {
 				text = n
