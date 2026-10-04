@@ -199,7 +199,8 @@ class BridgeService : LifecycleService() {
         { d, step -> main.postDelayed(step, token, d) },
     ) { unlocked -> if (foreground && !destroyed) act(unlocked) }
 
-    private fun locked() = getSystemService(KeyguardManager::class.java).isDeviceLocked
+    /** A reading that fails counts as locked. */
+    private fun locked() = try { getSystemService(KeyguardManager::class.java).isDeviceLocked } catch (e: RuntimeException) { true }
 
     private fun toast(@StringRes res: Int) = toast(getString(res))
 
