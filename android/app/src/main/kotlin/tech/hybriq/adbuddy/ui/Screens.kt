@@ -28,6 +28,9 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -225,24 +228,25 @@ fun ConfirmDialog(
                 }
             }
         },
+        // One Column for the three buttons: the dialog's own button row would put Deny beside a wide label and over it.
+        // Deny first, filled and on at once (the way out, the loudest); Allow outlined; Allow for the session apart and quiet.
         confirmButton = {
-            Column {
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                if (Decision.DENY in decisions) {
+                    Button(onClick = { onAnswer(Decision.DENY) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.action_deny)) }
+                }
                 if (Decision.ALLOW in decisions) {
-                    TextButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread && armed) { Text(stringResource(R.string.action_allow)) }
+                    OutlinedButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread && armed) { Text(stringResource(R.string.action_allow)) }
                 }
                 if (Decision.ALLOW_SESSION in decisions) {
+                    Spacer(Modifier.height(8.dp))
                     TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }, enabled = !unread && armed) {
-                        Text(stringResource(R.string.action_allow_session))
+                        Text(stringResource(R.string.action_allow_session), style = MaterialTheme.typography.labelMedium)
                     }
                 }
                 if (decisions.isEmpty()) {
                     TextButton(onClick = onClose) { Text(stringResource(R.string.action_close)) }
                 }
-            }
-        },
-        dismissButton = {
-            if (Decision.DENY in decisions) {
-                TextButton(onClick = { onAnswer(Decision.DENY) }) { Text(stringResource(R.string.action_deny)) }
             }
         },
     )

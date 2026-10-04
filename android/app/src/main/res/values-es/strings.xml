@@ -44,7 +44,7 @@
 
     <string name="action_allow">Permitir</string>
     <string name="action_deny">Rechazar</string>
-    <string name="action_allow_session">Permitir durante la sesión</string>
+    <string name="action_allow_session">Permitir este mismo comando durante la sesión</string>
     <string name="action_pause">Pausar</string>
     <string name="action_resume">Reanudar</string>
     <string name="action_cut">Cortar acceso</string>

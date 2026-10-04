@@ -29,7 +29,7 @@ import (
 // The app's English texts the tests look for (values/strings.xml).
 const (
 	txtAllow        = "Allow"
-	txtAllowSession = "Allow during the session"
+	txtAllowSession = "Allow this same command during the session"
 	txtDeny         = "Deny"
 	txtOpen         = "Open"
 	txtSpecial      = "⚠ This may cut the connection with the PC or affect ADBuddy."
