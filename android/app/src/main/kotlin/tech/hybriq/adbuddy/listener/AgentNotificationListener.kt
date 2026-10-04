@@ -23,6 +23,9 @@ import kotlinx.coroutines.flow.StateFlow
  */
 class AgentNotificationListener : NotificationListenerService() {
     override fun onListenerConnected() {
+        // A new binding: the user's mark from an older one goes first, before the gate can see the listener (the
+        // system may connect it without disconnecting it before, M5c-32 b; ListenerIsReadOnlyTest keeps this first).
+        NotificationGate.onConnected { NotificationConsent.of(this).revoke() }
         current = this
         _connected.value = true
     }

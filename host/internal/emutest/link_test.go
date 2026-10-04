@@ -24,6 +24,10 @@ import (
 // linkWait is how long openLink waits for the app's first device.info.
 const linkWait = 10 * time.Second
 
+// linkFirstWait is linkWait for the very first device.info: the cold start of
+// a freshly installed app on a loaded CI emulator.
+const linkFirstWait = 45 * time.Second
+
 // link is the real channel with the app on the emulator, as `adbuddy serve`
 // opens it: the host's bridge on 127.0.0.1, `adb reverse` of its port and the
 // token handed over by phoneapp.Handshake. The tests play the host: they send
@@ -88,8 +92,13 @@ func (e *emu) linkTo(t *testing.T, v phoneapp.Verified) *link {
 	if err := phoneapp.Tunnel(e.ctx, e.adb, l.port); err != nil {
 		t.Fatalf("adb reverse: %v", err)
 	}
+	t.Cleanup(func() {
+		if t.Failed() {
+			e.dumpLogcat(t)
+		}
+	})
 	l.handshake(t)
-	m := l.waitFor(t, bridge.TypeDeviceInfo, linkWait)
+	m := l.waitFor(t, bridge.TypeDeviceInfo, linkFirstWait)
 	l.Info = payload[bridge.DeviceInfo](t, m)
 	if len(l.Hellos()) == 0 {
 		t.Fatal("device.info came without a hello")
@@ -985,4 +994,46 @@ func TestTheScreenshotGoesToTheHost(t *testing.T) {
 	if len(cs.Attachments) != 1 || cs.Attachments[0] != fromNotification {
 		t.Errorf("chat.send after the notification's screenshot carries %q, want [%s]", cs.Attachments, fromNotification)
 	}
+}
+
+// diag runs a read-only shell command for a failure report: it survives the
+// test's cancelled context, is bounded to 20 s and never fails the test. It
+// returns "" when it cannot.
+func (e *emu) diag(command string) string {
+	c := *e
+	c.ctx = context.WithoutCancel(e.ctx)
+	if c.state() != "device" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(c.ctx, 20*time.Second)
+	defer cancel()
+	out, _, _, err := c.adb.Output(ctx, "shell", command)
+	if err != nil {
+		return ""
+	}
+	return strings.ReplaceAll(out, "\r", "")
+}
+
+// lastLines is the last n non-empty lines of out that keep accepts.
+func lastLines(out string, n int, keep func(string) bool) []string {
+	var l []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) != "" && keep(line) {
+			l = append(l, line)
+		}
+	}
+	if len(l) > n {
+		l = l[len(l)-n:]
+	}
+	return l
+}
+
+// dumpLogcat logs the app's last logcat lines, to see why a test failed. The
+// token is never logged, but a line that mentions one is dropped anyway.
+func (e *emu) dumpLogcat(t *testing.T) {
+	lines := lastLines(e.diag("logcat -d -t 400"), 80, func(s string) bool {
+		s = strings.ToLower(s)
+		return strings.Contains(s, "adbuddy") && !strings.Contains(s, "token")
+	})
+	t.Logf("app logcat (last %d lines):\n%s", len(lines), strings.Join(lines, "\n"))
 }

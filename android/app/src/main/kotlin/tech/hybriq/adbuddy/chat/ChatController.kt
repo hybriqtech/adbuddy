@@ -101,6 +101,15 @@ class ChatController(
         _answering.update { a -> a.filter { it in ids }.toSet() }
     }
 
+    /**
+     * The app came back to the front (PermissionCards, on ON_START/ON_RESUME): the person may be tapping as it comes
+     * up, so the first card is guarded again, as after a reconnection, and the screen re-reads it ([guardEpoch]).
+     */
+    fun rearmGuard() {
+        guard.rearm()
+        _guardEpoch.update { it + 1 }
+    }
+
     /** Milliseconds before the card may be answered (its promote guard); 0 when it may, or when it never may (then [canAnswer] says no). Finite: fit for PermissionUi.nextTickMs. */
     fun guardLeftMs(id: String): Long = guard.leftMs(id) ?: 0L
 
