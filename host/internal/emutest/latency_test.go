@@ -113,11 +113,19 @@ type latencyHost struct {
 	p  *probe
 	ws string
 	e  *emu
+	j  *journal.Store
 }
 
 type uiFunc = func(context.Context, string, json.RawMessage) (json.RawMessage, error)
 
 func newLatencyHost(t *testing.T, e *emu, ui uiFunc) *latencyHost {
+	t.Helper()
+	return newLatencyHostProtected(t, e, ui, nil)
+}
+
+// newLatencyHostProtected is newLatencyHost with the host's own list of
+// protected apps (Options.Protected); nil: none.
+func newLatencyHostProtected(t *testing.T, e *emu, ui uiFunc, protected func(pkg string) bool) *latencyHost {
 	t.Helper()
 	cls, err := classify.New(nil)
 	if err != nil {
@@ -134,9 +142,11 @@ func newLatencyHost(t *testing.T, e *emu, ui uiFunc) *latencyHost {
 			return raw, err
 		}
 	}
-	return &latencyHost{p: p, ws: ws, e: e, d: daemon.New(daemon.Options{
-		Classifier: cls, ADB: timedADB{e.adb, p}, Journal: journal.OpenSigned(filepath.Join(ws, "journal"), []byte("emutest")),
+	j := journal.OpenSigned(filepath.Join(ws, "journal"), []byte("emutest"))
+	return &latencyHost{p: p, ws: ws, e: e, j: j, d: daemon.New(daemon.Options{
+		Classifier: cls, ADB: timedADB{e.adb, p}, Journal: j,
 		Confirmer: noQuestions{t}, Serial: e.adb.Serial, Session: "emutest", Lang: "en", Workspace: ws, UI: timedUI,
+		Protected: protected,
 	})}
 }
 

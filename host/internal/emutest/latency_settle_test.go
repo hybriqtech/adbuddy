@@ -51,7 +51,7 @@ func TestLatencySettle(t *testing.T) {
 		dump      []byte
 		protected bool
 	}
-	observe := func(act func()) (first, last time.Duration, flickers int, reads int) {
+	observe := func(act func()) (first, last, gap time.Duration, flickers int, reads int) {
 		t0 := time.Now()
 		act()
 		var prev []byte
@@ -72,6 +72,8 @@ func TestLatencySettle(t *testing.T) {
 			if prev != nil && !bytes.Equal(prev, s.dump) {
 				if first == 0 {
 					first = s.at
+				} else if g := s.at - last; g > gap { // the longest stretch of equal reads between two changes
+					gap = g
 				}
 				last = s.at
 			}
@@ -81,11 +83,11 @@ func TestLatencySettle(t *testing.T) {
 	}
 	type row struct{ first, last time.Duration }
 	run := func(name string, act func(), reset func()) {
-		var firsts, lasts []time.Duration
+		var firsts, lasts, gaps []time.Duration
 		blocked, total := 0, 0
 		for i := 0; i < 12; i++ {
-			f, la, fl, rd := observe(act)
-			firsts, lasts = append(firsts, f), append(lasts, la)
+			f, la, gp, fl, rd := observe(act)
+			firsts, lasts, gaps = append(firsts, f), append(lasts, la), append(gaps, gp)
 			blocked += fl
 			total += rd
 			reset()
@@ -93,11 +95,19 @@ func TestLatencySettle(t *testing.T) {
 		}
 		sort.Slice(firsts, func(i, j int) bool { return firsts[i] < firsts[j] })
 		sort.Slice(lasts, func(i, j int) bool { return lasts[i] < lasts[j] })
+		sort.Slice(gaps, func(i, j int) bool { return gaps[i] < gaps[j] })
 		msg := fmt.Sprintf("| %s | first change median %d ms, max %d ms | last change median %d ms, p90 %d ms, max %d ms | protected in %d of %d reads |",
 			name, firsts[len(firsts)/2].Milliseconds(), firsts[len(firsts)-1].Milliseconds(),
 			lasts[len(lasts)/2].Milliseconds(), lasts[len(lasts)*9/10].Milliseconds(), lasts[len(lasts)-1].Milliseconds(), blocked, total)
 		t.Log(msg)
 		reportLine(msg)
+		// The longest stable stretch inside a transition (equal dumps between the first
+		// and the last change): settleQuiet must be longer than this to not call a
+		// transition settled halfway.
+		gmsg := fmt.Sprintf("| %s | longest stable gap inside the transition: median %d ms, max %d ms (of %d runs) |",
+			name, gaps[len(gaps)/2].Milliseconds(), gaps[len(gaps)-1].Milliseconds(), len(gaps))
+		t.Log(gmsg)
+		reportLine(gmsg)
 	}
 	tapNet := func() { call(bridge.UIOpClick, bridge.UIClickArgs{Text: "Network & internet"}) }
 	back := func() { e.shell(t, "input keyevent KEYCODE_BACK") }
