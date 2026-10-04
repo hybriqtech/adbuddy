@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.confirm.ConfirmNotifier
+import tech.hybriq.adbuddy.confirm.UnlockWait
 import tech.hybriq.adbuddy.control.CutAccess
 import tech.hybriq.adbuddy.notify.ConversationNotifier
 import tech.hybriq.adbuddy.notify.ConversationView
@@ -47,6 +48,10 @@ class BridgeService : LifecycleService() {
     private var lastId: String? = null
     private var lastTs = 0L
     private val main = Handler(Looper.getMainLooper())
+
+    /** Tags the polls of UnlockWait, so onDestroy removes them (and only them). */
+    private val token = Any()
+    private var destroyed = false
     private var locales: LocaleList? = null
 
     /**
@@ -127,17 +132,20 @@ class BridgeService : LifecycleService() {
             ACTION_PAUSE -> app.bridge.pause(true)
             ACTION_RESUME -> app.bridge.pause(false)
             // Reply and capture put something in the agent's hands: never with the phone locked (API 30 has no
-            // setAuthenticationRequired, and the lock screen must not be a way in on any version).
+            // setAuthenticationRequired, and the lock screen must not be a way in on any version). Delivered locked on
+            // API 31+ (the system holds them for the PIN, and delivers about 300 ms before isDeviceLocked turns false)
+            // they wait for the app to read it unlocked (UnlockWait, M2-8); otherwise they are dropped.
             ACTION_REPLY -> {
-                if (!locked()) {
-                    val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(ConversationNotifier.KEY_REPLY)?.toString()
-                    if (!text.isNullOrBlank()) app.chat.send(text)
+                // The text is read now, from this intent: START_STICKY would redeliver a null intent, never this one.
+                val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(ConversationNotifier.KEY_REPLY)?.toString()
+                whenUnlocked { unlocked ->
+                    if (unlocked && !locked() && !text.isNullOrBlank()) app.chat.send(text)
+                    // The "sending" wheel of the direct reply stays until the notification is posted again (also when it was ignored).
+                    shown?.let { post(it) }
                 }
-                // The "sending" wheel of the direct reply stays until the notification is posted again (also when it was ignored).
-                shown?.let { post(it) }
             }
-            ACTION_CAPTURE -> if (!locked()) {
-                app.captures.take { a, text ->
+            ACTION_CAPTURE -> whenUnlocked { unlocked ->
+                if (unlocked && !locked()) app.captures.take { a, text ->
                     if (a != null) app.chat.send("", listOf(a)) else toast(text)
                 }
             }
@@ -168,6 +176,8 @@ class BridgeService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        destroyed = true
+        main.removeCallbacksAndMessages(token)
         if (listening) {
             unregisterReceiver(screenOn)
             listening = false
@@ -179,6 +189,15 @@ class BridgeService : LifecycleService() {
         }
         super.onDestroy()
     }
+
+    /**
+     * Runs [act] with what UnlockWait says: at once when the phone was not locked at delivery, after the PIN when it
+     * was, false when it never unlocked. Nothing runs once the service is destroyed (or never went foreground).
+     */
+    private fun whenUnlocked(act: (unlocked: Boolean) -> Unit) = UnlockWait.afterUnlock(
+        locked(), Build.VERSION.SDK_INT, ::locked, SystemClock::elapsedRealtime,
+        { d, step -> main.postDelayed(step, token, d) },
+    ) { unlocked -> if (foreground && !destroyed) act(unlocked) }
 
     private fun locked() = getSystemService(KeyguardManager::class.java).isDeviceLocked
 
