@@ -1,6 +1,6 @@
 # Latencia del agente en el dispositivo: ledger
 
-Rama `perf/latencia`, worktree `C:/Users/Jose/orca/workspaces/adbuddy/latencia`.
+Rama `perf/latencia`, worktree `<worktree>`.
 
 ## Fase 1: medición y diagnóstico
 
