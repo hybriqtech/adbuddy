@@ -13,23 +13,34 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 )
 
-// Settling: after an act, or on request, the screen is read again until two
-// reads in a row are the same, so the agent sees what its tap did without
-// guessing a sleep. Variables for the tests (settle copies them on entry).
+// Settling: after an act, or on request, the screen is read again until it
+// has changed from the screen it started from and stayed the same for a
+// while, so the agent sees what its tap did without guessing a sleep.
+// Variables for the tests (settle copies them on entry).
 var (
-	settleFirst = 150 * time.Millisecond // after an act, before the first read: the effect starts
-	settleGap   = 120 * time.Millisecond // between two reads
-	settleMin   = 400 * time.Millisecond // two equal reads count as settled only this long after the act or the request: a slow transition shows the old screen twice
-	settleMax   = 2 * time.Second        // all in all, counted from the act or from the request
-	settleReads = 8                      // reads at most
+	settleFirst     = 150 * time.Millisecond // after an act, before the first read: the effect starts
+	settleGap       = 120 * time.Millisecond // between two attempts (a read or a block)
+	settleQuiet     = 350 * time.Millisecond // after a change, the screen the same at least this long counts as settled
+	settleIdle      = 2 * time.Second        // with no change at all (or the start unknown), the wait ends after this: screen --settle on a still screen takes about this
+	settleBlockWait = 2 * time.Second        // a block of the guard is tried again until this (a transition shows nothing for a moment)
+	settleMax       = 3 * time.Second        // all in all, counted from the act or from the request
+	settleReads     = 40                     // attempts at most: reads or blocks
+	baselineWait    = time.Second            // the read of the start, before the act, waits at most this: tap --screen takes up to this plus about settleMax
+	baselineSlack   = 150 * time.Millisecond // if the start took longer, the guard is asked again before the act
 )
 
 // ScreenSettled is dump's data when the client asked to wait for the screen
 // to settle. Settled is false when the screen was still changing at the end
-// of the wait (an animation, a video).
+// of the wait (an animation, a video). Changed says whether the screen that
+// comes out is not the one it started from: false with Settled means the
+// screen is the start again (nothing happened on screen, or it changed and
+// came back); nil means it is not known (the start could not be read, or
+// this read came another way than the start: the app and uiautomator differ
+// in format, so they are not compared).
 type ScreenSettled struct {
 	bridge.UIDump
-	Settled bool `json:"settled"`
+	Settled bool  `json:"settled"`
+	Changed *bool `json:"changed,omitempty"`
 }
 
 // ClickedScreen is click's data with the screen after it. Screen is nil, and
@@ -74,30 +85,100 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// settle reads the screen until two reads in a row are equal and settleMin
-// has passed since start, at most settleReads reads and until start+settleMax.
-// first is a read already made (nil after an act: the first read waits
-// settleFirst). Every read goes through the doors and the guard like any other
-// read of the screen: paused, a 🔴 question waiting, and guardForeground (a
-// protected app, ADBuddy itself, the shade, a notification...). If one of them
-// says no, there is no screen: why says it. why and f are both empty when the
-// context ended (the agent or serve went away). It fails closed: nothing it
-// could not read is returned. via says how the last read was made.
-func (d *Daemon) settle(ctx context.Context, args json.RawMessage, first *bridge.UIDump, start time.Time) (screen *ScreenSettled, via, why string, f *uiFailure) {
-	firstWait, gap, min, max, maxReads := settleFirst, settleGap, settleMin, settleMax, settleReads
-	prev := first
-	deadline := start.Add(max)
-	reads := 0
-	for {
+// sameScreen reports whether two reads show the same screen: everything but
+// which element has the focus, with no elements and none being the same. A
+// change of focus is not the transition a tap causes; a switch that turned
+// (Checked) is.
+func sameScreen(a, b bridge.UIDump) bool {
+	a.Elements, b.Elements = noFocus(a.Elements), noFocus(b.Elements)
+	return reflect.DeepEqual(a, b)
+}
+
+// noFocus is a copy of es without the focus flag; nil and empty are the same.
+func noFocus(es []bridge.UIElement) []bridge.UIElement {
+	out := make([]bridge.UIElement, len(es))
+	for i, e := range es {
+		e.Focused = false
+		out[i] = e
+	}
+	return out
+}
+
+// settleIn is what settle starts from.
+type settleIn struct {
+	args    json.RawMessage
+	base    *bridge.UIDump // the screen the wait starts from; nil: unknown
+	baseVia string         // how base was read: a read made another way is not compared with it
+	first   *bridge.UIDump // a read already made (and guarded); nil: none
+	via     string         // how first was read
+	start   time.Time
+	adopt   bool // base is nil: the first valid read becomes it
+}
+
+// settle reads the screen until it has changed from in.base and stayed the
+// same for settleQuiet, or, if it never changes, until settleIdle has passed
+// since in.start; at most until in.start+settleMax and settleReads attempts.
+// Without a base (the start could not be read) it is not known whether the
+// screen changed: only settleIdle ends the wait, and Changed is nil, never
+// false. A read made another way than the base (uiautomator after an app
+// that stopped answering) is not compared with it either: it does not count
+// as a change, so it can only end the wait at settleIdle, and if it comes out
+// its Changed is nil. With in.adopt the first valid read is the base (read
+// the way it was) and does not come out. The first read of screen --settle
+// (in.first, the base too) does not come out either, unless the cap comes
+// with no newer read: then it does, with Settled false (it passed the guard
+// before it was read). Changed, when known, is about the read that comes out
+// (a screen that changed and came back says false); the wait itself ends
+// early only after some read differed from the base.
+//
+// Every attempt goes through the doors and the guard like any other read of
+// the screen: paused, a 🔴 question waiting, and guardForeground (a protected
+// app, ADBuddy itself, the shade, a notification...). A pause or a question
+// ends the wait at once: why says it. A block of the guard, or of the app's
+// own check (ExitDenied: a transition shows a window with no content, which
+// the app calls protected), is tried again after settleGap until
+// settleBlockWait since in.start; then why says it. Only a read made after
+// the guard said yes comes out, and if the last attempt was a block nothing
+// read before comes out. why and f are both empty when the context ended (the
+// agent or serve went away). It fails closed: nothing it could not read is
+// returned. via says how the read that comes out was made. No goroutines.
+func (d *Daemon) settle(ctx context.Context, in settleIn) (screen *ScreenSettled, via, why string, f *uiFailure) {
+	firstWait, gap, quiet, idle, blockWait, max, maxTries := settleFirst, settleGap, settleQuiet, settleIdle, settleBlockWait, settleMax, settleReads
+	base, baseVia, cur, via := in.base, in.baseVia, in.first, in.via
+	deadline := in.start.Add(max)
+	changed := false     // some read made the way base was differed from it
+	lastMove := in.start // when the screen last moved (a read differed from the one before, or first from base)
+	blocked := ""
+	// vsBase is Changed for r, read via how: nil when there is no base or r
+	// was read another way than base (a difference of format is no change).
+	vsBase := func(r bridge.UIDump, how string) *bool {
+		if base == nil || how != baseVia {
+			return nil
+		}
+		c := !sameScreen(*base, r)
+		return &c
+	}
+	if in.first != nil {
+		if c := vsBase(*in.first, in.via); c != nil && *c {
+			changed = true
+		}
+	}
+	for tries := 0; ; tries++ {
 		wait := gap
-		if prev == nil {
+		if cur == nil && tries == 0 {
 			wait = firstWait
 		}
-		// The cap: no new read starts if its wait already goes past the deadline;
-		// the last one read (it passed the guard) is what comes out. Before the
-		// first read of this call there is no via to report, so it is read anyway.
-		if prev != nil && reads > 0 && time.Now().Add(wait).After(deadline) {
-			return &ScreenSettled{UIDump: *prev, Settled: false}, via, "", nil
+		// The cap: no new attempt starts past the deadline or the tries. If the
+		// last attempt was a block nothing read before is returned; else what the
+		// last read said (it passed the guard) is what comes out. With nothing
+		// read and nothing blocked (a deadline shorter than the first wait), read once.
+		if tries >= maxTries || time.Now().Add(wait).After(deadline) {
+			switch {
+			case blocked != "":
+				return nil, "", blocked, nil
+			case cur != nil:
+				return &ScreenSettled{UIDump: *cur, Settled: false, Changed: vsBase(*cur, via)}, via, "", nil
+			}
 		}
 		if !sleepCtx(ctx, wait) {
 			return nil, "", "", nil
@@ -114,33 +195,101 @@ func (d *Daemon) settle(ctx context.Context, args json.RawMessage, first *bridge
 			if ctx.Err() != nil {
 				return nil, "", "", nil
 			}
-			return nil, "", why, nil
+			blocked = why
+			if time.Since(in.start) >= blockWait {
+				return nil, "", blocked, nil // the block lasts: no screen
+			}
+			continue // maybe a transition: try again
 		}
+		blocked = ""
 		if d.o.Paused() { // paused while the guard looked
 			return nil, "", PausedMessage, nil
 		}
-		v, how, uf := d.runUI(ctx, bridge.UIOpDump, args, nil)
+		v, how, uf := d.runUI(ctx, bridge.UIOpDump, in.args, nil)
 		if uf != nil {
 			if ctx.Err() != nil { // the agent or serve went away during the read
 				return nil, "", "", nil
 			}
+			if uf.exit == ExitDenied { // the app's own check: a transition or a protected screen
+				blocked = uf.msg
+				if time.Since(in.start) >= blockWait {
+					return nil, "", blocked, nil
+				}
+				continue
+			}
 			return nil, "", "", uf
 		}
-		cur, ok := asDump(v)
+		read, ok := asDump(v)
 		if !ok {
 			return nil, "", "", fail(1, "UI_FAILED", "the ADBuddy app answered something unreadable")
 		}
 		via = how
-		reads++
 		now := time.Now()
-		if prev != nil && reflect.DeepEqual(*prev, cur) && now.Sub(start) >= min {
-			return &ScreenSettled{UIDump: cur, Settled: true}, via, "", nil
+		if base == nil && in.adopt {
+			base, baseVia = &read, how // the first valid read is where it started: it does not come out
+			cur = &read
+			lastMove = now
+			continue
 		}
-		prev = &cur
-		if reads >= maxReads || !now.Before(deadline) {
-			return &ScreenSettled{UIDump: cur, Settled: false}, via, "", nil
+		if cur != nil && !sameScreen(*cur, read) {
+			lastMove = now
+		}
+		if c := vsBase(read, how); c != nil && *c {
+			if !changed {
+				lastMove = now // the first change counts as a move
+			}
+			changed = true
+		}
+		cur = &read
+		still := now.Sub(lastMove) >= quiet
+		switch {
+		case changed && still: // it moved and has been quiet
+			return &ScreenSettled{UIDump: read, Settled: true, Changed: vsBase(read, how)}, via, "", nil
+		case still && now.Sub(in.start) >= idle: // it never moved (or the start is unknown): the idle wait is over
+			return &ScreenSettled{UIDump: read, Settled: true, Changed: vsBase(read, how)}, via, "", nil
 		}
 	}
+}
+
+// baselineScreen reads the screen the wait of --screen starts from, the one
+// before the act: only from the app, with a short limit (baselineWait). The
+// read is only compared: it is never returned, written or journaled. nil when
+// it cannot be read (no app, no answer in time, an error); then settle waits
+// settleIdle and says nothing about a change. Without the app it does not
+// fall back to uiautomator: that takes about 2 s, more than the limit, and
+// would leave a dump running on the phone next to settle's. denied is set
+// when the app itself says something protected is in front: then the act
+// must not happen.
+func (d *Daemon) baselineScreen(ctx context.Context) (*bridge.UIDump, *uiFailure) {
+	bctx, cancel := context.WithTimeout(ctx, baselineWait)
+	defer cancel()
+	res, err := d.callApp(bctx, bridge.UIOpDump, json.RawMessage("{}")) // read viaApp
+	if err != nil {
+		if uf := appFailure(bctx, err); uf.exit == ExitDenied {
+			return nil, uf
+		}
+		return nil, nil
+	}
+	v, err := checkResult(bridge.UIOpDump, res)
+	if err != nil {
+		return nil, nil
+	}
+	if dump, ok := asDump(v); ok {
+		return &dump, nil
+	}
+	return nil, nil
+}
+
+// viaApp is how runUI says a read came from the app (the start of --screen
+// always does).
+const viaApp = "the app"
+
+// changedWord is Changed for the journal.
+func changedWord(c *bool) string {
+	if c == nil {
+		return "unknown"
+	}
+	return strconv.FormatBool(*c)
 }
 
 // notDone goes first in every note about a screen that could not be read
@@ -148,11 +297,12 @@ func (d *Daemon) settle(ctx context.Context, args json.RawMessage, first *bridge
 const notDone = "The action was done; do not repeat it. The screen could not be read after it: "
 
 // withScreen adds the screen after an act (click, setText) to its result and
-// journals the read as the entry of an `adbuddy screen`: a green one, or a
-// blocked one when the guard said no. The act itself already happened and is
+// journals the read as the entry of an `adbuddy screen`: a green one (with
+// settled= and changed=), or a blocked one when the guard said no. base is
+// the screen before the act (nil: unknown). The act itself already happened and is
 // reported as such: a block only means there is no screen to show.
-func (d *Daemon) withScreen(ctx context.Context, req ipc.Request, data any) any {
-	scr, via, why, f := d.settle(ctx, json.RawMessage("{}"), nil, time.Now())
+func (d *Daemon) withScreen(ctx context.Context, req ipc.Request, data any, base *bridge.UIDump) any {
+	scr, via, why, f := d.settle(ctx, settleIn{args: json.RawMessage("{}"), base: base, baseVia: viaApp, start: time.Now()})
 	now := d.o.Now().UTC()
 	h := helpers[bridge.UIOpDump]
 	e := journal.Entry{
@@ -178,7 +328,7 @@ func (d *Daemon) withScreen(ctx context.Context, req ipc.Request, data any) any 
 		e.Status, e.Reason, code = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), ExitDenied
 		note = notDone + "stopped"
 	default:
-		e.Status, e.Reason = journal.StatusOK, "after "+req.UIOp+", via "+via+", settled="+strconv.FormatBool(scr.Settled)
+		e.Status, e.Reason = journal.StatusOK, "after "+req.UIOp+", via "+via+", settled="+strconv.FormatBool(scr.Settled)+", changed="+changedWord(scr.Changed)
 	}
 	e.ExitCode = &code
 	d.record(e)

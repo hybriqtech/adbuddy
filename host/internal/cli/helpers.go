@@ -93,17 +93,19 @@ func newScreenCmd(app *App) *cobra.Command {
 				return err
 			}
 			// settled is a *bool: an old daemon does not say, and then there is
-			// nothing to warn about.
+			// nothing to warn about. changed too: absent means not known, and
+			// --json keeps it only when the daemon sent it.
 			var d struct {
 				bridge.UIDump
 				Settled *bool `json:"settled"`
+				Changed *bool `json:"changed"`
 			}
 			if err := json.Unmarshal(data, &d); err != nil {
 				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if app.JSON {
 				if d.Settled != nil {
-					return WriteData(app.Stdout, daemon.ScreenSettled{UIDump: d.UIDump, Settled: *d.Settled})
+					return WriteData(app.Stdout, daemon.ScreenSettled{UIDump: d.UIDump, Settled: *d.Settled, Changed: d.Changed})
 				}
 				return WriteData(app.Stdout, d.UIDump)
 			}
@@ -122,17 +124,26 @@ func newScreenCmd(app *App) *cobra.Command {
 // stillChanging is what the agent reads when the screen did not settle in time.
 const stillChanging = "(the screen was still changing: run adbuddy screen again if you need it steady)"
 
+// noChange is what the agent reads after tap or type --screen when the screen
+// settled and is the one from before the act: the act did nothing visible.
+const noChange = "(the screen did not change in about 2 s after the action: run adbuddy screen before trying again)"
+
 // printAfterAct writes what tap and type print after the act itself, with
 // --screen: the settled screen, the daemon's note (the act was done and the
 // read was refused or failed: exit 0, so nothing retries the act) or, from a
-// daemon that ignored the flag, where to look. Fixed English, for the agent.
+// daemon that ignored the flag, where to look. A settled screen that did not
+// change says so; an unknown change (no changed) says nothing. Fixed English,
+// for the agent.
 func printAfterAct(w io.Writer, screen *daemon.ScreenSettled, note string) {
 	switch {
 	case screen != nil:
 		fmt.Fprintln(w)
 		printScreen(w, screen.UIDump)
-		if !screen.Settled {
+		switch {
+		case !screen.Settled:
 			fmt.Fprintln(w, stillChanging)
+		case screen.Changed != nil && !*screen.Changed:
+			fmt.Fprintln(w, noChange)
 		}
 	case note != "":
 		fmt.Fprintln(w, note)
