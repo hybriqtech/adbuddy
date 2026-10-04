@@ -210,7 +210,7 @@
     <string name="access_title">Notification access</string>
     <string name="access_intro">Lets the agent read what your notifications say, for example to see a message you just received. From protected apps and from ADBuddy it only sees that a notification exists, never what it says. It cannot dismiss or tap any notification. It is optional.</string>
     <string name="access_state_granted">Allowed</string>
-    <string name="access_state_confirm">Allowed in the system, not confirmed here</string>
+    <string name="access_state_confirm">Android allows it; your confirmation is missing</string>
     <string name="access_state_denied">Not allowed</string>
     <string name="access_state_unknown">Unknown</string>
     <string name="access_state_checking">Checking…</string>
