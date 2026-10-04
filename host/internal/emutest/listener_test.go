@@ -44,7 +44,7 @@ const (
 // NotificationAccessScreen.kt) and its confirm button.
 const (
 	accessAllowed     = "Allowed"
-	accessNeedsTap    = "Allowed in the system, not confirmed here"
+	accessNeedsTap    = "Android allows it; your confirmation is missing"
 	accessNotAllowed  = "Not allowed"
 	accessUnknown     = "Unknown"
 	accessConfirm     = "Let the agent read my notifications"
