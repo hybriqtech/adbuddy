@@ -846,6 +846,9 @@ func TestAnAllowedTapOnTheLockedShadeNeedsTheUnlockOfItsOwn(t *testing.T) {
 	if m, ok := l.take(bridge.TypeConfirmReply, 3*time.Second); ok {
 		t.Fatalf("Allow answered after the bouncer was dismissed: %s", m.Payload)
 	}
+	// After Back the lock screen keeps the shade open and a swipe up does not reach the bouncer: put the screen to
+	// sleep and wake it on a clean lock screen, as a person who gave up would find it later.
+	e.lock(t)
 	e.unlock(t)
 	if m, ok := l.take(bridge.TypeConfirmReply, 5*time.Second); ok {
 		t.Fatalf("an unlock by another route let the old Allow tap through: %s", m.Payload)
