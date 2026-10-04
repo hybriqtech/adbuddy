@@ -147,3 +147,44 @@ Este fragmento no edita esos ficheros; el controlador de integración debe actua
 ### Validaciones manuales pendientes (Pixel)
 
 Ninguna se pide al usuario ahora: el aviso de la pregunta del agente con la app en segundo plano y la pantalla apagada (suena y sale en pantalla, sin mostrar nada de la pregunta), el diálogo del sistema tras el motivo (Android 13+), y el banner al desactivar las notificaciones en los ajustes y volver. Lo demás está cubierto por tests de semántica, de la notificación construida y por las imágenes en la JVM.
+
+## P6a · CLI: textos, ayuda y errores de uso
+
+### Qué cambió
+
+- Task 1, textos rotos y plurales (H3, H8): los textos de flags ya no llevan acentos graves que rompían la ayuda, los plurales ingleses y españoles salen bien (`1 phone`, `1 skill`, `1 línea dañada`) y los `.fix` de los errores tienen un estilo comprobado por test (`fix_style_test.go`).
+- Task 2, errores de uso (H1, H4, H16): el error de uso apunta a la ayuda del comando que falló (`Run adbuddy tap --help to see the usage.`), `adbuddy help <tema que no existe>` es un error de uso (exit 2) y `--json` se describe como salida para programas.
+- Task 3, ayuda raíz (H6 en parte, H7 en parte): comandos agrupados en tres bloques, con un ejemplo y descripciones cortas que caben en 80 columnas (`TestHelpShortsFit`, máximo 60 caracteres por `Short`).
+- Task 4, `journal` y esperas (H9, H11, H12): `journal` avisa cuando recorta («Showing the last 50 of 60 entries») y pone la fecha cuando la entrada no es de hoy; los mensajes de espera de `serve` hablan del móvil y no del servidor adb; `doctor` es más accionable.
+- Task 5, `serve` dice dónde saldrán las confirmaciones 🔴 (H10): una línea al arrancar, justo antes de «ADBuddy is serving», según `--confirm` y si la entrada es una terminal. Solo texto: no cambia qué confirmador se usa.
+- Task 6, limpieza de menores de la revisión: `help.serve.flag.confirm` precisa que `auto` usa la terminal solo si la entrada es interactiva y que `terminal` lee la entrada estándar aunque sea una tubería; mejores `Short` de `doctor`, `setup` y `serve` en español (y «live»/«en vivo» en `serve`); el aviso de desconexión de la app dice «hasta que se vuelva a conectar»; tests más precisos (plurales españoles afirmados a mano, marcador de tres palabras, envelope `--json` completo, recorte seguro, comprobación de la llamada de espera por AST).
+
+### Goldens de ayuda regrabados
+
+- `testdata/help/en/`: `journal`, `run`, `serve`, `tap`, `undo` (Task 1); todos los `*.txt` (Task 2, la línea del pie de ayuda con `--json`); `root` y `env` (Task 3); `root` y `serve` (Task 6).
+- `testdata/help/es/`: `root` (Tasks 3 y 6). `doctor` no cambia.
+
+### `--json`
+
+Solo gana campos: `journal` añade `total` y `truncated`, y el `fix` de un error de uso ahora nombra el comando. Ningún campo existente cambia ni desaparece; la salida de máquinas sigue en inglés.
+
+### Aplazado con motivo
+
+Fuera de este plan (P6b, después): H2 (errores de cobra traducidos y sugerencias propias), H5 (`doctor` que imprime según avanza), H13 (colores y QR con `NO_COLOR`/redirección/Windows), H14 (`platformtools`: fuera de nuestro árbol), `Example` de `attach`/`new`/`send`/`stop`/`env`/`version` (H6), `Long` a ≤ 80 columnas con su test de ancho (H7) y los prefijos fijos `⚠ `/`⏳ ` de `serve.go:247-248` (H15).
+
+### Notas honestas
+
+- H10 es solo texto y sigue lo que el código hace de verdad: `startPhoneLink` envuelve siempre el confirmador en el de la app, así que con la app conectada la 🔴 se pregunta en la app sea cual sea `--confirm`.
+- La fecha del `journal` es ISO, no localizada.
+- El `Short` de ciertos comandos perdió detalle para caber en 60 caracteres; ese detalle sube al `Long`.
+- `adbuddy help <Tab>` conserva su autocompletado.
+- El test que lee `serve.go` para comprobar que se pasan los segundos de `deviceWait` mira el árbol sintáctico, no el texto; no depende del formato del fichero.
+
+### PARA EL CONTROLADOR DE INTEGRACIÓN Y `seguridad` (no se tocan aquí)
+
+- `docs/usage.md:~107` dice «`--confirm deny` refuses every red command without asking» y `docs/safety.md:~84` va en la misma línea. Es falso con el móvil conectado: `--confirm deny` SÍ pregunta en la app (solo deniega cuando la app no está conectada). Las dos frases hay que corregirlas.
+- Los cinco avisos `phone.*` que decían «confirmations happen here» ya están corregidos (`phone.confirmations_happen_here_without_the`, `phone.could_not_check_whether_the`, `phone.the_adbuddy_app_is_not`, `phone.the_phone_app_disconnected_confirmations`, `phone.could_not_reach_the_phone`): ahora dicen que las confirmaciones no llegarán al móvil hasta que se conecte.
+
+### Validaciones manuales pendientes
+
+Ninguna: todo está cubierto por tests de ayuda dorada y de ejecución del CLI.
