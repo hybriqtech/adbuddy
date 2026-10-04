@@ -59,6 +59,15 @@ class UnlockWaitTest {
         assertEquals(0, f.scheduled)
     }
 
+    // MIN_SDK is 31: 31 waits, 30 does not.
+    @Test fun sdk31WaitsAndUnlocksAt300() {
+        val f = Fake()
+        f.locked = { f.t < 300 }
+        f.wait(sdk = 31).begin(); f.run()
+        assertEquals(listOf(true), f.results)
+        assertTrue(f.polls > 1)
+    }
+
     @Test fun anExceptionInIsLockedKeepsWaitingAndEndsFalse() {
         val f = Fake { throw IllegalStateException("boom") }
         f.wait().begin(); f.run()

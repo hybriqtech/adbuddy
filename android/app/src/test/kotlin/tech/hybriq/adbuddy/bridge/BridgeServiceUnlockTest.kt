@@ -9,6 +9,7 @@ import androidx.core.app.RemoteInput
 import java.time.Duration
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
@@ -18,10 +19,12 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowToast
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.confirm.ConfirmNotifier
+import tech.hybriq.adbuddy.confirm.ScriptedKeyguard
 import tech.hybriq.adbuddy.notify.ConversationNotifier
 
 /**
@@ -33,7 +36,7 @@ class BridgeServiceUnlockTest {
     private val app get() = RuntimeEnvironment.getApplication() as AdbuddyApp
     private val nm get() = shadowOf(app.getSystemService(NotificationManager::class.java))
 
-    @After fun clean() = ConfirmNotifier.clear(app)
+    @After fun clean() { ConfirmNotifier.clear(app); ScriptedKeyguard.script.clear() }
 
     private fun lock(v: Boolean) = shadowOf(app.getSystemService(KeyguardManager::class.java)).setIsDeviceLocked(v)
 
@@ -121,11 +124,39 @@ class BridgeServiceUnlockTest {
         s.get().onStartCommand(reply("hola"), 0, 1)
         s.get().onStartCommand(Intent(BridgeService.ACTION_CAPTURE), 0, 1)
         s.destroy()
+        assertTrue(
+            "no task of the wait is left on the main looper (removeCallbacksAndMessages)",
+            shadowOf(Looper.getMainLooper()).nextScheduledTaskTime.let { it == Duration.ZERO || it > Duration.ofHours(1) },
+        )
         val after = posted()
         lock(false)
         advance(3_000)
         assertEquals(0, app.chat.outgoing.value.size)
         assertNull(ShadowToast.getLatestToast())
         assertSame("no notification posted after the destroy", after, posted())
+    }
+
+    // UnlockWait says unlocked, the fresh read says locked again (a relock): nothing happens (scripted readings:
+    // delivery locked, poll unlocked, fresh read locked).
+    @Test @Config(shadows = [ScriptedKeyguard::class])
+    fun aReplyWhoseFreshReadIsLockedAgainSendsNothingButRepostsTheNotification() {
+        lock(true)
+        val s = start()
+        val before = posted()
+        ScriptedKeyguard.script.addAll(listOf(true, false, true))
+        s.get().onStartCommand(reply("hola"), 0, 1)
+        advance(100)
+        assertEquals(0, app.chat.outgoing.value.size)
+        assertNotSame(before, posted())
+    }
+
+    @Test @Config(shadows = [ScriptedKeyguard::class])
+    fun aCaptureWhoseFreshReadIsLockedAgainIsDropped() {
+        lock(true)
+        val s = start()
+        ScriptedKeyguard.script.addAll(listOf(true, false, true))
+        s.get().onStartCommand(Intent(BridgeService.ACTION_CAPTURE), 0, 1)
+        advance(100)
+        assertNull(ShadowToast.getLatestToast())
     }
 }
