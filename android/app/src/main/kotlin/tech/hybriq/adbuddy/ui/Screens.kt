@@ -235,6 +235,7 @@ fun ConfirmDialog(
                 if (Decision.DENY in decisions) {
                     Button(onClick = { onAnswer(Decision.DENY) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.action_deny)) }
                 }
+                if (Decision.DENY in decisions && Decision.ALLOW in decisions) Spacer(Modifier.height(8.dp))
                 if (Decision.ALLOW in decisions) {
                     OutlinedButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread && armed) { Text(stringResource(R.string.action_allow)) }
                 }

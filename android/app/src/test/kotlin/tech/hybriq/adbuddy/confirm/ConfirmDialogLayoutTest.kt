@@ -184,21 +184,33 @@ class ConfirmDialogButtonsTest(private val mode: ScreenMode) {
         val deny = bounds(R.string.action_deny)
         val allow = bounds(R.string.action_allow)
         assertTrue("Deny is first: left of Allow, or above it", deny.right <= allow.left || deny.bottom <= allow.top)
-        assertTrue(deny.height >= allow.height - 1f)
+        assertTrue("Deny is at least 48 dp tall", deny.height >= 48f * app.resources.displayMetrics.density - 1f)
     }
 
-    @Test fun allowForTheSessionIsBelowAllowWithRoom() {
+    /** The touch area of a button: its bounds grown to the 48 dp minimum Material gives every button. */
+    private fun touchArea(id: Int): Rect {
+        val r = bounds(id)
+        val min = 48f * app.resources.displayMetrics.density
+        val grow = ((min - r.height) / 2f).coerceAtLeast(0f)
+        return Rect(r.left, r.top - grow, r.right, r.bottom + grow)
+    }
+
+    private val eightDp get() = 8f * app.resources.displayMetrics.density
+
+    @Test fun eachButtonIsBelowTheOtherWithEightDpBetweenTheirTouchAreas() {
         show()
-        val allow = bounds(R.string.action_allow)
-        val session = bounds(R.string.action_allow_session)
-        val gap = session.top - allow.bottom
-        assertTrue("session below Allow: allow=$allow session=$session", session.top >= allow.bottom)
-        assertTrue("more than 8 dp apart: $gap", gap > 0f)
+        val deny = touchArea(R.string.action_deny)
+        val allow = touchArea(R.string.action_allow)
+        val session = touchArea(R.string.action_allow_session)
+        assertTrue("Allow below Deny: $deny $allow", allow.top >= deny.bottom)
+        assertTrue("8 dp between Deny and Allow: ${allow.top - deny.bottom}", allow.top - deny.bottom >= eightDp - 1f)
+        assertTrue("session below Allow: $allow $session", session.top >= allow.bottom)
+        assertTrue("8 dp between Allow and the session one: ${session.top - allow.bottom}", session.top - allow.bottom >= eightDp - 1f)
     }
 
     @Test fun noTouchAreaOverlapsAnother() {
         show()
-        val all = listOf(R.string.action_deny, R.string.action_allow, R.string.action_allow_session).map { bounds(it) }
+        val all = listOf(R.string.action_deny, R.string.action_allow, R.string.action_allow_session).map { touchArea(it) }
         for (i in all.indices) for (j in i + 1 until all.size) {
             assertFalse("touch areas ${all[i]} and ${all[j]} overlap", all[i].overlaps(all[j]))
         }
@@ -220,7 +232,7 @@ class ConfirmDialogButtonsTest(private val mode: ScreenMode) {
         notice.assertIsDisplayed()
         var p = notice.fetchSemanticsNode().parent
         while (p != null) {
-            assertFalse("the notice is inside a button", p.config.contains(androidx.compose.ui.semantics.SemanticsActions.OnClick))
+            assertFalse("the notice is inside a button", p.config.contains(SemanticsActions.OnClick))
             p = p.parent
         }
         assertTrue(notice.fetchSemanticsNode().boundsInRoot.bottom <= bounds(R.string.action_allow).top + 1f)
