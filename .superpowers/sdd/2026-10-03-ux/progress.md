@@ -99,3 +99,9 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - Ruling: orden de comandos dentro de cada grupo alfabetico y ejemplo de la raiz con descripcion en la misma linea — mejorables en P6b — cuesta: ayuda algo menos pedagogica.
 - P6a: listo para PR (ux/p6).
 
+
+## Fase 2 - P5 (confirmaciones 🔴 y consentimiento) en la rama ux/p5, creada desde origin/fix/confirm-arming (#77) — SOLO PLAN hasta que #77 este en main
+- P6a subido (ux/p6 3ed6473, avisado). Plan P5: docs/superpowers/plans/2026-10-04-ux-p5-confirmaciones-y-consentimiento.md, revisado por adbuddy-reviewer-opus (a8a0fb76): 0 bloqueos, 7 importantes y 11 menores, todos incorporados. El revisor comprobo que la regla fija (nada da al agente un modo de aprobar una 🔴) se cumple: el aviso «Ver» solo quita ids de `closed`, el armado y el desplazamiento obligatorio se reinician al reabrir, ADBuddy es app protegida para el agente.
+- Ruling: Rechazar relleno (Button), Permitir con contorno (OutlinedButton), «durante la sesion» TextButton aparte — el revisor vio que con Rechazar tonal y Permitir relleno, Permitir seguia siendo el mas llamativo — cuesta: un permiso algo menos destacado (deliberado).
+- Ruling: C10 (visibilidad de la 🔴 en el bloqueo), CATEGORY_CALL, O12 y la asimetria de la accesibilidad (leer sin marco) no se tocan en P5 — son de `seguridad`/spec/latencia — cuesta: pendientes de decision de diseño.
+- Ruling: reloj propio en ChatRoot para el aviso (no se refactoriza ConfirmHost) — su `now` lo reescribe el camino del toque y es codigo del armado de seguridad — cuesta: dos relojes.
