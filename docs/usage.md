@@ -104,7 +104,7 @@ When the agent runs a command ADBuddy ranks red, it holds the command until you 
 
 Unanswered questions expire after 2 minutes (`confirm_timeout` in `config.toml`) and count as a no. The agent gets `Denied by user: …` and exit code 126, and is told not to retry.
 
-`adbuddy serve --confirm deny` refuses every red command without asking. Use it when nobody is there to answer.
+`adbuddy serve --confirm` (`auto`, `terminal` or `deny`) only says where a red command is asked when the phone app is **not** connected. With the app connected the question always goes to the phone, whatever the option, and you can allow it there. `--confirm deny` refuses the red commands that arrive while the app is not connected, and the ones still waiting on the phone when it disconnects, without asking: use it when nobody is at the PC terminal.
 
 ## The app on the phone
 
