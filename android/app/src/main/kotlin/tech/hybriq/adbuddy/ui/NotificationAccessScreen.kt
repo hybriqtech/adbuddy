@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
@@ -20,18 +19,14 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -42,7 +37,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -71,11 +65,7 @@ fun NotificationAccessScreen(step: OnboardingStep?, onBack: () -> Unit, onDone: 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // Another window drawn over the screen must not get the user's tap on a button that grants or saves.
-    val view = LocalView.current
-    DisposableEffect(view) {
-        view.rootView.filterTouchesWhenObscured = true
-        onDispose {}
-    }
+    ObscuredTouchGuard()
     val consent = remember(context) { NotificationConsent.of(context) }
     // Refreshing the system's answer after a click that could not confirm: the flow is read again.
     var refresh by remember { mutableIntStateOf(0) }
@@ -113,7 +103,6 @@ fun NotificationAccessScreen(step: OnboardingStep?, onBack: () -> Unit, onDone: 
 }
 
 /** The screen without state, so it has previews. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationAccessContent(
     step: OnboardingStep?,
@@ -130,14 +119,7 @@ fun NotificationAccessContent(
     Scaffold(
         topBar = {
             if (step == null) {
-                TopAppBar(
-                    title = { Text(stringResource(R.string.access_title)) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                        }
-                    },
-                )
+                AdbuddyTopBar(stringResource(R.string.access_title), onBack)
             }
         },
         bottomBar = {
@@ -147,7 +129,7 @@ fun NotificationAccessContent(
                         Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
                     ) {
-                        if (effective != Effective.ON) OutlinedButton(onClick = onSkip) { Text(stringResource(R.string.onboarding_skip)) }
+                        if (effective != Effective.ON) SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip)
                         Button(onClick = onDone) { Text(stringResource(R.string.onboarding_done)) }
                     }
                 }

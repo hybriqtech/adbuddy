@@ -12,3 +12,13 @@
 - Luego: android-36 (el usuario confirmó «android-36 si» según f3; AVD adbuddy-dev36, consola 5600, STABLE_SECS=120, solo tras «libre» de puffin y aviso a tern) y T6 (listener/consentimiento 22-32); después T7/T8, T3b, T4b.
 - Reglas: un subagente a la vez; un solo emulador en el PC; nunca kill por nombre; PIN siempre quitado; sin tocar el móvil del usuario.
 - Emulador: apagado (tasklist sin qemu mío).
+
+## PARADA GENERAL por orden del usuario (reinicio del PC) — estado
+Hecho y subido como copia (sin force): inventario/T1 (docs/validaciones-manuales, en main), T2 (ticker dumpsys, en main), T3 (test/link-harness, en main), T4 (test/confirmations-emulator, en main), T5 (test/guard-samples + fix/guard-imagewallpaper, PRs de f3), A5 docs (docs/a5-ci-docs), T6 (test/listener-consent integrada con main 4395b50, PR #57), fix de dumpsys (fix/dumpsys-other-services, #58 mergeado en main).
+PENDIENTE mío:
+- fix/listener-consent-after-revoke (WIP subido tal cual): implementa el plan docs/superpowers/plans/2026-10-03-m5c-reconfirmar-al-enlazar.md (+ correcciones de la revisión opus del plan): borrar la marca también en onListenerConnected ANTES de current/_connected; falta: comprobar qué quedó (producción + JVM + listener_test.go/NotificationListenerOnEmulatorTest.kt + docs: spec §3.5, ruling 15, safety.md:100, KDoc, pendientes cerrada, inventario), mutaciones, pasada de emulador `-run 'Listener'` (con la marca leída por canal/run-as, nunca por gateRead), revisión opus del diff, push, aviso a f3. Apilada sobre test/listener-consent (#57): merge de esa rama antes del PR.
+- android-36: el usuario lo confirmó según f3 («android-36 si»): sdkmanager `system-images;android-36;google_apis;x86_64`, AVD adbuddy-dev36, consola 5600, STABLE_SECS=120; si hace bucle, vuelve a API 34 y checklist del Pixel.
+- Pendiente anotado de dumpsys: averiguar qué servicio contenía el código en el CI (si el test vuelve a caer, ahora lo nombra); formas verdes de servicios sueltos (activity -a, accessibility, statusbar, media_session, usagestats) por medir con la marca única; notification_history no existe en la imagen; opcional re-review acotada del fix de dumpsys.
+- T7 (app de pruebas, perfiles), T8 (nautilus), T3b/T4b: del inventario; A5 docs a la espera del PR de f3; arreglos de producción post-v1 listados en pendientes (M2-8 Permitir tras PIN, fondo de pantalla ya hecho, M5c-32 b en curso).
+Depende del usuario: cuenta de Windows dedicada para el runner (A5-1/A3), crear environment `release` con revisor antes de los secretos (A5-2), checklist del Pixel (~30 min), android-36 (confirmado vía f3).
+Reglas vigentes: un subagente a la vez; un emulador en el PC (CI 5590 prioritario); nunca kill por nombre de imagen; PIN siempre quitado.

@@ -203,7 +203,42 @@ func (e *emu) openSettings(t *testing.T) {
 	e.shell(t, "input keyevent KEYCODE_HOME")
 	e.shell(t, "am start -W -S -n "+settingsPkg+"/.Settings")
 	e.waitFront(t, "Settings in front", first(settingsPkg))
-	e.waitFocus(t, "Settings focused", focusedOn(settingsPkg))
+	// Under load Settings can be in front with no input focus at all
+	// (mCurrentFocus=null): start it once more. A focus on another window
+	// is still a failure.
+	var f []string
+	if poll(15*time.Second, func() bool { f = e.focus(t); return focusedOn(settingsPkg)(f) }) {
+		return
+	}
+	if !emptyFocus(f) {
+		t.Fatalf("not Settings focused in 15 s: focus %q", f)
+	}
+	t.Logf("Settings in front without focus after 15 s: starting it again")
+	e.shell(t, "input keyevent KEYCODE_HOME")
+	e.shell(t, "am start -W -S -n "+settingsPkg+"/.Settings")
+	e.waitFront(t, "Settings in front (second start)", first(settingsPkg))
+	e.waitFocus30(t)
+}
+
+// waitFocus30 waits up to 30 s for the focus to be on Settings, or fails
+// with what the system says about the focus.
+func (e *emu) waitFocus30(t *testing.T) {
+	t.Helper()
+	var f []string
+	if poll(30*time.Second, func() bool { f = e.focus(t); return focusedOn(settingsPkg)(f) }) {
+		return
+	}
+	keep := func(string) bool { return true }
+	w := lastLines(e.diag("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|mInputMethodTarget|mTopFocusedDisplayId'"), 40, keep)
+	a := lastLines(e.diag("dumpsys activity | grep -i 'not responding'"), 40, keep)
+	t.Logf("window focus state:\n%s\nANR lines:\n%s", strings.Join(w, "\n"), strings.Join(a, "\n"))
+	t.Fatalf("not Settings focused in 30 s after a second start: focus %q", f)
+}
+
+// emptyFocus is whether no window has the input focus (mCurrentFocus=null):
+// no focus at all, not a focus on some other window.
+func emptyFocus(f []string) bool {
+	return !slices.ContainsFunc(f, func(s string) bool { return s != "" })
 }
 
 // longerUITimeout makes heads-ups and the volume dialog stay on screen 15 s
@@ -362,6 +397,7 @@ func TestTheGuardOnRealScreens(t *testing.T) {
 	e.atCleanup(t, "shell", "input keyevent KEYCODE_HOME")
 	e.atCleanup(t, "shell", "cmd statusbar collapse")
 	e.atCleanup(t, "shell", "input keyevent KEYCODE_WAKEUP")
+	e.cleanStateAtCleanup(t)
 	g := newHostGuard(t, e, nil)
 
 	// Settings in front, nothing over it: the command runs.
@@ -801,6 +837,7 @@ func (e *emu) guardPost(t *testing.T, kind, id string) (release func()) {
 // sleepScreen turns the screen off and waits until dumpsys power says so.
 func (e *emu) sleepScreen(t *testing.T) {
 	t.Helper()
+	e.cleanStateAtCleanup(t)
 	e.shell(t, "input keyevent KEYCODE_SLEEP")
 	if !poll(10*time.Second, func() bool { return uidump.Asleep(e.read(t, "", "power")) }) {
 		t.Fatal("the screen is not off 10 s after KEYCODE_SLEEP")

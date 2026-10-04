@@ -3,8 +3,10 @@ package tech.hybriq.adbuddy.bridge
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -17,6 +19,7 @@ import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.core.app.RemoteInput
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.combine
@@ -46,6 +49,18 @@ class BridgeService : LifecycleService() {
     private val main = Handler(Looper.getMainLooper())
     private var locales: LocaleList? = null
 
+    /**
+     * The screen turned on: the questions' Allow waits again (ConfirmArming.rearmAll), so a question posted while the
+     * screen was off is not allowed by the first tap on the lock screen or the shade. Not USER_PRESENT: that comes
+     * after the PIN, and would drop the Allow that asked to unlock.
+     */
+    private val screenOn = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_ON) ConfirmNotifier.arming.rearmAll()
+        }
+    }
+    private var listening = false
+
     override fun onCreate() {
         super.onCreate()
         locales = resources.configuration.locales
@@ -58,6 +73,9 @@ class BridgeService : LifecycleService() {
         shown = first
         // Questions left by an earlier process: nobody can answer them now; the host sends them again.
         ConfirmNotifier.clear(this)
+        // While the service lives (it posts the questions): a system broadcast, nobody else's to send.
+        ContextCompat.registerReceiver(this, screenOn, IntentFilter(Intent.ACTION_SCREEN_ON), ContextCompat.RECEIVER_NOT_EXPORTED)
+        listening = true
         val app = application as AdbuddyApp
         lifecycleScope.launch {
             app.bridge.state.collect { s -> ConfirmNotifier.sync(this@BridgeService, s) }
@@ -150,6 +168,10 @@ class BridgeService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        if (listening) {
+            unregisterReceiver(screenOn)
+            listening = false
+        }
         if (foreground) {
             (application as AdbuddyApp).bridge.stop()
             // Nobody can answer the questions without the channel.

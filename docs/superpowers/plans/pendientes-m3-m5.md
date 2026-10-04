@@ -4,12 +4,12 @@ Notas que hay que incorporar cuando se escriban esos planes (desde el 2026-09-29
 
 ## M2.5b · La app en el emulador
 
-**HECHO en M2.5b** (plan `docs/superpowers/plans/2026-10-03-adbuddy-m2.5b-app-emulador.md`): los instrumentados corren en el emulador **Android 14 (API 34, imagen `android-34`)** con `am instrument` desde `TestInstrumentedSuite` (nunca `connected*`: UTP habla con el servidor adb 5037, el del móvil, y la guarda de Gradle lo niega), y `host/internal/emutest` prueba el host contra la app; el job `emulator` de la CI ejecuta el oráculo en `android-37` y luego `emutest` en `android-34`. La imagen `android-37.0` no sirve para la app: `surfaceflinger` aborta cada 5-10 s (`Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma`, hilo `RegionSampling`) con `swiftshader_indirect`, `swangle_indirect` y `host`, y Android reinicia su sistema en bucle (el oráculo lo esquiva porque solo usa el shell). Validaciones de M2 automatizadas en Android 14: 1, 2, 3, 10 y la 6 solo en local (`ADBUDDY_EMULATOR_CUT=1`, ver el plan de M2). Siguen manuales: 4, 5, 7, 8, 9 y lo que depende de Android 17 (lista siguiente).
+**HECHO en M2.5b** (plan `docs/superpowers/plans/2026-10-03-adbuddy-m2.5b-app-emulador.md`): los instrumentados corren en el emulador **Android 14 (API 34, imagen `android-34`)** con `am instrument` desde `TestInstrumentedSuite` (nunca `connected*`: UTP habla con el servidor adb 5037, el del móvil, y la guarda de Gradle lo niega), y `host/internal/emutest` prueba el host contra la app; los workflows `emulator-oracle` (android-37) y `emulator-app` (android-34) de la CI ejecutan el oráculo y `emutest`. La imagen `android-37.0` no sirve para la app: `surfaceflinger` aborta cada 5-10 s (`Assertion failed: !rcEnc->featureInfo()->hasReadColorBufferDma`, hilo `RegionSampling`) con `swiftshader_indirect`, `swangle_indirect` y `host`, y Android reinicia su sistema en bucle (el oráculo lo esquiva porque solo usa el shell). Validaciones de M2 automatizadas en Android 14: 1, 2, 3, 10 y la 6 solo en local (`ADBUDDY_EMULATOR_CUT=1`, ver el plan de M2). Siguen manuales: 4, 5, 7, 8, 9 y lo que depende de Android 17 (lista siguiente).
 
 - **El emulador de desarrollo** usa el AVD `adbuddy-dev34` (imagen `android-34`), consola 5600 y servidor adb 5060 (`ADBUDDY_EMU_*` de `scripts/emulator.sh`); la CI, `adbuddy-ci-api37` (oráculo, 5590 y 5049) y `adbuddy-ci-api34` (app). Nunca dos a la vez en el PC del runner (~5 GB de RAM cada uno). Los puertos están fuera del rango que escanea adb (5555-5585): tras perder `adbd`, el emulador vuelve a su servidor solo por los reintentos de adb, y Cortar acceso espera 15 s antes de Reactivar (vuelve a ~17 s del corte).
 - **Cortar acceso solo en local:** tras un corte que nadie deshace, el AVD arranca con `adb_enabled=0` y `emulator.sh start` acaba en 124 a los 10 min; hay que borrar `userdata-qemu.img` y `.qcow2` del AVD. Por eso la CI no ejecuta `TestCutAccessAndReactivate`. La prueba de `tcpip` es débil: en el emulador `adbd` escucha siempre en 5555 (es su transporte), así que `listening before/after` salen igual con y sin `tcpip`.
-- **Cada PR que toca `android/**` lanza también el oráculo** (es un solo job). Si pesa, separar los tests de la app en otro job del mismo workflow con sus rutas.
-- **Post-v1: partir `emulator.yml` en dos workflows** (oráculo / app), cada uno con sus `paths`, para que un cambio de `android/**` no grabe el oráculo y uno del clasificador no pruebe la app. Al hacerlo, que no corran a la vez en el mismo runner (un emulador cabe en la RAM; mismo puerto 5590): un `concurrency` común o puertos y AVD distintos (de puffin, revisión de CI de M2.5b).
+- **HECHO (rama `ci/emulator-split`):** el oráculo y la app son dos workflows con sus rutas; un cambio de `android/**` ya no graba el oráculo.
+- **HECHO (rama `ci/emulator-split`, plan `2026-10-03-dividir-emulator-yml.md`): partir `emulator.yml` en dos workflows** (`emulator-oracle.yml` y `emulator-app.yml`, con puertos distintos 5590/5049 y 5592/5051); texto original: (oráculo / app), cada uno con sus `paths`, para que un cambio de `android/**` no grabe el oráculo y uno del clasificador no pruebe la app. Al hacerlo, que no corran a la vez en el mismo runner (un emulador cabe en la RAM; mismo puerto 5590): un `concurrency` común o puertos y AVD distintos (de puffin, revisión de CI de M2.5b).
 - `scripts/emulator.sh` escribe el log del emulador en `${TMPDIR:-/tmp}/adbuddy-emulator.log` sea cual sea el AVD: dos emuladores a la vez se pisan el log (de puffin).
 - `android/local.properties` no se versiona: crearlo con `sdk.dir=C\:/Users/<usuario>/AppData/Local/Android/Sdk`.
 
@@ -45,7 +45,7 @@ Cada una es un caso nuevo en el evaluador, sus usos en el generador de casos y u
 - El grabador no mata procesos de otros usuarios que sobreviven a un caso (solo darían falsos "se ejecutó") ni borra el fichero de sesión antes de cada caso.
 - Si salta el `-timeout` de Go durante la grabación, el sistema Android del emulador queda parado (`su 0 start` para arrancarlo).
 - Muchos "no se ejecuta" del oráculo dependen de la imagen (`su` de AOSP frente a Magisk, `busybox`, `script`…): hoy todos son 🔴 especial, pero si se admiten en la lista blanca hay que regrabar en otra imagen.
-- `emulator.yml`: el paso de grabar pasaría con "no tests to run" si se renombra `TestRecordOracle`; y los límites (60 min de test, 90 de job) se pueden bajar cuando se vea lo que tarda en CI.
+- `emulator-oracle.yml`: el paso de grabar pasaría con "no tests to run" si se renombra `TestRecordOracle`; y los límites (45 min de grabación y 75 de job en el oráculo, 75 de job en `emulator-app.yml`) se pueden bajar cuando se vea lo que tarda en CI.
 - `xargs -n1` y `xargs -I{}` (opción y valor pegados) piden confirmación como especiales.
 
 ## M3 · Chat: daemon con PTY
@@ -402,7 +402,6 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
 ## Tests de UI en la JVM (validaciones 27 y 34)
 
 - **Qué hay** (plan `2026-10-03-adbuddy-tests-ui-jvm.md`): Robolectric (SDK 34, por Java 17), Compose `ui-test` y Roborazzi; imágenes de referencia verificadas al píxel en Windows y solo comparadas en Linux y macOS hasta comprobar que salen iguales (validación 1 de ese plan). Lo que sigue necesitando el Pixel está en las validaciones 27 y 34 de M5c. `android.yml` corre hoy en `ubuntu-latest` salvo que `CI_RUNNER_ANDROID` diga otra cosa: ahí las imágenes solo avisan (`::warning`).
-- **Hallazgo de UI:** al 200 % en español el título "Acceso a las notificaciones" ocupa dos líneas y se sale de la barra superior de 64 dp (`KNOWN_UI_ISSUES` en `screens/ScreenTestSupport.kt`). Comprobarlo en el Pixel (validación 27 de M5c); el arreglo es de la app y, al hacerlo, se quita la entrada y se regraban sus imágenes.
 - **Sesiones que toquen el onboarding, Ajustes, la lista de apps protegidas o el acceso a notificaciones:** en Windows `testDebugUnitTest` verifica sus imágenes; en la misma tarea, regrabar solo la clase afectada (`-Padbuddy.screens=record --tests '*SettingsScreensTest'`), mirar cada imagen que cambie y hacer commit de ellas.
 - **Diferidos (con motivo):**
   - Ruido `Invalid ID 0x00000000.` de Robolectric en system-err: sin rastrear; no falla nada.
@@ -411,6 +410,19 @@ Spec: `docs/superpowers/specs/2026-10-02-adbuddy-m6c-i18n-design.md`. Plan (regi
   - T3: `access_unknown_marked` no tiene imagen; el párrafo final del acceso a 200 % queda sin cubrir por imagen.
   - T3: los shots `_below` y `_rows` son condicionales y no hay test de huérfanos; candidato: un test que compare los PNG de `screenshots/` con los nombres de shot esperados.
   - T3: faltan asserts de la razón de Mi Banco, de que WhatsApp no lleva razón, y de Guardar desactivado en la búsqueda sin resultados.
+
+## Revisión UX (P1)
+
+P1 · barra y accesibilidad base (rama `ux/revision`, plan `docs/superpowers/plans/2026-10-03-ux-p1-barra-y-a11y.md`; informe de la revisión en `docs/superpowers/plans/2026-10-03-ux-revision.md`). Los paquetes siguientes (P2 en adelante) se añaden aquí cuando lleguen a `main`.
+
+- **Hecho:** cuatro pantallas usan `AdbuddyTopBar`; `assertTitleFitsTheTopBar` mide la barra pintada y `KNOWN_UI_ISSUES` queda vacío (el título de Acceso a las notificaciones al 200 % en español ya cabe; el TopAppBar de Material ya crecía solo). `SecondaryActionButton` compartido para el «Ahora no» del paso 2 de 2 y de apps protegidas. La fila del modo remoto es accionable entera y TalkBack la lee como un solo interruptor con nombre; el diálogo de confirmación sigue apareciendo antes de abrir o cerrar nada. Pistas de TalkBack en la descarga de ficheros («Toca para cancelar», etiqueta de la acción según el estado) y en la tarjeta de pregunta del agente (anuncio del resumen, título como cabecera); `heading()` también en `StepHeader` y en los títulos de las barras. Imágenes regrabadas: 17 PNG al 200 % (`access_*_font_200` x7, `protected_apps_*` x6, `settings_*` x4) y 6 `onboarding_2_notification_access_*`.
+- **Sigue necesitando el Pixel con TalkBack** (no se pide al usuario ahora; el resto lo cubren tests de semántica e imágenes en la JVM):
+  - lectura real del interruptor del modo remoto como un solo interruptor con nombre («Modo remoto, interruptor, desactivado»);
+  - anuncio de la tarjeta del agente al aparecer;
+  - la descarga que dice «Toca para cancelar».
+- **Aplazado:**
+  - C23 (borrar de 18 dp en los chips de borrador): cambiar el tamaño del chip pide diseño propio; va a P3 con el resto de adjuntos.
+  - `SecondaryActionButton` en ConsentScreen: queda para P5, que toca ese fichero.
 
 ## V46 · Apps protegidas en vivo (plan `docs/superpowers/plans/2026-10-02-adbuddy-v46.md`)
 
@@ -499,6 +511,16 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
 - **(d) Post-v1: el teclado.** La ventana `InputMethod` no es de systemui y nunca contó (tampoco con la app conectada). La barra de sugerencias de Gboard puede mostrar el chip del portapapeles (p. ej. un código copiado desde una app protegida) o sugerencias de autorrelleno, y una captura con una app sin proteger delante lo recogería. El fondo de pantalla lo tapaba por accidente en el respaldo sin app en la API 34; el arreglo de (a) restaura el comportamiento de diseño.
 - **(e) Post-v1: proteger Ajustes no protege su búsqueda** (`com.google.android.settings.intelligence`, otro paquete).
 
+### CERRADA: consentimiento del listener (M5c-32 b)
+
+CERRADA en la rama `fix/listener-consent-after-revoke` (plan `2026-10-03-m5c-reconfirmar-al-enlazar.md`). Era un RIESGO CONOCIDO (ruling 15 de M5c): severidad importante, no crítica (no ejecutaba un 🔴 sin confirmar).
+
+- **Hueco medido** (API 34, 2026-10-03): con la app muerta, al revocar la marca sobrevivía; al volver a permitir, la puerta leía sin otro toque (`mark=true`, `Ok:5`). El sistema retira el permiso, pero un reinicio ya programado conecta el servicio sin llamar a `onListenerDisconnected` ni a `onDestroy`.
+- **Arreglo:** `AgentNotificationListener.onListenerConnected` borra la marca (`NotificationGate.onConnected { NotificationConsent.of(this).revoke() }`) como PRIMERA sentencia, antes de `current = this` y de `_connected.value = true`, de modo que la puerta nunca ve el listener con una marca de un enlace anterior. Se mantienen los `revoke()` de `onListenerDisconnected` y `onDestroy`.
+- **Coste aceptado:** un toque en «Dejar que el agente lea» tras cada reenlace en un proceso nuevo (reinicio, actualización, muerte de la app por el sistema). Un toque durante un reenlace (entre la desconexión de un enlace y la conexión del siguiente) también se pierde: molestia visible en pantalla, no fuga. Si molesta, un aviso de prioridad baja «vuelve a confirmar el acceso» (post-v1; no se añadió superficie).
+- **Tests:** JVM: `NotificationGateTest.aNewBindingOfTheListenerClearsTheMark`, `ListenerIsReadOnlyTest` (regex por método: `onListenerConnected` exige `onConnected` primero; `onListenerDisconnected` y `onDestroy`, `onUnbound`), `BubbleFlowTest.aNewBindingOfTheListenerAsksForANewTap`. Emulador: `TestRevokingClearsTheMark/b_dead` exige `mark=false` y `NotConfirmed` (sin salto por API; la marca se lee del fichero con `run-as` y por el canal real, nunca con un `gateRead`, que reinicia el proceso), `TestTheListenerStaysBound` exige que la marca no sobreviva a cada reenlace y que un toque nuevo baste, y el paso «confirmed» de `TestTheListenerGateStates` confirma dentro del `am instrument` (`-e confirm 1`).
+- **Alternativas descartadas:** una época del sistema no existe en la API pública; `JobScheduler` con `TriggerContentUri` es frágil con Doze; comparar un contador de enlace con la marca (sin API pública fiable).
+
 ### Post-v1: Permitir tras desbloquear con PIN (M2-8)
 
 - **Ruling del supervisor f3:** post-v1, no se implementa ahora. Falla seguro (no se ejecuta nada sin confirmación), es un problema de experiencia, y tocar `ConfirmReceiver`/`BridgeService` a última hora arriesga abrir el hueco que se protege.
@@ -515,14 +537,19 @@ Informes en `.superpowers/sdd/2026-10-03-revision-seguridad-v1/` (área 1: clasi
 Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 
 - **Documentado (`docs/ci-self-hosted.md` y `docs/releasing.md`), sin cierre técnico:**
-  - A5-1: decisión del usuario pendiente (cuenta de Windows dedicada, el usuario dijo "más adelante"); mientras tanto el riesgo se mantiene acotado porque el repositorio es privado y solo empujan ramas nuestros agentes; no hacer público el repositorio con el runner registrado. Riesgo: el runner Windows corre con su cuenta (una rama llama al `adb` del PATH y llega al servidor 5037 con el móvil). El cierre es la cuenta dedicada de Windows. El requisito nombra ya `CI_RUNNER_ANDROID` y el ejemplo con el runner Windows deja de recomendarlo.
+  - **A5-1 y A5-3: riesgo aceptado por el usuario el 2026-10-03; no resueltos.** El usuario decidió que todo se queda en su cuenta de Windows y que no se creará la cuenta dedicada (receta opcional: bloque 3 de `docs/superpowers/plans/2026-10-03-runners-pasos-usuario.md`). El runner Windows usa su `ANDROID_HOME` y su `adb`; una rama que llegue a un runner propio puede alcanzar su adbkey, su servidor adb y su SDK. Condiciones de la aceptación (`docs/ci-self-hosted.md` §6, "Accepted risk"):
+    - repositorio privado, nunca público con runners registrados;
+    - solo los PRs del propietario usan runners propios (lista blanca por autor de #54);
+    - sin auto-merge y sin "Dependabot en self-hosted";
+    - mitigación opcional: revocar en el Pixel las autorizaciones de depuración inalámbrica cuando no se prueba.
+    - si alguna condición cambia (repositorio público, colaboradores, auto-merge), el riesgo deja de estar aceptado y hay que hacer la cuenta dedicada antes.
   - A5-2: no crear los secretos de release/firma hasta tener un revisor obligatorio efectivo en el environment `release` (nunca como secretos del repositorio); antes de aprobar `sign`, comprobar que el commit está en `main` y revisar el diff de `release.yml`.
-  - A5-3: objetivo documentado, runner con SDK de Android, JDK y Go propios; hoy no se cumple (decisión del usuario, junto a la cuenta dedicada).
   - A5-5: persistencia entre jobs en el runner Windows (`_work/_tool`, cachés, `.env`/`.path`); ningún workflow lo limpia, se limpia a mano.
   - A5-7: `ADB_SERVER_SOCKET` y `ANDROID_ADB_SERVER_ADDRESS` en la lista mínima del entorno del runner. El `unset` en los pasos de diagnóstico de `emulator.yml` lo hace puffin.
+- **Runners (2026-10-03):** etiquetas por capacidad y opt-in: Windows 1 (SDK y AVDs) `adbuddy-emulator` y `adbuddy-host-windows`; Windows 2 (solo host, sin SDK ni JDK) `adbuddy-host-windows`; Linux 1 y 2 (WSL) `adbuddy-linux`. Ningún workflow lleva etiquetas: las leen de `CI_RUNNER_*` y `CI_HOST_MATRIX`. `adbuddy-local` y `adbuddy-host` son legado prohibido; `python scripts/check-ci-runner-rules.py [--live [--strict]]` lo hace cumplir. Los jobs en cola con una etiqueta antigua la conservan tras un cambio de variable (el 2026-10-03 un job de emulador antiguo cayó en el runner 2): retirar una etiqueta solo con la cola vacía de ella.
 - **Post-v1 (aplazado):**
   - A5-4: `gradle/verification-metadata.xml` (`gradle --write-verification-metadata sha256 ...`), versionado y actualizado por una persona al cambiar `libs.versions.toml`; hoy `release.yml` firma con la clave real un APK construido sin verificación de dependencias.
-  - A5-6 (lo pasa puffin): `concurrency` de `emulator.yml` por `github.ref` con puertos y AVD fijos; con dos runners en la misma máquina una PR se validaría contra el emulador de otra. Un grupo por runner (`vars.CI_RUNNER_EMULATOR`) o un grupo fijo con `cancel-in-progress: false`; mientras tanto, un solo runner de emulador por máquina.
+  - A5-6 (lo pasa puffin): `concurrency` de `emulator-oracle.yml` y `emulator-app.yml` (una por workflow, por `github.ref`) con puertos y AVD fijos; con dos runners en la misma máquina una PR se validaría contra el emulador de otra. Un grupo por runner (`vars.CI_RUNNER_EMULATOR`) o un grupo fijo con `cancel-in-progress: false`; mientras tanto, un solo runner de emulador por máquina.
   - A5-8 (cerrado en la sección «Dependabot» más abajo): `dependabot.yml` solo para `github-actions` (las acciones fijadas por SHA no reciben correcciones) y mandar los PRs que no son del propietario a runners de GitHub: cerrado con una lista blanca por autor (`github.event.pull_request.user.login == github.repository_owner`), no con la lista negra `github.actor != 'dependabot[bot]'` que se propuso primero.
 
 ## v1 · V44-V45 (plan `docs/superpowers/plans/2026-10-02-adbuddy-v44-v45.md`)

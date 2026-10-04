@@ -174,6 +174,23 @@ class ChatControllerTest {
         assertEquals(2, answers().size)
     }
 
+    // The app back in front (PermissionCards on ON_START/ON_RESUME): the first card is guarded again, as after a
+    // reconnection, and the screen re-reads it (the epoch changes).
+    @Test fun comingBackToTheFrontRearmsTheGuard() {
+        show("p_1")
+        assertEquals(true, chat.canAnswer("p_1"))
+        val e0 = chat.guardEpoch.value
+        chat.rearmGuard()
+        assertEquals(true, chat.guardEpoch.value != e0)
+        assertEquals(false, chat.canAnswer("p_1"))
+        assertEquals(PermissionUi.PROMOTE_GUARD_MS, chat.guardLeftMs("p_1"))
+        assertEquals("a tap as the app comes back answers nothing", false, chat.answerPermission("p_1", "deny"))
+        now += PermissionUi.PROMOTE_GUARD_MS - 1
+        assertEquals(false, chat.canAnswer("p_1"))
+        now += 1
+        assertEquals(true, chat.answerPermission("p_1", "allow"))
+    }
+
     @Test fun aCardThatIsNotTheFirstCannotBeAnswered() {
         show("p_1", "p_2")
         assertEquals(false, chat.answerPermission("p_2", "allow"))
