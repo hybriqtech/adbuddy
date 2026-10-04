@@ -20,7 +20,7 @@ import (
 var (
 	settleFirst     = 150 * time.Millisecond // after an act, before the first read: the effect starts
 	settleGap       = 120 * time.Millisecond // between two attempts (a read or a block)
-	settleQuiet     = 350 * time.Millisecond // after a change, the screen the same at least this long counts as settled
+	settleQuiet     = 600 * time.Millisecond // after a change, the screen the same at least this long counts as settled: above the longest stable gap measured inside a real transition (max 495-512 ms in the emulator, median 344 ms), so a half-drawn screen is not taken as settled
 	settleIdle      = 2 * time.Second        // with no change at all (or the start unknown), the wait ends after this: screen --settle on a still screen takes about this
 	settleBlockWait = 2 * time.Second        // a block of the guard is tried again until this (a transition shows nothing for a moment)
 	settleMax       = 3 * time.Second        // all in all, counted from the act or from the request

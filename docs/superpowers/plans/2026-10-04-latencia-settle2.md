@@ -19,7 +19,7 @@ Las transiciones reales (emulador, `TestLatencySettle`) enseñan dos defectos de
 
 **Qué cuenta como «cambió» (`sameScreen`).** Comparar paquete, actividad, `Locked` y los elementos por (id, texto, desc, hint, clase, límites, click, edit, scroll, checked, enabled, password, window), **sin `Focused`** y tratando `Elements` nil como vacío; así un foco, un `Checked` del elemento pulsado o una diferencia entre rutas (app y adb) no cuenta como la transición. (Un `Checked` que cambia tras un tap sí es un cambio real: está en la firma.)
 
-Valores (variables de paquete, para los tests): `settleFirst` 150 ms (tras una acción, antes de la primera lectura), `settleGap` 120 ms, `settleQuiet` 350 ms (la pantalla igual durante al menos esto, tras haber cambiado; S2 lo calibra con el mayor hueco estable dentro de una transición), `settleIdle` 2 s (sin cambio alguno), `settleBlockWait` 2 s, `settleMax` 3 s, `settleReads` 40 (intentos: lecturas o bloqueos), `baselineWait` 1 s, `baselineSlack` 150 ms. Desaparece `settleMin`.
+Valores (variables de paquete, para los tests): `settleFirst` 150 ms (tras una acción, antes de la primera lectura), `settleGap` 120 ms, `settleQuiet` 600 ms (la pantalla igual durante al menos esto, tras haber cambiado; calibrado con el mayor hueco estable dentro de una transición: máx. 495-512 ms en el emulador, ver `2026-10-03-latencia.md`; era 350 ms), `settleIdle` 2 s (sin cambio alguno), `settleBlockWait` 2 s, `settleMax` 3 s, `settleReads` 40 (intentos: lecturas o bloqueos), `baselineWait` 1 s, `baselineSlack` 150 ms. Desaparece `settleMin`.
 
 Código (`host/internal/daemon/settle.go`; sustituye `settle` y `ScreenSettled`):
 
