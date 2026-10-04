@@ -98,3 +98,4 @@ Encargo: revisión completa de UX (app Android + CLI `adbuddy`) y aplicar mejora
 - P6a Task 6: complete (limpieza 9fde8fe, fragmento 9710cca, fix final b72bb42). Revision final opus afbd6689: 0 criticos; 1 importante (cola «until it reconnects» en la clave equivocada de en.toml) -> arreglado en b72bb42 junto con README/comentario/fragmento. Suite host vet+test verde.
 - Ruling: orden de comandos dentro de cada grupo alfabetico y ejemplo de la raiz con descripcion en la misma linea — mejorables en P6b — cuesta: ayuda algo menos pedagogica.
 - P6a: listo para PR (ux/p6).
+
