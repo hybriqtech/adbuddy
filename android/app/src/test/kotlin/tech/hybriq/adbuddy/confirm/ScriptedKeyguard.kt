@@ -13,9 +13,15 @@ import org.robolectric.shadows.ShadowKeyguardManager
 @Implements(KeyguardManager::class)
 class ScriptedKeyguard : ShadowKeyguardManager() {
     @Implementation
-    override fun isDeviceLocked(): Boolean = script.removeFirstOrNull() ?: super.isDeviceLocked()
+    override fun isDeviceLocked(): Boolean {
+        if (alwaysThrow) throw IllegalStateException("keyguard unavailable")
+        return script.removeFirstOrNull() ?: super.isDeviceLocked()
+    }
 
     companion object {
         val script = ArrayDeque<Boolean>()
+
+        /** Every reading throws (a system service that fails). */
+        @Volatile var alwaysThrow = false
     }
 }

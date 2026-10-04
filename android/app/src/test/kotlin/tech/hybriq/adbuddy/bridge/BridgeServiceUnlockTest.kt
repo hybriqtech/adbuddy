@@ -36,7 +36,7 @@ class BridgeServiceUnlockTest {
     private val app get() = RuntimeEnvironment.getApplication() as AdbuddyApp
     private val nm get() = shadowOf(app.getSystemService(NotificationManager::class.java))
 
-    @After fun clean() { ConfirmNotifier.clear(app); ScriptedKeyguard.script.clear() }
+    @After fun clean() { ConfirmNotifier.clear(app); ScriptedKeyguard.script.clear(); ScriptedKeyguard.alwaysThrow = false }
 
     private fun lock(v: Boolean) = shadowOf(app.getSystemService(KeyguardManager::class.java)).setIsDeviceLocked(v)
 
@@ -157,6 +157,27 @@ class BridgeServiceUnlockTest {
         ScriptedKeyguard.script.addAll(listOf(true, false, true))
         s.get().onStartCommand(Intent(BridgeService.ACTION_CAPTURE), 0, 1)
         advance(100)
+        assertNull(ShadowToast.getLatestToast())
+    }
+
+    // A reading of the lock that throws counts as locked: it neither sends nor breaks onStartCommand.
+    @Test @Config(shadows = [ScriptedKeyguard::class])
+    fun aFailingLockReadingAtDeliveryCountsAsLockedForReply() {
+        lock(false)
+        val s = start()
+        ScriptedKeyguard.alwaysThrow = true
+        s.get().onStartCommand(reply("hola"), 0, 1)
+        advance(3_000)
+        assertEquals(0, app.chat.outgoing.value.size)
+    }
+
+    @Test @Config(shadows = [ScriptedKeyguard::class])
+    fun aFailingLockReadingAtDeliveryCountsAsLockedForCapture() {
+        lock(false)
+        val s = start()
+        ScriptedKeyguard.alwaysThrow = true
+        s.get().onStartCommand(Intent(BridgeService.ACTION_CAPTURE), 0, 1)
+        advance(3_000)
         assertNull(ShadowToast.getLatestToast())
     }
 }

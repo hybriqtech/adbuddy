@@ -12,12 +12,14 @@ import okhttp3.WebSocket
 import okio.ByteString
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.bridge.Bridge
 import tech.hybriq.adbuddy.bridge.BridgeState
@@ -58,7 +60,7 @@ class ConfirmReceiverOnReceiveTest {
         field("socket").set(app.bridge, socket)
     }
 
-    @After fun clean() = ConfirmNotifier.clear(app)
+    @After fun clean() { ConfirmNotifier.clear(app); ScriptedKeyguard.alwaysThrow = false }
 
     private fun field(name: String) = Bridge::class.java.getDeclaredField(name).also { it.isAccessible = true }
 
@@ -108,5 +110,29 @@ class ConfirmReceiverOnReceiveTest {
         lock(true)
         deliver(Decision.DENY)
         assertEquals(1, replies())
+    }
+
+    private fun noTasksLeft() = shadowOf(Looper.getMainLooper()).nextScheduledTaskTime.let { it == Duration.ZERO || it > Duration.ofHours(1) }
+
+    // The question is pending but its button was never shown (not armed): a locked Allow is dropped at once.
+    @Test fun anAllowLockedWhoseQuestionIsNotArmedIsDroppedWithoutWaiting() {
+        lock(true)
+        deliver(Decision.ALLOW)
+        assertEquals(0, replies())
+        assertTrue("it did not wait: no task on the main looper", noTasksLeft())
+        Handler(Looper.getMainLooper()).postDelayed({ lock(false) }, 100)
+        advance(3_000)
+        assertEquals(0, replies())
+    }
+
+    // A lock reading that throws at delivery counts as locked: nothing is sent and onReceive does not throw
+    // (goAsync() is null here, so the single finish() is not observable; handle's test covers it).
+    @Test @Config(shadows = [ScriptedKeyguard::class])
+    fun aFailingLockReadingAtDeliverySendsNothingAndDoesNotThrow() {
+        armed()
+        ScriptedKeyguard.alwaysThrow = true
+        deliver(Decision.ALLOW)
+        advance(3_000)
+        assertEquals(0, replies())
     }
 }
