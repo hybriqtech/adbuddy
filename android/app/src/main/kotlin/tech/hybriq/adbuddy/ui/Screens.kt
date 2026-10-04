@@ -21,6 +21,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import tech.hybriq.adbuddy.bridge.Inverse
@@ -83,16 +85,11 @@ fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
     Scaffold(
         bottomBar = {
             Surface(tonalElevation = 3.dp) {
-                Row(
-                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
-                ) {
-                    OutlinedButton(
-                        onClick = { onAnswer(false) },
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                    ) { Text(stringResource(R.string.consent_decline), color = MaterialTheme.colorScheme.onSurface) }
-                    Button(onClick = { onAnswer(true) }) { Text(stringResource(R.string.consent_accept)) }
-                }
+                ActionFooter(
+                    main = { m -> Button(onClick = { onAnswer(true) }, modifier = m) { Text(stringResource(R.string.consent_accept)) } },
+                    other = { m -> SecondaryActionButton(stringResource(R.string.consent_decline), { onAnswer(false) }, m) },
+                    modifier = Modifier.navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
+                )
             }
         },
     ) { inner ->
@@ -106,7 +103,7 @@ fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
             ) {
                 Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
             }
-            Text(stringResource(R.string.consent_title, host), style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.consent_title, host), Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
             Text(stringResource(R.string.consent_intro, host), style = MaterialTheme.typography.bodyLarge)
             for ((icon, item) in listOf(
                 Icons.Default.Lock to R.string.consent_grant,
@@ -119,7 +116,7 @@ fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
                 Text(
                     stringResource(R.string.consent_note),
                     Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

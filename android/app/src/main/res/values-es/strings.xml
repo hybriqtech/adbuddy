@@ -82,7 +82,7 @@
     <string name="consent_intro">El PC \"%1$s\" pide terminar de configurar ADBuddy. Si aceptas, va a:</string>
     <string name="consent_grant">Dar a ADBuddy el permiso para cambiar ajustes seguros, que usa para cortar y reactivar desde el móvil el acceso del PC por adb.</string>
     <string name="consent_battery">Quitar a ADBuddy de la optimización de batería, para que el canal con el PC siga abierto.</string>
-    <string name="consent_a11y">Activar el servicio de accesibilidad de ADBuddy, sin quitar ninguno de los que ya uses.</string>
+    <string name="consent_a11y">Activar el servicio de accesibilidad de ADBuddy: permite al agente leer la pantalla, tocarla y escribir en ella, con un marco y un botón de Pausa mientras actúa, y nunca en ADBuddy ni en las apps protegidas. Los demás servicios que uses se quedan activados.</string>
     <string name="consent_note">ADBuddy no envía nada fuera: el PC y el móvil hablan por la conexión adb que emparejaste. Lo que lee el agente de código va adonde ese agente lo envíe.</string>
     <string name="consent_accept">Aceptar</string>
     <string name="consent_decline">Ahora no</string>
