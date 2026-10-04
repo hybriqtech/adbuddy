@@ -188,10 +188,11 @@ func newServeCmd(app *App) *cobra.Command {
 				return NewErrorT("SECRET_FAILED", "error.cause", "err.serve.secret_failed.fix", err.Error(), e.dirs.Data)
 			}
 			var confirmer confirm.Confirmer
+			interactive := isTerminal(app.Stdin)
 			switch confirmMode {
 			case "auto":
 				confirmer = confirm.DenyAll{Out: app.Stderr, Lang: app.Lang}
-				if isTerminal(app.Stdin) {
+				if interactive {
 					confirmer = confirm.NewTerminal(app.Stdin, app.Stderr).WithLang(app.Lang)
 				}
 			case "terminal":
@@ -259,6 +260,7 @@ func newServeCmd(app *App) *cobra.Command {
 			if err != nil {
 				return NewError("SOCKET_FAILED", err.Error(), "")
 			}
+			fmt.Fprintln(app.Stderr, confirmersNote(confirmMode, interactive).In(app.speaks()))
 			fmt.Fprintln(app.Stderr, app.T("serve.adbuddy_is_serving_session_journal", activeSerial, session, workspace.JournalDir(ws)))
 			if noAgent {
 				fmt.Fprintln(app.Stderr, app.T("serve.in_another_terminal", agentName))
@@ -383,4 +385,25 @@ func rulesPath(e env) string {
 // Enabled, which includes a pending close.
 func remoteActive(ctl *remote.Controller) func() bool {
 	return func() bool { return ctl.State().Enabled }
+}
+
+// confirmersNote says where the 🔴 confirmations will be asked. With the
+// phone app connected they always go to the app (the bridge confirmer wraps
+// whatever --confirm chose); --confirm only decides who answers when the app
+// is not connected.
+func confirmersNote(mode string, interactive bool) i18n.Msg {
+	switch mode {
+	case "auto":
+		if interactive {
+			return i18n.M("serve.confirmations_auto_terminal")
+		}
+		return i18n.M("serve.confirmations_auto_no_terminal")
+	case "terminal":
+		if interactive {
+			return i18n.M("serve.confirmations_terminal_terminal")
+		}
+		return i18n.M("serve.confirmations_terminal_pipe")
+	default:
+		return i18n.M("serve.confirmations_deny")
+	}
 }

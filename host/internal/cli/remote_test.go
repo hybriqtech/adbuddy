@@ -146,6 +146,12 @@ func TestSetupKnownPhoneAtItsAddress(t *testing.T) {
 // serveOnce runs serve until it is serving (then stops it) or fails, and
 // returns its exit code, stderr, what it answered to a ping and the fake adb's log.
 func serveOnce(t *testing.T, rules []testutil.FakeRule, cfg config.Config) (int, string, ipc.Ping, string) {
+	return serveOnceMarker(t, rules, cfg, "ADBuddy is serving")
+}
+
+// serveOnceMarker is serveOnce for a language other than English: marker is
+// what serve prints (in that language) when it is serving.
+func serveOnceMarker(t *testing.T, rules []testutil.FakeRule, cfg config.Config, marker string) (int, string, ipc.Ping, string) {
 	t.Helper()
 	data := isolate(t)
 	if err := config.Save(filepath.Join(os.Getenv("ADBUDDY_CONFIG_DIR"), "config.toml"), cfg); err != nil {
@@ -158,7 +164,7 @@ func serveOnce(t *testing.T, rules []testutil.FakeRule, cfg config.Config) (int,
 	var ping ipc.Ping
 	pinged := make(chan struct{})
 	serving := make(chan struct{})
-	cancelWhen(t, &errb, "ADBuddy is serving", func() { close(serving) })
+	cancelWhen(t, &errb, marker, func() { close(serving) })
 	go func() {
 		defer close(pinged)
 		defer cancel()
