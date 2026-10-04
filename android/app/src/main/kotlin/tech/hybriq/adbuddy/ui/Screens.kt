@@ -43,7 +43,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -53,7 +52,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +74,7 @@ import tech.hybriq.adbuddy.control.CutAccess
 /** Consent for the PC to finish the setup (spec §3.1 step 6.1). Header, content, actions at the foot. */
 @Composable
 fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
+    ObscuredTouchGuard()
     Scaffold(
         bottomBar = {
             Surface(tonalElevation = 3.dp) {
@@ -143,14 +142,24 @@ private fun ConsentScreenPreview() {
  * scrolls if long. The whole detail and up to ConfirmUi.DIALOG_MAX_COMMAND
  * characters of the command are shown, with how many more are hidden (then it
  * can only be denied, H3), and the Allow buttons wait until the text has been
- * scrolled to its end (A4-2), as in the PermissionCard; Deny never waits. It offers its buttons only while
+ * scrolled to its end (A4-2), as in the PermissionCard, and until [armed]
+ * (ConfirmHost: ConfirmUi.ARMING_MS since the question appeared or the app came
+ * back to the front; meanwhile they keep their text and read as disabled). Deny
+ * never waits. It offers its buttons only while
  * the question is open, and says why otherwise. It can always be closed (back
  * or a tap outside; Close when it has no buttons): Pause and Cut access are
  * never hidden with no way out, and the notification is still there. Touches
- * are refused while another app's window covers it (filterTouchesWhenObscured).
+ * are refused while another app's window covers it (ObscuredTouchGuard).
  */
 @Composable
-fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock, onClose: () -> Unit, onAnswer: (String) -> Unit) {
+fun ConfirmDialog(
+    r: ConfirmRequest,
+    status: ConfirmUi.Status,
+    clock: HostClock,
+    armed: Boolean,
+    onClose: () -> Unit,
+    onAnswer: (String) -> Unit,
+) {
     val context = LocalContext.current
     val decisions = ConfirmUi.decisions(r, status)
     val footer = ConfirmNotifier.footer(context, status, ConfirmUi.expiry(r)?.let { clock.toLocal(it) })
@@ -169,11 +178,7 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
             }
         },
         text = {
-            val view = LocalView.current
-            DisposableEffect(view) {
-                view.rootView.filterTouchesWhenObscured = true
-                onDispose {}
-            }
+            ObscuredTouchGuard()
             Column(Modifier.verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (shown.warning) {
                     Text("⚠ " + stringResource(R.string.confirm_special), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
@@ -201,10 +206,10 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
                     Text(stringResource(R.string.confirm_scroll), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
                 if (Decision.ALLOW in decisions) {
-                    TextButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread) { Text(stringResource(R.string.action_allow)) }
+                    TextButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread && armed) { Text(stringResource(R.string.action_allow)) }
                 }
                 if (Decision.ALLOW_SESSION in decisions) {
-                    TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }, enabled = !unread) {
+                    TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }, enabled = !unread && armed) {
                         Text(stringResource(R.string.action_allow_session))
                     }
                 }

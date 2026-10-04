@@ -46,7 +46,7 @@ guard in `app/build.gradle.kts` refuses every `connected*` task.
 
 They check that the provider answers only the shell user (`TokenProviderTest`),
 that the app hears changes of `adb_wifi_enabled` (`AdbWifiObserverTest`) and the
-strings in both languages (`LocalesTest`). The `emulator` workflow is meant to run them (first run pending).
+strings in both languages (`LocalesTest`). The `emulator-app` workflow is meant to run them (first run pending).
 
 ### Screen tests
 

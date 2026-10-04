@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into the instrumented tests' APK (tech.hybriq.adbuddy.test) only, never into the app. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- TapjackOverlayActivity draws over the app; the host allows it with
+         `appops set tech.hybriq.adbuddy.test SYSTEM_ALERT_WINDOW allow` (host/internal/emutest/tapjack_test.go). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <application>
+        <!-- Exported: the host starts it with `am start` (the shell user cannot start an activity that is not). -->
+        <activity
+            android:name="tech.hybriq.adbuddy.TapjackOverlayActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+    </application>
+</manifest>

@@ -75,6 +75,18 @@ class NotificationGateTest {
         assertFalse(consent.confirmed())
     }
 
+    @Test fun aNewBindingOfTheListenerClearsTheMark() {
+        // M5c-32 b: the system may bind the listener again without unbinding it first (a restart it had scheduled
+        // before the access was revoked with the app dead). The confirmation belonged to the old binding.
+        val prefs = FakePrefs()
+        val consent = NotificationConsent(prefs)
+        consent.confirm()
+        NotificationGate.onConnected(consent::revoke)
+        assertFalse(NotificationConsent(prefs).confirmed())
+        assertEquals(NotificationRead.NotConfirmed, NotificationGate.read(consent::confirmed, { Listed.YES }, consent::revoke) { sourceCalls++; listOf(one) })
+        assertEquals("nothing was read", 0, sourceCalls)
+    }
+
     @Test fun aMarkRevokedWhileTheListenerIsReadDiscardsTheRead() {
         // The user revokes (the listener unbinds and clears the mark) between the checks and the end of the read.
         var mark = true

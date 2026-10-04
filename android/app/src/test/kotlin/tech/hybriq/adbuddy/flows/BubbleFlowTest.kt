@@ -141,6 +141,23 @@ class BubbleFlowTest {
         assertTrue(consent.confirmed())
     }
 
+    @Test fun aNewBindingOfTheListenerAsksForANewTap() {
+        allowInTheSystemAndOpenTheAccess()
+        val consent = NotificationConsent.of(app)
+        compose.onNodeWithText(text(R.string.access_confirm)).performScrollTo().performClick()
+        compose.waitUntil(15_000) { consent.confirmed() }
+        compose.waitUntil(15_000) { compose.onAllNodes(hasText(text(R.string.access_withdraw))).fetchSemanticsNodes().isNotEmpty() }
+
+        // The system binds the listener again (a reboot, an update, a process it killed; or, M5c-32 b, a restart it had
+        // scheduled before the access was revoked with the app dead, which never calls onListenerDisconnected): the
+        // confirmation belonged to a binding that is gone.
+        compose.runOnIdle { listener!!.onListenerConnected() }
+        assertFalse("the mark survived a new binding of the listener", consent.confirmed())
+        compose.waitUntil(15_000) { compose.onAllNodes(hasText(text(R.string.access_confirm))).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(text(R.string.access_state_confirm)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.access_withdraw)).assertDoesNotExist()
+    }
+
     @Test fun theConfirmButtonAsksTheSystemAgainAtTheClick() {
         allowInTheSystemAndOpenTheAccess()
         // Revoked in the system after the screen drew the button, before the tap (only the system's own answer changes,

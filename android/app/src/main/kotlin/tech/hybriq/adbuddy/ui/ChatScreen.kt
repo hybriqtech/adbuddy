@@ -232,7 +232,10 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { askNew = false },
             title = { Text(stringResource(R.string.new_conversation_title)) },
-            text = { Text(stringResource(R.string.new_conversation_body)) },
+            text = {
+                ObscuredTouchGuard()
+                Text(stringResource(R.string.new_conversation_body))
+            },
             confirmButton = { TextButton(onClick = { askNew = false; actions.newConversation() }) { Text(stringResource(R.string.new_conversation_confirm)) } },
             dismissButton = { TextButton(onClick = { askNew = false }) { Text(stringResource(R.string.action_cancel)) } },
         )

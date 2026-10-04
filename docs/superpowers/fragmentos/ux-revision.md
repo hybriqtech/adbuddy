@@ -4,6 +4,8 @@ El controlador de integración copia lo que haga falta a `pendientes-m3-m5.md` y
 
 ## P1 · barra y accesibilidad base
 
+P1 aplicado en pendientes (2026-10-04): `pendientes-m3-m5.md`, «Revisión UX (P1)», y el inventario de validaciones (M5c-27). No volver a copiarlo.
+
 ### Qué cambió
 
 - Cuatro pantallas usan el nuevo `AdbuddyTopBar`. `assertTitleFitsTheTopBar` ahora mide la barra pintada y `KNOWN_UI_ISSUES` queda vacío.
