@@ -1,6 +1,6 @@
 # Latencia del agente: plan de implementación
 
-> Para quien ejecute: `superpowers:subagent-driven-development`. Diagnóstico y datos: `2026-10-03-latencia.md`. Rama `perf/latencia`; worktree `C:/Users/Jose/orca/workspaces/adbuddy/latencia` (el checkout principal `C:/Users/Jose/Documents/projects/adbuddy` NO se toca: rutas absolutas y `cd <worktree> && …` en el mismo comando). Commits con identidad hybriqtech y el trailer exacto `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. `go test -race` no corre en este PC. Nunca modelos Haiku.
+> Para quien ejecute: `superpowers:subagent-driven-development`. Diagnóstico y datos: `2026-10-03-latencia.md`. Rama `perf/latencia`; worktree `<worktree>` (el checkout principal `<checkout principal>` NO se toca: rutas absolutas y `cd <worktree> && …` en el mismo comando). Commits con identidad hybriqtech y el trailer exacto `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. `go test -race` no corre en este PC. Nunca modelos Haiku.
 
 **Objetivo:** que el agente tarde menos desde que el usuario pide algo hasta que el móvil cambia y responde, sin capar al agente y sin abrir ningún hueco en la guarda. El tiempo se va en los turnos del modelo (~1,8 s cada uno), no en las órdenes (4-14 ms con el teléfono instantáneo): se quitan turnos y esperas del agente.
 
