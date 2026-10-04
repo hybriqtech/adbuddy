@@ -56,9 +56,9 @@ func TestServeSaysWhereConfirmationsGo(t *testing.T) {
 			i18ntest.Lang(t, l)
 			cfg := config.Default()
 			cfg.Serial, cfg.Address = phoneSerial, tsAddr
-			// The first word of the serving line, in the language under test.
-			serving := strings.SplitN(l.T("serve.adbuddy_is_serving_session_journal", "", "", ""), " ", 3)
-			marker := serving[0] + " " + serving[1]
+			// The first three words of the serving line, in the language under test.
+			serving := strings.SplitN(l.T("serve.adbuddy_is_serving_session_journal", "", "", ""), " ", 4)
+			marker := serving[0] + " " + serving[1] + " " + serving[2]
 			code, errOut, _, _ := serveOnceMarker(t, remoteRules("AAAA1111"), cfg, marker)
 			if code != 0 {
 				t.Fatalf("exit %d stderr %q", code, errOut)

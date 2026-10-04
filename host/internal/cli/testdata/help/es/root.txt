@@ -18,9 +18,9 @@ Ejemplos:
   adbuddy serve    arranca ADBuddy y el agente
 
 Primeros pasos:
-  doctor        Comprueba todo lo que ADBuddy necesita y cómo arreglarlo
-  serve         Ejecuta ADBuddy en el PC: diario y confirmaciones
-  setup         Configura ADBuddy: adb, emparejar el móvil y el entorno
+  doctor        Comprueba lo que ADBuddy necesita y explica cómo arreglarlo
+  serve         Ejecuta ADBuddy en el PC: diario en vivo y confirmaciones
+  setup         Configura ADBuddy: adb, emparejado y entorno del agente
 
 Día a día:
   attach        Conecta esta terminal al agente (Ctrl+] desconecta)

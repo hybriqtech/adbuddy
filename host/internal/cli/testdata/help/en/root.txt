@@ -19,7 +19,7 @@ Examples:
 
 Getting started:
   doctor        Check everything ADBuddy needs and say how to fix it
-  serve         Run the ADBuddy host: journal and confirmations
+  serve         Run the ADBuddy host: live journal and confirmations
   setup         Set up ADBuddy: adb, phone pairing and agent environment
 
 Day to day:

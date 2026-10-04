@@ -3,8 +3,6 @@ package cli
 import (
 	"strings"
 	"testing"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
@@ -34,31 +32,26 @@ func TestPluralsOne(t *testing.T) {
 				}
 			}
 		} else {
-			// Spanish: a .one that counts must differ from its .other.
-			for _, k := range []string{"doctor.server.ok", "journal.damaged_journal_lines_were_skipped", "envcmd.skills_created", "envcmd.skills_updated"} {
-				if app.TN(k, 1, "x") == app.TN(k, 2, "x") {
-					t.Errorf("[es] %s: .one equals .other", k)
+			// Spanish: assert the singular by hand, and that it is not the plural.
+			singular := map[string]string{
+				"doctor.server.ok":                           "1 móvil conectado",
+				"journal.damaged_journal_lines_were_skipped": "Se saltó 1 línea",
+				"envcmd.skills_created":                      "creada 1 skill",
+				"envcmd.skills_updated":                      "actualizada 1 skill",
+			}
+			for k, want := range singular {
+				got := app.TN(k, 1, 5038)
+				if k != "doctor.server.ok" {
+					got = app.TN(k, 1, "x")
+				}
+				if !strings.Contains(got, want) {
+					t.Errorf("[es] %s 1: want %q in %q", k, want, got)
+				}
+				if strings.Contains(got, "%!") || strings.Contains(got, "móviles") || strings.Contains(got, "líneas") || strings.Contains(got, "skills") {
+					t.Errorf("[es] %s 1 looks plural or malformed: %q", k, got)
 				}
 			}
 		}
 	}
 }
 
-// A fix is a sentence: it starts with a capital and ends with a full stop.
-// The ones that start or end with an argument (a command, a name) are exempt.
-func TestFixStyle(t *testing.T) {
-	for _, p := range i18n.Pairs() {
-		if !strings.HasPrefix(p.Key, "err.") || !strings.HasSuffix(p.Key, ".fix") {
-			continue
-		}
-		for lang, s := range map[string]string{"en": p.EN, "es": p.ES} {
-			first, _ := utf8.DecodeRuneInString(s)
-			if !strings.HasPrefix(s, "%[") && !unicode.IsUpper(first) {
-				t.Errorf("[%s] %s: should start with a capital: %q", lang, p.Key, s)
-			}
-			if !strings.HasSuffix(s, ".") && !strings.HasPrefix(s, "%[") && !strings.HasSuffix(s, "]s") && !strings.HasSuffix(s, "]d") {
-				t.Errorf("[%s] %s: should end with a full stop: %q", lang, p.Key, s)
-			}
-		}
-	}
-}

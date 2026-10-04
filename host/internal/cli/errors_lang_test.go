@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -121,9 +122,13 @@ func TestAnErrorPointsAtTheHelpOfItsCommand(t *testing.T) {
 			t.Fatalf("%v: exit %d %q", c.args, exit, errOut)
 		}
 	}
-	_, out, _ := runCLI(t, "tap", "--json")
-	if !strings.Contains(out, `"fix":"Run `+"`adbuddy tap --help`"+` to see the usage."`) || !strings.Contains(out, `"code":"USAGE"`) {
-		t.Fatalf("--json: %s", out)
+	jexit, out, _ := runCLI(t, "tap", "--json")
+	if jexit != 2 || !strings.Contains(out, `"fix":"Run `+"`adbuddy tap --help`"+` to see the usage."`) || !strings.Contains(out, `"code":"USAGE"`) {
+		t.Fatalf("--json: exit %d %s", jexit, out)
+	}
+	noFix := regexp.MustCompile(`"fix":"[^"]*",`).ReplaceAllString(out, "")
+	if strings.TrimSpace(noFix) != `{"ok":false,"error":{"code":"USAGE","message":"tap needs exactly one of a text, --id or --xy","transient":false}}` {
+		t.Fatalf("--json envelope without fix: %s", noFix)
 	}
 	i18ntest.Lang(t, i18n.ES)
 	exit, _, es := runCLI(t, "tap")

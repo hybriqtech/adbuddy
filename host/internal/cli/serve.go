@@ -209,8 +209,8 @@ func newServeCmd(app *App) *cobra.Command {
 			}
 			var outMu sync.Mutex
 			session := journal.NewID("s_", time.Now())
-			// Without the app, or if its channel fails, confirmations stay
-			// here: only Ctrl+C stops serve at this step.
+			// Without the app, or if its channel fails, confirmations go to the
+			// fallback confirmer of --confirm: only Ctrl+C stops serve at this step.
 			link, err := startPhoneLink(ctx, app, &e, store, ctl, active, session, agentName, confirmer)
 			if err != nil {
 				return err

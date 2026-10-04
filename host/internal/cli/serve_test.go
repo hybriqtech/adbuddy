@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -452,7 +453,7 @@ func journalOf(t *testing.T, n int) string {
 	ws := t.TempDir()
 	var es []journal.Entry
 	for i := 0; i < n; i++ {
-		es = append(es, journal.Entry{ID: "j_" + strings.Repeat("x", 1) + string(rune('a'+i%26)) + string(rune('a'+i/26)), Level: "green", Status: "ok",
+		es = append(es, journal.Entry{ID: fmt.Sprintf("j_%03d", i), Level: "green", Status: "ok",
 			Description: "d", Argv: []string{"shell", "true"}})
 	}
 	appendEntries(t, ws, nil, es...)
@@ -471,11 +472,11 @@ func TestJournalSaysWhenItTruncates(t *testing.T) {
 	}
 	out, _, _ = run(t, "journal", "--limit", "50", "--workspace", ws, "--json")
 	if !strings.Contains(out, `"total":60`) || !strings.Contains(out, `"truncated":true`) {
-		t.Fatalf("json %q", out[len(out)-80:])
+		t.Fatalf("json %q", tail80(out))
 	}
 	out, _, _ = run(t, "journal", "--limit", "0", "--workspace", ws, "--json")
 	if !strings.Contains(out, `"total":60`) || !strings.Contains(out, `"truncated":false`) {
-		t.Fatalf("json %q", out[len(out)-80:])
+		t.Fatalf("json %q", tail80(out))
 	}
 	t.Setenv("ADBUDDY_LANG", "es")
 	_, errOut, _ = run(t, "journal", "--limit", "50", "--workspace", ws)
@@ -492,9 +493,32 @@ func TestServeWaitingTextIsAboutThePhone(t *testing.T) {
 			t.Errorf("%v: %q", l, got)
 		}
 	}
-	src, err := os.ReadFile("serve.go")
-	if err != nil || !strings.Contains(string(src), `app.T("serve.waiting_for_the_phone_on", int(deviceWait/time.Second))`) {
-		t.Fatalf("serve must pass the seconds of deviceWait (%v)", err)
+	// Looked up in the syntax tree, not as text: the call must pass the
+	// seconds of deviceWait.
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "serve.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	passes := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		if !ok || len(c.Args) != 2 {
+			return true
+		}
+		if lit, ok := c.Args[0].(*ast.BasicLit); !ok || lit.Value != `"serve.waiting_for_the_phone_on"` {
+			return true
+		}
+		ast.Inspect(c.Args[1], func(m ast.Node) bool {
+			if id, ok := m.(*ast.Ident); ok && id.Name == "deviceWait" {
+				passes = true
+			}
+			return true
+		})
+		return true
+	})
+	if !passes {
+		t.Fatal("serve must pass the seconds of deviceWait")
 	}
 }
 
@@ -505,4 +529,12 @@ func TestSetupCodeWithoutTerminalHasItsOwnFix(t *testing.T) {
 		!strings.Contains(errOut, "Run it in a terminal, or give the answers on stdin, one per line.") || strings.Contains(errOut, "--help") {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
 	}
+}
+
+// tail80 is the last 80 bytes of s (all of it if shorter), for failure messages.
+func tail80(s string) string {
+	if len(s) > 80 {
+		return s[len(s)-80:]
+	}
+	return s
 }

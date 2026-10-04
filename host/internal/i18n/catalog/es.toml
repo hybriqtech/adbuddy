@@ -65,7 +65,7 @@ inalámbrica: vuelve a ejecutar este comando con el nuevo."""
 "help.connect.flag.adb" = "ruta del adb real (por defecto: adb_path de config.toml, y si no, el adb que instala adbuddy setup)"
 
 # doctor.go: cobra
-"help.doctor.short" = "Comprueba todo lo que ADBuddy necesita y cómo arreglarlo"
+"help.doctor.short" = "Comprueba lo que ADBuddy necesita y explica cómo arreglarlo"
 "help.doctor.long" = """
 Comprueba, por orden, todo lo que ADBuddy necesita: la configuración, el adb de ADBuddy y su
 servidor privado, `adbuddy serve`, el móvil (conectado, el que configuraste, sin puerto de
@@ -188,7 +188,7 @@ pie de texto opcional. El fichero debe estar dentro del entorno y pesar como muc
 "help.send.flag.caption" = "texto que acompaña al fichero en el chat (como mucho 64 KiB)"
 
 # serve.go: cobra
-"help.serve.short" = "Ejecuta ADBuddy en el PC: diario y confirmaciones"
+"help.serve.short" = "Ejecuta ADBuddy en el PC: diario en vivo y confirmaciones"
 "help.serve.long" = """
 Ejecuta ADBuddy en esta terminal, en el PC. Clasifica cada comando adb que ejecuta el
 agente, lo apunta en el diario, lo enseña aquí y te pregunta antes de cualquier cosa irreversible.
@@ -200,10 +200,10 @@ en otra terminal con `adbuddy run`."""
 "help.serve.flag.serial" = "el móvil que se usa cuando hay varios conectados"
 "help.serve.flag.workspace" = "entorno del agente (por defecto: workspace de config.toml, y si no, ~/ADBuddy/default)"
 "help.serve.flag.no_agent" = "no arranca el agente aquí: ejecútalo tú con 'adbuddy run' (sin chat desde el móvil)"
-"help.serve.flag.confirm" = "dónde se confirman los comandos 🔴 cuando la app del móvil no está conectada: auto (esta terminal si la hay, y si no, denegar), terminal o deny"
+"help.serve.flag.confirm" = "dónde se confirman los comandos 🔴 cuando la app del móvil no está conectada: auto (esta terminal si su entrada es interactiva, y si no, denegar), terminal (lee la entrada estándar aunque no sea una terminal, como una tubería) o deny"
 
 # setup.go: cobra
-"help.setup.short" = "Configura ADBuddy: adb, emparejar el móvil y el entorno"
+"help.setup.short" = "Configura ADBuddy: adb, emparejado y entorno del agente"
 "help.setup.long" = """
 Configura ADBuddy paso a paso: descarga las platform-tools de Android (comprobadas con la
 suma de verificación de Google), empareja el móvil por depuración inalámbrica con un código QR (o
@@ -669,7 +669,7 @@ En el móvil: Depuración inalámbrica → Vincular dispositivo con código QR, 
 "phone.the_adbuddy_app_on_the" = "⚠ La app de ADBuddy del móvil (%[1]s) es demasiado antigua para este PC: instala una compilación más reciente con `adbuddy setup --apk <fichero>` (`adbuddy setup` a secas no reemplaza una app instalada)."
 "phone.an_app_with_the_token" = "⚠ Se conectó una app con el token, pero no es la app que ADBuddy comprobó (%[1]s): rechazada, se vuelve a comprobar la app."
 "phone.the_phone_app_is_connected" = "📱 La app del móvil está conectada: las confirmaciones 🔴 van al móvil."
-"phone.the_phone_app_disconnected_confirmations" = "📱 La app del móvil se desconectó: las confirmaciones 🔴 no llegarán al móvil."
+"phone.the_phone_app_disconnected_confirmations" = "📱 La app del móvil se desconectó: las confirmaciones 🔴 no llegarán al móvil hasta que se vuelva a conectar."
 "phone.still_paused_resume_from_the" = "⏸ Sigue en pausa: reanuda desde la app cuando se vuelva a conectar, o reinicia adbuddy serve."
 "phone.the_phone_app_disconnected_before" = "📱 La app del móvil se desconectó antes de que respondieras a «%[1]s»: ya no espera al móvil."
 "phone.the_phone_app_is_back" = "📱 La app del móvil ha vuelto: «%[1]s» sigue esperando tu respuesta en el móvil."

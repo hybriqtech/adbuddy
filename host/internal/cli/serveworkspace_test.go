@@ -113,7 +113,6 @@ func TestRunPassesTheExitCodeOfTheAgentThrough(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	_ = ws
 	fakeDaemon(t, data, ipc.Ping{Version: Version, Session: "s_1", Serial: "192.0.2.10:41000", Identity: "adb-AAAA1111-bbb._adb-tls-connect._tcp", Journal: workspace.JournalDir(ws)}, ipc.Exit{})
 	script, err := testutil.WriteScript(t.TempDir(), testutil.FakeRule{Match: ".*", Exit: 3})
 	if err != nil {
