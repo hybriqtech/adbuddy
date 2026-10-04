@@ -497,7 +497,7 @@ func TestTemplatesImportNotesAndChainScreenHelpers(t *testing.T) {
 		}
 	}
 	a := read(t, filepath.Join(dir, "AGENTS.md"))
-	for _, want := range []string{"adbuddy tap \"Network & internet\" --screen", "`adbuddy screen --settle`", "read the result in the same call with", "--screen", "`The action was done; do not repeat it`", "If it is not already in your context, read it before you start."} {
+	for _, want := range []string{"adbuddy tap \"Network & internet\" --screen", "`adbuddy screen --settle`", "read the result in the same call with", "--screen", "`The action was done; do not repeat it`", "If it is not already in your context, read it before you start.", "`(the screen did not change in about 2 s after the action …)` means the tap did nothing visible: look before you try again."} {
 		if !strings.Contains(a, want) {
 			t.Errorf("AGENTS.md lacks %q", want)
 		}

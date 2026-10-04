@@ -131,19 +131,55 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	defer release()
 	// foreground is what the guard asks; notifications do not read the screen
 	// (the app empties what a protected app says, and the host does it again).
+	firstBlocked := false
 	if req.UIOp != bridge.UIOpForeground && req.UIOp != bridge.UIOpNotifications {
 		if why := d.guardForeground(ctx, nil); why != "" {
 			if ctx.Err() != nil { // the agent or serve went away meanwhile
-				code := ExitDenied
-				e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
-				d.record(e)
-				return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
+				return d.abandonUI(ctx, e)
 			}
-			return d.blockUI(e, why)
+			if !(req.Screen && req.UIOp == bridge.UIOpDump) {
+				return d.blockUI(e, why)
+			}
+			// screen --settle: maybe a transition (a window with no content for
+			// a moment). The wait tries again with the guard on every attempt,
+			// and its first valid read is the screen it starts from.
+			firstBlocked = true
 		}
 	}
-	if d.o.Paused() { // paused while the guard looked
+	guarded := time.Now() // right after the guard said yes
+	if d.o.Paused() {     // paused while the guard looked
 		return d.blockUI(e, PausedMessage)
+	}
+	// An act with Screen: read the screen before it, the one the wait starts
+	// from. That read is only compared (never returned, written or journaled)
+	// and it does not weaken the doors of the act: the context and the pause
+	// are looked at again, the guard too if the read took longer than
+	// baselineSlack, and if the app says something protected is in front the
+	// act does not happen.
+	var base *bridge.UIDump
+	if req.Screen && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
+		var denied *uiFailure
+		base, denied = d.baselineScreen(ctx)
+		if ctx.Err() != nil { // the agent or serve went away: no act
+			return d.abandonUI(ctx, e)
+		}
+		if d.o.Paused() { // paused while the start was read: no act
+			return d.blockUI(e, PausedMessage)
+		}
+		if denied != nil { // the app says there is something protected in front: no act
+			return d.blockUI(e, denied.msg)
+		}
+		if time.Since(guarded) > baselineSlack { // the guard looked too long ago: look again before acting
+			if why := d.guardForeground(ctx, nil); why != "" {
+				if ctx.Err() != nil {
+					return d.abandonUI(ctx, e)
+				}
+				return d.blockUI(e, why)
+			}
+			if d.o.Paused() {
+				return d.blockUI(e, PausedMessage)
+			}
+		}
 	}
 	if h.change {
 		running := e
@@ -153,24 +189,24 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 	}
 
-	data, via, f := d.runUI(ctx, req.UIOp, req.UIArgs, s)
-
-	// screen with Screen: wait for it to settle; the read above counts as the first one.
-	if f == nil && req.Screen && req.UIOp == bridge.UIOpDump {
-		if first, ok := asDump(data); ok {
-			scr, how, why, sf := d.settle(ctx, req.UIArgs, &first, time.Now())
-			switch {
-			case sf != nil:
-				f = sf
-			case why != "":
-				return d.blockUI(e, why) // nothing read before is returned
-			case scr == nil: // the agent or serve went away
-				code := ExitDenied
-				e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
-				d.record(e)
-				return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
-			default:
-				data, via = *scr, how+", settled="+strconv.FormatBool(scr.Settled)
+	var data any
+	var via string
+	var f *uiFailure
+	if firstBlocked {
+		// screen --settle after a block: nothing was read yet.
+		var done *ipc.Exit
+		if data, via, f, done = d.settleScreen(ctx, e, settleIn{args: req.UIArgs, start: time.Now(), adopt: true}); done != nil {
+			return *done
+		}
+	} else {
+		data, via, f = d.runUI(ctx, req.UIOp, req.UIArgs, s)
+		// screen with Screen: wait for it to settle; the read above is the start.
+		if f == nil && req.Screen && req.UIOp == bridge.UIOpDump {
+			if first, ok := asDump(data); ok {
+				var done *ipc.Exit
+				if data, via, f, done = d.settleScreen(ctx, e, settleIn{args: req.UIArgs, base: &first, first: &first, via: via, start: time.Now()}); done != nil {
+					return *done
+				}
 			}
 		}
 	}
@@ -192,13 +228,39 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if data != nil {
 		if req.Screen && f == nil && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
 			release() // the change is done: a question must not wait for the screen to settle
-			data = d.withScreen(ctx, req, data)
+			data = d.withScreen(ctx, req, data, base)
 		}
 		if err := s.Data(data); err != nil {
 			return ipc.Exit{Code: 1, ErrorCode: "UI_FAILED", Error: err.Error()}
 		}
 	}
 	return ipc.Exit{}
+}
+
+// settleScreen is the wait of screen --settle: what ui sends and how it was
+// read, or its failure; or done, when ui returns it as is: a block (nothing
+// read before comes out) or the agent or serve gone.
+func (d *Daemon) settleScreen(ctx context.Context, e journal.Entry, in settleIn) (data any, via string, f *uiFailure, done *ipc.Exit) {
+	scr, how, why, sf := d.settle(ctx, in)
+	switch {
+	case sf != nil:
+		return nil, "", sf, nil
+	case why != "":
+		x := d.blockUI(e, why)
+		return nil, "", nil, &x
+	case scr == nil: // the agent or serve went away
+		x := d.abandonUI(ctx, e)
+		return nil, "", nil, &x
+	}
+	return *scr, how + ", settled=" + strconv.FormatBool(scr.Settled), nil, nil
+}
+
+// abandonUI journals a helper the agent or serve gave up on before it ran.
+func (d *Daemon) abandonUI(ctx context.Context, e journal.Entry) ipc.Exit {
+	code := ExitDenied
+	e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
+	d.record(e)
+	return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
 }
 
 // blockUI refuses a helper without running it, as block does a command.

@@ -12,7 +12,7 @@ Examples:
 Flags:
   -h, --help                help for tap
       --id adbuddy screen   the element's id, as adbuddy screen lists it
-      --screen              also print the screen once it has settled, so a second call is not needed
+      --screen              also print the screen once it has settled (up to about 3 s), so a second call is not needed
       --xy string           a point on the screen, x,y in pixels
 
 Global Flags:

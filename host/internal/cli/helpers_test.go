@@ -478,6 +478,110 @@ func TestTapScreen(t *testing.T) {
 	}
 }
 
+const wantNoChange = "(the screen did not change in about 2 s after the action: run adbuddy screen before trying again)"
+
+// changed says whether the screen moved from the one before the act: false
+// (and settled) warns that the act did nothing visible; true or unknown
+// (absent) say nothing. --json keeps it only when the daemon sent it.
+func TestTapScreenChanged(t *testing.T) {
+	var reply any
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(reply)
+		return ipc.Exit{}
+	})
+	clicked := bridge.UIClicked{Clicked: true, Bounds: [4]int{1, 2, 3, 4}, How: "action"}
+	yes, no := true, false
+	settled := func(settled bool, changed *bool) daemon.ClickedScreen {
+		return daemon.ClickedScreen{UIClicked: clicked, Screen: &daemon.ScreenSettled{UIDump: screenOf("p"), Settled: settled, Changed: changed}}
+	}
+
+	reply = settled(true, &no)
+	out, _, code := runHelper(t, "tap", "OK", "--screen")
+	if code != 0 || !strings.HasSuffix(out, "click\n"+wantNoChange+"\n") || strings.Contains(out, "still changing") {
+		t.Fatalf("no change: exit %d %q", code, out)
+	}
+	for name, r := range map[string]daemon.ClickedScreen{"changed": settled(true, &yes), "unknown": settled(true, nil)} {
+		reply = r
+		if out, _, code := runHelper(t, "tap", "OK", "--screen"); code != 0 || strings.Contains(out, "did not change") {
+			t.Fatalf("%s: exit %d %q", name, code, out)
+		}
+	}
+	// Still changing at the end: only that warning, whatever changed says.
+	reply = settled(false, &no)
+	if out, _, code := runHelper(t, "tap", "OK", "--screen"); code != 0 || strings.Contains(out, "did not change") || !strings.Contains(out, wantStillChanging) {
+		t.Fatalf("still changing: exit %d %q", code, out)
+	}
+	// type says it too.
+	reply = daemon.TextSetScreen{UITextSet: bridge.UITextSet{Set: true}, Screen: &daemon.ScreenSettled{UIDump: screenOf("p"), Settled: true, Changed: &no}}
+	if out, _, code := runHelper(t, "type", "x", "--screen"); code != 0 || !strings.HasSuffix(out, wantNoChange+"\n") {
+		t.Fatalf("type: exit %d %q", code, out)
+	}
+
+	// --json: kept when it came, never made up.
+	reply = settled(true, &no)
+	out, _, code = runHelper(t, "tap", "OK", "--screen", "--json")
+	if code != 0 || !strings.Contains(out, `"changed":false`) {
+		t.Fatalf("json false: exit %d %q", code, out)
+	}
+	reply = settled(true, &yes)
+	if out, _, code = runHelper(t, "tap", "OK", "--screen", "--json"); code != 0 || !strings.Contains(out, `"changed":true`) {
+		t.Fatalf("json true: exit %d %q", code, out)
+	}
+	reply = settled(true, nil)
+	if out, _, code = runHelper(t, "tap", "OK", "--screen", "--json"); code != 0 || strings.Contains(out, `"changed"`) {
+		t.Fatalf("json unknown: exit %d %q", code, out)
+	}
+	// An old daemon: no changed at all, as raw JSON.
+	reply = json.RawMessage(`{"clicked":true,"bounds":[1,2,3,4],"how":"action","screen":{"package":"p","width":1080,"height":2400,"elements":[],"settled":true}}`)
+	if out, _, code = runHelper(t, "tap", "OK", "--screen", "--json"); code != 0 || strings.Contains(out, `"changed"`) || !strings.Contains(out, `"settled":true`) {
+		t.Fatalf("json old daemon: exit %d %q", code, out)
+	}
+	if out, _, code = runHelper(t, "tap", "OK", "--screen"); code != 0 || strings.Contains(out, "did not change") {
+		t.Fatalf("old daemon: exit %d %q", code, out)
+	}
+}
+
+// AGENTS.md tells the agent what the no-change line means: the words it
+// quotes must be how noChange begins.
+func TestAgentsTemplateQuotesNoChange(t *testing.T) {
+	b, err := os.ReadFile("../workspace/templates/AGENTS.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const quoted = "(the screen did not change in about 2 s after the action"
+	if !strings.Contains(string(b), "`"+quoted+" …)`") {
+		t.Errorf("AGENTS.md does not quote %q", quoted)
+	}
+	if !strings.HasPrefix(noChange, quoted) || noChange != wantNoChange {
+		t.Errorf("noChange %q does not begin with %q", noChange, quoted)
+	}
+}
+
+// screen --settle: a settled screen that did not change is a quiet screen,
+// with no warning; --json keeps changed only when it came.
+func TestScreenSettleChanged(t *testing.T) {
+	var reply any
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(reply)
+		return ipc.Exit{}
+	})
+	no, yes := false, true
+	reply = daemon.ScreenSettled{UIDump: screenOf("p"), Settled: true, Changed: &no}
+	if out, _, code := runHelper(t, "screen", "--settle"); code != 0 || strings.Contains(out, "did not change") || strings.Contains(out, "still changing") {
+		t.Fatalf("exit %d %q", code, out)
+	}
+	for _, c := range []struct {
+		changed *bool
+		want    string // "" means absent
+	}{{&no, `"changed":false`}, {&yes, `"changed":true`}, {nil, ""}} {
+		reply = daemon.ScreenSettled{UIDump: screenOf("p"), Settled: true, Changed: c.changed}
+		out, _, code := runHelper(t, "screen", "--settle", "--json")
+		if code != 0 || !strings.Contains(out, `"settled":true`) || c.want != "" && !strings.Contains(out, c.want) || c.want == "" && strings.Contains(out, `"changed"`) {
+			t.Fatalf("json %v: exit %d %q", c.changed, code, out)
+		}
+	}
+}
+
 func TestTypeScreen(t *testing.T) {
 	var reply any
 	reqs := helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
