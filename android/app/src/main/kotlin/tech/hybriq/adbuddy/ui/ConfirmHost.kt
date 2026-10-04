@@ -87,7 +87,7 @@ internal fun ConfirmHost(
     }
     // The seconds the dialog counts down: its own state, apart from `now` (status, canSend and the arming never read
     // it). It moves each second while a question is open.
-    var displayNow by remember { mutableLongStateOf(clock.now()) }
+    var displayNow by remember(question?.id) { mutableLongStateOf(clock.now()) }
     LaunchedEffect(question?.id, open) {
         while (open) {
             displayNow = clock.now()

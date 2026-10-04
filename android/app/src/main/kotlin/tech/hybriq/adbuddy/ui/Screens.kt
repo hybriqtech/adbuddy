@@ -185,26 +185,26 @@ fun ConfirmDialog(
         text = {
             ObscuredTouchGuard()
             Column {
-            Column(Modifier.weight(1f, fill = false).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (shown.warning) {
-                    Text("⚠ " + stringResource(R.string.confirm_special), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Column(Modifier.weight(1f, fill = false).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (shown.warning) {
+                        Text("⚠ " + stringResource(R.string.confirm_special), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    }
+                    // The host's detail and the agent's command are code: left to right whatever their first letter, so
+                    // what is read is in the order it runs. The labels follow the language.
+                    for (line in shown.detail) {
+                        Text(line, style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr))
+                    }
+                    Text(shown.command, style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr))
+                    if (shown.hidden > 0) {
+                        // H3: what is not shown cannot have been read: only Deny (ConfirmUi.decisions), and it says so.
+                        Text(
+                            pluralStringResource(R.plurals.confirm_hidden, shown.hidden, shown.hidden) + " " +
+                                stringResource(R.string.confirm_too_long),
+                            style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Text(footer, style = MaterialTheme.typography.bodySmall)
                 }
-                // The host's detail and the agent's command are code: left to right whatever their first letter, so
-                // what is read is in the order it runs. The labels follow the language.
-                for (line in shown.detail) {
-                    Text(line, style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr))
-                }
-                Text(shown.command, style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr))
-                if (shown.hidden > 0) {
-                    // H3: what is not shown cannot have been read: only Deny (ConfirmUi.decisions), and it says so.
-                    Text(
-                        pluralStringResource(R.plurals.confirm_hidden, shown.hidden, shown.hidden) + " " +
-                            stringResource(R.string.confirm_too_long),
-                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
-                    )
-                }
-                Text(footer, style = MaterialTheme.typography.bodySmall)
-            }
             // Fixed lines, outside the part that scrolls: always in sight. No live region: it would be read out every second.
             val left = if (status == ConfirmUi.Status.OPEN) ConfirmUi.secondsLeft(r, now) else null
             if (left != null) {

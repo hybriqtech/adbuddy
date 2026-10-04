@@ -1,9 +1,19 @@
 package tech.hybriq.adbuddy.confirm
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import java.time.Instant
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -39,9 +49,12 @@ class ConfirmDialogLayoutTest {
             expiresAt = Instant.ofEpochMilli(t0).plusSeconds(600).toString(),
         )
 
+    private var errorColor = Color.Unspecified
+
     private fun show(r: ConfirmRequest, status: ConfirmUi.Status = ConfirmUi.Status.OPEN, now: Long = t0) {
         compose.setContent {
             AdbuddyTheme(dynamic = false) {
+                errorColor = MaterialTheme.colorScheme.error
                 ConfirmDialog(r, status, app.clock, armed = true, now = now, onClose = {}, onAnswer = {})
             }
         }
@@ -73,5 +86,35 @@ class ConfirmDialogLayoutTest {
         val r = request()
         show(r, status = ConfirmUi.Status.OFFLINE, now = ConfirmUi.expiry(r)!! - 42_000)
         compose.onNodeWithText(expiresIn("0:42")).assertDoesNotExist()
+    }
+
+    private fun countdownNode(s: String) = compose.onNodeWithText(expiresIn(s)).fetchSemanticsNode()
+
+    private fun countdownLayout(s: String): TextLayoutResult {
+        val results = mutableListOf<TextLayoutResult>()
+        countdownNode(s).config[SemanticsActions.GetTextLayoutResult].action!!(results)
+        return results.first()
+    }
+
+    @Test fun underTenSecondsItIsBoldInTheErrorColor() {
+        val r = request()
+        show(r, now = ConfirmUi.expiry(r)!! - 9_000)
+        val style = countdownLayout("0:09").layoutInput.style
+        assertEquals(errorColor, style.color)
+        assertEquals(FontWeight.Bold, style.fontWeight)
+    }
+
+    @Test fun atTenSecondsItIsNotYetInTheErrorColor() {
+        val r = request()
+        show(r, now = ConfirmUi.expiry(r)!! - 10_000)
+        val style = countdownLayout("0:10").layoutInput.style
+        assertNotEquals(errorColor, style.color)
+        assertNotEquals(FontWeight.Bold, style.fontWeight)
+    }
+
+    @Test fun theCountdownIsNotALiveRegion() {
+        val r = request()
+        show(r, now = ConfirmUi.expiry(r)!! - 9_000)
+        assertNull(countdownNode("0:09").config.getOrNull(SemanticsProperties.LiveRegion))
     }
 }
