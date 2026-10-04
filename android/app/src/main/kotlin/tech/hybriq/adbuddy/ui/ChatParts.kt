@@ -146,6 +146,7 @@ fun ChatHeader(
                     Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.action_menu))
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    ObscuredTouchGuard()
                     PauseButton.of(state)?.let { button ->
                         DropdownMenuItem(
                             text = { Text(stringResource(button.text)) },
@@ -367,6 +368,7 @@ fun InputBar(
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.chat_attach)) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                ObscuredTouchGuard()
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_photo)) }, onClick = { menu = false; onPhoto() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_file)) }, onClick = { menu = false; onFile() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_capture)) }, onClick = { menu = false; onCapture() })
@@ -401,11 +403,15 @@ fun InputBar(
     }
 }
 
-/** Esc, Ctrl+C, up, down, Tab, Enter, 1, 2, 3 (QuickKey.entries), horizontally scrollable. */
+/**
+ * Esc, Ctrl+C, up, down, Tab, Enter, 1, 2, 3 (QuickKey.entries), horizontally scrollable. Each key refuses a tap while
+ * another app's window covers it ("1" would answer "1. Yes" to the agent's permission prompt on the PC); the rest of
+ * the chat keeps working under the overlay.
+ */
 @Composable
 fun QuickKeysRow(enabled: Boolean = true, onKey: (QuickKey) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (k in QuickKey.entries) AssistChip(onClick = { onKey(k) }, enabled = enabled, label = { Text(k.label) })
+        for (k in QuickKey.entries) AssistChip(onClick = { onKey(k) }, enabled = enabled, modifier = Modifier.refuseObscuredTouches(), label = { Text(k.label) })
     }
 }
 
@@ -426,7 +432,10 @@ fun LinkDialog(url: String, domain: String, onOpen: () -> Unit, onDismiss: () ->
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.link_open_title, domain), fontWeight = FontWeight.Bold) },
-        text = { Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis) },
+        text = {
+            ObscuredTouchGuard()
+            Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis)
+        },
         confirmButton = { TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )

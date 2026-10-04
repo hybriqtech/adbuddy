@@ -120,7 +120,10 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
         AlertDialog(
             onDismissRequest = { ask = null },
             title = { Text(stringResource(if (enable) R.string.remote_enable_title else R.string.remote_disable_title)) },
-            text = { Text(stringResource(if (enable) R.string.remote_enable_body else R.string.remote_disable_body)) },
+            text = {
+                ObscuredTouchGuard()
+                Text(stringResource(if (enable) R.string.remote_enable_body else R.string.remote_disable_body))
+            },
             confirmButton = {
                 TextButton(onClick = { ask = null; send(enable) }) {
                     Text(stringResource(if (enable) R.string.remote_enable_confirm else R.string.remote_disable_confirm))

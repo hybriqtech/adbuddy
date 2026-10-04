@@ -40,6 +40,13 @@ const (
 	txtCapture      = "Send screenshot"
 )
 
+// armingWait is how long a test lets a 🔴 question's Allow arm before it
+// looks at it or taps it: the dialog's and the notification's Allow allow
+// nothing for ConfirmUi.ARMING_MS (600 ms) after they appear, the dialog's
+// again each time the app comes to the front. With a margin for a slow
+// emulator; Deny never waits.
+const armingWait = 1500 * time.Millisecond
+
 // confirmNotificationID is ConfirmNotifier.NOTIFICATION_ID: every question
 // has it, with its id as the tag.
 const confirmNotificationID = 2
@@ -67,22 +74,46 @@ func recordActions(rec string) []string {
 	return out
 }
 
-var flagsRe = regexp.MustCompile(`Notification\(channel=\S+ .*?flags=0x([0-9a-fA-F]+)`)
+// API 34 prints the flags in hexadecimal (flags=0x...); Android 36 prints them
+// by name (flags=ONGOING_EVENT|CAN_COLORIZE|SILENT), measured on the API 36 emulator.
+var flagsRe = regexp.MustCompile(`Notification\(channel=\S+ .*?flags=([0-9A-Za-z_|]+)`)
 
 // flagLocalOnly is Notification.FLAG_LOCAL_ONLY.
 const flagLocalOnly = 0x100
 
-// recordFlags returns the flags of the notification of a record, or -1.
+// flagNames are the Notification.FLAG_* names dumpsys may print; unknown names
+// are ignored (they add nothing to the mask).
+var flagNames = map[string]int64{
+	"LOCAL_ONLY":         0x100,
+	"ONGOING_EVENT":      0x2,
+	"AUTO_CANCEL":        0x10,
+	"NO_CLEAR":           0x20,
+	"FOREGROUND_SERVICE": 0x40,
+	"GROUP_SUMMARY":      0x200,
+	"CAN_COLORIZE":       0x800,
+	"BUBBLE":             0x1000,
+	"SILENT":             0x2000,
+}
+
+// recordFlags returns the flags of the notification of a record, or -1 (fail
+// closed) if the field is not found or is unreadable.
 func recordFlags(rec string) int64 {
 	m := flagsRe.FindStringSubmatch(rec)
 	if m == nil {
 		return -1
 	}
-	v, err := strconv.ParseInt(m[1], 16, 64)
-	if err != nil {
-		return -1
+	if hex, ok := strings.CutPrefix(m[1], "0x"); ok {
+		v, err := strconv.ParseInt(hex, 16, 64)
+		if err != nil {
+			return -1
+		}
+		return v
 	}
-	return v
+	var mask int64
+	for _, name := range strings.Split(m[1], "|") {
+		mask |= flagNames[name]
+	}
+	return mask
 }
 
 // ask sends r to the app as the host does and waits for its notification;
@@ -127,7 +158,7 @@ func question(id, title, raw string) bridge.ConfirmRequest {
 // openShade pulls the notification shade down (it goes up again at cleanup).
 func (e *emu) openShade(t *testing.T) {
 	t.Helper()
-	e.atCleanup(t, "shell", "cmd statusbar collapse")
+	e.cleanStateAtCleanup(t)
 	e.shell(t, "cmd statusbar expand-notifications")
 }
 
@@ -253,6 +284,11 @@ func TestTheDialogAllowsOnlyWhatWasRead(t *testing.T) {
 	}) {
 		t.Fatalf("no Allow in the dialog in 15 s: %+v", nodes)
 	}
+	// Past its arming (ConfirmUi.ARMING_MS since the dialog appeared): if Allow is
+	// off now, it is because the text has not been read.
+	time.Sleep(armingWait)
+	nodes = e.screen(t)
+	allow, _ = dialogButton(nodes, txtAllow)
 	if allow.Enabled {
 		t.Fatal("Allow is on before the text was read")
 	}
@@ -389,6 +425,10 @@ func (e *emu) lockWithPIN(t *testing.T) {
 		}
 		_, _, _, _ = e.adb.Output(ctx, "shell", "input keyevent KEYCODE_WAKEUP")
 		_, _, _, _ = e.adb.Output(ctx, "shell", "wm dismiss-keyguard")
+		// With the PIN gone: dismiss, collapse the shade, back to HOME.
+		if why := e.cleanState(); why != "" {
+			t.Logf("the emulator is left with %s", why)
+		}
 	})
 	e.shell(t, "locksettings set-pin "+testPIN)
 	e.lock(t)
@@ -397,11 +437,80 @@ func (e *emu) lockWithPIN(t *testing.T) {
 // lock puts the screen to sleep and wakes it on the lock screen.
 func (e *emu) lock(t *testing.T) {
 	t.Helper()
+	e.cleanStateAtCleanup(t)
 	e.shell(t, "input keyevent KEYCODE_SLEEP")
 	if !poll(10*time.Second, func() bool { return e.locked(t) }) {
 		t.Fatal("the device is not locked 10 s after going to sleep")
 	}
 	e.shell(t, "input keyevent KEYCODE_WAKEUP")
+	if !poll(10*time.Second, func() bool {
+		return strings.Contains(e.shell(t, "dumpsys power | grep -m1 mWakefulness="), "mWakefulness=Awake")
+	}) {
+		t.Fatal("the screen is not awake 10 s after KEYCODE_WAKEUP")
+	}
+	// A pending dismissKeyguardThenExecute (the known defect of the actions
+	// that ask to unlock) can make SystemUI show the bouncer, late, instead of
+	// the lock screen: BACK hides it without unlocking (never type the PIN here).
+	for try := 1; ; try++ {
+		var nodes []uiNode
+		sawBouncer := false
+		poll(3*time.Second, func() bool {
+			nodes = e.screen(t)
+			sawBouncer = bouncer(nodes)
+			return sawBouncer
+		})
+		switch lockAction(sawBouncer, try) {
+		case lockOK:
+			return
+		case lockFail:
+			t.Fatalf("the PIN bouncer is still on screen after %d BACK presses, not the lock screen: %s", try-1, trimNodes(nodes))
+		}
+		e.shell(t, "input keyevent KEYCODE_BACK")
+		if !poll(5*time.Second, func() bool { return !bouncer(e.screen(t)) && e.locked(t) }) {
+			t.Logf("lock(): the bouncer did not go away 5 s after BACK (try %d)", try)
+		}
+	}
+}
+
+// lockActions are the decisions of lock() after waking the screen.
+type lockActions int
+
+const (
+	lockOK   lockActions = iota // the lock screen is up
+	lockBack                    // the bouncer is up: press BACK
+	lockFail                    // the bouncer survived the BACKs
+)
+
+const lockMaxBacks = 2
+
+// lockAction decides, given whether the bouncer is on screen and the number of
+// this check (1 is the first), what lock() does next.
+func lockAction(bouncerUp bool, try int) lockActions {
+	switch {
+	case !bouncerUp:
+		return lockOK
+	case try > lockMaxBacks:
+		return lockFail
+	}
+	return lockBack
+}
+
+// trimNodes renders nodes for a failure message, at most 40 of them.
+func trimNodes(nodes []uiNode) string {
+	if len(nodes) > 40 {
+		return fmt.Sprintf("%+v ...(%d more)", nodes[:40], len(nodes)-40)
+	}
+	return fmt.Sprintf("%+v", nodes)
+}
+
+// logShell logs the output of a read-only shell command, with a time limit; it
+// never fails the test.
+func (e *emu) logShell(t *testing.T, command string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(e.ctx, 15*time.Second)
+	defer cancel()
+	out, errOut, code, err := e.adb.Output(ctx, "shell", command)
+	t.Logf("logShell %q: exit %d, %v:\n%s%s", command, code, err, strings.TrimSpace(strings.ReplaceAll(out, "\r", "")), strings.TrimSpace(errOut))
 }
 
 // locked reports whether the device is locked (dumpsys trust).
@@ -474,8 +583,17 @@ func TestSwipeUpPoints(t *testing.T) {
 // waitNodes waits up to d for the screen to be as ok wants and returns its nodes, or fails.
 func (e *emu) waitNodes(t *testing.T, what string, d time.Duration, ok func([]uiNode) bool) []uiNode {
 	t.Helper()
+	return e.waitNodesDiag(t, what, d, ok, nil)
+}
+
+// waitNodesDiag is waitNodes that, before failing, runs diag (if not nil).
+func (e *emu) waitNodesDiag(t *testing.T, what string, d time.Duration, ok func([]uiNode) bool, diag func()) []uiNode {
+	t.Helper()
 	var nodes []uiNode
 	if !poll(d, func() bool { nodes = e.screen(t); return ok(nodes) }) {
+		if diag != nil {
+			diag()
+		}
 		t.Fatalf("no %s in %d s: %+v", what, int(d/time.Second), nodes)
 	}
 	return nodes
@@ -528,6 +646,11 @@ func (e *emu) tapInShade(t *testing.T, title, label string) {
 	e.openShade(t)
 	isButton := func(n uiNode) bool { return strings.EqualFold(n.Text, label) && n.Class == "android.widget.Button" }
 	nodes := e.shadeUntil(t, title, func(nodes []uiNode) bool { return slices.ContainsFunc(nodes, isButton) })
+	if strings.EqualFold(label, txtAllow) {
+		// Allow drops a tap in its first ConfirmUi.ARMING_MS (ConfirmArming): the
+		// shade's dumps take longer than that already, but do not rely on it.
+		time.Sleep(armingWait)
+	}
 	e.tap(t, nodes[slices.IndexFunc(nodes, isButton)])
 }
 
@@ -668,8 +791,11 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 	// name; without it, "emutest" being absent below would prove nothing.
 	e.shell(t, "settings put secure lock_screen_allow_private_notifications 1")
 	e.lock(t)
-	e.waitNodes(t, "the PC's name on the lock screen with private notifications allowed", 10*time.Second, func(nodes []uiNode) bool {
+	e.waitNodesDiag(t, "the PC's name on the lock screen with private notifications allowed", 10*time.Second, func(nodes []uiNode) bool {
 		return slices.ContainsFunc(nodes, func(n uiNode) bool { return strings.Contains(n.Text+n.Desc, "emutest") })
+	}, func() {
+		e.logShell(t, "dumpsys window | grep -E 'mCurrentFocus|isKeyguardShowing|mKeyguardShowing|mDreamingLockscreen'")
+		e.logShell(t, "dumpsys trust | head -30")
 	})
 	e.unlock(t)
 	e.shell(t, "settings put secure lock_screen_allow_private_notifications 0")
@@ -815,4 +941,22 @@ func (e *emu) screencap(t *testing.T, path string) {
 	e.run(t, "pull", remote, path)
 	e.shell(t, "rm -f "+remote)
 	t.Logf("screenshot: %s", path)
+}
+
+func TestLockAction(t *testing.T) {
+	for _, c := range []struct {
+		bouncer bool
+		try     int
+		want    lockActions
+	}{
+		{false, 1, lockOK},
+		{false, 3, lockOK},
+		{true, 1, lockBack},
+		{true, 2, lockBack},
+		{true, 3, lockFail},
+	} {
+		if got := lockAction(c.bouncer, c.try); got != c.want {
+			t.Errorf("lockAction(%v, %d) = %v, want %v", c.bouncer, c.try, got, c.want)
+		}
+	}
 }

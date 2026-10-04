@@ -101,6 +101,7 @@ func newEmuTimeout(t *testing.T, d time.Duration) *emu {
 	if s := e.state(); s != "device" {
 		t.Fatalf("the emulator %s is %q, not online", serial, s)
 	}
+	e.requireCleanState(t)
 	return e
 }
 

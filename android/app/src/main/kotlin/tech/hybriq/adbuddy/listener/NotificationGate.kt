@@ -35,4 +35,15 @@ object NotificationGate {
      * confirmation. Allowing it again needs a new tap on ADBuddy's confirm button.
      */
     fun onUnbound(revoke: () -> Unit) = revoke()
+
+    /**
+     * The system connected the listener: any confirmation belongs to a binding that no longer exists, so it goes,
+     * BEFORE the listener becomes visible (`current`, `connected`), so the gate can never read with an old mark.
+     * The system may bind it again without unbinding it first (M5c-32 b, measured on API 34: the access revoked
+     * with the app dead, and a restart it had already scheduled connects the listener without
+     * onListenerDisconnected), and the agent may then turn the switch back on (`adbuddy tap`). The confirm button
+     * needs a bound listener, so this never clears a tap made on this binding; a later one (reboot, update, a
+     * process the system killed) needs a new tap: the accepted cost.
+     */
+    fun onConnected(revoke: () -> Unit) = revoke()
 }

@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import tech.hybriq.adbuddy.AdbuddyApp
+import tech.hybriq.adbuddy.bridge.BridgeState
 
 /**
  * Receives the notification buttons (not exported: only this app's PendingIntents reach it).
@@ -13,8 +14,9 @@ import tech.hybriq.adbuddy.AdbuddyApp
  * still pending, open (not answered here, not expired, the PC connected) and
  * the notification offers that decision (never Allow during the session, nor Allow for a special question
  * or a command it cuts: those are allowed from the dialog); Allow also needs the phone unlocked
- * (isDeviceLocked), besides setAuthenticationRequired. A tap
- * that arrives late or from a stale notification sends nothing.
+ * (isDeviceLocked), besides setAuthenticationRequired, and its button shown for ConfirmUi.ARMING_MS
+ * (ConfirmNotifier.arming: a stray tap as the notification pops up allows nothing; after the PIN of a locked
+ * phone it is long armed). A tap that arrives late, too soon or from a stale notification sends nothing.
  *
  * It does not remove the notification: once the answer is on its way the
  * state marks the question as answering and ConfirmNotifier posts it again
@@ -27,11 +29,18 @@ class ConfirmReceiver : BroadcastReceiver() {
         val decision = intent.getStringExtra(EXTRA_DECISION) ?: return
         val app = context.applicationContext as AdbuddyApp
         val locked = context.getSystemService(KeyguardManager::class.java).isDeviceLocked
-        if (!ConfirmUi.canSend(app.bridge.state.value, id, decision, app.clock.now(), locked, notification = true)) return
+        if (!mayReply(app.bridge.state.value, id, decision, app.clock.now(), locked, ConfirmNotifier.arming)) return
         app.bridge.reply(id, decision)
     }
 
     companion object {
+        /**
+         * Whether a notification button may send decision for id: ConfirmUi.canSend, with Allow armed only once its
+         * notification has shown it for ConfirmUi.ARMING_MS ([arming]). Deny does not wait.
+         */
+        internal fun mayReply(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean, arming: ConfirmArming): Boolean =
+            ConfirmUi.canSend(state, id, decision, now, locked, armed = arming.isArmed(id), notification = true)
+
         const val ACTION_REPLY = "tech.hybriq.adbuddy.action.CONFIRM_REPLY"
         const val EXTRA_ID = "id"
         const val EXTRA_DECISION = "decision"

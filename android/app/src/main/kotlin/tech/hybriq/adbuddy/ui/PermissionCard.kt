@@ -16,6 +16,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -33,6 +34,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDirection
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -47,6 +51,7 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
  * The agent's own questions (Claude Code's permissions, spec M4 §7.3), above the input: the oldest one, with
  * its full text, and a count of the others. Not an ADBuddy 🔴 question (ConfirmDialog): the label says whose it is.
  * The card is not removed here: it goes when the host's permission.resolved arrives, wherever it was answered.
+ * Coming back to the front guards the first card again (ChatController.rearmGuard).
  * Whether it may be answered is [ChatController]'s (canAnswer, guardLeftMs): this only re-reads it when something changes
  * (the list, the connection, an answer on its way) and while a second or the promote guard runs out.
  */
@@ -58,6 +63,22 @@ fun PermissionCards(
     chat: ChatController,
     modifier: Modifier = Modifier,
 ) {
+    // Back to the front (ON_START, ON_RESUME: the screen woke, the person came back), the first card waits its promote
+    // guard again, as the 🔴 dialog waits its arming (ConfirmHost). Listened to with or without cards: one that came
+    // while the app was away waits too. A new observer is first brought up to the current state (the events up to it
+    // are replayed, and not always within addObserver): those are not a coming back.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, chat) {
+        val current = lifecycle.currentState
+        var caughtUp = current == Lifecycle.State.INITIALIZED
+        val observer = LifecycleEventObserver { _, event ->
+            val back = caughtUp && (event == Lifecycle.Event.ON_START || event == Lifecycle.Event.ON_RESUME)
+            if (event.targetState >= current) caughtUp = true
+            if (back) chat.rearmGuard()
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     if (permissions.isEmpty()) return
     val answeringIds by chat.answering.collectAsStateWithLifecycle()
     val first = permissions.first()
@@ -101,6 +122,7 @@ fun PermissionCard(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ObscuredTouchGuard()
             // Whose question it is outweighs what it says: the label is bold and larger, the agent's own words are marked as such.
             Text(stringResource(R.string.perm_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.semantics { heading() })
             Text(stringResource(R.string.perm_summary, p.summary.ifEmpty { p.tool }), style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })

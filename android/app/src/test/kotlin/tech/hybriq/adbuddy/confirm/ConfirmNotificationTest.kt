@@ -2,6 +2,8 @@ package tech.hybriq.adbuddy.confirm
 
 import android.app.Notification
 import android.app.NotificationManager
+import android.os.Looper
+import java.time.Duration
 import java.time.Instant
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -12,10 +14,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.ConfirmRequest
+import tech.hybriq.adbuddy.bridge.Decision
 
 /**
  * The 🔴 notification as ConfirmNotifier really builds it (Robolectric's NotificationManager): its buttons (A4-1: a
@@ -89,5 +93,55 @@ class ConfirmNotificationTest {
         val n = post(request("j_long", raw = "adb shell echo " + "d".repeat(ConfirmUi.DIALOG_MAX_COMMAND)))
         assertEquals(listOf(deny, open), labels(n))
         assertTrue(n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString().contains(app.getString(R.string.confirm_too_long)))
+    }
+
+    // --- the arming of the notification's Allow (ConfirmNotifier.arming), in the phone's elapsed time ---
+
+    private fun advance(ms: Long) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms))
+
+    private fun connected(vararg pending: ConfirmRequest, answering: Set<String> = emptySet()) =
+        BridgeState(connection = BridgeState.Connection.CONNECTED, pending = pending.toList(), answering = answering)
+
+    private fun receiverMay(state: BridgeState, id: String, decision: String) =
+        ConfirmReceiver.mayReply(state, id, decision, app.clock.now(), locked = false, arming = ConfirmNotifier.arming)
+
+    @Test fun theNotificationsAllowIsArmedSixHundredMillisecondsAfterItIsPosted() {
+        val r = request("j_arm")
+        val s = connected(r)
+        ConfirmNotifier.sync(app, s)
+        assertFalse("a tap at once is dropped", receiverMay(s, r.id, Decision.ALLOW))
+        assertTrue("Deny never waits", receiverMay(s, r.id, Decision.DENY))
+        advance(300)
+        assertFalse(receiverMay(s, r.id, Decision.ALLOW))
+        // A change of language posts it again: the wait does not start over.
+        ConfirmNotifier.repaint(app, s)
+        advance(300)
+        assertTrue(receiverMay(s, r.id, Decision.ALLOW))
+    }
+
+    // Its button gone (answered here: SENDING) and back (the connection dropped and came back): a new wait.
+    @Test fun allowWaitsAgainWhenItsButtonComesBack() {
+        val r = request("j_back")
+        ConfirmNotifier.sync(app, connected(r))
+        advance(1_000)
+        ConfirmNotifier.sync(app, connected(r, answering = setOf(r.id)))
+        assertFalse(r.id in ConfirmNotifier.arming.tracked())
+        val again = connected(r)
+        ConfirmNotifier.sync(app, again)
+        assertFalse(receiverMay(again, r.id, Decision.ALLOW))
+        advance(600)
+        assertTrue(receiverMay(again, r.id, Decision.ALLOW))
+    }
+
+    @Test fun onlyAPostedAllowIsArmedAndTheGoneAreForgotten() {
+        val plain = request("j_plain2")
+        val special = request("j_special2", special = true)
+        ConfirmNotifier.sync(app, connected(plain, special))
+        assertEquals("a notification with only Deny arms nothing", setOf(plain.id), ConfirmNotifier.arming.tracked())
+        ConfirmNotifier.sync(app, connected(special))
+        assertEquals("the answered question is forgotten", emptySet<String>(), ConfirmNotifier.arming.tracked())
+        ConfirmNotifier.sync(app, connected(plain))
+        ConfirmNotifier.clear(app)
+        assertEquals(emptySet<String>(), ConfirmNotifier.arming.tracked())
     }
 }

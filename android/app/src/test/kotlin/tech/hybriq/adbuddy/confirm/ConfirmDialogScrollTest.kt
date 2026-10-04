@@ -62,7 +62,7 @@ class ConfirmDialogScrollTest {
     private fun show(r: ConfirmRequest) {
         compose.setContent {
             AdbuddyTheme(dynamic = false) {
-                ConfirmDialog(r, ConfirmUi.Status.OPEN, app.clock, onClose = {}, onAnswer = { answers += it })
+                ConfirmDialog(r, ConfirmUi.Status.OPEN, app.clock, armed = true, onClose = {}, onAnswer = { answers += it })
             }
         }
         compose.waitForIdle()
