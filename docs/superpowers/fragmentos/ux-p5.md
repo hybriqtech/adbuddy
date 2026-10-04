@@ -7,7 +7,7 @@ Rama `ux/p5` (sobre `ux/p6`, que lleva P2-P4 y P6a de #79). Plan: `docs/superpow
 Ningún cambio da al agente una forma de aprobar una 🔴, y ninguno cambia qué se concede ni cómo se responde.
 
 - El aviso del chat solo reabre: su único botón («Ver») quita el id de `closed` y no hay botón de permitir. Al reabrir, el diálogo se recompone desde cero: vuelven el armado de 600 ms, la puerta de desplazamiento (`unread`) y la guarda anti-tapjacking. Lo prueba `ConfirmReopenTest` (tras «Ver», Permitir sigue desactivado y un toque no responde).
-- No se tocaron `ConfirmHost` (el `now` de `status`, `canSend` y armado), `ObscuredTouchGuard`, `ARMING_MS`, `armed`, `unread` ni `enabled = !unread && armed`, ni los `onAnswer`. Los tests de armado, de desplazamiento y de tapjacking existentes (`ConfirmHostArmingTest`, `ConfirmDialogArmingTest`, `ConfirmDialogScrollTest`, `TouchGuardSourceTest`) pasan sin una línea modificada.
+- De `ConfirmHost` solo se añadió `displayNow`; no se tocaron el `now` de `status`, `canSend` y armado, `ObscuredTouchGuard`, `ARMING_MS`, `armed`, `unread` ni `enabled = !unread && armed`, ni los `onAnswer`. Los tests de armado, de desplazamiento y de tapjacking existentes (`ConfirmHostArmingTest`, `ConfirmDialogArmingTest`, `ConfirmDialogScrollTest`, `TouchGuardSourceTest`) pasan sin una línea modificada.
 - Revisión de cada tarea por `adbuddy-reviewer-opus`; revisión final de la rama también.
 
 ## Qué cambió por tarea
@@ -28,6 +28,7 @@ Ningún cambio da al agente una forma de aprobar una 🔴, y ninguno cambia qué
 
 - `host/internal/emutest/confirm_test.go`: `txtAllowSession` pasa al texto nuevo en inglés (antes solo se usaba en una comprobación negativa, así que con el literal viejo habría pasado sin vigilar nada).
 - `host/internal/emutest/listener_test.go`: `accessNeedsTap` pasa al título nuevo; ese sí lo espera una comprobación positiva (`waitAccessState`) y se habría roto en el emulador del CI. Ninguno de los dos se ha podido ejecutar aquí (el emulador es del CI): `TestAccessState` (sin emulador) pasa.
+- `host/internal/emutest/confirm_test.go` (`scrollDialog`): el gesto de desplazar el texto del diálogo pasa de ±600 px a de +250 a -350 px del centro del comando (y los bucles que lo usan, de 60/80 a 120/160 iteraciones), porque el área que desplaza ahora es más baja (cuenta atrás, aviso y tres botones apilados quedan fuera de ella). Sin emulador no se ha podido ejecutar: es lo primero que hay que mirar si el job del emulador se pone rojo con P5.
 - Fuera de P5, un arreglo hecho en `ux/p6` (c8f1a81b): `NotificationsRationaleDialog` (P4) no llevaba `ObscuredTouchGuard()` y `TouchGuardSourceTest` fallaba.
 
 ## Aplazado con motivo
