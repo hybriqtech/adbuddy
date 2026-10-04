@@ -58,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import tech.hybriq.adbuddy.R
@@ -146,9 +147,9 @@ private fun ConsentScreenPreview() {
  * (ConfirmHost: ConfirmUi.ARMING_MS since the question appeared or the app came
  * back to the front; meanwhile they keep their text and read as disabled). Deny
  * never waits. It offers its buttons only while
- * the question is open, and says why otherwise. It can always be closed (back
- * or a tap outside; Close when it has no buttons): Pause and Cut access are
- * never hidden with no way out, and the notification is still there. Touches
+ * the question is open, and says why otherwise. It can always be closed with Back (and Close when it has no
+ * buttons), not with a tap outside: a stray tap no longer hides a question; the chat keeps a notice that reopens
+ * it. Pause and Cut access are never hidden with no way out, and the notification is still there. Touches
  * are refused while another app's window covers it (ObscuredTouchGuard).
  */
 @Composable
@@ -169,6 +170,8 @@ fun ConfirmDialog(
     val unread = scroll.canScrollForward
     AlertDialog(
         onDismissRequest = onClose,
+        // Back closes it; a tap outside does not (the chat's notice reopens it, but a stray tap hides nothing).
+        properties = DialogProperties(dismissOnClickOutside = false),
         // The title comes from the host's rules, but it never takes the whole dialog.
         title = {
             Column {

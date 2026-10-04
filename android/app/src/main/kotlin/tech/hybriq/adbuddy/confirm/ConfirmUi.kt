@@ -110,6 +110,10 @@ object ConfirmUi {
         return open.firstOrNull { it.id == focus } ?: open.firstOrNull() ?: shown.firstOrNull()
     }
 
+    /** The open questions the person closed: the chat says they are still waiting (and "Show" opens the same dialog again). */
+    fun closedWaiting(state: BridgeState, closed: Set<String>, now: Long): List<ConfirmRequest> =
+        state.pending.filter { it.id in closed && status(it, state, now) == Status.OPEN }
+
     /**
      * What a question shows: whether it carries the ⚠ warning, the first [maxDetail] lines of the host's detail
      * and how many more there are, and the agent's command cut to [maxCommand] characters with how many of them

@@ -18,6 +18,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -30,6 +31,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.AdbuddyApp
@@ -39,6 +41,7 @@ import tech.hybriq.adbuddy.bridge.BridgePrefs
 import tech.hybriq.adbuddy.bridge.Empty
 import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.chat.Composer
+import tech.hybriq.adbuddy.confirm.ConfirmUi
 import tech.hybriq.adbuddy.control.CutAccess
 import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.DownloadState
@@ -53,7 +56,7 @@ import tech.hybriq.adbuddy.notify.openNotificationSettings
  * the notification access under it), and the red questions over all of them.
  */
 @Composable
-fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = true, askForNotifications: Boolean = true, onClose: (String) -> Unit) {
+fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = true, askForNotifications: Boolean = true, onReopen: (String) -> Unit = {}, onClose: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by app.bridge.state.collectAsStateWithLifecycle()
@@ -144,6 +147,15 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         notifications = NotificationsStatus.of(context)
         onPauseOrDispose {}
     }
+    // The closed questions still waiting, by the host's clock (ConfirmHost keeps its own: this one only counts).
+    var now by remember { mutableLongStateOf(app.clock.now()) }
+    LaunchedEffect(state.pending, closed) {
+        while (true) {
+            now = app.clock.now()
+            delay(ConfirmUi.nextExpiry(state.pending, now) ?: break)
+        }
+    }
+    val waiting = ConfirmUi.closedWaiting(state, closed, now).size
     val back = { route = route.parent ?: Route.CHAT }
     val first = step
     if (first != null) {
@@ -160,7 +172,10 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
             Route.CHAT -> holder.SaveableStateProvider("chat") {
                 ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured, terminalOpenByDefault = terminalOpenByDefault,
-                    notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) }) {
+                    notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) },
+                    pendingQuestions = waiting,
+                    // The clock of the tap, not of the composition: a question that has just expired is not reopened.
+                    onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } }) {
                     RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
                 }
             }

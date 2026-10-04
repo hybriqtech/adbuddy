@@ -62,6 +62,7 @@
     <string name="confirm_open_special">Abre ADBuddy para leer el aviso y permitirlo.</string>
     <string name="confirm_too_long">El comando es demasiado largo para enseñarlo entero: solo se puede rechazar.</string>
     <string name="confirm_scroll">Desplázate hasta el final para permitirlo</string>
+    <string name="confirm_waiting_show">Ver</string>
     <string name="action_open">Abrir</string>
     <plurals name="confirm_more">
         <item quantity="one">y %1$d más</item>
@@ -70,6 +71,10 @@
     <plurals name="confirm_hidden">
         <item quantity="one">%1$d carácter del comando no se muestra</item>
         <item quantity="other">%1$d caracteres del comando no se muestran</item>
+    </plurals>
+    <plurals name="confirm_waiting">
+        <item quantity="one">%1$d acción delicada espera tu respuesta</item>
+        <item quantity="other">%1$d acciones delicadas esperan tu respuesta</item>
     </plurals>
 
     <string name="consent_title">Configurar ADBuddy con %1$s</string>

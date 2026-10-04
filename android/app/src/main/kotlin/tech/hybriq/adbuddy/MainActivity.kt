@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
                         },
                     )
                 } else {
-                    ChatRoot(app, focusConfirm, closed) { closed = closed + it }
+                    ChatRoot(app, focusConfirm, closed, onReopen = { closed = closed - it }) { closed = closed + it }
                 }
             }
         }

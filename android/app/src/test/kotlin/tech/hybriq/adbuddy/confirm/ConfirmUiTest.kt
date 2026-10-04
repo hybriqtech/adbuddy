@@ -198,6 +198,25 @@ class ConfirmUiTest {
         assertEquals("j_2", ConfirmUi.question(open, focus = "j_1", now = now, closed = setOf("j_1"))?.id)
     }
 
+    @Test fun onlyClosedAndOpenQuestionsAreWaiting() {
+        val s = state(q("j_1"), q("j_2"), q("j_3"), q("j_4", expiresAt = "2026-09-30T09:59:00Z"), q("j_5"), answering = setOf("j_3"))
+        val closed = setOf("j_1", "j_3", "j_4", "j_5")
+        // j_2 is open but not closed, j_3 is on its way, j_4 expired: j_1 and j_5, in the order of pending.
+        assertEquals(listOf("j_1", "j_5"), ConfirmUi.closedWaiting(s, closed, now).map { it.id })
+        assertEquals(emptyList<String>(), ConfirmUi.closedWaiting(s, emptySet(), now).map { it.id })
+    }
+
+    @Test fun aClosedQuestionWithoutConnectionIsNotWaiting() {
+        val s = state(q("j_1"), connection = BridgeState.Connection.WAITING)
+        assertEquals(emptyList<String>(), ConfirmUi.closedWaiting(s, setOf("j_1"), now).map { it.id })
+    }
+
+    @Test fun aClosedQuestionNoLongerWaitsOnceItExpires() {
+        val s = state(q("j_1"))
+        assertEquals(1, ConfirmUi.closedWaiting(s, setOf("j_1"), now).size)
+        assertEquals(0, ConfirmUi.closedWaiting(s, setOf("j_1"), now + 60_000).size)
+    }
+
     @Test fun noQuestionNoDialog() {
         assertNull(ConfirmUi.question(state(), focus = "j_1", now = now))
     }

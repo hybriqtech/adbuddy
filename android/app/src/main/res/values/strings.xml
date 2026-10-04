@@ -63,6 +63,7 @@
     <string name="confirm_open_special">Open ADBuddy to read the warning and allow it.</string>
     <string name="confirm_too_long">The command is too long to show whole: it can only be denied.</string>
     <string name="confirm_scroll">Scroll to the end to allow it</string>
+    <string name="confirm_waiting_show">Show</string>
     <string name="action_open">Open</string>
     <plurals name="confirm_more">
         <item quantity="one">and %1$d more</item>
@@ -71,6 +72,10 @@
     <plurals name="confirm_hidden">
         <item quantity="one">%1$d character of the command is not shown</item>
         <item quantity="other">%1$d characters of the command are not shown</item>
+    </plurals>
+    <plurals name="confirm_waiting">
+        <item quantity="one">%1$d delicate action is waiting for your answer</item>
+        <item quantity="other">%1$d delicate actions are waiting for your answer</item>
     </plurals>
 
     <string name="consent_title">Set up ADBuddy with %1$s</string>
