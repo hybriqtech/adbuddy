@@ -51,6 +51,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -158,6 +159,7 @@ fun ConfirmDialog(
     status: ConfirmUi.Status,
     clock: HostClock,
     armed: Boolean,
+    now: Long = clock.now(),
     onClose: () -> Unit,
     onAnswer: (String) -> Unit,
 ) {
@@ -182,7 +184,8 @@ fun ConfirmDialog(
         },
         text = {
             ObscuredTouchGuard()
-            Column(Modifier.verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column {
+            Column(Modifier.weight(1f, fill = false).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (shown.warning) {
                     Text("⚠ " + stringResource(R.string.confirm_special), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                 }
@@ -202,12 +205,28 @@ fun ConfirmDialog(
                 }
                 Text(footer, style = MaterialTheme.typography.bodySmall)
             }
+            // Fixed lines, outside the part that scrolls: always in sight. No live region: it would be read out every second.
+            val left = if (status == ConfirmUi.Status.OPEN) ConfirmUi.secondsLeft(r, now) else null
+            if (left != null) {
+                val urgent = left < 10
+                Text(
+                    stringResource(R.string.confirm_expires_in, Formats.countdown(left)),
+                    modifier = Modifier.padding(top = 8.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (urgent) FontWeight.Bold else null,
+                    color = if (urgent) MaterialTheme.colorScheme.error else Color.Unspecified,
+                )
+            }
+            if (unread && Decision.ALLOW in decisions) {
+                Text(
+                    stringResource(R.string.confirm_scroll), style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            }
         },
         confirmButton = {
             Column {
-                if (unread && Decision.ALLOW in decisions) {
-                    Text(stringResource(R.string.confirm_scroll), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                }
                 if (Decision.ALLOW in decisions) {
                     TextButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread && armed) { Text(stringResource(R.string.action_allow)) }
                 }

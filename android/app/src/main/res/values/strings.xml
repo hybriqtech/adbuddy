@@ -56,6 +56,7 @@
     <string name="confirm_title">The agent wants to: %1$s</string>
     <string name="confirm_special">This may cut the connection with the PC or affect ADBuddy.</string>
     <string name="confirm_expires">Expires at %1$s</string>
+    <string name="confirm_expires_in">Expires in %1$s</string>
     <string name="confirm_sending">Answered: waiting for the PC</string>
     <string name="confirm_offline">No connection with the PC</string>
     <string name="confirm_expired">Expired: it can no longer be answered.</string>

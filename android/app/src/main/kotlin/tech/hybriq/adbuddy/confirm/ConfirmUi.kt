@@ -32,6 +32,13 @@ object ConfirmUi {
     }
 
     /**
+     * Whole seconds left until the question expires at [now] (the host's clock), rounded up as
+     * PermissionUi.secondsLeft (so "0:00" never shows with Allow still on), never below zero; null when it
+     * has no readable expiry.
+     */
+    fun secondsLeft(r: ConfirmRequest, now: Long): Long? = expiry(r)?.let { ((it - now + 999) / 1000).coerceAtLeast(0) }
+
+    /**
      * Whether the question can be answered at now. An answer on its way wins
      * (it left before the expiry); an unreadable expiry cannot be trusted to
      * be in the future, so it counts as expired; then the connection.

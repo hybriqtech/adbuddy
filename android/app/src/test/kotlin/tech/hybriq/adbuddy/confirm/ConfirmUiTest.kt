@@ -455,4 +455,21 @@ class ConfirmUiTest {
         assertEquals(setOf("j_9"), p.cancel)
         assertEquals(mapOf("j_1" to ConfirmUi.Status.OPEN), p.shown)
     }
+
+    // --- the countdown ---
+
+    @Test fun secondsLeftRoundsUpAndNeverGoesBelowZero() {
+        val r = q("j_1", expiresAt = "2026-09-30T10:00:42Z")
+        assertEquals(42L, ConfirmUi.secondsLeft(r, now))
+        assertEquals("41.2 s left shows 42", 42L, ConfirmUi.secondsLeft(r, now + 800))
+        val soon = q("j_1", expiresAt = "2026-09-30T10:00:00.400Z")
+        assertEquals("0.4 s left shows 1", 1L, ConfirmUi.secondsLeft(soon, now))
+        assertEquals(0L, ConfirmUi.secondsLeft(r, now + 42_000))
+        assertEquals("already expired", 0L, ConfirmUi.secondsLeft(r, now + 90_000))
+    }
+
+    @Test fun secondsLeftIsNullWhenTheExpiryCannotBeRead() {
+        assertNull(ConfirmUi.secondsLeft(q("j_1", expiresAt = "soon"), now))
+        assertNull(ConfirmUi.secondsLeft(q("j_1", expiresAt = ""), now))
+    }
 }

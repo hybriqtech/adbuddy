@@ -85,9 +85,18 @@ internal fun ConfirmHost(
         delay(ConfirmUi.ARMING_MS)
         armedFor = Arming(id, front, generation)
     }
+    // The seconds the dialog counts down: its own state, apart from `now` (status, canSend and the arming never read
+    // it). It moves each second while a question is open.
+    var displayNow by remember { mutableLongStateOf(clock.now()) }
+    LaunchedEffect(question?.id, open) {
+        while (open) {
+            displayNow = clock.now()
+            delay(1000)
+        }
+    }
     if (question != null && status != null) {
         val armedNow = armedFor == Arming(question.id, front, generation)
-        ConfirmDialog(question, status, clock, armed = armedNow, onClose = { onClose(question.id) }) { decision ->
+        ConfirmDialog(question, status, clock, armed = armedNow, now = displayNow, onClose = { onClose(question.id) }) { decision ->
             // The same rule as the notification buttons (ConfirmReceiver), with the
             // current state, time and arming, not those of this composition: a second
             // quick tap sees the first answer (answering), the delay stops while the
