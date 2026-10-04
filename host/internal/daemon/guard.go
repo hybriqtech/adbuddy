@@ -32,10 +32,13 @@ import (
 var foregroundWait = 3 * time.Second
 
 // focusSlack is how old a read of the system UI (the shade, the system windows)
-// may be when the guard uses it. The reads start together with inFront; if
-// inFront took longer than this (a slow or silent app), they are made again,
-// after it, as the guard did before it ran them in parallel. A variable for the
-// tests.
+// may be when the guard uses it. The age is measured from when the read
+// STARTED, not from when it ended: what a dumpsys shows is the state of its
+// start, and a read lasts about half a second. The reads start together with
+// inFront; if more than this went by since they started (a slow or silent app,
+// or a read that by itself lasts longer than this: it is then always repeated,
+// which is the strict side), they are made again, in series, after inFront, as
+// the guard did before it ran them in parallel. A variable for the tests.
 var focusSlack = 150 * time.Millisecond
 
 // screenReads are the commands that read the screen; the classifier marks
@@ -308,12 +311,13 @@ const (
 	powerCmd   = "dumpsys power"
 )
 
-// readResult is the answer of one of the guard's own dumpsys reads, and when it came.
+// readResult is the answer of one of the guard's own dumpsys reads, and when it
+// started (the state it shows is that of the start, not of the end).
 type readResult struct {
-	out  string
-	code int
-	err  error
-	done time.Time // when the read ended
+	out     string
+	code    int
+	err     error
+	started time.Time // just before the read was asked of adb
 }
 
 // guardReads are the reads the guard started in the background. The guard
@@ -331,8 +335,9 @@ func (g *guardReads) start(ctx context.Context, adb Executor, cmd string) <-chan
 	g.wg.Add(1)
 	go func() {
 		defer g.wg.Done()
+		started := time.Now()
 		out, code, err := adb.Shell(ctx, cmd)
-		ch <- readResult{out, code, err, time.Now()}
+		ch <- readResult{out, code, err, started}
 	}()
 	return ch
 }
@@ -454,19 +459,20 @@ func (d *Daemon) systemUIReason(ctx context.Context, viaApp, closing bool, focus
 }
 
 // freshRead is the answer of a read started in the background (ch; nil: none
-// was started), or a new read made now when it is older than focusSlack: the
-// guard never decides on a read that is older than it would have been before
-// the reads ran in parallel by more than that.
+// was started), or a new read made now when it started more than focusSlack
+// ago: the guard never decides on a state that is older than it would have been
+// before the reads ran in parallel by more than that.
 func (d *Daemon) freshRead(ctx context.Context, ch <-chan readResult, cmd string) readResult {
 	slack := focusSlack
 	if ch != nil {
 		r := <-ch
-		if time.Since(r.done) <= slack {
+		if time.Since(r.started) <= slack {
 			return r
 		}
 	}
+	started := time.Now()
 	out, code, err := d.o.ADB.Shell(ctx, cmd)
-	return readResult{out, code, err, time.Now()}
+	return readResult{out, code, err, started}
 }
 
 // screenOff reports whether dumpsys power says the screen is off.

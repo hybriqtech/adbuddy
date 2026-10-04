@@ -502,6 +502,26 @@ func TestGuardRereadsStaleReads(t *testing.T) {
 			t.Fatalf("the shade was read %d times, want 2", n)
 		}
 	})
+	t.Run("a read that lasts longer than focusSlack is read again", func(t *testing.T) {
+		// The state a dumpsys shows is that of when it started: the age is
+		// measured from there, not from when the read ended. The first read
+		// ends right before the guard uses it (quick app), but it lasted more
+		// than focusSlack.
+		shortSlack(t, slack)
+		g := quietPhone()
+		g.hooks[fixedFocusCmd] = func(_ context.Context, n int) {
+			if n == 0 {
+				time.Sleep(slack * 5)
+			}
+		}
+		g.answer(fixedFocusCmd, gateReply{out: focusApp}, gateReply{out: focusShade})
+		if why := gateDaemon(g, settingsApp()).guardForeground(context.Background(), tapWords); why != shadeOpen {
+			t.Fatalf("got %q", why)
+		}
+		if n := g.count(fixedFocusCmd); n != 2 {
+			t.Fatalf("the shade was read %d times, want 2", n)
+		}
+	})
 	t.Run("the system windows, behind a quick dumpsys", func(t *testing.T) {
 		shortSlack(t, time.Minute)
 		g := quietPhone()
