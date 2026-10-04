@@ -102,7 +102,7 @@ These are the commands of `adbuddy --help`; `adbuddy <command> --help` shows the
 | Command | What it does |
 |---|---|
 | `adbuddy setup` | Set up ADBuddy: adb, phone pairing and agent environment |
-| `adbuddy serve` | Run the ADBuddy host: journal and confirmations |
+| `adbuddy serve` | Run the ADBuddy host: live journal and confirmations |
 | `adbuddy run` | Start a coding agent in the ADBuddy environment |
 | `adbuddy attach` | Connect this terminal to the agent (Ctrl+] detaches) |
 | `adbuddy new` | Start a new conversation, with another agent if given |

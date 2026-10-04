@@ -166,14 +166,17 @@ Ninguna se pide al usuario ahora: el aviso de la pregunta del agente con la app 
 
 ### `--json`
 
-Solo gana campos: `journal` añade `total` y `truncated`, y el `fix` de un error de uso ahora nombra el comando. Ningún campo existente cambia ni desaparece; la salida de máquinas sigue en inglés.
+Solo gana campos: `journal` añade `total` y `truncated`, y el `fix` de un error de uso ahora nombra el comando (también cambia el `fix` del error de `setup` sin terminal, que es otro error de uso con arreglo propio). Ningún campo existente cambia ni desaparece; la salida de máquinas sigue en inglés.
 
 ### Aplazado con motivo
 
 Fuera de este plan (P6b, después): H2 (errores de cobra traducidos y sugerencias propias), H5 (`doctor` que imprime según avanza), H13 (colores y QR con `NO_COLOR`/redirección/Windows), H14 (`platformtools`: fuera de nuestro árbol), `Example` de `attach`/`new`/`send`/`stop`/`env`/`version` (H6), `Long` a ≤ 80 columnas con su test de ancho (H7) y los prefijos fijos `⚠ `/`⏳ ` de `serve.go:247-248` (H15).
 
+También aplazado: H4 sin «sugerencia de comandos parecidos» (va con H2, P6b) y H15: el `(default "auto")` de `--confirm` sigue sin traducir (lo añade pflag con texto fijo, fuera del catálogo).
+
 ### Notas honestas
 
+- El orden de los comandos dentro de cada grupo de la ayuda raíz es alfabético (doctor, serve, setup), no el del flujo, y el ejemplo de la raíz lleva la descripción en la misma línea (no copiable tal cual): mejorables en P6b.
 - H10 es solo texto y sigue lo que el código hace de verdad: `startPhoneLink` envuelve siempre el confirmador en el de la app, así que con la app conectada la 🔴 se pregunta en la app sea cual sea `--confirm`.
 - La fecha del `journal` es ISO, no localizada.
 - El `Short` de ciertos comandos perdió detalle para caber en 60 caracteres; ese detalle sube al `Long`.
@@ -183,7 +186,7 @@ Fuera de este plan (P6b, después): H2 (errores de cobra traducidos y sugerencia
 ### PARA EL CONTROLADOR DE INTEGRACIÓN Y `seguridad` (no se tocan aquí)
 
 - `docs/usage.md:~107` dice «`--confirm deny` refuses every red command without asking» y `docs/safety.md:~84` va en la misma línea. Es falso con el móvil conectado: `--confirm deny` SÍ pregunta en la app (solo deniega cuando la app no está conectada). Las dos frases hay que corregirlas.
-- Los cinco avisos `phone.*` que decían «confirmations happen here» ya están corregidos (`phone.confirmations_happen_here_without_the`, `phone.could_not_check_whether_the`, `phone.the_adbuddy_app_is_not`, `phone.the_phone_app_disconnected_confirmations`, `phone.could_not_reach_the_phone`): ahora dicen que las confirmaciones no llegarán al móvil hasta que se conecte.
+- Los cinco avisos `phone.*` que decían «confirmations happen here» ya están corregidos (`phone.confirmations_happen_here_without_the`, `phone.could_not_check_whether_the`, `phone.the_adbuddy_app_is_not`, `phone.the_phone_app_disconnected_confirmations`, `phone.could_not_reach_the_phone`): ahora dicen que las confirmaciones no llegarán al móvil. Solo el aviso de desconexión de la app (`phone.the_phone_app_disconnected_confirmations`) promete reconexión («hasta que se vuelva a conectar»), y `phone.could_not_reach_the_phone` dice «hasta que se conecte», cierto donde se emite; los otros tres (sin app, no se pudo comprobar, canal no disponible) no prometen nada, porque la app no se reconecta hasta reiniciar `serve`.
 
 ### Validaciones manuales pendientes
 

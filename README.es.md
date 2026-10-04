@@ -101,8 +101,8 @@ Son los comandos de `adbuddy --help` (el programa los describe en inglés; aquí
 
 | Comando | Qué hace |
 |---|---|
-| `adbuddy setup` | Configura ADBuddy: adb, emparejar el móvil y el entorno |
-| `adbuddy serve` | Ejecuta ADBuddy en el PC: diario y confirmaciones |
+| `adbuddy setup` | Configura ADBuddy: adb, emparejado y entorno del agente |
+| `adbuddy serve` | Ejecuta ADBuddy en el PC: diario en vivo y confirmaciones |
 | `adbuddy run` | Arranca un agente de código en el entorno de ADBuddy |
 | `adbuddy attach` | Conecta esta terminal al agente (Ctrl+] desconecta) |
 | `adbuddy new` | Empieza una conversación nueva, con otro agente si se indica |
@@ -111,7 +111,7 @@ Son los comandos de `adbuddy --help` (el programa los describe en inglés; aquí
 | `adbuddy undo` | Deshace los cambios del diario ejecutando sus inversos |
 | `adbuddy connect <ip:port>` | Conecta con el móvil por dirección IP y puerto |
 | `adbuddy remote` | Abre o cierra el puerto de red 5555 de adb (modo remoto) |
-| `adbuddy doctor` | Comprueba todo lo que ADBuddy necesita y cómo arreglarlo |
+| `adbuddy doctor` | Comprueba lo que ADBuddy necesita y explica cómo arreglarlo |
 | `adbuddy env` | Gestiona el entorno del agente |
 | `adbuddy screen` | Lista lo que hay en la pantalla del móvil y dónde tocar |
 | `adbuddy tap` | Toca un elemento de la pantalla por texto, id o punto |

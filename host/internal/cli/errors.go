@@ -67,7 +67,8 @@ func ConfigErrorT(code, key, fixKey string, args ...any) *Error {
 }
 
 // UsageErrorT is UsageError with a catalog key for the message; the fix is
-// always "Run `adbuddy --help` to see the usage." (error.usage_fix).
+// "Run `adbuddy --help` to see the usage." (error.usage_fix), which forCommand
+// replaces with the one of the command that failed.
 func UsageErrorT(key string, args ...any) *Error {
 	return errorT(ExitUsage, false, "USAGE", key, "error.usage_fix", args)
 }
