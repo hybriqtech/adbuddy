@@ -126,6 +126,11 @@
     <string name="link_open">Open</string>
     <string name="file_tap_download">Tap to download</string>
     <string name="file_downloading">Downloading… %1$d%%</string>
+    <string name="file_tap_cancel">Tap to cancel</string>
+    <string name="file_action_download">download the file</string>
+    <string name="file_action_cancel">cancel the download</string>
+    <string name="file_action_open">open the file</string>
+    <string name="file_action_retry">retry the download</string>
     <string name="file_open">Tap to open</string>
     <string name="file_failed">Download failed: tap to retry</string>
     <string name="remote_title">Remote mode</string>

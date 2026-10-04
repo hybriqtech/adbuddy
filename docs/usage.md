@@ -91,7 +91,7 @@ adbuddy stop
 
 When the agent runs a command ADBuddy ranks red, it holds the command until you answer. The agent waits.
 
-- **App connected:** the question appears on the phone as a notification with **Allow**, **Deny** and, when the host offers it, **Allow during the session**. The app shows the same question as a dialog when it is open. The phone must be unlocked to allow; Deny always works.
+- **App connected:** the question appears on the phone as a notification with **Allow**, **Deny** and, when the host offers it, **Allow during the session**. The app shows the same question as a dialog when it is open. The phone must be unlocked to allow, and Allow waits 600 ms from when the question appears; Deny always works, at once.
 - **No app connected:** the question appears in the `adbuddy serve` terminal, similar to this (a `Why:` line follows when there is a reason):
 
   ```text
@@ -106,7 +106,7 @@ When the agent runs a command ADBuddy ranks red, it holds the command until you 
 
 Unanswered questions expire after 2 minutes (`confirm_timeout` in `config.toml`) and count as a no. The agent gets `Denied by user: …` and exit code 126, and is told not to retry.
 
-`adbuddy serve --confirm deny` refuses every red command without asking. Use it when nobody is there to answer.
+The `--confirm` option of `adbuddy serve` (`auto`, `terminal` or `deny`) only says where a red command is asked when the phone app is **not** connected. With the app connected the question always goes to the phone, whatever the option, and you can allow it there. `--confirm deny` refuses the red commands that arrive while the app is not connected, and the ones still waiting on the phone when it disconnects, without asking: use it when nobody is at the PC terminal.
 
 ## The app on the phone
 

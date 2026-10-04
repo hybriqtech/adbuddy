@@ -18,6 +18,13 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels the run it supersedes (one group per
+# workflow and ref). A push to main gets a group of its own (the run id) and
+# never cancels, nor is cancelled by, anything: main and tags are never cut.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   unit:
     # Fork pull requests never reach a self-hosted runner.
@@ -47,7 +54,7 @@ jobs:
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" "platforms;android-37.0"
-      - name: "Unit tests, debug build, lint, and the instrumented tests compile (emulator.yml runs them)"
+      - name: "Unit tests, debug build, lint, and the instrumented tests compile (emulator-app.yml runs them)"
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest
       # The screen tests' golden images that came out different (android/README.md, "Screen tests"): verify fails on
       # Windows, compare only reports elsewhere, so it is said in the run's summary too. The folder exists only when

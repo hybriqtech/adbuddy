@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.LinkAnnotation
@@ -141,6 +142,7 @@ fun ChatHeader(
                     Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.action_menu))
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    ObscuredTouchGuard()
                     PauseButton.of(state)?.let { button ->
                         DropdownMenuItem(
                             text = { Text(stringResource(button.text)) },
@@ -261,11 +263,19 @@ fun AttachmentCard(a: Attachment, state: DownloadState?, onTap: () -> Unit) {
             null
         }
     }
+    val tapLabel = stringResource(
+        when (state) {
+            null -> R.string.file_action_download
+            is DownloadState.Running -> R.string.file_action_cancel
+            is DownloadState.Done -> R.string.file_action_open
+            is DownloadState.Failed -> R.string.file_action_retry
+        },
+    )
     Surface(
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onTap),
+        modifier = Modifier.fillMaxWidth().clickable(onClickLabel = tapLabel, role = Role.Button, onClick = onTap),
     ) {
         Column {
             if (thumb != null) {
@@ -280,6 +290,7 @@ fun AttachmentCard(a: Attachment, state: DownloadState?, onTap: () -> Unit) {
                         val p = if (state.size > 0) (state.done.toFloat() / state.size).coerceIn(0f, 1f) else 0f
                         LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
                         Text(stringResource(R.string.file_downloading, (p * 100).toInt()), style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.file_tap_cancel), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     }
                     is DownloadState.Done -> Text(stringResource(R.string.file_open), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     // The host's own text when it refused; a lost connection has none, and tapping goes on.
@@ -344,6 +355,7 @@ fun InputBar(
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.chat_attach)) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                ObscuredTouchGuard()
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_photo)) }, onClick = { menu = false; onPhoto() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_file)) }, onClick = { menu = false; onFile() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_capture)) }, onClick = { menu = false; onCapture() })
@@ -363,11 +375,15 @@ fun InputBar(
     }
 }
 
-/** Esc, Ctrl+C, up, down, Tab, Enter, 1, 2, 3 (QuickKey.entries), horizontally scrollable. */
+/**
+ * Esc, Ctrl+C, up, down, Tab, Enter, 1, 2, 3 (QuickKey.entries), horizontally scrollable. Each key refuses a tap while
+ * another app's window covers it ("1" would answer "1. Yes" to the agent's permission prompt on the PC); the rest of
+ * the chat keeps working under the overlay.
+ */
 @Composable
 fun QuickKeysRow(onKey: (QuickKey) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (k in QuickKey.entries) AssistChip(onClick = { onKey(k) }, label = { Text(k.label) })
+        for (k in QuickKey.entries) AssistChip(onClick = { onKey(k) }, modifier = Modifier.refuseObscuredTouches(), label = { Text(k.label) })
     }
 }
 
@@ -377,7 +393,10 @@ fun LinkDialog(url: String, domain: String, onOpen: () -> Unit, onDismiss: () ->
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.link_open_title, domain), fontWeight = FontWeight.Bold) },
-        text = { Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis) },
+        text = {
+            ObscuredTouchGuard()
+            Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis)
+        },
         confirmButton = { TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )

@@ -207,7 +207,7 @@ func TestTheStatusBarWithAQuestionWaiting(t *testing.T) {
 		ID: "j_guard", Level: "red", Title: "Restart the phone", Detail: "may restart",
 		RawCommand: "adb shell reboot", ExpiresAt: time.Now().Add(2 * time.Minute).UTC(),
 	})
-	e.atCleanup(t, "shell", "cmd statusbar collapse")
+	e.cleanStateAtCleanup(t)
 	if !poll(20*time.Second, func() bool {
 		return notificationRecord(e.shell(t, "dumpsys notification --noredact"), phoneapp.Package, "confirm") != ""
 	}) {

@@ -9,6 +9,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsNodeInteractionsProvider
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.text.TextLayoutResult
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -16,7 +17,7 @@ import org.junit.Assert.assertTrue
 import org.junit.rules.ExternalResource
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
-import tech.hybriq.adbuddy.R
+import tech.hybriq.adbuddy.ui.TOP_BAR_TAG
 
 /** The phone the screens are drawn on: a Pixel-sized portrait screen, at 1.5x so the golden images stay small. */
 const val PHONE = "w411dp-h891dp-hdpi"
@@ -68,27 +69,26 @@ fun SemanticsNodeInteractionsProvider.shot(name: String, mode: ScreenMode) {
 }
 
 /**
- * Known UI faults that the screen tests show and this plan does not fix (they belong to the app): per mode, the string
+ * Known UI faults that the screen tests show and are not fixed yet (they belong to the app): per mode, the string
  * resources of the titles that do not fit the top bar. The check lets them through and fails once one fits, so the
- * entry goes with the fix.
- * - access_title at 200 % in Spanish: "Acceso a las notificaciones" takes two lines (89 dp) in the 64 dp top bar and
- *   sticks out below it (validation 27 of M5c).
+ * entry goes with the fix. None today: AdbuddyTopBar closed the one there was (access_title at 200 % in Spanish).
  */
-val KNOWN_UI_ISSUES: Map<ScreenMode, Set<Int>> get() = mapOf(ScreenMode.FONT_200_ES to setOf(R.string.access_title))
+val KNOWN_UI_ISSUES: Map<ScreenMode, Set<Int>> get() = emptyMap()
 
 fun knownUiIssue(id: Int, mode: ScreenMode): Boolean = id in KNOWN_UI_ISSUES[mode].orEmpty()
 
 /**
- * Material 3's TopAppBar is 64 dp high and does not clip its title: a title taller than that (two lines at 200 %)
- * sticks out of the bar, which no other check sees (the text itself is whole and touches nothing). known: the title
- * is in KNOWN_UI_ISSUES, so it must still stick out (a failure tells to remove the entry).
+ * The title must not stick out of the top bar that is drawn (the node tagged TOP_BAR_TAG, not a constant): Material 3's
+ * TopAppBar does not clip its title, and no other check sees it (the text itself is whole and touches nothing). known:
+ * the title is in KNOWN_UI_ISSUES, so it must still stick out (a failure tells to remove the entry).
  */
 fun SemanticsNodeInteractionsProvider.assertTitleFitsTheTopBar(title: String, known: Boolean = false) {
     val node = onAllNodes(hasText(title), useUnmergedTree = true).fetchSemanticsNodes().minBy { it.positionInRoot.y }
-    val bar = 64 * RuntimeEnvironment.getApplication().resources.displayMetrics.density
+    val barNode = onNodeWithTag(TOP_BAR_TAG, useUnmergedTree = true).fetchSemanticsNode()
+    val bar = barNode.positionInRoot.y + barNode.size.height
     val bottom = node.positionInRoot.y + node.size.height
     if (known) assertTrue("known issue gone: \"$title\" fits the top bar now; remove it from KNOWN_UI_ISSUES", bottom > bar + 0.5f)
-    else assertTrue("title sticks out of the 64 dp top bar: \"$title\" ends at $bottom px, the bar at $bar px", bottom <= bar + 0.5f)
+    else assertTrue("title sticks out of the top bar: \"$title\" ends at $bottom px, the bar at $bar px", bottom <= bar + 0.5f)
 }
 
 private fun SemanticsNode.texts(): List<String> = config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }

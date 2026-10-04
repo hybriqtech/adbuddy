@@ -198,22 +198,37 @@ class ListenerIsReadOnlyTest {
     }
 
 
-    /** The clearing must be the FIRST statement of the body: not inside an `if`, nor behind a `return`. */
-    private val clearsFirst = Regex("^\\{\\s*NotificationGate\\.onUnbound\\s*\\{[^}]*NotificationConsent\\.of\\(this\\)\\.revoke\\(\\)[^}]*}")
-    private fun clearsTheMarkFirst(body: String) = clearsFirst.containsMatchIn(body)
+    /**
+     * The clearing must be the FIRST statement of the body: not inside an `if`, nor behind a `return`, nor (on a
+     * connection) behind `current = this` or `_connected.value = true`, which make the listener visible to the gate.
+     * [via] is NotificationGate's function for that moment: onConnected or onUnbound.
+     */
+    private fun clearsFirst(via: String) = Regex("^\\{\\s*NotificationGate\\.$via\\s*\\{[^}]*NotificationConsent\\.of\\(this\\)\\.revoke\\(\\)[^}]*}")
+    private fun clearsTheMarkFirst(body: String, via: String = "onUnbound") = clearsFirst(via).containsMatchIn(body)
 
-    @Test fun theListenerClearsTheUsersMarkWhenTheSystemUnbindsIt() {
+    /** Each method of the listener's lifecycle and the gate's function it must clear the mark through, first. */
+    private val clearing = mapOf(
+        "onListenerConnected" to "onConnected",
+        "onListenerDisconnected" to "onUnbound",
+        "onDestroy" to "onUnbound",
+    )
+
+    @Test fun theListenerClearsTheUsersMarkWhenTheSystemBindsOrUnbindsIt() {
         // Revoking the access unbinds the service: the mark goes at once, even if nobody is looking (the gate and the
-        // screen only see the revoke when asked, and the agent could turn the switch back on before that).
+        // screen only see the revoke when asked, and the agent could turn the switch back on before that). And the
+        // system may bind it again without unbinding it first (M5c-32 b: a restart it had scheduled, with the app dead
+        // when the access was revoked): every new binding clears it too, before the listener can be read.
         val src = code(File(dir, "AgentNotificationListener.kt"))
-        for (name in listOf("onListenerDisconnected", "onDestroy")) {
-            assertTrue("$name does not clear the mark first", clearsTheMarkFirst(body(src, name)))
+        for ((name, via) in clearing) {
+            assertTrue("$name does not clear the mark first (NotificationGate.$via)", clearsTheMarkFirst(body(src, name), via))
         }
     }
 
     @Test fun theClearingMustBeTheFirstStatementOfTheBody() {
         val fine = "{ // comment\n NotificationGate.onUnbound { NotificationConsent.of(this).revoke() }\n if (x) {} }"
         assertTrue(clearsTheMarkFirst(code(fine)))
+        val connected = "{ NotificationGate.onConnected { NotificationConsent.of(this).revoke() }\n current = this\n _connected.value = true }"
+        assertTrue(clearsTheMarkFirst(code(connected), "onConnected"))
         val bad = listOf(
             "{ if (current === this) { NotificationGate.onUnbound { NotificationConsent.of(this).revoke() } } }",
             "{ if (x) return\n NotificationGate.onUnbound { NotificationConsent.of(this).revoke() } }",
@@ -222,6 +237,15 @@ class ListenerIsReadOnlyTest {
             "{ NotificationGate.onUnbound { } }",
         )
         for (b in bad) assertFalse(b, clearsTheMarkFirst(code(b)))
+        val badConnected = listOf(
+            "{ current = this\n NotificationGate.onConnected { NotificationConsent.of(this).revoke() } }",
+            "{ _connected.value = true; NotificationGate.onConnected { NotificationConsent.of(this).revoke() } }",
+            "{ NotificationGate.onConnected { } }",
+            "{ if (x) return\n NotificationGate.onConnected { NotificationConsent.of(this).revoke() } }",
+            // The other moment's function does not count.
+            "{ NotificationGate.onUnbound { NotificationConsent.of(this).revoke() }\n current = this }",
+        )
+        for (b in badConnected) assertFalse(b, clearsTheMarkFirst(code(b), "onConnected"))
     }
 
     // UiHelpers is exempt from the white list above (it does the wiring), so its use is pinned exactly here: the class
