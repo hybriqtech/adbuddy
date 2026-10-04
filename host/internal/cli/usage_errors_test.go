@@ -8,6 +8,7 @@ import (
 
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n/i18ntest"
+	"github.com/spf13/cobra"
 )
 
 // cobraTexts are strings that only cobra and pflag write; none may reach a person.
@@ -82,7 +83,7 @@ func TestUsageErrorsArgCounts(t *testing.T) {
 	}{
 		{[]string{"connect"}, "connect admite 1 argumento, recibió 0"},
 		{[]string{"connect", "a", "b", "c"}, "connect admite 1 argumento, recibió 3"},
-		{[]string{"new", "a", "b", "c"}, "new admite como máximo"},
+		{[]string{"new", "a", "b"}, "new admite como máximo 1 argumento, recibió 2"},
 	} {
 		exit, _, es := runCLI(t, tc.args...)
 		if exit != 2 || !strings.Contains(es, tc.want) {
@@ -91,16 +92,52 @@ func TestUsageErrorsArgCounts(t *testing.T) {
 		noCobra(t, es)
 	}
 	i18ntest.Lang(t, i18n.EN)
-	_, _, en := runCLI(t, "new", "a", "b", "c")
-	if !strings.Contains(en, "new takes at most") {
+	_, _, en := runCLI(t, "new", "a", "b")
+	if !strings.Contains(en, "Error: USAGE — new takes at most 1 argument, got 2") {
 		t.Errorf("EN: %q", en)
 	}
-	// The plural is chosen by N: a command with an exact count above one would say "arguments";
-	// MaximumNArgs(1) with 3 given shows both forms exist in the catalog.
-	for _, k := range []string{"err.usage.args_exact.one", "err.usage.args_exact.other", "err.usage.args_at_most.one", "err.usage.args_at_most.other"} {
-		if !i18n.Has(k) {
-			t.Errorf("missing %s", k)
+}
+
+// The plural forms no real command uses (exact 2, at most 2) are checked directly.
+func TestUsageErrorsPluralForms(t *testing.T) {
+	root := NewRoot(&App{})
+	cmd, _, err := root.Find([]string{"connect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		in, en, es string
+	}{
+		{"accepts 2 arg(s), received 0", "connect takes 2 arguments, got 0", "connect admite 2 argumentos, recibió 0"},
+		{"accepts 1 arg(s), received 3", "connect takes 1 argument, got 3", "connect admite 1 argumento, recibió 3"},
+		{"accepts at most 2 arg(s), received 5", "connect takes at most 2 arguments, got 5", "connect admite como máximo 2 argumentos, recibió 5"},
+		{"accepts at most 1 arg(s), received 4", "connect takes at most 1 argument, got 4", "connect admite como máximo 1 argumento, recibió 4"},
+	} {
+		e := translateArgsError(root, cmd, errors.New(tc.in))
+		if e == nil {
+			t.Fatalf("%q not translated", tc.in)
 		}
+		if got := msgIn(e, i18n.EN); got != tc.en {
+			t.Errorf("EN %q: %q, want %q", tc.in, got, tc.en)
+		}
+		if got := msgIn(e, i18n.ES); got != tc.es {
+			t.Errorf("ES %q: %q, want %q", tc.in, got, tc.es)
+		}
+	}
+}
+
+func TestUsageErrorsQuotedArgumentIsNotEscapedTwice(t *testing.T) {
+	root := NewRoot(&App{})
+	e := translateArgsError(root, root, errors.New(`unknown command "serv\"x" for "adbuddy"`))
+	if e == nil {
+		t.Fatal("not translated")
+	}
+	if got, want := e.Message, `unknown command "serv\"x": did you mean "serve"?`; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	e = translateArgsError(root, root, errors.New(`unknown command "doc\"x" for "adbuddy journal"`))
+	if got, want := e.Message, `journal takes no arguments (got "doc\"x")`; got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -148,10 +185,28 @@ func TestSuggestCommand(t *testing.T) {
 			t.Errorf("suggestCommand(%q) = %q, want %q", name, got, want)
 		}
 	}
-	// Equal length: the alphabetically first. "s" prefix candidates of equal length do not exist
-	// among real commands, so check the edit-distance tie too: "tyle" is 1 from "type"; 2+ letters only.
-	if got := suggestCommand(root, "stap"); got != "stop" && got != "setup" && got != "" {
-		t.Errorf("stap: %q", got)
+	synth := func(names ...string) *cobra.Command {
+		r := &cobra.Command{Use: "x"}
+		for _, n := range names {
+			r.AddCommand(&cobra.Command{Use: n, Run: func(*cobra.Command, []string) {}})
+		}
+		return r
+	}
+	for _, tc := range []struct {
+		names []string
+		in    string
+		want  string
+	}{
+		{[]string{"abcd", "abc", "abce"}, "ab", "abc"}, // prefix: the shortest
+		{[]string{"abd", "abc", "abe"}, "ab", "abc"},   // prefix, same length: alphabetical
+		{[]string{"aab", "aaa"}, "aac", "aaa"},         // edit distance 1 for both: alphabetical
+		{[]string{"zzzz", "aaaa"}, "aabb", "aaaa"},     // closest by distance (2) wins
+		{[]string{"aaaa"}, "bbbb", ""},                 // too far
+		{[]string{"aaaa"}, "a", ""},                    // one letter: no prefix; distance 3 is too far
+	} {
+		if got := suggestCommand(synth(tc.names...), tc.in); got != tc.want {
+			t.Errorf("%v %q: %q, want %q", tc.names, tc.in, got, tc.want)
+		}
 	}
 }
 
@@ -176,7 +231,12 @@ func TestUsageErrorsHelpTopic(t *testing.T) {
 		t.Errorf("help zzzzz: %q", en)
 	}
 	_, _, en = runCLI(t, "tap")
-	if !strings.Contains(en, "USAGE") {
+	if !strings.Contains(en, "Error: USAGE — tap needs exactly one of a text, --id or --xy") {
 		t.Errorf("tap: %q", en)
 	}
+}
+
+func msgIn(e *Error, lang i18n.Lang) string {
+	m, _ := e.in(lang)
+	return m
 }

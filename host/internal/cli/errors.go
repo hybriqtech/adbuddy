@@ -242,6 +242,10 @@ func translateArgsError(root, cmd *cobra.Command, err error) *Error {
 	msg := err.Error()
 	short := func(path string) string { return strings.TrimPrefix(path, root.CommandPath()+" ") }
 	if m := unknownCommandRe.FindStringSubmatch(msg); m != nil {
+		// cobra wrote the argument with %q; UsageErrorT quotes it again.
+		if u, err := strconv.Unquote(`"` + m[1] + `"`); err == nil {
+			m[1] = u
+		}
 		if m[2] == root.CommandPath() {
 			if s := suggestCommand(root, m[1]); s != "" {
 				return UsageErrorT("err.usage.unknown_command_suggest", m[1], s)
