@@ -25,3 +25,12 @@ Rama `perf/latencia`, worktree `C:/Users/Jose/orca/workspaces/adbuddy/latencia`.
 - Ruling: `settleMin` 400 ms (dos lecturas iguales antes no cuentan) — una transición lenta enseña dos veces la pantalla vieja — cuesta ~0,5 s por `--screen` aunque la pantalla se asiente al instante; revisar con el dispositivo.
 - Medidas antes/después en `2026-10-03-latencia.md`: turnos 6,4 → 3,8; total 11,8 → 10,0 s (teléfono falso; ruido ±3 s).
 - Pendiente: dispositivo (P4 guarda en paralelo, P5 foreground ligero, ajuste de settle*) cuando haya cupo de emulador; fila para pendientes en `docs/superpowers/fragmentos/perf-latencia.md`.
+
+## settle2 (perf/latencia): la espera de `--screen` con pantalla de partida
+
+- Motivo (medido en emulador, `TestLatencySettle`): primer cambio de pantalla a 520-1100 ms (máx. 1,7 s) y la app dice «protegida» en el 39 % de las lecturas tras Atrás. `settleMin` 400 ms daba por asentada la pantalla vieja (riesgo de tap repetido) y los bloqueos transitorios salían como bloqueo.
+- Revisión opus del plan: no conforme a la primera (2 críticos: la lectura de partida debilitaba pausa y guarda inmediata de la acción; `Changed` falso con partida desconocida invitaba a repetir), todo incorporado. Diff d259ca3: conforme con 5 menores; arreglos 26e36dd; re-revisión acotada conforme.
+- Ruling: la lectura de partida va solo por la app (`callApp` + `checkResult`), no por `runUI` — con `ErrNoApp` o timeout `runUI` caía a `dumpsys accessibility` + `uiautomator` (~2 s, más que el tope de 1 s) dejando un dump en marcha en el móvil — cuesta: sin app no hay comprobación de «protegida» en la partida; la guarda de la acción sigue cubriéndolo y con `Changed` nil (desconocido) la espera cierra solo por `settleIdle`.
+- Ruling: `Changed` nil = desconocido, nunca «no cambió»; el CLI avisa «no cambió» solo con falso — un aviso falso invitaría a repetir el tap — cuesta: una partida que falla alarga la espera a `settleIdle` (2 s).
+- Ruling: los bloqueos de la guarda y los `UI_PROTECTED` del dump se reintentan hasta `settleBlockWait` (2 s); pausa y pregunta 🔴 no — es lo que cura el bloqueo espurio tras una transición — cuesta: un bloqueo real avisa a los ~2 s en vez de al instante; cada intento pasa la guarda completa y no se devuelve nada leído antes de un bloqueo.
+- Pendiente: S2 en el emulador (prueba escrita: `screen_after_test.go`, 804d788d) y el hueco estable para calibrar `settleQuiet` (350 ms por defecto).
