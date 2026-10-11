@@ -155,8 +155,9 @@ func TestTheNoticeWhenTheHostReadsTheScreen(t *testing.T) {
 	if exit.Code != 0 {
 		t.Fatalf("adbuddy screenshot: %+v", exit)
 	}
-	pill := e.waitOverlay(t)
-	t.Logf("screenshot %s: the overlay is up, the pill at %v", data, pill)
+	// The overlay hides after 4 s, so on a slow emulator it may be gone once
+	// the command is done: only logged, edgeDiffers is the proof.
+	t.Logf("screenshot %s: overlay windows after the command: %v", data, e.overlayWindows(t))
 	if n := edgeDiffers(plain, decodePNG(t, img)); n == 0 {
 		t.Error("the screenshot's edges are those of the screen without the overlay: the frame was not up during the capture")
 	} else {
@@ -181,6 +182,7 @@ func TestTheNoticeWhenTheHostReadsTheScreen(t *testing.T) {
 	}) {
 		t.Fatal("the app does not take itself as paused 10 s after session.state paused")
 	}
+	e.overlayGone(t, "after the paused probe")
 	for _, c := range []struct {
 		name, op, code string
 		args           any
