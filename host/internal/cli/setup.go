@@ -87,6 +87,9 @@ func newSetupCmd(app *App) *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			go func() { <-ctx.Done(); stop() }()
+			// Before drawing anything: the QR code needs escape sequences.
+			restoreVT, vt := enableVTOK(asFile(app.Stderr))
+			defer restoreVT()
 			err := func() error {
 				if app.Getenv("ADBUDDY_SOURCE") == "agent" {
 					return NewErrorT("AGENT_SESSION", "err.setup.agent_session", "err.setup.agent_session.fix")
@@ -120,7 +123,7 @@ func newSetupCmd(app *App) *cobra.Command {
 						return "", ctx.Err()
 					case a := <-ch:
 						if a.err != nil && a.line == "" {
-							return "", UsageErrorT("err.setup.usage_no_answer_on_stdin")
+							return "", errorT(ExitUsage, false, "USAGE", "err.setup.usage_no_answer_on_stdin", "err.setup.usage_no_answer_on_stdin.fix", nil)
 						}
 						return strings.TrimSpace(a.line), nil
 					}
@@ -207,7 +210,7 @@ func newSetupCmd(app *App) *cobra.Command {
 
 				// 3-4. Guide and pairing.
 				if serial == "" {
-					guid, err = pair(ctx, app, runner, useCode, ask, say)
+					guid, err = pair(ctx, app, runner, useCode, vt, ask, say)
 					if err != nil {
 						return err
 					}
@@ -373,17 +376,21 @@ func repositoryURL(app *App) string {
 	return platformtools.RepositoryURL
 }
 
-func colorOK(app *App) bool {
-	return app.Getenv("NO_COLOR") == "" && app.Getenv("TERM") != "dumb"
+// qrStyle says whether the QR code is drawn with escape sequences (white
+// background, black modules): only on a terminal that processes them. The QR
+// is functional, so NO_COLOR does not turn it off. vt is false when the
+// Windows console could not be switched to virtual terminal mode.
+func qrStyle(app *App, vt bool) bool {
+	return isTerminal(app.Stderr) && app.Getenv("TERM") != "dumb" && vt
 }
 
 // pairingCodeRe is the code the phone shows in "Pair device with pairing code".
 var pairingCodeRe = regexp.MustCompile(`^[0-9]{6}$`)
 
 // pair shows the guide and pairs by QR code or by code.
-func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask func(string) (string, error), say func(string, ...any)) (string, error) {
+func pair(ctx context.Context, app *App, runner adb.Runner, useCode, vt bool, ask func(string) (string, error), say func(string, ...any)) (string, error) {
 	fmt.Fprint(app.Stderr, phoneGuideIn(app.speaks(), useCode))
-	if art, err := pairing.RenderQR(HelpURL, colorOK(app)); err == nil {
+	if art, err := pairing.RenderQR(HelpURL, qrStyle(app, vt)); err == nil {
 		fmt.Fprint(app.Stderr, art)
 	}
 	fmt.Fprintf(app.Stderr, "%s\n\n", HelpURL)
@@ -412,7 +419,7 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 	if err != nil {
 		return "", NewError("PAIRING_FAILED", err.Error(), "")
 	}
-	art, err := pairing.RenderQR(q.Payload(), colorOK(app))
+	art, err := pairing.RenderQR(q.Payload(), qrStyle(app, vt))
 	if err != nil {
 		return "", NewError("PAIRING_FAILED", err.Error(), "")
 	}

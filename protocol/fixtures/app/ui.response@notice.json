@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "type": "ui.response",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "u_7",
+    "ok": true,
+    "result": {}
+  }
+}

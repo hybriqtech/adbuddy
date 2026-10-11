@@ -20,6 +20,11 @@
     <string name="notif_capture_failed">Could not take the screenshot</string>
     <string name="notif_cut_failed">Could not cut ADB access</string>
     <string name="channel_confirm">Confirmations</string>
+    <string name="channel_ask">Agent questions</string>
+    <string name="channel_ask_description">Tells you when the agent asks your permission, so you can answer in time.</string>
+    <string name="channel_conversation_description">The ongoing notification with the conversation and its buttons.</string>
+    <string name="channel_done_description">Tells you when the agent has finished.</string>
+    <string name="channel_confirm_description">Questions about risky commands, with Allow and Deny.</string>
     <string name="status_connected">Connected to %1$s</string>
     <string name="status_connecting">Connecting to the PC…</string>
     <string name="status_waiting">Waiting for the PC (run adbuddy serve)</string>
@@ -27,10 +32,20 @@
     <string name="status_update_app">This app is too old for the ADBuddy on your PC: install a newer build with adbuddy setup --apk &lt;file&gt; on the PC (plain setup does not replace an installed app)</string>
     <string name="status_update_host">The ADBuddy on your PC is too old for this app: update it on the PC</string>
     <string name="status_cut">ADB access is cut</string>
+    <string name="status_not_set_up">This phone is not set up yet: on the PC, run adbuddy setup</string>
+    <string name="status_short_cut">Access cut</string>
+    <string name="status_short_update">Update needed</string>
+    <string name="status_short_connecting">Connecting…</string>
+    <string name="status_short_waiting">Waiting for the PC</string>
+    <string name="status_short_paused">Paused</string>
+    <string name="status_short_not_set_up">Not set up</string>
+    <string name="status_short_connected">Connected</string>
+    <string name="notifications_blocked">ADBuddy\'s notifications are off or silenced: you will not be told when the agent asks you something. Turn them on in the system settings.</string>
+    <string name="notifications_open_settings">Settings</string>
 
     <string name="action_allow">Allow</string>
     <string name="action_deny">Deny</string>
-    <string name="action_allow_session">Allow during the session</string>
+    <string name="action_allow_session">Allow this same command during the session</string>
     <string name="action_pause">Pause</string>
     <string name="action_resume">Resume</string>
     <string name="action_cut">Cut access</string>
@@ -41,6 +56,7 @@
     <string name="confirm_title">The agent wants to: %1$s</string>
     <string name="confirm_special">This may cut the connection with the PC or affect ADBuddy.</string>
     <string name="confirm_expires">Expires at %1$s</string>
+    <string name="confirm_expires_in">Expires in %1$s</string>
     <string name="confirm_sending">Answered: waiting for the PC</string>
     <string name="confirm_offline">No connection with the PC</string>
     <string name="confirm_expired">Expired: it can no longer be answered.</string>
@@ -48,6 +64,7 @@
     <string name="confirm_open_special">Open ADBuddy to read the warning and allow it.</string>
     <string name="confirm_too_long">The command is too long to show whole: it can only be denied.</string>
     <string name="confirm_scroll">Scroll to the end to allow it</string>
+    <string name="confirm_waiting_show">Show</string>
     <string name="action_open">Open</string>
     <plurals name="confirm_more">
         <item quantity="one">and %1$d more</item>
@@ -57,25 +74,38 @@
         <item quantity="one">%1$d character of the command is not shown</item>
         <item quantity="other">%1$d characters of the command are not shown</item>
     </plurals>
+    <plurals name="confirm_waiting">
+        <item quantity="one">%1$d delicate action is waiting for your answer</item>
+        <item quantity="other">%1$d delicate actions are waiting for your answer</item>
+    </plurals>
 
     <string name="consent_title">Set up ADBuddy with %1$s</string>
     <string name="consent_intro">The PC \"%1$s\" asks to finish setting up ADBuddy. If you accept, it will:</string>
     <string name="consent_grant">Give ADBuddy the permission to change secure settings, used to cut and restore the PC\'s adb access from the phone.</string>
     <string name="consent_battery">Exempt ADBuddy from battery optimisation, so the channel with the PC stays open.</string>
-    <string name="consent_a11y">Turn on ADBuddy\'s accessibility service, keeping any other one you use.</string>
+    <string name="consent_a11y">Turn on ADBuddy\'s accessibility service: it lets the agent read the screen, tap and type on it, showing a frame and a Pause button while it acts, and never in ADBuddy or in protected apps. Any other service you use stays on.</string>
     <string name="consent_note">ADBuddy itself sends nothing outside: the PC and the phone talk through the adb connection you paired. What the coding agent reads goes wherever that agent sends it.</string>
     <string name="consent_accept">Accept</string>
     <string name="consent_decline">Not now</string>
     <string name="consent_done">Done. You can go back to the PC.</string>
+    <string name="consent_done_steps">Done. Two quick steps remain here; then go back to the PC.</string>
+    <string name="consent_declined">Nothing was set up. To try again, run adbuddy setup on the PC.</string>
 
     <string name="home_title" translatable="false">ADBuddy</string>
     <string name="home_activity">Activity</string>
     <string name="home_empty">Nothing yet. Every adb command of the agent will appear here.</string>
+    <string name="chat_empty_ready">Write to the agent below. Risky commands ask for your confirmation.</string>
     <string name="cut_done">Debugging is off: the PC cannot reach the phone.</string>
     <string name="cut_restored">Debugging is back on. If remote mode was on, its network port stays open until the PC connects or the phone restarts.</string>
     <string name="cut_failed">Debugging could not be turned off. Turn off USB debugging and wireless debugging in Developer options.</string>
     <string name="restore_failed">Debugging could not be turned back on. Turn it on in Developer options.</string>
     <string name="filter_all">All</string>
+    <string name="level_green">Safe</string>
+    <string name="level_yellow">Caution</string>
+    <string name="level_red">Delicate</string>
+    <string name="level_chip">%1$s %2$s</string>
+    <string name="activity_filter_empty">Nothing at this level yet.</string>
+    <string name="activity_undo_hint">Undo it on the PC: adbuddy undo %1$s</string>
     <string name="overlay_pill">Agent using the screen · Pause</string>
 
     <string name="action_cancel">Cancel</string>
@@ -87,12 +117,14 @@
     <string name="session_stopped">Stopped</string>
     <string name="chat_hint">Message the agent</string>
     <string name="chat_send">Send</string>
+    <string name="chat_stop">Stop</string>
     <string name="chat_attach">Attach</string>
     <string name="chat_photo">Photo</string>
     <string name="chat_file">File</string>
     <string name="chat_capture">Screenshot</string>
     <string name="chat_terminal_show">Show the terminal</string>
     <string name="chat_terminal_hide">Hide the terminal</string>
+    <string name="terminal_offline">No connection with the PC: keys are not sent</string>
     <string name="perm_title">Claude Code asks</string>
     <string name="perm_summary">Agent’s description: %1$s</string>
     <string name="perm_allow">Yes</string>
@@ -111,10 +143,13 @@
     <string name="tool_error">failed</string>
     <string name="confirm_label">ADBuddy: delicate action</string>
     <string name="notif_asking">Claude Code needs an answer</string>
+    <string name="notif_ask_title">The agent needs an answer</string>
+    <string name="notif_ask_text">Open ADBuddy to answer.</string>
     <string name="chat_retry">Retry</string>
     <string name="chat_discard">Discard</string>
     <string name="chat_not_sent">Not sent</string>
     <string name="chat_sending">Sending…</string>
+    <string name="chat_new_messages">New messages</string>
     <string name="menu_activity">Activity</string>
     <string name="menu_new_conversation">New conversation</string>
     <string name="new_conversation_title">Start a new conversation?</string>
@@ -126,6 +161,11 @@
     <string name="link_open">Open</string>
     <string name="file_tap_download">Tap to download</string>
     <string name="file_downloading">Downloading… %1$d%%</string>
+    <string name="file_tap_cancel">Tap to cancel</string>
+    <string name="file_action_download">download the file</string>
+    <string name="file_action_cancel">cancel the download</string>
+    <string name="file_action_open">open the file</string>
+    <string name="file_action_retry">retry the download</string>
     <string name="file_open">Tap to open</string>
     <string name="file_failed">Download failed: tap to retry</string>
     <string name="remote_title">Remote mode</string>
@@ -146,6 +186,9 @@
     <string name="listener_label">ADBuddy notification reader</string>
     <string name="step_progress">Step %1$d of %2$d</string>
     <string name="onboarding_skip">Not now</string>
+    <string name="notifications_rationale_title">Get notified?</string>
+    <string name="notifications_rationale_body">ADBuddy can tell you when the agent asks your permission or finishes. Without notifications you would only see its questions with the app open, and they expire.</string>
+    <string name="notifications_rationale_continue">Continue</string>
     <string name="onboarding_done">Done</string>
     <string name="protected_count">Protected apps: %1$d</string>
     <string name="protected_title">Protected apps</string>
@@ -167,7 +210,7 @@
     <string name="access_title">Notification access</string>
     <string name="access_intro">Lets the agent read what your notifications say, for example to see a message you just received. From protected apps and from ADBuddy it only sees that a notification exists, never what it says. It cannot dismiss or tap any notification. It is optional.</string>
     <string name="access_state_granted">Allowed</string>
-    <string name="access_state_confirm">Allowed in the system, not confirmed here</string>
+    <string name="access_state_confirm">Android allows it; your confirmation is missing</string>
     <string name="access_state_denied">Not allowed</string>
     <string name="access_state_unknown">Unknown</string>
     <string name="access_state_checking">Checking…</string>
@@ -180,6 +223,7 @@
     <string name="access_withdraw">Stop the agent reading them</string>
     <string name="access_open">Open system settings</string>
     <string name="access_restricted_hint">If the switch is greyed out, open ADBuddy\'s App info, tap the three dots and choose \"Allow restricted settings\".</string>
+    <string name="access_later_hint">You can turn it on later in ADBuddy\'s Settings, under Notification access.</string>
     <string name="menu_settings">Settings</string>
     <string name="settings_title">Settings</string>
     <string name="settings_protected_proposed">Proposed list (%1$d). Review it and confirm.</string>

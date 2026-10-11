@@ -32,6 +32,13 @@ object ConfirmUi {
     }
 
     /**
+     * Whole seconds left until the question expires at [now] (the host's clock), rounded up as
+     * PermissionUi.secondsLeft (so "0:00" never shows with Allow still on), never below zero; null when it
+     * has no readable expiry.
+     */
+    fun secondsLeft(r: ConfirmRequest, now: Long): Long? = expiry(r)?.let { ((it - now + 999) / 1000).coerceAtLeast(0) }
+
+    /**
      * Whether the question can be answered at now. An answer on its way wins
      * (it left before the expiry); an unreadable expiry cannot be trusted to
      * be in the future, so it counts as expired; then the connection.
@@ -87,14 +94,16 @@ object ConfirmUi {
     /**
      * Whether a button may send decision for id now: the question is still open and offers that decision where
      * it was tapped (the [notification] offers less than the dialog), and allowing needs the phone unlocked (a
-     * tap can arrive late, after the bouncer, or from a stale notification). Denying is always fine.
+     * tap can arrive late, after the bouncer, or from a stale notification) and the button [armed]: shown for
+     * [ARMING_MS] ([armed] for the notification, ConfirmHost for the dialog), so a stray tap or a burst as the
+     * question appears allows nothing. Denying is always fine.
      */
-    fun canSend(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean, notification: Boolean): Boolean {
+    fun canSend(state: BridgeState, id: String, decision: String, now: Long, locked: Boolean, armed: Boolean, notification: Boolean): Boolean {
         val r = state.pending.firstOrNull { it.id == id } ?: return false
         val status = status(r, state, now)
         val offered = if (notification) notificationDecisions(r, status) else decisions(r, status)
         if (decision !in offered) return false
-        return decision == Decision.DENY || !locked
+        return decision == Decision.DENY || (!locked && armed)
     }
 
     /**
@@ -107,6 +116,10 @@ object ConfirmUi {
         val open = shown.filter { status(it, state, now) == Status.OPEN }
         return open.firstOrNull { it.id == focus } ?: open.firstOrNull() ?: shown.firstOrNull()
     }
+
+    /** The open questions the person closed: the chat says they are still waiting (and "Show" opens the same dialog again). */
+    fun closedWaiting(state: BridgeState, closed: Set<String>, now: Long): List<ConfirmRequest> =
+        state.pending.filter { it.id in closed && status(it, state, now) == Status.OPEN }
 
     /**
      * What a question shows: whether it carries the ⚠ warning, the first [maxDetail] lines of the host's detail
@@ -187,6 +200,19 @@ object ConfirmUi {
         val next = shown.filterKeys { it in ids } + post.associate { it.request.id to it.status }
         return Plan(cancel = shown.keys - ids, post = post, shown = next)
     }
+
+    /**
+     * Whether an Allow button shown at [shownAt] is armed at [now] (both in the phone's elapsed time): [ARMING_MS]
+     * have passed. One not known to be shown ([shownAt] null: a notification of an earlier process) never is.
+     */
+    fun armed(shownAt: Long?, now: Long): Boolean = shownAt != null && now - shownAt >= ARMING_MS
+
+    /**
+     * How long Allow and Allow during the session wait from when they appear (the dialog, and again when the app
+     * comes back to the front; the notification's button) before they allow: a tap meant for what was there, or a
+     * burst as the question pops up, is not an answer. Deny never waits. As PermissionUi.PROMOTE_GUARD_MS.
+     */
+    const val ARMING_MS = 600L
 
     /** What the notification shows of the command; a longer one is cut there and only the dialog allows it. */
     const val MAX_COMMAND = 300

@@ -195,3 +195,73 @@ func TestReadLanguage(t *testing.T) {
 		t.Errorf("a missing file: %q", got)
 	}
 }
+
+func TestAgentModelAndEffort(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(p, []byte("agent_model = \"claude-sonnet-5-5\"\nagent_effort = \"medium\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil || c.AgentModel != "claude-sonnet-5-5" || c.AgentEffort != "medium" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	for key, data := range map[string]string{
+		"agent_model":  "agent_model = \"--x\"\n",
+		"agent_effort": "agent_effort = \"ultra\"\n",
+	} {
+		q := filepath.Join(dir, key+".toml")
+		if err := os.WriteFile(q, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(q); err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("%s: %v", key, err)
+		}
+	}
+	// Absent: empty, and what Save writes loads again.
+	d, err := Load(filepath.Join(dir, "none.toml"))
+	if err != nil || d.AgentModel != "" || d.AgentEffort != "" {
+		t.Fatalf("%+v %v", d, err)
+	}
+	if err := Save(filepath.Join(dir, "saved.toml"), d); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(filepath.Join(dir, "saved.toml")); err != nil {
+		t.Fatal(err)
+	}
+	// Filled in, they come back as they went.
+	d.AgentModel, d.AgentEffort = "opus[1m]", "xhigh"
+	rt := filepath.Join(dir, "roundtrip.toml")
+	if err := Save(rt, d); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load(rt)
+	if err != nil || back.AgentModel != "opus[1m]" || back.AgentEffort != "xhigh" {
+		t.Fatalf("%+v %v", back, err)
+	}
+}
+
+// "inherit" is a valid agent_model and agent_effort and comes back as it went.
+func TestAgentModelAndEffortInherit(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	c := Default()
+	c.AgentModel, c.AgentEffort = "inherit", "inherit"
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load(p)
+	if err != nil || back.AgentModel != "inherit" || back.AgentEffort != "inherit" {
+		t.Fatalf("%+v %v", back, err)
+	}
+}
+
+// inherit is lower case only, and the error says it is accepted.
+func TestAgentEffortInheritIsCaseSensitive(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(p, []byte("agent_effort = \"INHERIT\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "agent_effort") || !strings.Contains(err.Error(), "inherit") {
+		t.Fatalf("%v", err)
+	}
+}

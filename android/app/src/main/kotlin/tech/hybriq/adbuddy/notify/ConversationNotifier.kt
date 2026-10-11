@@ -27,6 +27,7 @@ object ConversationNotifier {
     const val KEY_REPLY = "reply"
     const val SHORTCUT_ID = "conversation"
     const val DONE_ID = 3
+    const val ASK_ID = 4
 
     @Volatile private var pushedFor: String? = null
 
@@ -112,6 +113,35 @@ object ConversationNotifier {
             .build()
         ctx.getSystemService(NotificationManager::class.java).notify(DONE_ID, n)
     }
+
+    /**
+     * "The agent needs an answer": a generic heads-up so the question is not missed with the phone in a pocket. It never
+     * carries the tool, the command or the detail, and it has no buttons: it is answered in the app, on the card with its guard.
+     */
+    fun ask(ctx: Context) {
+        if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
+        val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val public = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_ASK)
+            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setContentTitle(ctx.getString(R.string.app_name))
+            .setContentText(ctx.getString(R.string.notif_ask_title))
+            .build()
+        val n = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_ASK)
+            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setContentTitle(ctx.getString(R.string.notif_ask_title))
+            .setContentText(ctx.getString(R.string.notif_ask_text))
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(public)
+            .setLocalOnly(true)
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        ctx.getSystemService(NotificationManager::class.java).notify(ASK_ID, n)
+    }
+
+    fun cancelAsk(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).cancel(ASK_ID)
 
     private fun service(ctx: Context, code: Int, action: String, mutable: Boolean): PendingIntent =
         PendingIntent.getService(ctx, code, Intent(ctx, BridgeService::class.java).setAction(action),

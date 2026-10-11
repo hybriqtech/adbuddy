@@ -44,6 +44,11 @@ class BridgePrefs(context: Context) {
         get() = prefs.getString("consentHost", "") ?: ""
         set(value) = save("consentHost") { putString("consentHost", value) }
 
+    /** The reason for the notification permission was shown and answered (either way): never asked again. */
+    var notificationsAsked: Boolean
+        get() = prefs.getBoolean("notifications_asked", false)
+        set(value) = save("notifications_asked") { putBoolean("notifications_asked", value) }
+
     /** Writes at once (commit); a failure is logged by name only, never with the values. */
     private fun save(what: String, change: SharedPreferences.Editor.() -> Unit) {
         val editor = prefs.edit()

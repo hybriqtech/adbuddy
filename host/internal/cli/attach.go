@@ -19,10 +19,11 @@ const detachKey = 0x1d
 
 func newAttachCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "attach",
-		Short: app.T("help.attach.short"),
-		Long:  app.T("help.attach.long"),
-		Args:  cobra.NoArgs,
+		Use:     "attach",
+		Example: "  adbuddy attach",
+		Short:   app.T("help.attach.short"),
+		Long:    app.T("help.attach.long"),
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if app.Getenv("ADBUDDY_SOURCE") == "agent" {
 				return NewErrorT("AGENT_SESSION", "err.attach.agent_session", "err.attach.agent_session.fix")
@@ -135,9 +136,11 @@ func watchSize(ctx context.Context, out *os.File) <-chan [2]int {
 
 func newNewCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "new [agent]",
-		Short: app.T("help.new.short"),
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "new [agent]",
+		Example: "  adbuddy new\n  adbuddy new codex",
+		Short:   app.T("help.new.short"),
+		Long:    app.T("help.new.long"),
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			argv := append([]string{"new"}, args...)
 			return sessionRequest(cmd.Context(), app, argv)
@@ -147,9 +150,11 @@ func newNewCmd(app *App) *cobra.Command {
 
 func newStopCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "stop",
-		Short: app.T("help.stop.short"),
-		Args:  cobra.NoArgs,
+		Use:     "stop",
+		Example: "  adbuddy stop",
+		Short:   app.T("help.stop.short"),
+		Long:    app.T("help.stop.long"),
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return sessionRequest(cmd.Context(), app, []string{"stop"})
 		},

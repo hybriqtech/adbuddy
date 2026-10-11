@@ -71,7 +71,9 @@ func newJournalCmd(app *App) *cobra.Command {
 					out = append(out, j)
 				}
 			}
-			if limit > 0 && len(out) > limit {
+			total := len(out)
+			truncated := limit > 0 && total > limit
+			if truncated {
 				out = out[len(out)-limit:]
 			}
 			if !signed && len(out) > 0 {
@@ -82,13 +84,16 @@ func newJournalCmd(app *App) *cobra.Command {
 				for _, j := range out {
 					list = append(list, journalEntry{Entry: j, Verified: signed && !j.Tampered})
 				}
-				return WriteData(app.Stdout, map[string]any{"entries": list, "skippedLines": skipped})
+				return WriteData(app.Stdout, map[string]any{"entries": list, "skippedLines": skipped, "total": total, "truncated": truncated})
 			}
 			for _, j := range out {
 				fmt.Fprintln(app.Stdout, formatEntryIn(app.speaks(), j))
 			}
 			if len(out) == 0 {
 				fmt.Fprintln(app.Stderr, app.T("journal.the_journal_is_empty"))
+			}
+			if truncated {
+				fmt.Fprintln(app.Stderr, app.T("journal.showing_last_of", limit, total))
 			}
 			if skipped > 0 {
 				fmt.Fprintln(app.Stderr, app.TN("journal.damaged_journal_lines_were_skipped", skipped))

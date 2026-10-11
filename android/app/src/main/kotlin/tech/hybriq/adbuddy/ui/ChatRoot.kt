@@ -2,7 +2,10 @@ package tech.hybriq.adbuddy.ui
 
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
@@ -15,6 +18,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -24,17 +28,27 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Attachment
+import tech.hybriq.adbuddy.bridge.BridgePrefs
+import tech.hybriq.adbuddy.bridge.Empty
+import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.chat.Composer
+import tech.hybriq.adbuddy.confirm.ConfirmUi
 import tech.hybriq.adbuddy.control.CutAccess
 import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.DownloadState
 import tech.hybriq.adbuddy.files.FileIntents
+import tech.hybriq.adbuddy.notify.NotificationPermission
+import tech.hybriq.adbuddy.notify.NotificationsStatus
+import tech.hybriq.adbuddy.notify.openNotificationSettings
 
 /**
  * The app's screens: the first-run steps until they are done (only when firstRun: the chat bubble passes
@@ -42,7 +56,7 @@ import tech.hybriq.adbuddy.files.FileIntents
  * the notification access under it), and the red questions over all of them.
  */
 @Composable
-fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, onClose: (String) -> Unit) {
+fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = true, askForNotifications: Boolean = true, onReopen: (String) -> Unit = {}, onClose: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by app.bridge.state.collectAsStateWithLifecycle()
@@ -65,11 +79,11 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
 
     // What the host says (notice) and what it refuses (chat, uploads), as the host wrote it.
     LaunchedEffect(app) {
-        merge(app.notices, app.chat.errors, app.drafts.errors).collect { snackbar.showSnackbar(it) }
+        merge(app.notices, app.chat.errors, app.drafts.errors).collect { scope.launch { snackbar.notify(it) } }
     }
 
     // Photos and files go through the system pickers: no storage permission asked.
-    fun attach(uri: Uri) = app.attachUri(uri) { text -> scope.launch { snackbar.showSnackbar(text.ifEmpty { attachFailed }) } }
+    fun attach(uri: Uri) = app.attachUri(uri) { text -> scope.launch { snackbar.notify(text.ifEmpty { attachFailed }) } }
     val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(Composer.MAX_ATTACHMENTS)) { uris -> uris.forEach(::attach) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) attach(uri) }
 
@@ -114,17 +128,34 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
                 }
                 scope.launch {
                     // Without the permission (or if the change did not stick), the person does it by hand.
-                    val r = snackbar.showSnackbar(message, actionLabel = if (ok) null else developerOptions)
+                    val r = snackbar.notify(message, actionLabel = if (ok) null else developerOptions)
                     if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
                 }
             },
             openActivity = { route = Route.ACTIVITY },
             openSettings = { route = Route.SETTINGS },
             newConversation = app.chat::newConversation,
+            interrupt = { app.bridge.send(Protocol.AGENT_INTERRUPT, Protocol.json.encodeToJsonElement(Empty.serializer(), Empty)) },
         )
     }
 
     val holder = rememberSaveableStateHolder()
+    val configured = remember(state.connection) { BridgePrefs(context).link != null }
+    var notifications by remember { mutableStateOf(NotificationsStatus.of(context)) }
+    // Back from the system settings the user may have turned them on: read them again.
+    LifecycleResumeEffect(Unit) {
+        notifications = NotificationsStatus.of(context)
+        onPauseOrDispose {}
+    }
+    // The closed questions still waiting, by the host's clock (ConfirmHost keeps its own: this one only counts).
+    var now by remember { mutableLongStateOf(app.clock.now()) }
+    LaunchedEffect(state.pending, closed) {
+        while (true) {
+            now = app.clock.now()
+            delay(ConfirmUi.nextExpiry(state.pending, now) ?: break)
+        }
+    }
+    val waiting = ConfirmUi.closedWaiting(state, closed, now).size
     val back = { route = route.parent ?: Route.CHAT }
     val first = step
     if (first != null) {
@@ -140,8 +171,12 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             // The chat leaves the composition under Settings and Activity: its state (the text being written,
             // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
             Route.CHAT -> holder.SaveableStateProvider("chat") {
-                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now) {
-                    RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.showSnackbar(text) } })
+                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured, terminalOpenByDefault = terminalOpenByDefault,
+                    notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) },
+                    pendingQuestions = waiting,
+                    // The clock of the tap, not of the composition: a question that has just expired is not reopened.
+                    onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } }) {
+                    RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
                 }
             }
             Route.ACTIVITY -> {
@@ -155,6 +190,18 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             Route.PROTECTED_APPS -> ProtectedAppsScreen(app, null, onBack = back, onDone = back, onSkip = back)
             Route.NOTIFICATION_ACCESS -> NotificationAccessScreen(null, onBack = back, onDone = back, onSkip = back)
         }
+    }
+    val prefs = remember(context) { BridgePrefs(context) }
+    var asked by remember { mutableStateOf(prefs.notificationsAsked) }
+    val requestPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifications = NotificationsStatus.of(context) }
+    // Composed BEFORE ConfirmHost and never with a question open: the reason must not sit over a decision.
+    val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    val questionPending = state.pending.isNotEmpty() || state.chat.permissions.isNotEmpty()
+    if (askForNotifications && route == Route.CHAT && NotificationPermission.shouldAsk(Build.VERSION.SDK_INT, granted, asked, stepShown = step != null, questionPending = questionPending)) {
+        NotificationsRationaleDialog(
+            onContinue = { prefs.notificationsAsked = true; asked = true; requestPermission.launch(Manifest.permission.POST_NOTIFICATIONS) },
+            onSkip = { prefs.notificationsAsked = true; asked = true },
+        )
     }
     // After both screens, so a question shows wherever the person is.
     ConfirmHost(state, app.bridge, app.clock, focusConfirm, closed, onClose)

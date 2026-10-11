@@ -406,3 +406,53 @@ func TestStopsWhenTheAgentEndsButNotItsOutput(t *testing.T) {
 		t.Fatal("stopped without killing what held the terminal")
 	}
 }
+
+// Args after --continue; a resumed start is not told apart by its arguments.
+func TestArgsAreSeparateFromResume(t *testing.T) {
+	r := newRig(t)
+	r.m.o.Args = func(name string) []string {
+		if name == "codex" {
+			return nil
+		}
+		return []string{"--model", "x"}
+	}
+	if err := r.m.Start("claude", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(r.starts[0].Args, " "); got != "--continue --model x" {
+		t.Fatalf("args %q", got)
+	}
+	r.m.mu.Lock()
+	resumed := r.m.cur.resumed
+	r.m.mu.Unlock()
+	if !resumed {
+		t.Fatal("resumed should be true")
+	}
+	if err := r.m.Start("claude", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(r.starts[1].Args, " "); got != "--model x" {
+		t.Fatalf("args %q", got)
+	}
+	r.m.mu.Lock()
+	resumed = r.m.cur.resumed
+	r.m.mu.Unlock()
+	if resumed {
+		t.Fatal("resumed should be false")
+	}
+	// A quick failure of a non-resumed start does not start again.
+	r.fake(1).exit(1)
+	time.Sleep(300 * time.Millisecond)
+	r.mu.Lock()
+	n := len(r.starts)
+	r.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("%d starts: retried a start that was not resumed", n)
+	}
+	if err := r.m.Start("codex", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.starts[len(r.starts)-1].Args; len(got) != 0 {
+		t.Fatalf("codex args %v", got)
+	}
+}

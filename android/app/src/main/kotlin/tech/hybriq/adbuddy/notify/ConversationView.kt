@@ -68,7 +68,7 @@ data class ConversationView(
             val working = s.sessionState.state == "working"
             val status = StatusView.of(s, cut)
             return ConversationView(status, s.sessionState.agent, s.sessionState.state, if (working) s.sessionState.activity else "", last,
-                asking = s.chat.permissions.isNotEmpty() && status.status == LinkStatus.CONNECTED)
+                asking = AskNotice.pending(s).isNotEmpty() && status.status == LinkStatus.CONNECTED)
         }
 
         private fun cutText(t: String) = if (t.length <= MAX_TEXT) t else t.take(MAX_TEXT - 1) + "…"

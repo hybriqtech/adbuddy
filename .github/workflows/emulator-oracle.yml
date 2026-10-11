@@ -81,16 +81,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version-file: host/go.mod
-          cache: ${{ runner.environment == 'github-hosted' }}
-          cache-dependency-path: host/go.sum
       # sdkmanager and avdmanager are Java.
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "17"
+      # After setup-java: on GitHub-hosted runners it puts /usr/bin (an older go) first in PATH.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: host/go.mod
+          cache: ${{ runner.environment == 'github-hosted' }}
+          cache-dependency-path: host/go.sum
       - name: Point the emulator at the AVD (Linux runners)
         if: runner.os == 'Linux'
         run: '[ -z "$XDG_CONFIG_HOME" ] || echo "ANDROID_AVD_HOME=$XDG_CONFIG_HOME/.android/avd" >> "$GITHUB_ENV"'

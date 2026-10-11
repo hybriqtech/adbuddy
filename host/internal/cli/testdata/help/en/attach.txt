@@ -5,8 +5,11 @@ While attached, this terminal's size is the agent's.
 Usage:
   adbuddy attach [flags]
 
+Examples:
+  adbuddy attach
+
 Flags:
   -h, --help   help for attach
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

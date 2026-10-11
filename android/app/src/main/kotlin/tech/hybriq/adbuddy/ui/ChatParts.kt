@@ -3,6 +3,7 @@ package tech.hybriq.adbuddy.ui
 import android.graphics.BitmapFactory
 import android.util.Base64
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -30,7 +31,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -39,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,7 +51,14 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.LinkAnnotation
@@ -59,6 +68,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Attachment
 import tech.hybriq.adbuddy.bridge.BridgeState
@@ -89,10 +99,12 @@ fun ChatHeader(
     onActivity: () -> Unit,
     onSettings: () -> Unit,
     onNewConversation: () -> Unit,
+    configured: Boolean = true,
 ) {
     var menu by remember { mutableStateOf(false) }
     val label = SessionLabel.of(state)
-    val status = LinkStatus.of(state, cut)
+    val status = LinkStatus.of(state, cut, configured)
+    val titleLine = with(LocalDensity.current) { MaterialTheme.typography.titleMedium.lineHeight.toDp() + MaterialTheme.typography.bodySmall.lineHeight.toDp() }
     TopAppBar(
         title = {
             Column {
@@ -109,26 +121,19 @@ fun ChatHeader(
                             SessionLabel.WAITING -> R.string.session_waiting
                             SessionLabel.IDLE -> R.string.session_idle
                             SessionLabel.STOPPED -> R.string.session_stopped
-                            SessionLabel.OFFLINE -> status.text
+                            // Not connected: the short state; what to do about it is in the banner under the bar.
+                            SessionLabel.OFFLINE -> status.shortText
                         },
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // The link line, when it is not the plain "connected" (cut, paused, update needed).
-                if (label != SessionLabel.OFFLINE && status != LinkStatus.CONNECTED) {
-                    Text(
-                        stringResource(status.text),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
             }
         },
+        modifier = Modifier.testTag(TOP_BAR_TAG),
+        expandedHeight = AdbuddyTopBarSpec.height(titleLine),
         actions = {
             IconButton(onClick = onToggleTerminal) {
                 Icon(
@@ -141,6 +146,7 @@ fun ChatHeader(
                     Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.action_menu))
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    ObscuredTouchGuard()
                     PauseButton.of(state)?.let { button ->
                         DropdownMenuItem(
                             text = { Text(stringResource(button.text)) },
@@ -261,11 +267,19 @@ fun AttachmentCard(a: Attachment, state: DownloadState?, onTap: () -> Unit) {
             null
         }
     }
+    val tapLabel = stringResource(
+        when (state) {
+            null -> R.string.file_action_download
+            is DownloadState.Running -> R.string.file_action_cancel
+            is DownloadState.Done -> R.string.file_action_open
+            is DownloadState.Failed -> R.string.file_action_retry
+        },
+    )
     Surface(
         color = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
         shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onTap),
+        modifier = Modifier.fillMaxWidth().clickable(onClickLabel = tapLabel, role = Role.Button, onClick = onTap),
     ) {
         Column {
             if (thumb != null) {
@@ -280,6 +294,7 @@ fun AttachmentCard(a: Attachment, state: DownloadState?, onTap: () -> Unit) {
                         val p = if (state.size > 0) (state.done.toFloat() / state.size).coerceIn(0f, 1f) else 0f
                         LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
                         Text(stringResource(R.string.file_downloading, (p * 100).toInt()), style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.file_tap_cancel), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     }
                     is DownloadState.Done -> Text(stringResource(R.string.file_open), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     // The host's own text when it refused; a lost connection has none, and tapping goes on.
@@ -300,35 +315,42 @@ fun DraftChips(drafts: List<Draft>, onRemove: (String) -> Unit, onRetry: (String
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (d in drafts) {
             val failed = d.status == DraftStatus.FAILED
-            InputChip(
-                selected = failed,
-                onClick = { if (failed) onRetry(d.key) },
-                label = {
-                    Column {
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (failed) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // The retry tap is on the label only: the X is its sibling, so tapping it can never retry.
+                    Column(
+                        Modifier.widthIn(max = 180.dp)
+                            .then(if (failed) Modifier.clickable(role = Role.Button, onClick = { onRetry(d.key) }) else Modifier)
+                            .padding(vertical = 8.dp),
+                    ) {
                         Text(
                             if (failed) d.error.ifEmpty { stringResource(R.string.draft_failed) } else d.name,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 180.dp),
+                            style = MaterialTheme.typography.labelLarge, maxLines = if (failed) 4 else 1, overflow = TextOverflow.Ellipsis,
                         )
-                        if (d.status == DraftStatus.UPLOADING && d.size > 0) {
-                            LinearProgressIndicator(progress = { (d.progress.toFloat() / d.size).coerceIn(0f, 1f) }, modifier = Modifier.widthIn(max = 180.dp))
+                        if (d.status == DraftStatus.UPLOADING) {
+                            // Size 0 is a file still being prepared (or a screenshot being taken): an unknown amount, not an empty one.
+                            if (d.size > 0) LinearProgressIndicator(progress = { (d.progress.toFloat() / d.size).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                            else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                         }
                     }
-                },
-                trailingIcon = {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = stringResource(R.string.chat_discard),
-                        modifier = Modifier.size(18.dp).clickable { onRemove(d.key) },
-                    )
-                },
-            )
+                    IconButton(onClick = { onRemove(d.key) }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.chat_discard))
+                    }
+                }
+            }
         }
     }
 }
 
-/** + (photo, file, screenshot), the text field (up to 5 lines) and Send; Send is `enabled = Composer.canSend(text, drafts)`. */
+/**
+ * + (photo, file, screenshot), the text field (up to 5 lines) and Send; Send is `enabled = Composer.canSend(text, drafts)`.
+ * While the agent works ([working]) and nothing is being written (no text, no drafts), the button is Stop instead and calls
+ * [onStop]; it then rests a few seconds, because agent.interrupt has no reply and a second tap would send a second Esc.
+ */
 @Composable
 fun InputBar(
     text: String,
@@ -338,12 +360,15 @@ fun InputBar(
     onFile: () -> Unit,
     onCapture: () -> Unit,
     onSend: () -> Unit,
+    working: Boolean = false,
+    onStop: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Box {
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.Add, contentDescription = stringResource(R.string.chat_attach)) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                ObscuredTouchGuard()
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_photo)) }, onClick = { menu = false; onPhoto() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_file)) }, onClick = { menu = false; onFile() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.chat_capture)) }, onClick = { menu = false; onCapture() })
@@ -357,17 +382,47 @@ fun InputBar(
             maxLines = 5,
             shape = MaterialTheme.shapes.extraLarge,
         )
-        FilledIconButton(onClick = onSend, enabled = Composer.canSend(text, drafts)) {
-            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_send))
+        val canSend = Composer.canSend(text, drafts)
+        val stopLabel = stringResource(R.string.chat_stop)
+        // Anything being written (text, or a draft even if still uploading) keeps Send: Stop is only for an empty bar, so a person
+        // composing never interrupts the agent by mistake.
+        val hasContent = text.isNotBlank() || drafts.isNotEmpty()
+        // After a tap the button rests a moment: agent.interrupt has no reply, so a second tap would send a second Esc.
+        var stopping by remember(working) { mutableStateOf(false) }
+        LaunchedEffect(stopping) { if (stopping) { delay(3_000); stopping = false } }
+        if (working && !hasContent) {
+            FilledIconButton(onClick = { stopping = true; onStop() }, enabled = !stopping, modifier = Modifier.semantics { contentDescription = stopLabel }) {
+                // A square, the usual "stop": Icons.Default.Close already means "discard" in the draft chips, and Stop is in icons-extended (not in the app).
+                Box(Modifier.size(14.dp).background(LocalContentColor.current))
+            }
+        } else {
+            FilledIconButton(onClick = onSend, enabled = canSend) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = stringResource(R.string.chat_send))
+            }
         }
     }
 }
 
-/** Esc, Ctrl+C, up, down, Tab, Enter, 1, 2, 3 (QuickKey.entries), horizontally scrollable. */
+/**
+ * Esc, Ctrl+C, up, down, Tab, Enter, 1, 2, 3 (QuickKey.entries), horizontally scrollable. Each key refuses a tap while
+ * another app's window covers it ("1" would answer "1. Yes" to the agent's permission prompt on the PC); the rest of
+ * the chat keeps working under the overlay.
+ */
 @Composable
-fun QuickKeysRow(onKey: (QuickKey) -> Unit) {
+fun QuickKeysRow(enabled: Boolean = true, onKey: (QuickKey) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (k in QuickKey.entries) AssistChip(onClick = { onKey(k) }, label = { Text(k.label) })
+        for (k in QuickKey.entries) AssistChip(onClick = { onKey(k) }, enabled = enabled, modifier = Modifier.refuseObscuredTouches(), label = { Text(k.label) })
+    }
+}
+
+/** Over the terminal while there is no channel to the PC: what is typed would not arrive. */
+@Composable
+fun TerminalOfflineNotice(modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        modifier = modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Text(stringResource(R.string.terminal_offline), style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
     }
 }
 
@@ -377,7 +432,10 @@ fun LinkDialog(url: String, domain: String, onOpen: () -> Unit, onDismiss: () ->
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.link_open_title, domain), fontWeight = FontWeight.Bold) },
-        text = { Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis) },
+        text = {
+            ObscuredTouchGuard()
+            Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis)
+        },
         confirmButton = { TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
     )

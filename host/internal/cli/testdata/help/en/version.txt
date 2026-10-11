@@ -3,8 +3,12 @@ Print the ADBuddy version
 Usage:
   adbuddy version [flags]
 
+Examples:
+  adbuddy version
+  adbuddy version --json
+
 Flags:
   -h, --help   help for version
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

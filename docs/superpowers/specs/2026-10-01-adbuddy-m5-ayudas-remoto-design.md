@@ -66,7 +66,7 @@ agente ──► adbuddy tap --text OK          (CLI, en la sesión del agente)
 
 M3.0 dejó `args` y `result` como JSON libre (`json.RawMessage` y `JsonElement`). M5 los define aquí, con estructuras propias en ficheros nuevos (`bridge/ui_ops.go`, `ProtocolUiOps.kt`) y una fixture por operación (§12). `UIRequest` y `UIResponse` no cambian.
 
-### 3.1 `dump` → `adbuddy screen [--all] [--json]`
+### 3.1 `dump` → `adbuddy screen [--all] [--settle] [--json]`
 
 `args`: `{}`.
 
@@ -107,9 +107,11 @@ com.android.settings · 1344×2992
 - "Wi-Fi" Switch (980,700)-(1302,780) click checked=false
 ```
 
+`--settle` (latencia, 2026-10-03; pantalla de partida, 2026-10-04) pide al daemon que espere a que la pantalla se asiente antes de devolverla, cada lectura con la guarda: sirve tras una orden `adb` en bruto (`am start`, `input`). La primera lectura es la **partida** y no se devuelve, salvo si se llega al tope (`settleMax` o `settleReads`) sin más lecturas: entonces sale ella, con `settled` falso (pasó la guarda antes de leerse). La pantalla se da por asentada cuando ha **cambiado** respecto a la partida y sigue igual al menos `settleQuiet` (600 ms); si nunca cambia, a los `settleIdle` (2 s): `screen --settle` sobre una pantalla quieta tarda unos 2 s (hasta settle2, 2026-10-04, unos 0,4 s); como mucho `settleMax` (3 s) más lo que tarde una lectura que ya empezó. Una lectura que llega por otra vía que la partida (`uiautomator` porque la app dejó de contestar) no se compara con ella, porque los formatos difieren: no cuenta como cambio (por ella solo `settleIdle` cierra la espera) y, si sale, `changed` va ausente. Para comparar no cuenta qué elemento tiene el foco, y no tener elementos es lo mismo que una lista vacía; un interruptor que cambia (`checked`) sí cuenta. Si la guarda, o la propia app con `UI_PROTECTED`, bloquea una lectura, se reintenta tras `settleGap` hasta `settleBlockWait` (2 s) desde el inicio: durante una transición la app enseña un momento una ventana sin contenido y la da por protegida. Cada intento pasa la guarda completa y solo sale una lectura hecha después de pasarla; si el último intento fue un bloqueo, sale el bloqueo y nada leído antes. La guarda propia de `screen` también reintenta: si bloquea, o si la app contesta `UI_PROTECTED` a la primera lectura, se entra en la espera sin lectura y la primera lectura válida es la partida; un bloqueo que dura hasta `settleBlockWait` sale como bloqueo, sin datos. La pausa y una pregunta 🔴 pendiente no se reintentan. La respuesta añade `settled` y `changed`, que habla de la lectura que sale (`false`: es igual a la partida, porque no cambió o porque cambió y volvió; ausente: no se sabe); si `settled` es `false`, la CLI avisa de que la pantalla seguía cambiando; un `changed` falso en `screen --settle` no se avisa (es una pantalla quieta). Sin la bandera, la salida es la de siempre.
+
 `[id]` sale si hay `id`, y si no, un `-`. Los textos van entre comillas, recortados a 120 caracteres y escapados con `classify.Printable`: un texto de la pantalla no puede meter secuencias de control en la terminal del agente.
 
-### 3.2 `click` → `adbuddy tap "<texto>" | --id <id> | --xy x,y`
+### 3.2 `click` → `adbuddy tap "<texto>" | --id <id> | --xy x,y [--screen]`
 
 `args`: `{"text": "..."}`, `{"id": "..."}` o `{"x": 10, "y": 20}`, solo uno.
 
@@ -118,14 +120,15 @@ com.android.settings · 1344×2992
 - **Por `id` o por texto:** se busca entre los nodos que `dump` mostraría, por este orden: `id` exacto; texto o descripción exactos; y los mismos sin distinguir mayúsculas. Del nodo que coincide se sube al antepasado pulsable más cercano, y se pulsa con `ACTION_CLICK` (`how: action`). Si coinciden varios pulsables distintos, el error es `ambiguous` (§12), con el número de coincidencias y los límites de las 5 primeras en `text`. El agente repite entonces con `--id` o `--xy`. Si no coincide ninguno, `not_found`.
 - **Por coordenadas:** un toque con `dispatchGesture` (`how: gesture`), 50 ms. Antes de tocar se mira qué ventana tiene encima ese punto. Si es de ADBuddy o de una app protegida, el error es `protected`.
 - La superposición marca el punto (§6).
+- **`--screen`:** antes del toque, tras pasar la guarda y la pausa, el daemon lee una vez la pantalla de **partida**, solo desde la app y con un tope de `baselineWait` (1 s; sin app no cae a `uiautomator`, que tarda más). Esa lectura no se devuelve, no se escribe y no se registra: solo se compara. No debilita las puertas del toque: tras ella se miran otra vez el contexto y la pausa, y la guarda si pasaron más de `baselineSlack` (150 ms) desde que dijo sí; si alguna dice no, el toque no ocurre. Si la app contesta `UI_PROTECTED` a esa lectura, el toque tampoco ocurre (bloqueo, sin riesgo de acción doble). Con cualquier otro fallo (sin app, sin respuesta a tiempo) el toque sigue sin partida: entonces solo `settleIdle` cierra la espera y no se sabe si la pantalla cambió. Por esa lectura, el total de `tap --screen` puede ser hasta `baselineWait` (1 s) más unos 3 s de la espera. Tras el toque, el daemon lee la pantalla asentada (como `screen --settle`, desde esa partida) y la CLI la imprime a continuación del `Tapped …`; así el agente no necesita otra llamada. Si se asentó igual que la partida (sin cambiar, o cambió y volvió), la respuesta trae `changed: false` y la CLI añade `(the screen did not change in about 2 s after the action: run adbuddy screen before trying again)`; con `changed` ausente (partida desconocida, daemon antiguo) no dice nada. La entrada de diario de la lectura dice `settled=` y `changed=` (`true`, `false` o `unknown`). Si la guarda impide leerla (el toque abrió una app protegida, por ejemplo; tras reintentarlo hasta `settleBlockWait`), la respuesta trae `screenNote` en vez de `screen` (también si hay pausa, una pregunta 🔴 pendiente, un fallo de la app o «stopped», no solo por la guarda) y la CLI la imprime y sale con 0: el toque sí ocurrió y un código de error haría reintentarlo. Deja **dos entradas** en el diario: la del toque y una `adbuddy screen` de la lectura.
 
-### 3.3 `setText` → `adbuddy type "<texto>"`
+### 3.3 `setText` → `adbuddy type "<texto>" [--screen]`
 
 `args`: `{"text": "..."}`, hasta 4096 caracteres.
 
 `result`: `{"set": true}`.
 
-- Va al nodo con el foco de entrada (`findFocus(FOCUS_INPUT)`), con `ACTION_SET_TEXT`. Reemplaza el texto del campo: así es la acción de Android. Para añadir, el agente lee el campo con `screen` y manda el texto completo.
+- Va al nodo con el foco de entrada (`findFocus(FOCUS_INPUT)`), con `ACTION_SET_TEXT`. Reemplaza el texto del campo: así es la acción de Android. Para añadir, el agente lee el campo con `screen` y manda el texto completo. `--screen` funciona igual que en `tap` (§3.2).
 - Sin campo con foco: `not_found` ("Tap a text field first").
 - Campo de contraseña: `protected` ("ADBuddy does not type into password fields: ask the user to type it").
 - Bloqueado: `protected` ("The phone is locked: ask the user to unlock it").
@@ -146,18 +149,26 @@ La app lo sabe por los `TYPE_WINDOW_STATE_CHANGED` de la ventana de aplicación 
 - **Qué sale (M5c).** De ADBuddy, de las apps protegidas (la lista se consulta en cada llamada), de una notificación que la app marca `VISIBILITY_SECRET` y de un paquete que no es un nombre de paquete (su `package` sale vacío) salen `key`, `title` y `text` vacíos: la `key` lleva el tag de la app, que puede llevar texto, y se sustituye por `hidden-<n>`. Lo demás, con el texto cortado a 1024 puntos de código, las 50 más recientes (`truncated`) y el resultado dentro de `MaxUIResult` (se descartan las más antiguas hasta que quepa).
 - **Dos capas.** El daemon repite el vaciado con su copia de `protected.json`, el recorte a 50 y 1024 y el paquete inválido a vacío: una lista desfasada o una app que no sea la verdadera no saca un código. No pasa por la guarda de primer plano (no lee la pantalla), sí por pausa, pregunta 🔴 y diario; el diario guarda la orden, nunca el resultado. Un tiempo agotado es `UI_TIMEOUT`, sin reintento.
 - **El listener solo lee** (no descarta, pospone ni pulsa nada, no abre intents ni registra texto, y nada fuera de su paquete lo alcanza; `ListenerIsReadOnlyTest`). El acceso lo concede el usuario en los ajustes del sistema; la app lo muestra con tres valores (permitido, no permitido, desconocido) y el desconocido nunca se pinta como ninguno de los otros.
-- **Confirmación del usuario.** Que el sistema diga "permitido" no basta para leer: la app exige una marca que solo pone el botón de confirmar de su propia pantalla de acceso (nunca algo automático) y que revocar el acceso invalida (el propio listener la borra al desconectarse, sin esperar a que nadie la mire); sin ella, `unavailable` con "confírmalo en la app ADBuddy". El agente podría activar el interruptor del sistema con `adbuddy tap`, pero no pulsar el botón de ADBuddy (app protegida).
+- **Confirmación del usuario.** Que el sistema diga "permitido" no basta para leer: la app exige una marca que solo pone el botón de confirmar de su propia pantalla de acceso (nunca algo automático) y que revocar el acceso invalida (el propio listener la borra al desconectarse y en cada nuevo enlace, sin esperar a que nadie la mire: el sistema puede volver a enlazarlo sin desconectarlo antes, M5c-32 b); sin ella, `unavailable` con "confírmalo en la app ADBuddy". El agente podría activar el interruptor del sistema con `adbuddy tap`, pero no pulsar el botón de ADBuddy (app protegida).
 - **Secretas.** Salen vacías las notificaciones que la app marca `VISIBILITY_SECRET`, las de otro usuario o del perfil de trabajo, las que el usuario o el canal ocultan de la pantalla de bloqueo y las que no se pueden leer.
 - **Límite honesto.** Una app que reenvía las notificaciones de otras con su propio paquete (acompañantes de reloj, historiales de notificaciones, KDE Connect) saca el contenido de una app protegida: el paquete que sale es el del reenviador, y no es de la lista. Se documenta; no se puede cerrar desde aquí.
 
 ### 3.6 `adbuddy screenshot [--scale 0.5] [--format png|jpeg] [-o fichero]`
 
-La hace el host, nunca la app: `exec-out screencap -p` por el adb del host. Antes pasa por la guarda (§4.3).
+La hace el host, nunca la app: `exec-out screencap -p` por el adb del host. Antes pasa por la guarda (§4.3) y pide el aviso de la superposición a la app (§6, «Cuándo»).
 
 - **Escala:** por defecto 0,5; `--scale 1` deja el tamaño original. El reescalado es un filtro de caja con la biblioteca estándar de Go (`image`, `image/png`, `image/jpeg`), sin dependencias nuevas.
 - **Formato:** PNG por defecto, o JPEG con calidad 80.
 - **Fichero:** `-o` relativo a la carpeta del agente. Por defecto, `screenshots/<AAAAMMDD-hhmmss>.png` dentro del entorno. Lo escribe la CLI, en el proceso del agente: el daemon le manda los bytes por el flujo de datos del IPC, en tramas de 1 MiB.
 - Con el modo remoto activo, el valor por defecto pasa a 0,5 en JPEG (M5b, §3.3 de la v1; lo decide el daemon, §13).
+
+### 3.7 `notice` (sin comando de CLI)
+
+Pide a la app que muestre la superposición (§6) sin hacer nada más. La usa el host antes de `screenshot` y de las lecturas crudas por adb (§6, «Cuándo»). `args` y `result` son `{}` (`bridge.Empty`).
+
+- Respuestas: `ok`; `failed` si la app no puede dibujar la superposición; `protected` con la sesión en pausa; `unavailable` con el servicio apagado; `unsupported` en una app anterior.
+- El host solo deja leer sin aviso con `ErrNoApp`, `unavailable` (con el servicio no vinculado) y `unsupported`; cualquier otra respuesta bloquea.
+- No lleva guarda de app protegida: no lee nada. El nombre es el mismo que el del tipo de mensaje `notice`, pero son espacios de nombres distintos (op de `ui.request`).
 
 ## 4. Seguridad
 
@@ -172,7 +183,7 @@ Una ayuda recorre en el daemon el mismo camino que `exec`:
 | Con una pregunta 🔴 pendiente | Bloqueada, como toda orden de adb (`admit` del daemon) | Bloqueada: un toque podría pulsar Permitir |
 | Admisión en vuelo | No cuenta | Cuenta: retrasa la pregunta siguiente, como un `input` en marcha |
 | Guarda de §4.3 | Sí | Sí |
-| Diario | Una entrada con `argv` `["adbuddy", "<op>", …]`, `source` del agente y la descripción de la regla | Igual |
+| Diario | Una entrada con `argv` `["adbuddy", "<op>", …]`, `source` del agente y la descripción de la regla | Igual; con `--screen`/`--settle` son dos: la de la acción y una `adbuddy screen` de la lectura, que puede quedar `blocked` mientras la acción queda `ok`. No se escribe el contenido de la pantalla, solo el estado |
 
 El `argv` del diario lo construye el daemon a partir de la operación y sus `args` (el del cliente no cuenta), con el texto de `type` recortado a 60 caracteres. Las descripciones salen de reglas propias de las ayudas (`helper.screen`, `helper.tap`…), con título en inglés y en español como las demás. No pasan por el clasificador de shell: su `argv` no es una orden de adb.
 
@@ -237,7 +248,11 @@ Las órdenes del respaldo las ejecuta el daemon con el adb del host, ya admitida
 
 `AgentAccessibilityService` dibuja una ventana `TYPE_ACCESSIBILITY_OVERLAY`, que no necesita `SYSTEM_ALERT_WINDOW`:
 
-- **Cuándo:** al empezar cualquier `ui.request` de acción (`click` y `setText`), y también con `dump`. Se oculta 4 s después de la última operación. Con la sesión en pausa no se muestra nunca.
+- **Cuándo:** al empezar cualquier `ui.request` de acción (`click` y `setText`), y también con `dump`, que falla como `click` y `setText` si la app no puede mostrarla. Se oculta 4 s después de la última operación. Con la sesión en pausa no se muestra nunca (la app lo comprueba también en `dump` y `notice`, por si la pausa llega tras las puertas del host).
+  - **Lecturas por adb:** antes de `screenshot` y de los `screencap`, `screenrecord`, `uiautomator` y `dumpsys` que vuelque la vista (crudos), el host pide el aviso a la app con la op `notice` (§3.7). Va después de la guarda y de la confirmación (si el comando es 🔴), y antes de la última comprobación de pausa: una pausa que llegue durante el aviso bloquea la lectura.
+  - **Sin aviso posible:** sin app conectada o con el servicio de accesibilidad apagado no hay aviso, y la lectura sigue (el agente conserva su experiencia normal). Una app anterior que contesta `unsupported` también deja leer, sin consultar el servicio.
+  - **Se bloquea** (`UI_BLOCKED`, `Blocked by ADBuddy: …`, sin ejecutar nada por adb) cuando la accesibilidad está activa y la app no está conectada o no contesta a tiempo, cuando no se puede comprobar si lo está (`dumpsys accessibility` falla), cuando la app no puede dibujar el aviso (`failed`) y cuando está en pausa (`protected`).
+  - `screenrecord` solo avisa al empezar: el overlay se oculta a los 4 s aunque la grabación siga. Es 🔴 y la persona la confirma.
 - **Qué:** un marco fino del color de acento del tema y una píldora arriba: "Agent using the screen · Pause" / "Agente usando la pantalla · Pausar". Tocar la píldora envía `pause` (el tipo de M2) con `Bridge.send`.
 - **Marca del toque:** un círculo de 48 dp que se desvanece en 600 ms, centrado en el punto o en el centro de los límites del nodo.
 - **Toques:** toda la ventana es `FLAG_NOT_TOUCHABLE` salvo la píldora, que es una ventana aparte, pequeña y tocable. La superposición nunca tapa la interfaz: no intercepta el toque de `dispatchGesture` ni los del usuario.
@@ -331,11 +346,11 @@ Sin `canTakeScreenshot`: la captura la hace el host (§3.6). La descripción del
 ## 11. Tests
 
 - **Host:**
-  - el daemon con un `UI` falso: cada puerta de §4.1, el orden pausa → pregunta → guarda → admisión, y una entrada del diario por ayuda;
+  - el daemon con un `UI` falso: cada puerta de §4.1, el orden pausa → pregunta → guarda → admisión, y una entrada del diario por ayuda (dos con `--screen`: la de la acción y la `adbuddy screen` de la lectura posterior);
   - la guarda: con una app protegida, ADBuddy, primer plano desconocido o sin lista, para `input`, `am start -n`, `monkey -p`, `screencap` y las ayudas;
   - el respaldo con el adb falso de `testutil`: `uiautomator` con el servicio vinculado y sin vincular, `input text` con espacios, comillas y Unicode, y `dumpsys` de Android 11 a 17 (muestras reales en `testdata`);
   - `uiArea` con una app falsa de `bridge`: respuesta tardía, respuesta de otra conexión, `id` desconocido y caducidad;
-  - la CLI: la salida de texto escapada, `--json` y los códigos de salida;
+  - la CLI: la salida de texto escapada, `--json`, los códigos de salida, y `tap`/`type --screen` y `screen --settle` (pantalla, nota con salida 0, daemon antiguo, aviso de pantalla cambiante);
   - el reescalado: tamaño y formato.
 - **App** (JVM, sin Android):
   - `Dumper`, `Matcher` y `ProtectedApps` sobre un modelo propio de nodo (`UiNode`), que el servicio construye a partir de `AccessibilityNodeInfo`, para que la lógica no dependa de clases de Android;
@@ -369,6 +384,7 @@ Todos aditivos (§11 del protocolo: sigue siendo `v1`):
    - los límites: `MaxUIResult` 512 KiB, `MaxNotifications` 50, `MaxNotificationText` 1024, `MaxSetText` 4096 code points, `MaxProtectedApps` 1000 y `MaxPackage` 255;
    - los casos de `ValidPackage`.
    - `notifications` gana `truncated`.
+5. **La op `notice` de `ui.request`** (screen-overlay-frame): `args` y `result` vacíos (`Empty`). Go: `UIOpNotice` en `UIOps`; Kotlin: `UiOp.NOTICE` en `UiOp.ALL`. Fixtures `host/ui.request@notice.json` y `app/ui.response@notice.json`, y entrada en `protocol/fixtures/ui.json`. Aditivo; un commit con Go, Kotlin y fixtures.
 
 Van en un solo commit (Go, Kotlin y fixtures), como pide §10 del protocolo, y se avisa a tern-51 y a skimmer-32 al integrar.
 
@@ -390,4 +406,4 @@ Van en un solo commit (Go, Kotlin y fixtures), como pide §10 del protocolo, y s
 - **Ruling (M5c): `notifications` no pasa por la guarda de primer plano (sí por pausa, pregunta 🔴 y diario) y no tiene respaldo por adb.** **Por qué:** no lee la pantalla y adb daría todo el texto. **Coste si me equivoco:** una condición en `daemon/ui.go`.
 - **Ruling (M5c): el acceso a notificaciones tiene tres valores, y permitido exige ajuste y conexión.** **Por qué:** lo desconocido no se pinta como permitido ni como denegado (ruling de M5b). **Coste si me equivoco:** un "desconocido" de más.
 - **Ruling (M5c): las apps que reciben los códigos (Mensajes, Gmail, la app de SMS, Play services) están protegidas desde el primer arranque, por la propuesta.** **Por qué:** un OTP por SMS o correo es tan secreto como el de un banco y no puede esperar a la confirmación. **Coste si me equivoco:** el agente no lee esas apps hasta que el usuario las desmarque.
-- **Ruling (M5c): `notifications` exige la confirmación del usuario en la app, además del acceso del sistema.** **Por qué:** el agente podría activar el interruptor del sistema con `adbuddy tap`, pero no pulsar el botón de ADBuddy. **Coste si me equivoco:** un toque de más del usuario, una vez. El host no concede el acceso (el `setup` de M6a decide si lo ofrece).
+- **Ruling (M5c): `notifications` exige la confirmación del usuario en la app, además del acceso del sistema.** **Por qué:** el agente podría activar el interruptor del sistema con `adbuddy tap`, pero no pulsar el botón de ADBuddy. **Coste si me equivoco:** un toque de más del usuario tras cada reinicio, actualización o muerte de la app (la marca se borra en cada nuevo enlace del listener, M5c-32 b). El host no concede el acceso (el `setup` de M6a decide si lo ofrece).

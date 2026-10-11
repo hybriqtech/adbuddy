@@ -1,6 +1,12 @@
 package tech.hybriq.adbuddy
 
+import android.app.Activity
 import android.app.Application
+import android.os.Bundle
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import android.content.res.Configuration
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -76,6 +82,12 @@ class AdbuddyApp : Application() {
     /** What the person reads of a refusal of the host: the app's own text for its code, in the language in force (ErrorText). */
     val errorTexts: ErrorTexts = { ErrorText.text({ id -> getString(id) }, it) }
 
+    private val started = AtomicInteger(0)
+    private val _foreground = MutableStateFlow(false)
+
+    /** True while at least one activity of the app is started (the bubble counts): the person is looking at the app. */
+    val foreground: StateFlow<Boolean> = _foreground.asStateFlow()
+
     private var deviceInfo: DeviceInfoSender? = null
 
     override fun onCreate() {
@@ -93,6 +105,19 @@ class AdbuddyApp : Application() {
         terminal = TerminalFeed(channel)
         scope.launch { channel.connected.collect { terminal.onConnectedChanged(it) } }
         createNotificationChannels()
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(a: Activity) { started.incrementAndGet(); _foreground.value = true }
+            override fun onActivityStopped(a: Activity) {
+                val n = started.decrementAndGet()
+                // A recreation (rotation, dark mode, language) stops the activity and starts it again at once: it stays in front.
+                if (n > 0 || !a.isChangingConfigurations) _foreground.value = n > 0
+            }
+            override fun onActivityCreated(a: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityResumed(a: Activity) {}
+            override fun onActivityPaused(a: Activity) {}
+            override fun onActivitySaveInstanceState(a: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(a: Activity) {}
+        })
     }
 
     /**
@@ -109,9 +134,20 @@ class AdbuddyApp : Application() {
     private fun createNotificationChannels() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.deleteNotificationChannel(LEGACY_STATUS)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL_CONVERSATION, getString(R.string.channel_conversation), NotificationManager.IMPORTANCE_LOW).apply { setAllowBubbles(true) })
-        nm.createNotificationChannel(NotificationChannel(CHANNEL_DONE, getString(R.string.channel_done), NotificationManager.IMPORTANCE_DEFAULT))
-        nm.createNotificationChannel(NotificationChannel(CHANNEL_CONFIRM, getString(R.string.channel_confirm), NotificationManager.IMPORTANCE_HIGH))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_CONVERSATION, getString(R.string.channel_conversation), NotificationManager.IMPORTANCE_LOW).apply {
+            description = getString(R.string.channel_conversation_description)
+            setAllowBubbles(true)
+        })
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_DONE, getString(R.string.channel_done), NotificationManager.IMPORTANCE_DEFAULT).apply {
+            description = getString(R.string.channel_done_description)
+        })
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_CONFIRM, getString(R.string.channel_confirm), NotificationManager.IMPORTANCE_HIGH).apply {
+            description = getString(R.string.channel_confirm_description)
+        })
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_ASK, getString(R.string.channel_ask), NotificationManager.IMPORTANCE_HIGH).apply {
+            description = getString(R.string.channel_ask_description)
+            setShowBadge(false)
+        })
     }
 
     override fun onTerminate() {
@@ -146,6 +182,7 @@ class AdbuddyApp : Application() {
         const val CHANNEL_CONVERSATION = "conversation"
         const val CHANNEL_DONE = "done"
         const val CHANNEL_CONFIRM = "confirm"
+        const val CHANNEL_ASK = "ask"
         private const val LEGACY_STATUS = "status"
     }
 }

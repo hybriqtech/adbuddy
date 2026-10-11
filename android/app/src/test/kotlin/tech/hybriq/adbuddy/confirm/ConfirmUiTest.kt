@@ -88,7 +88,7 @@ class ConfirmUiTest {
     @Test fun theReceiverSendsAnOpenQuestion() {
         val s = state(q("j_1", allowSession = true))
         for (d in listOf(Decision.DENY, Decision.ALLOW)) {
-            assertTrue(d, ConfirmUi.canSend(s, "j_1", d, now, locked = false, notification = true))
+            assertTrue(d, ConfirmUi.canSend(s, "j_1", d, now, locked = false, armed = true, notification = true))
         }
     }
 
@@ -98,28 +98,69 @@ class ConfirmUiTest {
         val r = q("j_1", allowSession = true)
         assertEquals(listOf(Decision.DENY, Decision.ALLOW), ConfirmUi.notificationDecisions(r, ConfirmUi.Status.OPEN))
         val s = state(r)
-        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, notification = true))
-        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, notification = false))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, armed = true, notification = true))
+        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, armed = true, notification = false))
     }
 
     @Test fun aLockedPhoneCanDenyButNotAllow() {
         val s = state(q("j_1", allowSession = true))
-        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = true, notification = true))
-        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = true, notification = true))
-        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = true, notification = true))
+        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = true, armed = true, notification = true))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = true, armed = true, notification = true))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = true, armed = true, notification = true))
     }
 
     @Test fun theReceiverSendsNothingThatIsNotOpen() {
-        assertFalse("gone", ConfirmUi.canSend(state(), "j_1", Decision.DENY, now, locked = false, notification = true))
-        assertFalse("sending", ConfirmUi.canSend(state(q("j_1"), answering = setOf("j_1")), "j_1", Decision.DENY, now, locked = false, notification = true))
-        assertFalse("expired", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.DENY, now + 61_000, locked = false, notification = true))
+        assertFalse("gone", ConfirmUi.canSend(state(), "j_1", Decision.DENY, now, locked = false, armed = true, notification = true))
+        assertFalse("sending", ConfirmUi.canSend(state(q("j_1"), answering = setOf("j_1")), "j_1", Decision.DENY, now, locked = false, armed = true, notification = true))
+        assertFalse("expired", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.DENY, now + 61_000, locked = false, armed = true, notification = true))
         val offline = state(q("j_1"), connection = BridgeState.Connection.CONNECTING)
-        assertFalse("offline", ConfirmUi.canSend(offline, "j_1", Decision.DENY, now, locked = false, notification = true))
+        assertFalse("offline", ConfirmUi.canSend(offline, "j_1", Decision.DENY, now, locked = false, armed = true, notification = true))
     }
 
     @Test fun theReceiverSendsOnlyKnownDecisions() {
-        assertFalse(ConfirmUi.canSend(state(q("j_1")), "j_1", "allow_forever", now, locked = false, notification = true))
-        assertFalse("not offered", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.ALLOW_SESSION, now, locked = false, notification = true))
+        assertFalse(ConfirmUi.canSend(state(q("j_1")), "j_1", "allow_forever", now, locked = false, armed = true, notification = true))
+        assertFalse("not offered", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.ALLOW_SESSION, now, locked = false, armed = true, notification = true))
+    }
+
+    // --- the arming: Allow waits ConfirmUi.ARMING_MS from when it is shown, Deny never ---
+
+    @Test fun allowWaitsSixHundredMillisecondsFromWhenItIsShown() {
+        assertEquals(600L, ConfirmUi.ARMING_MS)
+        val shown = 1_000_000L
+        assertFalse("at once", ConfirmUi.armed(shown, shown))
+        assertFalse("a quick burst", ConfirmUi.armed(shown, shown + 300))
+        assertFalse("a millisecond short", ConfirmUi.armed(shown, shown + 599))
+        assertTrue(ConfirmUi.armed(shown, shown + 600))
+        assertTrue(ConfirmUi.armed(shown, shown + 60_000))
+    }
+
+    // Fail closed: a button nobody saw shown (a stale notification after the process restarted) is never armed.
+    @Test fun aButtonNotKnownToBeShownIsNotArmed() {
+        assertFalse(ConfirmUi.armed(null, 1_000_000L))
+        assertFalse(ConfirmUi.armed(null, Long.MAX_VALUE))
+    }
+
+    @Test fun anUnarmedButtonAllowsNothingButDenyAlwaysWorks() {
+        val s = state(q("j_1", allowSession = true))
+        for (notification in listOf(true, false)) {
+            assertFalse("allow $notification", ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, armed = false, notification = notification))
+            assertTrue("deny $notification", ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = false, armed = false, notification = notification))
+            assertTrue("deny locked $notification", ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = true, armed = false, notification = notification))
+        }
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, armed = false, notification = false))
+        assertTrue("armed, the dialog allows for the session", ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, armed = true, notification = false))
+        assertTrue("armed, the notification allows", ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, armed = true, notification = true))
+        assertFalse("armed but locked", ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = true, armed = true, notification = true))
+    }
+
+    // Armed or not, a question that is not open sends nothing, not even Deny.
+    @Test fun theArmingNeverOpensWhatIsNotOpen() {
+        val offline = state(q("j_1"), connection = BridgeState.Connection.CONNECTING)
+        for (armed in listOf(true, false)) {
+            assertFalse("gone $armed", ConfirmUi.canSend(state(), "j_1", Decision.DENY, now, locked = false, armed = armed, notification = false))
+            assertFalse("expired $armed", ConfirmUi.canSend(state(q("j_1")), "j_1", Decision.ALLOW, now + 61_000, locked = false, armed = armed, notification = false))
+            assertFalse("offline $armed", ConfirmUi.canSend(offline, "j_1", Decision.DENY, now, locked = false, armed = armed, notification = false))
+        }
     }
 
     // --- the dialog's question ---
@@ -155,6 +196,25 @@ class ConfirmUiTest {
         assertNull("answering, closed", ConfirmUi.question(sending, focus = null, now = now, closed = setOf("j_1")))
         val open = state(q("j_1"), q("j_2"))
         assertEquals("j_2", ConfirmUi.question(open, focus = "j_1", now = now, closed = setOf("j_1"))?.id)
+    }
+
+    @Test fun onlyClosedAndOpenQuestionsAreWaiting() {
+        val s = state(q("j_1"), q("j_2"), q("j_3"), q("j_4", expiresAt = "2026-09-30T09:59:00Z"), q("j_5"), answering = setOf("j_3"))
+        val closed = setOf("j_1", "j_3", "j_4", "j_5")
+        // j_2 is open but not closed, j_3 is on its way, j_4 expired: j_1 and j_5, in the order of pending.
+        assertEquals(listOf("j_1", "j_5"), ConfirmUi.closedWaiting(s, closed, now).map { it.id })
+        assertEquals(emptyList<String>(), ConfirmUi.closedWaiting(s, emptySet(), now).map { it.id })
+    }
+
+    @Test fun aClosedQuestionWithoutConnectionIsNotWaiting() {
+        val s = state(q("j_1"), connection = BridgeState.Connection.WAITING)
+        assertEquals(emptyList<String>(), ConfirmUi.closedWaiting(s, setOf("j_1"), now).map { it.id })
+    }
+
+    @Test fun aClosedQuestionNoLongerWaitsOnceItExpires() {
+        val s = state(q("j_1"))
+        assertEquals(1, ConfirmUi.closedWaiting(s, setOf("j_1"), now).size)
+        assertEquals(0, ConfirmUi.closedWaiting(s, setOf("j_1"), now + 60_000).size)
     }
 
     @Test fun noQuestionNoDialog() {
@@ -236,9 +296,9 @@ class ConfirmUiTest {
         assertEquals(listOf(Decision.DENY), ConfirmUi.decisions(long, ConfirmUi.Status.OPEN))
         assertEquals(listOf(Decision.DENY), ConfirmUi.notificationDecisions(long, ConfirmUi.Status.OPEN))
         val s = state(long)
-        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, notification = false))
-        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, notification = false))
-        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = false, notification = false))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, armed = true, notification = false))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW_SESSION, now, locked = false, armed = true, notification = false))
+        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = false, armed = true, notification = false))
         assertEquals(ConfirmUi.Why.TOO_LONG, ConfirmUi.why(long, ConfirmUi.Status.OPEN))
         val fits = q("j_2").copy(rawCommand = "a".repeat(ConfirmUi.DIALOG_MAX_COMMAND))
         assertEquals(listOf(Decision.DENY, Decision.ALLOW), ConfirmUi.decisions(fits, ConfirmUi.Status.OPEN))
@@ -288,12 +348,12 @@ class ConfirmUiTest {
 
     @Test fun theNotificationButtonsCannotSendWhatTheNotificationDoesNotOffer() {
         val s = state(q("j_1").copy(special = true), q("j_2", allowSession = true).copy(rawCommand = "x".repeat(ConfirmUi.MAX_COMMAND + 1)))
-        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, notification = true))
-        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = false, notification = true))
-        assertTrue("the dialog can", ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, notification = false))
-        assertFalse(ConfirmUi.canSend(s, "j_2", Decision.ALLOW, now, locked = false, notification = true))
-        assertFalse(ConfirmUi.canSend(s, "j_2", Decision.ALLOW_SESSION, now, locked = false, notification = false))
-        assertTrue(ConfirmUi.canSend(s, "j_2", Decision.ALLOW, now, locked = false, notification = false))
+        assertFalse(ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, armed = true, notification = true))
+        assertTrue(ConfirmUi.canSend(s, "j_1", Decision.DENY, now, locked = false, armed = true, notification = true))
+        assertTrue("the dialog can", ConfirmUi.canSend(s, "j_1", Decision.ALLOW, now, locked = false, armed = true, notification = false))
+        assertFalse(ConfirmUi.canSend(s, "j_2", Decision.ALLOW, now, locked = false, armed = true, notification = true))
+        assertFalse(ConfirmUi.canSend(s, "j_2", Decision.ALLOW_SESSION, now, locked = false, armed = true, notification = false))
+        assertTrue(ConfirmUi.canSend(s, "j_2", Decision.ALLOW, now, locked = false, armed = true, notification = false))
     }
 
     // --- when the screen must look again ---
@@ -394,5 +454,22 @@ class ConfirmUiTest {
         val p = ConfirmUi.repaint(mapOf("j_1" to ConfirmUi.Status.OPEN, "j_9" to ConfirmUi.Status.OPEN), state(q("j_1")), now)
         assertEquals(setOf("j_9"), p.cancel)
         assertEquals(mapOf("j_1" to ConfirmUi.Status.OPEN), p.shown)
+    }
+
+    // --- the countdown ---
+
+    @Test fun secondsLeftRoundsUpAndNeverGoesBelowZero() {
+        val r = q("j_1", expiresAt = "2026-09-30T10:00:42Z")
+        assertEquals(42L, ConfirmUi.secondsLeft(r, now))
+        assertEquals("41.2 s left shows 42", 42L, ConfirmUi.secondsLeft(r, now + 800))
+        val soon = q("j_1", expiresAt = "2026-09-30T10:00:00.400Z")
+        assertEquals("0.4 s left shows 1", 1L, ConfirmUi.secondsLeft(soon, now))
+        assertEquals(0L, ConfirmUi.secondsLeft(r, now + 42_000))
+        assertEquals("already expired", 0L, ConfirmUi.secondsLeft(r, now + 90_000))
+    }
+
+    @Test fun secondsLeftIsNullWhenTheExpiryCannotBeRead() {
+        assertNull(ConfirmUi.secondsLeft(q("j_1", expiresAt = "soon"), now))
+        assertNull(ConfirmUi.secondsLeft(q("j_1", expiresAt = ""), now))
     }
 }

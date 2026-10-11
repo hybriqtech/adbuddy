@@ -12,12 +12,17 @@ import (
 )
 
 func newEnvCmd(app *App) *cobra.Command {
-	env := &cobra.Command{Use: "env", Short: app.T("help.env.short")}
+	env := &cobra.Command{
+		Use:     "env",
+		Short:   app.T("help.env.short"),
+		Example: "  adbuddy env init\n  adbuddy env init --dir ~/ADBuddy/pixel",
+	}
 	var dir string
 	var force bool
 	initCmd := &cobra.Command{
 		Use:     "init",
 		Short:   app.T("help.init.short"),
+		Long:    app.T("help.init.long"),
 		Example: "  adbuddy env init\n  adbuddy env init --force\n  adbuddy env init --dir ~/ADBuddy/pixel --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -66,8 +71,8 @@ func groupSkillPaths(verb string, paths []string) []string {
 
 // groupSkillLines prints one line per path, except the skill files, which are
 // summarised in one line per folder: "created 9 skills in .claude/skills". verb
-// is "created" or "updated". The English keeps "1 skills" as it always said;
-// the Spanish has its singular.
+// is "created" or "updated". English and Spanish both have their singular;
+// the count picks the form.
 func groupSkillLines(lang i18n.Lang, verb string, paths []string) []string {
 	var lines, order []string
 	skills := map[string]map[string]bool{}

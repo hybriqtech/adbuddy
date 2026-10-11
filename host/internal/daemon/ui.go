@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
@@ -130,19 +131,62 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	defer release()
 	// foreground is what the guard asks; notifications do not read the screen
 	// (the app empties what a protected app says, and the host does it again).
+	firstBlocked := false
 	if req.UIOp != bridge.UIOpForeground && req.UIOp != bridge.UIOpNotifications {
 		if why := d.guardForeground(ctx, nil); why != "" {
 			if ctx.Err() != nil { // the agent or serve went away meanwhile
-				code := ExitDenied
-				e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
-				d.record(e)
-				return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
+				return d.abandonUI(ctx, e)
 			}
-			return d.blockUI(e, why)
+			if !(req.Screen && req.UIOp == bridge.UIOpDump) {
+				return d.blockUI(e, why)
+			}
+			// screen --settle: maybe a transition (a window with no content for
+			// a moment). The wait tries again with the guard on every attempt,
+			// and its first valid read is the screen it starts from.
+			firstBlocked = true
 		}
 	}
-	if d.o.Paused() { // paused while the guard looked
+	// The notice of the on-screen frame goes before the last pause check, so a
+	// pause that arrives meanwhile blocks (after the guard: no notice for what it refuses).
+	if req.UIOp == OpScreenshot {
+		if why := d.showNotice(ctx); why != "" {
+			return d.stopUI(ctx, e, why)
+		}
+	}
+	guarded := time.Now() // right after the guard said yes
+	if d.o.Paused() {     // paused while the guard looked
 		return d.blockUI(e, PausedMessage)
+	}
+	// An act with Screen: read the screen before it, the one the wait starts
+	// from. That read is only compared (never returned, written or journaled)
+	// and it does not weaken the doors of the act: the context and the pause
+	// are looked at again, the guard too if the read took longer than
+	// baselineSlack, and if the app says something protected is in front the
+	// act does not happen.
+	var base *bridge.UIDump
+	if req.Screen && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
+		var denied *uiFailure
+		base, denied = d.baselineScreen(ctx)
+		if ctx.Err() != nil { // the agent or serve went away: no act
+			return d.abandonUI(ctx, e)
+		}
+		if d.o.Paused() { // paused while the start was read: no act
+			return d.blockUI(e, PausedMessage)
+		}
+		if denied != nil { // the app says there is something protected in front: no act
+			return d.blockUI(e, denied.msg)
+		}
+		if time.Since(guarded) > baselineSlack { // the guard looked too long ago: look again before acting
+			if why := d.guardForeground(ctx, nil); why != "" {
+				if ctx.Err() != nil {
+					return d.abandonUI(ctx, e)
+				}
+				return d.blockUI(e, why)
+			}
+			if d.o.Paused() {
+				return d.blockUI(e, PausedMessage)
+			}
+		}
 	}
 	if h.change {
 		running := e
@@ -152,7 +196,35 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 	}
 
-	data, via, f := d.runUI(ctx, req.UIOp, req.UIArgs, s)
+	var data any
+	var via string
+	var f *uiFailure
+	if firstBlocked {
+		// screen --settle after a block: nothing was read yet.
+		var done *ipc.Exit
+		if data, via, f, done = d.settleScreen(ctx, e, settleIn{args: req.UIArgs, start: time.Now(), adopt: true}); done != nil {
+			return *done
+		}
+	} else {
+		data, via, f = d.runUI(ctx, req.UIOp, req.UIArgs, s)
+		if req.Screen && req.UIOp == bridge.UIOpDump {
+			var done *ipc.Exit
+			switch first, ok := asDump(data); {
+			case f == nil && ok:
+				// screen with Screen: wait for it to settle; the read above is the start.
+				data, via, f, done = d.settleScreen(ctx, e, settleIn{args: req.UIArgs, base: &first, baseVia: via, first: &first, via: via, start: time.Now()})
+			case f != nil && f.exit == ExitDenied && ctx.Err() == nil:
+				// The app's own check refused the first read (UI_PROTECTED): maybe
+				// a transition, as after a block of the guard. Nothing read comes
+				// out of it; the wait's first valid read is the start, and a
+				// refusal that lasts is a block with no data.
+				data, via, f, done = d.settleScreen(ctx, e, settleIn{args: req.UIArgs, start: time.Now(), adopt: true})
+			}
+			if done != nil {
+				return *done
+			}
+		}
+	}
 	code := 0
 	if f != nil {
 		code = f.exit
@@ -169,11 +241,41 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		return ipc.Exit{Code: f.exit, ErrorCode: f.code, Error: f.msg}
 	}
 	if data != nil {
+		if req.Screen && f == nil && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
+			release() // the change is done: a question must not wait for the screen to settle
+			data = d.withScreen(ctx, req, data, base)
+		}
 		if err := s.Data(data); err != nil {
 			return ipc.Exit{Code: 1, ErrorCode: "UI_FAILED", Error: err.Error()}
 		}
 	}
 	return ipc.Exit{}
+}
+
+// settleScreen is the wait of screen --settle: what ui sends and how it was
+// read, or its failure; or done, when ui returns it as is: a block (nothing
+// read before comes out) or the agent or serve gone.
+func (d *Daemon) settleScreen(ctx context.Context, e journal.Entry, in settleIn) (data any, via string, f *uiFailure, done *ipc.Exit) {
+	scr, how, why, sf := d.settle(ctx, in)
+	switch {
+	case sf != nil:
+		return nil, "", sf, nil
+	case why != "":
+		x := d.blockUI(e, why)
+		return nil, "", nil, &x
+	case scr == nil: // the agent or serve went away
+		x := d.abandonUI(ctx, e)
+		return nil, "", nil, &x
+	}
+	return *scr, how + ", settled=" + strconv.FormatBool(scr.Settled), nil, nil
+}
+
+// abandonUI journals a helper the agent or serve gave up on before it ran.
+func (d *Daemon) abandonUI(ctx context.Context, e journal.Entry) ipc.Exit {
+	code := ExitDenied
+	e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
+	d.record(e)
+	return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
 }
 
 // blockUI refuses a helper without running it, as block does a command.
@@ -397,7 +499,7 @@ func (d *Daemon) runUI(ctx context.Context, op string, raw json.RawMessage, s St
 		if err != nil {
 			return nil, "", fail(1, "UI_FAILED", "the ADBuddy app answered something unreadable: "+err.Error())
 		}
-		return v, "the app", nil
+		return v, viaApp, nil
 	}
 	if !fallsBack(err, op == bridge.UIOpDump) {
 		return nil, "", appFailure(ctx, err)
@@ -446,15 +548,15 @@ func checkResult(op string, raw json.RawMessage) (any, error) {
 // uiautomator dumps the screen by adb, unless ADBuddy's accessibility
 // service is on: uiautomator would disconnect it (M5 spec §5).
 func (d *Daemon) uiautomator(ctx context.Context) ([]byte, *uiFailure) {
-	out, code, err := d.o.ADB.Shell(ctx, "dumpsys accessibility")
-	if err != nil || code != 0 {
+	on, err := d.serviceOn(ctx)
+	if err != nil {
 		return nil, fail(exitTransient, "UI_UNAVAILABLE", "could not check ADBuddy's accessibility service on the phone")
 	}
-	if uidump.ServiceOn(out) {
+	if on {
 		return nil, fail(exitTransient, "UI_UNAVAILABLE", "ADBuddy's accessibility service is running but the app is not connected: open the ADBuddy app and try again")
 	}
 	var buf, errb bytes.Buffer
-	code, err = d.o.ADB.Run(ctx, "", []string{"exec-out", "uiautomator", "dump", "/dev/tty"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
+	code, err := d.o.ADB.Run(ctx, "", []string{"exec-out", "uiautomator", "dump", "/dev/tty"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
 	if err != nil || code != 0 {
 		return nil, fail(1, "UI_FAILED", "uiautomator dump failed: "+classify.Printable(strings.TrimSpace(errb.String())))
 	}
@@ -556,4 +658,30 @@ func (l *limited) Write(p []byte) (int, error) {
 	}
 	l.n -= len(p)
 	return l.w.Write(p)
+}
+
+// serviceOn reports whether ADBuddy's accessibility service is listed by
+// dumpsys accessibility (enabled or bound). An error when the phone cannot
+// say: the callers fail closed.
+func (d *Daemon) serviceOn(ctx context.Context) (bool, error) {
+	out, code, err := d.o.ADB.Shell(ctx, "dumpsys accessibility")
+	if err != nil {
+		return false, err
+	}
+	if code != 0 {
+		return false, fmt.Errorf("dumpsys accessibility exited with %d", code)
+	}
+	return uidump.ServiceOn(out), nil
+}
+
+// stopUI ends a helper that the guard or the notice refused: blocked, or
+// abandoned when the agent or serve went away meanwhile.
+func (d *Daemon) stopUI(ctx context.Context, e journal.Entry, why string) ipc.Exit {
+	if ctx.Err() != nil {
+		code := ExitDenied
+		e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
+		d.record(e)
+		return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
+	}
+	return d.blockUI(e, why)
 }

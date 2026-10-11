@@ -27,7 +27,7 @@ class ChatBubbleActivity : ComponentActivity() {
         // A rotation keeps the questions the person closed (MainActivity does the same).
         closed = savedInstanceState?.getStringArrayList(STATE_CLOSED)?.toSet() ?: emptySet()
         val app = application as AdbuddyApp
-        setContent { AdbuddyTheme { ChatRoot(app, focusConfirm = null, closed = closed, firstRun = false, onClose = { closed = closed + it }) } }
+        setContent { AdbuddyTheme { ChatRoot(app, focusConfirm = null, closed = closed, firstRun = false, terminalOpenByDefault = false, askForNotifications = false, onReopen = { closed = closed - it }, onClose = { closed = closed + it }) } }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

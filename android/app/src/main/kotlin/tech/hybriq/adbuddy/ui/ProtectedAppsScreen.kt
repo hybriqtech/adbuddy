@@ -3,13 +3,11 @@ package tech.hybriq.adbuddy.ui
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -21,26 +19,20 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,9 +45,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,11 +76,7 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
     val context = LocalContext.current
     val protectedApps = remember(context) { ProtectedApps.of(context) }
     // Another window drawn over the screen must not get the user's tap on a button that grants or saves.
-    val view = LocalView.current
-    DisposableEffect(view) {
-        view.rootView.filterTouchesWhenObscured = true
-        onDispose {}
-    }
+    ObscuredTouchGuard()
     var load by remember { mutableStateOf<ProtectedAppsUi.LoadState>(ProtectedAppsUi.LoadState.Loading) }
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     var selection by rememberSaveable(stateSaver = SelectionSaver) { mutableStateOf<Set<String>?>(null) }
@@ -153,7 +142,10 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
         AlertDialog(
             onDismissRequest = { askDiscard = false },
             title = { Text(stringResource(R.string.protected_discard_title)) },
-            text = { Text(stringResource(R.string.protected_discard_body)) },
+            text = {
+                ObscuredTouchGuard()
+                Text(stringResource(R.string.protected_discard_body))
+            },
             confirmButton = { TextButton(onClick = { askDiscard = false; onBack() }) { Text(stringResource(R.string.protected_discard_confirm)) } },
             dismissButton = { TextButton(onClick = { askDiscard = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
@@ -161,7 +153,6 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
 }
 
 /** The screen without state, so it has previews: header, search and the rows, with its actions at the foot. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProtectedAppsContent(
     step: OnboardingStep?,
@@ -182,14 +173,7 @@ fun ProtectedAppsContent(
     Scaffold(
         topBar = {
             if (step == null) {
-                TopAppBar(
-                    title = { Text(stringResource(R.string.protected_title)) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                        }
-                    },
-                )
+                AdbuddyTopBar(stringResource(R.string.protected_title), onBack)
             }
         },
         bottomBar = {
@@ -207,12 +191,14 @@ fun ProtectedAppsContent(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                        if (step != null) OutlinedButton(onClick = onSkip, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) { Text(stringResource(R.string.onboarding_skip), color = MaterialTheme.colorScheme.onSurface) }
-                        Button(onClick = onSave, enabled = canSave) {
-                            Text(stringResource(if (proposal) R.string.protected_confirm else R.string.protected_save))
-                        }
-                    }
+                    ActionFooter(
+                        main = { m ->
+                            Button(onClick = onSave, enabled = canSave, modifier = m) {
+                                Text(stringResource(if (proposal) R.string.protected_confirm else R.string.protected_save))
+                            }
+                        },
+                        other = if (step != null) { { m -> SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip, m) } } else null,
+                    )
                 }
             }
         },
@@ -289,7 +275,7 @@ fun StepHeader(step: OnboardingStep, @StringRes title: Int, icon: ImageVector = 
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(stringResource(title), style = MaterialTheme.typography.headlineSmall)
+        Text(stringResource(title), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
     }
 }
 

@@ -17,4 +17,4 @@ Flags:
       --scale float     size relative to the screen, more than 0 and at most 1 (default 0.5; 0.5 and JPEG in remote mode)
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

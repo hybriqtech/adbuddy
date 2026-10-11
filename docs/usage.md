@@ -26,7 +26,7 @@ Every command gets one of three levels: green (read-only, runs at once), yellow 
 You will see lines like these, and more:
 
 ```text
-Waiting for the phone on ADBuddy's adb server (port 5038)…
+Waiting for the phone (up to 45 s). Is Wireless debugging on, and are the phone and this PC on the same Wi-Fi?
 ADBuddy is serving <phone> (session s_…).
 Journal: <environment>/journal
 Press Ctrl+C to stop.
@@ -40,6 +40,8 @@ If the phone is not found, serve stops with `DEVICE_NOT_FOUND`: see [Troubleshoo
 ## Talk to the agent
 
 By default `adbuddy serve` starts the agent for you, inside the host: Claude Code unless you chose another one in setup. Claude Code continues its last conversation. ADBuddy marks the environment folder as trusted in Claude Code's own settings, so Claude Code does not ask. Reach the agent in one of three ways.
+
+By default the agent that `adbuddy serve` starts uses Claude Haiku 5.5 with effort `low`, to keep the latency down. `--model` and `--effort`, or `agent_model` and `agent_effort` in `config.toml`, change that, and `inherit` for either one goes back to what you have configured in Claude Code: `adbuddy serve --model inherit --effort inherit`. For example, `adbuddy serve --model claude-sonnet-5-5 --effort medium`. For `adbuddy run`, which does not add anything of its own: `adbuddy run claude -- --model … --effort …`. The comparison with other models is in `docs/superpowers/plans/2026-10-03-latencia.md`. Only Claude Code takes these settings, and neither the agent nor the phone can change them.
 
 ### From the phone
 
@@ -89,7 +91,7 @@ adbuddy stop
 
 When the agent runs a command ADBuddy ranks red, it holds the command until you answer. The agent waits.
 
-- **App connected:** the question appears on the phone as a notification with **Allow**, **Deny** and, when the host offers it, **Allow during the session**. The app shows the same question as a dialog when it is open. The phone must be unlocked to allow; Deny always works.
+- **App connected:** the question appears on the phone as a notification with **Allow**, **Deny** and, when the host offers it, **Allow during the session**. The app shows the same question as a dialog when it is open. The phone must be unlocked to allow, and Allow waits 600 ms from when the question appears; Deny always works, at once.
 - **No app connected:** the question appears in the `adbuddy serve` terminal, similar to this (a `Why:` line follows when there is a reason):
 
   ```text
@@ -104,7 +106,7 @@ When the agent runs a command ADBuddy ranks red, it holds the command until you 
 
 Unanswered questions expire after 2 minutes (`confirm_timeout` in `config.toml`) and count as a no. The agent gets `Denied by user: …` and exit code 126, and is told not to retry.
 
-`adbuddy serve --confirm deny` refuses every red command without asking. Use it when nobody is there to answer.
+The `--confirm` option of `adbuddy serve` (`auto`, `terminal` or `deny`) only says where a red command is asked when the phone app is **not** connected. With the app connected the question always goes to the phone, whatever the option, and you can allow it there. `--confirm deny` refuses the red commands that arrive while the app is not connected, and the ones still waiting on the phone when it disconnects, without asking: use it when nobody is at the PC terminal.
 
 ## The app on the phone
 
@@ -170,6 +172,8 @@ The agent reads and acts on the phone's screen with these. They go through the h
 adbuddy screen
 adbuddy tap "Network & internet"
 adbuddy tap --xy 540,1200
+adbuddy tap "Network & internet" --screen
+adbuddy screen --settle
 adbuddy type "Wi-Fi"
 adbuddy foreground
 adbuddy screenshot
@@ -179,6 +183,7 @@ adbuddy notifications
 - `adbuddy screen` lists what is on the screen, one element per line, with its id and position. Run it before tapping.
 - `adbuddy tap` taps an element by its text, by its id (`--id`) or at a point (`--xy`).
 - `adbuddy type "<text>"` types into the field that has the focus. It replaces the field's text. Without the app, only plain ASCII works.
+- `--screen` (on `tap` and `type`) also prints the screen right after the action, once it has stopped changing, so the agent does not need a second call. `adbuddy screen --settle` does the same wait for a screen read after a raw adb command such as `am start`. Both wait until the screen has changed from the one they started from and has stopped changing, up to about 3 seconds, plus however long a screen read that had already started takes; if the screen was still changing, they say so. Before a `tap --screen` or `type --screen`, ADBuddy reads the screen once only to compare: that read is not shown, saved or journaled, and it waits at most 1 second, so a `tap --screen` can take up to about 4 seconds in all. A tap that changes nothing on screen (or whose screen changes and comes back) takes about 2 seconds and says that the screen did not change. `adbuddy screen --settle` compares with its own first read, which is not shown unless the 3 seconds run out with no other read (then it is shown, marked as still changing); on a still screen it takes about 2 seconds. If the ADBuddy app stops answering during the wait and the screen is read with `uiautomator` instead, that read is not compared with the start (the two differ in format): the answer does not say whether the screen changed. While the screen changes, a protected-looking window can show for a moment, so a blocked read is tried again for about 2 seconds: a real block (a protected app opened) is reported after about 2 seconds instead of at once. If ADBuddy cannot read the screen afterwards (a protected app opened, for example), the answer says the action was done and why the screen was not read; the exit code stays 0 so nothing repeats the tap. Each reading is journaled as an `adbuddy screen` entry next to the tap or type entry. Workspaces you already created get these instructions, and `@NOTES.md`, with `adbuddy env init --force`.
 - `adbuddy foreground` shows the app in front.
 - `adbuddy screenshot` saves a picture, scaled to half by default, in `screenshots/` of the current folder. `-o` picks the file and `--scale` the size.
 - `adbuddy notifications` lists the notifications on the phone now, newest first, with the app, the time, the title and the text (`--json` gives them whole). Protected apps and ADBuddy show no title or text. It only works once you allow notification access to ADBuddy and confirm it in the app (Settings, Notification access); until then it answers `UI_UNAVAILABLE` and says what to do. It only reads: nothing dismisses or taps a notification.

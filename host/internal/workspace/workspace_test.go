@@ -482,3 +482,24 @@ func TestHookCommandRefusesAPathThatQuotingCannotMakeSafe(t *testing.T) {
 		t.Errorf("%q %v", c, err)
 	}
 }
+
+// Latency plan T1: CLAUDE.md imports NOTES.md so the agent does not spend a
+// turn reading it, and AGENTS.md tells the agent to chain tap and screen.
+func TestTemplatesImportNotesAndChainScreenHelpers(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Init(Options{Dir: dir, Exe: fakeExe(t, "x")}); err != nil {
+		t.Fatal(err)
+	}
+	c := read(t, filepath.Join(dir, "CLAUDE.md"))
+	for _, want := range []string{"@AGENTS.md\n@NOTES.md\n"} {
+		if !strings.Contains(strings.ReplaceAll(c, "\r\n", "\n"), want) {
+			t.Errorf("CLAUDE.md lacks %q", want)
+		}
+	}
+	a := read(t, filepath.Join(dir, "AGENTS.md"))
+	for _, want := range []string{"adbuddy tap \"Network & internet\" --screen", "`adbuddy screen --settle`", "read the result in the same call with", "--screen", "`The action was done; do not repeat it`", "If it is not already in your context, read it before you start.", "`(the screen did not change in about 2 s after the action …)` means the tap did nothing visible: look before you try again."} {
+		if !strings.Contains(a, want) {
+			t.Errorf("AGENTS.md lacks %q", want)
+		}
+	}
+}

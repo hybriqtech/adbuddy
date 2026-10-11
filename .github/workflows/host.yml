@@ -6,12 +6,15 @@ name: host
 # Runners come from repository variables (docs/ci-self-hosted.md); with none
 # set, GitHub-hosted runners are used.
 
+# docs/superpowers/** (specs, plans, validation notes) is design material that no test reads
+# (the Pages test excludes it); a change that touches only it runs no CI. host.yml is not a
+# required check (no branch protection on a private free repository), so skipping is safe.
 on:
   pull_request:
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
   push:
     branches: [main]
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
 
 permissions:
   contents: read

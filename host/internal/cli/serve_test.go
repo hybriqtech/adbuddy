@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -15,8 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
+	"github.com/hybriqtech/adbuddy/host/internal/pty"
+	"github.com/hybriqtech/adbuddy/host/internal/session"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 	"github.com/hybriqtech/adbuddy/host/internal/workspace"
 )
@@ -54,7 +59,7 @@ func TestJournalEmptyJSON(t *testing.T) {
 	t.Setenv("ADBUDDY_CONFIG_DIR", t.TempDir())
 	t.Setenv("ADBUDDY_DATA_DIR", t.TempDir())
 	out, _, code := run(t, "journal", "--json", "--workspace", t.TempDir())
-	if code != 0 || strings.TrimSpace(out) != `{"ok":true,"data":{"entries":[],"skippedLines":0}}` {
+	if code != 0 || strings.TrimSpace(out) != `{"ok":true,"data":{"entries":[],"skippedLines":0,"total":0,"truncated":false}}` {
 		t.Fatalf("exit %d, stdout %q", code, out)
 	}
 }
@@ -443,4 +448,258 @@ func TestServeReleasesTheLockWhenItFails(t *testing.T) {
 		t.Fatalf("the lock is still held after serve ended: %v", err)
 	}
 	lock.Close()
+}
+
+// --model and --effort are checked before serve touches anything: a bad value
+// is a usage error, and one in config.toml a configuration error.
+func TestServeModelAndEffortAreChecked(t *testing.T) {
+	t.Run("flags", func(t *testing.T) {
+		isolate(t)
+		for _, args := range [][]string{{"--model", "--x"}, {"--effort", "ultra"}, {"--effort", "INHERIT"}} {
+			_, errOut, code := run(t, append([]string{"serve", "--adb", "adb"}, args...)...)
+			want := "--model"
+			if args[0] == "--effort" {
+				want = "--effort"
+			}
+			if code != ExitUsage || !strings.Contains(errOut, want+" (or agent_") {
+				t.Errorf("%v: exit %d, stderr %q", args, code, errOut)
+			}
+		}
+	})
+	t.Run("config.toml", func(t *testing.T) {
+		isolate(t)
+		for key, data := range map[string]string{
+			"agent_model":  "agent_model = \"--x\"\n",
+			"agent_effort": "agent_effort = \"ultra\"\n",
+		} {
+			dir := t.TempDir()
+			t.Setenv("ADBUDDY_CONFIG_DIR", dir)
+			if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, errOut, code := run(t, "serve", "--adb", "adb")
+			// config.Load already refuses it: a configuration error, naming the key.
+			if code != ExitConfig || !strings.Contains(errOut, "CONFIG_INVALID") || !strings.Contains(errOut, key) {
+				t.Errorf("%s: exit %d, stderr %q", key, code, errOut)
+			}
+		}
+	})
+}
+
+// What model and effort say reaches the arguments Claude Code starts with, and
+// no other agent gets them.
+func TestNewSessionPassesModelAndEffort(t *testing.T) {
+	origPTY, origLook := startPTY, lookAgent
+	t.Cleanup(func() { startPTY, lookAgent = origPTY, origLook })
+	var got []string
+	lookAgent = func(name string) (string, error) { return "/bin/" + name, nil }
+	startPTY = func(o pty.Options) (pty.PTY, error) {
+		got = o.Args
+		return nil, errors.New("not started")
+	}
+	app := &App{Stdout: io.Discard, Stderr: io.Discard, Getenv: func(string) string { return "" }}
+	for _, c := range []struct{ agent, model, effort, want string }{
+		{"claude", "opus", "low", "--model opus --effort low"},
+		{"claude", "", "", "--model claude-haiku-5-5 --effort low"},
+		{"claude", "inherit", "inherit", ""},
+		{"claude", "inherit", "high", "--effort high"},
+		{"codex", "", "", ""},
+		{"codex", "opus", "", ""},
+	} {
+		m := newSession(app, t.TempDir(), "dev1", func(session.Info) {}, c.model, c.effort)
+		got = nil
+		err := m.Start(c.agent, false)
+		m.Stop()
+		if err == nil {
+			t.Fatalf("%s: the fake PTY should have failed", c.agent)
+		}
+		if strings.Join(got, " ") != c.want {
+			t.Errorf("%s (%q, %q) started with %q, want %q", c.agent, c.model, c.effort, got, c.want)
+		}
+	}
+}
+
+// With --no-agent there is no agent to give them to: serve says so.
+func TestServeModelWithNoAgentSaysItIsNotApplied(t *testing.T) {
+	out := serveNoAgent(t, "--model", "opus")
+	if !strings.Contains(out, "--model and --effort do not apply with --no-agent") {
+		t.Fatalf("no notice:\n%s", out)
+	}
+	// Nothing set: the default model is not a setting, so no notice.
+	if out := serveNoAgent(t); strings.Contains(out, "do not apply with --no-agent") {
+		t.Fatalf("notice without flags:\n%s", out)
+	}
+	// Only inherit: it passes validation and there is nothing to say.
+	if out := serveNoAgent(t, "--model", "inherit", "--effort", "inherit"); strings.Contains(out, "do not apply with --no-agent") {
+		t.Fatalf("notice for inherit:\n%s", out)
+	}
+}
+
+// serveNoAgent runs serve --no-agent with extra flags until it is up, stops it
+// and returns what it said.
+func serveNoAgent(t *testing.T, extra ...string) string {
+	t.Helper()
+	data := isolate(t)
+	tmp := t.TempDir()
+	script, err := testutil.WriteScript(tmp, testutil.FakeRule{Match: "^devices$", Stdout: "List of devices attached\ndev1\tdevice\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKEADB_SCRIPT", script)
+	t.Setenv("FAKEADB_LOG", filepath.Join(tmp, "adb.log"))
+	adb := fakeADB(t)
+	serveErr := &syncBuffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	served := make(chan int, 1)
+	go func() {
+		args := []string{"serve", "--adb", adb, "--serial", "dev1", "--workspace", filepath.Join(tmp, "ws"), "--confirm", "terminal", "--no-agent"}
+		args = append(args, extra...)
+		served <- mainContext(ctx, args, strings.NewReader(""), io.Discard, serveErr)
+	}()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := ipc.PingDaemon(context.Background(), data); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("serve did not start:\n%s", serveErr.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case code := <-served:
+		if code != 0 {
+			t.Fatalf("serve exit %d:\n%s", code, serveErr.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not stop")
+	}
+	return serveErr.String()
+}
+
+func journalOf(t *testing.T, n int) string {
+	t.Helper()
+	isolate(t)
+	ws := t.TempDir()
+	var es []journal.Entry
+	for i := 0; i < n; i++ {
+		es = append(es, journal.Entry{ID: fmt.Sprintf("j_%03d", i), Level: "green", Status: "ok",
+			Description: "d", Argv: []string{"shell", "true"}})
+	}
+	appendEntries(t, ws, nil, es...)
+	return ws
+}
+
+func TestJournalSaysWhenItTruncates(t *testing.T) {
+	ws := journalOf(t, 60)
+	out, errOut, code := run(t, "journal", "--limit", "50", "--workspace", ws)
+	if code != 0 || strings.Count(out, "\n") != 50 || !strings.Contains(errOut, "Showing the last 50 of 60 entries (use --limit 0 for all).") {
+		t.Fatalf("exit %d, lines %d, stderr %q", code, strings.Count(out, "\n"), errOut)
+	}
+	out, errOut, code = run(t, "journal", "--limit", "0", "--workspace", ws)
+	if code != 0 || strings.Count(out, "\n") != 60 || strings.Contains(errOut, "Showing the last") {
+		t.Fatalf("exit %d, lines %d, stderr %q", code, strings.Count(out, "\n"), errOut)
+	}
+	out, _, _ = run(t, "journal", "--limit", "50", "--workspace", ws, "--json")
+	if !strings.Contains(out, `"total":60`) || !strings.Contains(out, `"truncated":true`) {
+		t.Fatalf("json %q", tail80(out))
+	}
+	out, _, _ = run(t, "journal", "--limit", "0", "--workspace", ws, "--json")
+	if !strings.Contains(out, `"total":60`) || !strings.Contains(out, `"truncated":false`) {
+		t.Fatalf("json %q", tail80(out))
+	}
+	t.Setenv("ADBUDDY_LANG", "es")
+	_, errOut, _ = run(t, "journal", "--limit", "50", "--workspace", ws)
+	if !strings.Contains(errOut, "Mostrando las últimas 50 de 60 entradas (usa --limit 0 para verlas todas).") {
+		t.Fatalf("stderr %q", errOut)
+	}
+}
+
+func TestServeWaitingTextIsAboutThePhone(t *testing.T) {
+	for _, l := range []i18n.Lang{i18n.EN, i18n.ES} {
+		app := &App{Lang: l, Getenv: func(string) string { return "" }}
+		got := app.T("serve.waiting_for_the_phone_on", 45)
+		if strings.Contains(got, "adb server") || strings.Contains(got, "servidor adb") || strings.Contains(got, "5038") || !strings.Contains(got, "45 s") {
+			t.Errorf("%v: %q", l, got)
+		}
+	}
+	// Looked up in the syntax tree, not as text: the call must pass the
+	// seconds of deviceWait.
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "serve.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	passes := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		if !ok || len(c.Args) != 2 {
+			return true
+		}
+		if lit, ok := c.Args[0].(*ast.BasicLit); !ok || lit.Value != `"serve.waiting_for_the_phone_on"` {
+			return true
+		}
+		ast.Inspect(c.Args[1], func(m ast.Node) bool {
+			if id, ok := m.(*ast.Ident); ok && id.Name == "deviceWait" {
+				passes = true
+			}
+			return true
+		})
+		return true
+	})
+	if !passes {
+		t.Fatal("serve must pass the seconds of deviceWait")
+	}
+}
+
+func TestSetupCodeWithoutTerminalHasItsOwnFix(t *testing.T) {
+	e := newSetupEnv(t, phoneRules())
+	_, errOut, code := runWithInput(t, "", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitUsage || !strings.Contains(errOut, "Error: USAGE — no answer on stdin") ||
+		!strings.Contains(errOut, "Run it in a terminal, or give the answers on stdin, one per line.") || strings.Contains(errOut, "--help") {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+}
+
+// tail80 is the last 80 bytes of s (all of it if shorter), for failure messages.
+func tail80(s string) string {
+	if len(s) > 80 {
+		return s[len(s)-80:]
+	}
+	return s
+}
+
+// What serve says about the model and effort the agent starts with.
+func TestStartNote(t *testing.T) {
+	for _, c := range []struct {
+		agent, model, effort string
+		key                  string
+		arg                  string
+	}{
+		{"claude", "", "", "serve.model_default", "model claude-haiku-5-5, effort low"},
+		{"claude", "opus", "", "serve.model_default", "model opus, effort low"},
+		{"claude", "", "high", "serve.model_default", "model claude-haiku-5-5, effort high"},
+		{"claude", "opus", "high", "serve.model_applied", "model opus, effort high"},
+		{"claude", "inherit", "inherit", "serve.model_inherited", ""},
+		{"claude", "inherit", "", "serve.model_default", "effort low"},
+		{"claude", "", "inherit", "serve.model_default", "model claude-haiku-5-5"},
+		{"claude", "inherit", "high", "serve.model_applied", "effort high"},
+		{"claude", "opus", "inherit", "serve.model_applied", "model opus"},
+		{"codex", "", "", "", ""},
+		{"codex", "inherit", "inherit", "", ""},
+		{"codex", "opus", "", "serve.model_not_applied", "codex"},
+		{"codex", "", "high", "serve.model_not_applied", "codex"},
+	} {
+		note := startNote(c.agent, c.model, c.effort)
+		key, args := note.Key, note.Args
+		arg := ""
+		if len(args) > 0 {
+			arg = args[0].(string)
+		}
+		if key != c.key || arg != c.arg {
+			t.Errorf("startNote(%q, %q, %q) = %q, %q; want %q, %q", c.agent, c.model, c.effort, key, arg, c.key, c.arg)
+		}
+	}
 }

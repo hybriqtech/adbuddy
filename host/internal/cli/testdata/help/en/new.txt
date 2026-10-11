@@ -3,8 +3,12 @@ Start a new conversation in adbuddy serve, with another agent if given
 Usage:
   adbuddy new [agent] [flags]
 
+Examples:
+  adbuddy new
+  adbuddy new codex
+
 Flags:
   -h, --help   help for new
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

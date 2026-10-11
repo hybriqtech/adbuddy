@@ -82,6 +82,10 @@ type Request struct {
 	// command as the agent typed it, for the journal.
 	UIOp   string          `json:"uiOp,omitempty"`
 	UIArgs json.RawMessage `json:"uiArgs,omitempty"`
+	// Screen, in a KindUI request: for click and setText, also read the screen
+	// once it settles (the result then carries it); for dump, wait for it to
+	// settle before answering. Ignored by an older daemon.
+	Screen bool `json:"screen,omitempty"`
 }
 
 // Exit is the last frame: the exit code for the client and, for failures

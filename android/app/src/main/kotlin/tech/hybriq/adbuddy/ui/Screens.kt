@@ -5,7 +5,6 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,6 +20,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import tech.hybriq.adbuddy.bridge.Inverse
@@ -28,6 +29,9 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -43,7 +47,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -52,14 +55,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import tech.hybriq.adbuddy.R
@@ -76,19 +80,15 @@ import tech.hybriq.adbuddy.control.CutAccess
 /** Consent for the PC to finish the setup (spec §3.1 step 6.1). Header, content, actions at the foot. */
 @Composable
 fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
+    ObscuredTouchGuard()
     Scaffold(
         bottomBar = {
             Surface(tonalElevation = 3.dp) {
-                Row(
-                    Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
-                ) {
-                    OutlinedButton(
-                        onClick = { onAnswer(false) },
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                    ) { Text(stringResource(R.string.consent_decline), color = MaterialTheme.colorScheme.onSurface) }
-                    Button(onClick = { onAnswer(true) }) { Text(stringResource(R.string.consent_accept)) }
-                }
+                ActionFooter(
+                    main = { m -> Button(onClick = { onAnswer(true) }, modifier = m) { Text(stringResource(R.string.consent_accept)) } },
+                    other = { m -> SecondaryActionButton(stringResource(R.string.consent_decline), { onAnswer(false) }, m) },
+                    modifier = Modifier.navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
+                )
             }
         },
     ) { inner ->
@@ -102,7 +102,7 @@ fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
             ) {
                 Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
             }
-            Text(stringResource(R.string.consent_title, host), style = MaterialTheme.typography.headlineSmall)
+            Text(stringResource(R.string.consent_title, host), Modifier.semantics { heading() }, style = MaterialTheme.typography.headlineSmall)
             Text(stringResource(R.string.consent_intro, host), style = MaterialTheme.typography.bodyLarge)
             for ((icon, item) in listOf(
                 Icons.Default.Lock to R.string.consent_grant,
@@ -115,7 +115,7 @@ fun ConsentScreen(host: String, onAnswer: (Boolean) -> Unit) {
                 Text(
                     stringResource(R.string.consent_note),
                     Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -143,14 +143,25 @@ private fun ConsentScreenPreview() {
  * scrolls if long. The whole detail and up to ConfirmUi.DIALOG_MAX_COMMAND
  * characters of the command are shown, with how many more are hidden (then it
  * can only be denied, H3), and the Allow buttons wait until the text has been
- * scrolled to its end (A4-2), as in the PermissionCard; Deny never waits. It offers its buttons only while
- * the question is open, and says why otherwise. It can always be closed (back
- * or a tap outside; Close when it has no buttons): Pause and Cut access are
- * never hidden with no way out, and the notification is still there. Touches
- * are refused while another app's window covers it (filterTouchesWhenObscured).
+ * scrolled to its end (A4-2), as in the PermissionCard, and until [armed]
+ * (ConfirmHost: ConfirmUi.ARMING_MS since the question appeared or the app came
+ * back to the front; meanwhile they keep their text and read as disabled). Deny
+ * never waits. It offers its buttons only while
+ * the question is open, and says why otherwise. It can always be closed with Back (and Close when it has no
+ * buttons), not with a tap outside: a stray tap no longer hides a question; the chat keeps a notice that reopens
+ * it. Pause and Cut access are never hidden with no way out, and the notification is still there. Touches
+ * are refused while another app's window covers it (ObscuredTouchGuard).
  */
 @Composable
-fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock, onClose: () -> Unit, onAnswer: (String) -> Unit) {
+fun ConfirmDialog(
+    r: ConfirmRequest,
+    status: ConfirmUi.Status,
+    clock: HostClock,
+    armed: Boolean,
+    now: Long = clock.now(),
+    onClose: () -> Unit,
+    onAnswer: (String) -> Unit,
+) {
     val context = LocalContext.current
     val decisions = ConfirmUi.decisions(r, status)
     val footer = ConfirmNotifier.footer(context, status, ConfirmUi.expiry(r)?.let { clock.toLocal(it) })
@@ -160,6 +171,8 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
     val unread = scroll.canScrollForward
     AlertDialog(
         onDismissRequest = onClose,
+        // Back closes it; a tap outside does not (the chat's notice reopens it, but a stray tap hides nothing).
+        properties = DialogProperties(dismissOnClickOutside = false),
         // The title comes from the host's rules, but it never takes the whole dialog.
         title = {
             Column {
@@ -169,53 +182,68 @@ fun ConfirmDialog(r: ConfirmRequest, status: ConfirmUi.Status, clock: HostClock,
             }
         },
         text = {
-            val view = LocalView.current
-            DisposableEffect(view) {
-                view.rootView.filterTouchesWhenObscured = true
-                onDispose {}
-            }
-            Column(Modifier.verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (shown.warning) {
-                    Text("⚠ " + stringResource(R.string.confirm_special), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+            ObscuredTouchGuard()
+            Column {
+                Column(Modifier.weight(1f, fill = false).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (shown.warning) {
+                        Text("⚠ " + stringResource(R.string.confirm_special), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    }
+                    // The host's detail and the agent's command are code: left to right whatever their first letter, so
+                    // what is read is in the order it runs. The labels follow the language.
+                    for (line in shown.detail) {
+                        Text(line, style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr))
+                    }
+                    Text(shown.command, style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr))
+                    if (shown.hidden > 0) {
+                        // H3: what is not shown cannot have been read: only Deny (ConfirmUi.decisions), and it says so.
+                        Text(
+                            pluralStringResource(R.plurals.confirm_hidden, shown.hidden, shown.hidden) + " " +
+                                stringResource(R.string.confirm_too_long),
+                            style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Text(footer, style = MaterialTheme.typography.bodySmall)
                 }
-                // The host's detail and the agent's command are code: left to right whatever their first letter, so
-                // what is read is in the order it runs. The labels follow the language.
-                for (line in shown.detail) {
-                    Text(line, style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr))
-                }
-                Text(shown.command, style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr))
-                if (shown.hidden > 0) {
-                    // H3: what is not shown cannot have been read: only Deny (ConfirmUi.decisions), and it says so.
+                // Fixed lines, outside the part that scrolls: always in sight. No live region: it would be read out every second.
+                val left = if (status == ConfirmUi.Status.OPEN) ConfirmUi.secondsLeft(r, now) else null
+                if (left != null) {
+                    val urgent = left < 10
                     Text(
-                        pluralStringResource(R.plurals.confirm_hidden, shown.hidden, shown.hidden) + " " +
-                            stringResource(R.string.confirm_too_long),
-                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                        stringResource(R.string.confirm_expires_in, Formats.countdown(left)),
+                        modifier = Modifier.padding(top = 8.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (urgent) FontWeight.Bold else null,
+                        color = if (urgent) MaterialTheme.colorScheme.error else Color.Unspecified,
                     )
                 }
-                Text(footer, style = MaterialTheme.typography.bodySmall)
+                if (unread && Decision.ALLOW in decisions) {
+                    Text(
+                        stringResource(R.string.confirm_scroll), style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
         },
+        // One Column for the three buttons: the dialog's own button row would put Deny beside a wide label and over it.
+        // Deny first, filled and on at once (the way out, the loudest); Allow outlined; Allow for the session apart and quiet.
         confirmButton = {
-            Column {
-                if (unread && Decision.ALLOW in decisions) {
-                    Text(stringResource(R.string.confirm_scroll), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                if (Decision.DENY in decisions) {
+                    Button(onClick = { onAnswer(Decision.DENY) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.action_deny)) }
                 }
+                if (Decision.DENY in decisions && Decision.ALLOW in decisions) Spacer(Modifier.height(8.dp))
                 if (Decision.ALLOW in decisions) {
-                    TextButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread) { Text(stringResource(R.string.action_allow)) }
+                    OutlinedButton(onClick = { onAnswer(Decision.ALLOW) }, enabled = !unread && armed) { Text(stringResource(R.string.action_allow)) }
                 }
                 if (Decision.ALLOW_SESSION in decisions) {
-                    TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }, enabled = !unread) {
-                        Text(stringResource(R.string.action_allow_session))
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = { onAnswer(Decision.ALLOW_SESSION) }, enabled = !unread && armed) {
+                        Text(stringResource(R.string.action_allow_session), style = MaterialTheme.typography.labelMedium)
                     }
                 }
                 if (decisions.isEmpty()) {
                     TextButton(onClick = onClose) { Text(stringResource(R.string.action_close)) }
                 }
-            }
-        },
-        dismissButton = {
-            if (Decision.DENY in decisions) {
-                TextButton(onClick = { onAnswer(Decision.DENY) }) { Text(stringResource(R.string.action_deny)) }
             }
         },
     )
