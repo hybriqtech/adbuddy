@@ -167,6 +167,13 @@ Tests (host, adb y app falsos; `fakeApp` registra `calls`): `TestScreenshotAsksT
 
 M5 §6 «Cuándo»: «…y con `dump` (si no se puede mostrar, `dump` falla como `click` y `setText`) y antes de `screenshot` y de los `screencap`/`screenrecord`/`uiautomator` y `dumpsys` que vuelque la vista (crudos) (si la app no puede mostrarlo, se bloquean; sin app o sin accesibilidad no hay aviso posible)». Una línea en la sección de usuario «Cuando el agente usa la pantalla». Validación en emulador (cuando haya turno; no en esta tarea): `emutest` lanza `adbuddy screenshot` y comprueba con `dumpsys window` la ventana `TYPE_ACCESSIBILITY_OVERLAY` de ADBuddy; la mutación de T2 la pone en rojo. Apuntar en «Validaciones manuales pendientes».
 
+## Validaciones manuales pendientes
+
+Necesitan emulador o móvil; no se hacen en esta rama.
+
+- (a) Overlay visible durante `adbuddy screenshot` en emulador: `emutest` lanza `adbuddy screenshot` con la accesibilidad activa y comprueba con `dumpsys window` que existe la ventana `TYPE_ACCESSIBILITY_OVERLAY` de ADBuddy; la mutación de T2 la pone en rojo.
+- (b) `dump` con la pantalla bloqueada: o el overlay se dibuja sobre el keyguard, o `dump` devuelve `FAILED` («won't read», porque la app no puede mostrar el aviso). Ambas son aceptables; lo que no puede pasar es leer sin aviso.
+
 ## 4. Rulings
 
 Ver `.superpowers/sdd/2026-10-11-screen-overlay-frame/progress.md`.
