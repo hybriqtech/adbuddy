@@ -169,7 +169,23 @@ func newDoctorCmd(app *App) *cobra.Command {
 			ctx, cancel := context.WithTimeout(stop, doctorTotalWait)
 			defer cancel()
 
-			rep := runDoctor(ctx, app)
+			// Each check is written as it ends, so a slow phone or a hung adb
+			// does not look like a frozen doctor. Not with --json (one
+			// envelope), nor with --fix (the report may be computed again
+			// and the notes rewrite checks), nor in the agent's session
+			// (askTheUser rewrites the report): those write it whole at the
+			// end. It looks at Ctrl+C, not at doctor's time limit: after
+			// Ctrl+C the checks left are cancellations that must not show.
+			var onCheck func(check)
+			streaming := !app.JSON && !fix && !agent
+			if streaming {
+				onCheck = func(c check) {
+					if stop.Err() == nil {
+						printCheck(app, c)
+					}
+				}
+			}
+			rep := runDoctor(ctx, app, onCheck)
 			if stop.Err() != nil {
 				return Interrupted()
 			}
@@ -179,7 +195,7 @@ func newDoctorCmd(app *App) *cobra.Command {
 					return Interrupted()
 				}
 				if out.restarted {
-					rep = runDoctor(ctx, app)
+					rep = runDoctor(ctx, app, nil)
 					if stop.Err() != nil {
 						return Interrupted()
 					}
@@ -202,7 +218,11 @@ func newDoctorCmd(app *App) *cobra.Command {
 				}
 				return WriteData(app.Stdout, rep)
 			}
-			printReport(app, rep)
+			if streaming {
+				printVerdict(app, rep)
+			} else {
+				printReport(app, rep)
+			}
 			if broken {
 				return ExitWith(1)
 			}
@@ -215,19 +235,31 @@ func newDoctorCmd(app *App) *cobra.Command {
 
 func printReport(app *App, rep doctorReport) {
 	lang := app.speaks()
-	icon := map[string]string{checkOK: "✓", checkWarn: "⚠", checkFail: "✗", checkSkip: "·"}
 	for _, f := range rep.fixed {
 		fmt.Fprintf(app.Stdout, "↻ %s\n", classify.Printable(f.In(lang)))
 	}
 	for _, c := range rep.Checks {
-		fmt.Fprintf(app.Stdout, "%s %s: %s\n", icon[c.Status], checkName(lang, c.Name), classify.Printable(c.detailMsg().In(lang)))
-		if c.Run != "" {
-			fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.run"), classify.Printable(c.Run))
-		}
-		if c.Guidance != "" {
-			fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.guidance"), classify.Printable(c.guidanceMsg().In(lang)))
-		}
+		printCheck(app, c)
 	}
+	printVerdict(app, rep)
+}
+
+// printCheck writes one check of the human report.
+func printCheck(app *App, c check) {
+	lang := app.speaks()
+	icon := map[string]string{checkOK: "✓", checkWarn: "⚠", checkFail: "✗", checkSkip: "·"}
+	fmt.Fprintf(app.Stdout, "%s %s: %s\n", icon[c.Status], checkName(lang, c.Name), classify.Printable(c.detailMsg().In(lang)))
+	if c.Run != "" {
+		fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.run"), classify.Printable(c.Run))
+	}
+	if c.Guidance != "" {
+		fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.guidance"), classify.Printable(c.guidanceMsg().In(lang)))
+	}
+}
+
+// printVerdict writes the last line of the human report.
+func printVerdict(app *App, rep doctorReport) {
+	lang := app.speaks()
 	switch rep.Verdict {
 	case "ready":
 		fmt.Fprintln(app.Stdout, lang.T("doctor.verdict.ready"))
@@ -243,8 +275,13 @@ func printReport(app *App, rep doctorReport) {
 // depends on one that failed is reported as skipped. It never changes
 // anything, on the PC or on the phone (starting ADBuddy's private adb server
 // aside, as any adb call does).
-func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
-	add := func(c check) { rep.Checks = append(rep.Checks, c) }
+func runDoctor(ctx context.Context, app *App, onCheck func(check)) (rep doctorReport) {
+	add := func(c check) {
+		rep.Checks = append(rep.Checks, c)
+		if onCheck != nil {
+			onCheck(c)
+		}
+	}
 	skip := func(why i18n.Msg, names ...string) {
 		for _, n := range names {
 			add(mk(n, checkSkip, i18n.M("doctor.skipped", why)))
