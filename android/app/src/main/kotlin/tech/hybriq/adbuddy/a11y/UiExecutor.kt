@@ -137,11 +137,19 @@ class UiExecutor(
                 UiOp.CLICK -> click(r, s, args(r, UiClickArgs.serializer()) ?: return invalid(r))
                 UiOp.SET_TEXT -> setText(r, s, args(r, UiSetTextArgs.serializer()) ?: return invalid(r))
                 UiOp.FOREGROUND -> foreground(r, s)
+                UiOp.NOTICE -> if (args(r, Empty.serializer()) == null) invalid(r) else notice(r, s)
                 else -> fail(r, ErrorCode.UNSUPPORTED, "This version of the ADBuddy app does not handle ${r.op.take(64)}.")
             }
         } catch (e: RuntimeException) {
             fail(r, ErrorCode.FAILED, "The app could not do it: ${e.javaClass.simpleName}.")
         }
+    }
+
+    /** The host is about to read the screen by adb (screencap, uiautomator): show the notice first. It reads nothing, so no heads-up check; the pause does count. */
+    private fun notice(r: UiRequest, s: Screen): UiResponse = when {
+        paused() -> pausedNow(r) // acting() is true without drawing while paused: the host must not read then
+        s.acting(null) -> ok(r, Empty, Empty.serializer())
+        else -> noNoticeToRead(r)
     }
 
     /**
