@@ -25,9 +25,13 @@ type fakeApp struct {
 	results map[string]any
 	errs    map[string]error
 	calls   []string
+	onCall  func(op string) // called, outside mu, when op arrives (before it answers)
 }
 
 func (a *fakeApp) ui(_ context.Context, op string, args json.RawMessage) (json.RawMessage, error) {
+	if a.onCall != nil {
+		a.onCall(op)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.calls = append(a.calls, op+" "+string(args))
