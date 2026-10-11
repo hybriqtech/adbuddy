@@ -120,7 +120,7 @@ func newSetupCmd(app *App) *cobra.Command {
 						return "", ctx.Err()
 					case a := <-ch:
 						if a.err != nil && a.line == "" {
-							return "", UsageErrorT("err.setup.usage_no_answer_on_stdin")
+							return "", errorT(ExitUsage, false, "USAGE", "err.setup.usage_no_answer_on_stdin", "err.setup.usage_no_answer_on_stdin.fix", nil)
 						}
 						return strings.TrimSpace(a.line), nil
 					}

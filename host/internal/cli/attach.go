@@ -137,6 +137,7 @@ func newNewCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "new [agent]",
 		Short: app.T("help.new.short"),
+		Long:  app.T("help.new.long"),
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			argv := append([]string{"new"}, args...)
@@ -149,6 +150,7 @@ func newStopCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
 		Short: app.T("help.stop.short"),
+		Long:  app.T("help.stop.long"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return sessionRequest(cmd.Context(), app, []string{"stop"})

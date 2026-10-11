@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
@@ -87,6 +88,12 @@ func formatEntry(e journal.Entry) string { return formatEntryIn(i18n.EN, e) }
 // labels of the reason and of the undo) are the catalog's; the status word of
 // the entry, its description and its command are data and are not translated.
 func formatEntryIn(lang i18n.Lang, e journal.Entry) string {
+	return formatEntryAt(lang, e, time.Now())
+}
+
+// formatEntryAt is formatEntryIn with the clock given: an entry of the day of
+// now shows only its time, any other also its date.
+func formatEntryAt(lang i18n.Lang, e journal.Entry, now time.Time) string {
 	lvl := map[string]string{"green": "🟢", "yellow": "🟡", "red": "🔴"}[e.Level]
 	if lvl == "" {
 		lvl = "·"
@@ -101,7 +108,13 @@ func formatEntryIn(lang i18n.Lang, e journal.Entry) string {
 	if e.Tampered {
 		status += lang.T("journal.status.tampered")
 	}
-	line := fmt.Sprintf("%s %s %-8s %s  [%s] adb %s", e.TS.Local().Format("15:04:05"), lvl, status,
+	ts := e.TS.In(now.Location())
+	stamp := ts.Format("2006-01-02 15:04:05")
+	ny, nm, nd := now.Date()
+	if y, m, d := ts.Date(); y == ny && m == nm && d == nd {
+		stamp = ts.Format("15:04:05")
+	}
+	line := fmt.Sprintf("%s %s %-8s %s  [%s] adb %s", stamp, lvl, status,
 		classify.Printable(e.Description), classify.Printable(e.ID), classify.Printable(strings.Join(e.Argv, " ")))
 	if e.Reason != "" && e.Status != journal.StatusOK {
 		line += "\n    " + lang.T("journal.label.reason") + " " + classify.Printable(e.Reason)

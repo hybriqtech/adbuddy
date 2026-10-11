@@ -14,4 +14,4 @@ Flags:
       --screen   also print the screen once it has settled (up to about 4 s in all), so a second call is not needed
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

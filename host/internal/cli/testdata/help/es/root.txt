@@ -13,33 +13,43 @@ Uso:
   adbuddy [flags]
   adbuddy [command]
 
-Comandos disponibles:
-  attach        Conecta esta terminal a la sesión del agente en adbuddy serve (Ctrl+] para desconectar)
-  completion    Genera el script de autocompletado para la shell indicada
-  connect       Conecta con el móvil por dirección IP y puerto (Tailscale u otra red sin mDNS)
-  doctor        Comprueba que ADBuddy, adb, el móvil y la app están listos, y explica cómo arreglar lo que no lo esté
+Ejemplos:
+  adbuddy setup    empareja tu móvil y prepara el agente (una vez)
+  adbuddy serve    arranca ADBuddy y el agente
+
+Primeros pasos:
+  doctor        Comprueba lo que ADBuddy necesita y explica cómo arreglarlo
+  serve         Ejecuta ADBuddy en el PC: diario en vivo y confirmaciones
+  setup         Configura ADBuddy: adb, emparejado y entorno del agente
+
+Día a día:
+  attach        Conecta esta terminal al agente (Ctrl+] desconecta)
+  connect       Conecta con el móvil por dirección IP y puerto
   env           Gestiona el entorno del agente
-  foreground    Enseña la app y la actividad que están en primer plano en el móvil
-  help          Ayuda sobre cualquier comando
   journal       Enseña el diario de comandos adb y sus inversos
-  new           Empieza una conversación nueva en adbuddy serve, con otro agente si se indica
-  notifications Lista las notificaciones actuales del móvil (las apps protegidas no muestran texto)
-  remote        Abre el puerto de red 5555 de adb durante 12 horas (modo remoto), lo cierra, o enseña su estado
+  new           Empieza una conversación nueva, con otro agente si se indica
+  remote        Abre o cierra el puerto de red 5555 de adb (modo remoto)
   run           Arranca un agente de código en el entorno de ADBuddy
-  screen        Lista lo que hay en la pantalla del móvil: ids, textos y dónde tocar
-  screenshot    Guarda una captura del móvil, reducida
-  send          Envía un fichero del entorno al móvil del usuario (para el agente)
-  serve         Ejecuta ADBuddy en el PC: diario en vivo y confirmaciones de los comandos adb del agente
-  setup         Configura ADBuddy: consigue adb, empareja el móvil por Wi-Fi y prepara el entorno del agente
-  stop          Para el agente que ejecuta adbuddy serve (serve sigue en marcha)
-  tap           Toca un elemento de la pantalla del móvil por su texto, su id o un punto
-  type          Escribe texto en el campo con foco del móvil (sustituye lo que tenga el campo)
+  stop          Para el agente de adbuddy serve (serve sigue en marcha)
   undo          Deshace cambios del diario ejecutando sus inversos
   version       Muestra la versión de ADBuddy
 
+Para el agente:
+  foreground    Enseña la app y la actividad en primer plano del móvil
+  notifications Lista las notificaciones actuales del móvil
+  screen        Lista lo que hay en la pantalla del móvil y dónde tocar
+  screenshot    Guarda una captura del móvil, reducida
+  send          Envía un fichero al móvil del usuario (para el agente)
+  tap           Toca un elemento de la pantalla por texto, id o punto
+  type          Escribe texto en el campo con foco del móvil
+
+Comandos adicionales:
+  completion    Genera el script de autocompletado para la shell indicada
+  help          Ayuda sobre cualquier comando
+
 Opciones:
   -h, --help      ayuda de adbuddy
-      --json      escribe JSON legible por programas en la salida estándar
+      --json      salida JSON para programas, en los comandos que la admiten
   -v, --version   versión de adbuddy
 
 Usa "adbuddy [command] --help" para más información sobre un comando.

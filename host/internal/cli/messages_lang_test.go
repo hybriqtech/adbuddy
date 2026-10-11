@@ -92,8 +92,8 @@ func TestSkillLinesInSpanish(t *testing.T) {
 		if got := strings.Join(groupSkillLines(i18n.ES, verb, paths), "\n"); got != strings.Join(w, "\n") {
 			t.Errorf("%s:\n%s\nwant\n%s", verb, got, strings.Join(w, "\n"))
 		}
-		// English keeps its old wording, "1 skills" included (the existing test reads it).
-		if got := groupSkillLines(i18n.EN, verb, paths); got[2] != "  "+verb+" 1 skills in .agents/skills" {
+		// English has its singular too.
+		if got := groupSkillLines(i18n.EN, verb, paths); got[2] != "  "+verb+" 1 skill in .agents/skills" {
 			t.Errorf("English changed: %q", got)
 		}
 	}
@@ -221,5 +221,19 @@ func TestInterruptedAndUsageInSpanish(t *testing.T) {
 	}
 	if e := UsageError("m"); e.Message != "m" || e.Fix != "Run `adbuddy --help` to see the usage." || ExitCode(e) != ExitUsage {
 		t.Errorf("%+v", e)
+	}
+}
+
+func TestFormatEntryAtShowsTheDateWhenNotToday(t *testing.T) {
+	zone := time.FixedZone("x", 2*3600)
+	now := time.Date(2026, 10, 4, 12, 0, 0, 0, zone)
+	e := journal.Entry{ID: "j_1", Level: "green", Status: "ok", Description: "d", Argv: []string{"shell", "true"}}
+	e.TS = time.Date(2026, 10, 4, 8, 30, 5, 0, time.UTC) // 10:30:05 in zone, same day
+	if got := formatEntryAt(i18n.EN, e, now); !strings.HasPrefix(got, "10:30:05 ") {
+		t.Errorf("today: %q", got)
+	}
+	e.TS = time.Date(2026, 10, 3, 8, 30, 5, 0, time.UTC)
+	if got := formatEntryAt(i18n.EN, e, now); !strings.HasPrefix(got, "2026-10-03 10:30:05 ") {
+		t.Errorf("another day: %q", got)
 	}
 }

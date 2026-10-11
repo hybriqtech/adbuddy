@@ -101,25 +101,25 @@ Son los comandos de `adbuddy --help` (el programa los describe en inglés; aquí
 
 | Comando | Qué hace |
 |---|---|
-| `adbuddy setup` | Prepara ADBuddy: consigue adb, empareja el móvil por Wi-Fi y prepara el entorno del agente |
-| `adbuddy serve` | Ejecuta el host de ADBuddy: diario en directo y confirmaciones para los comandos adb del agente |
+| `adbuddy setup` | Configura ADBuddy: adb, emparejado y entorno del agente |
+| `adbuddy serve` | Ejecuta ADBuddy en el PC: diario en vivo y confirmaciones |
 | `adbuddy run` | Arranca un agente de código en el entorno de ADBuddy |
-| `adbuddy attach` | Conecta esta terminal a la sesión del agente en `adbuddy serve` (Ctrl+] para desconectar) |
-| `adbuddy new` | Empieza una conversación nueva en `adbuddy serve`, con otro agente si se indica |
-| `adbuddy stop` | Detiene el agente que ejecuta `adbuddy serve` (serve sigue en marcha) |
+| `adbuddy attach` | Conecta esta terminal al agente (Ctrl+] desconecta) |
+| `adbuddy new` | Empieza una conversación nueva, con otro agente si se indica |
+| `adbuddy stop` | Para el agente de `adbuddy serve` (serve sigue en marcha) |
 | `adbuddy journal` | Muestra el diario de comandos adb y de sus inversos |
 | `adbuddy undo` | Deshace los cambios del diario ejecutando sus inversos |
-| `adbuddy connect <ip:port>` | Conecta con el móvil por dirección IP y puerto (Tailscale u otra red sin mDNS) |
-| `adbuddy remote` | Abre el puerto de red 5555 de adb durante 12 horas (modo remoto), lo cierra o muestra su estado |
-| `adbuddy doctor` | Comprueba que ADBuddy, adb, el móvil y la app están listos, y dice cómo arreglar lo que no lo está |
+| `adbuddy connect <ip:port>` | Conecta con el móvil por dirección IP y puerto |
+| `adbuddy remote` | Abre o cierra el puerto de red 5555 de adb (modo remoto) |
+| `adbuddy doctor` | Comprueba lo que ADBuddy necesita y explica cómo arreglarlo |
 | `adbuddy env` | Gestiona el entorno del agente |
-| `adbuddy screen` | Lista lo que hay en la pantalla del móvil: ids, textos y dónde tocar |
-| `adbuddy tap` | Toca un elemento de la pantalla del móvil por su texto, su id o un punto |
-| `adbuddy type "<text>"` | Escribe texto en el campo con foco del móvil (sustituye lo que tenga el campo) |
-| `adbuddy foreground` | Muestra la app y la actividad en primer plano del móvil |
-| `adbuddy notifications` | Lista las notificaciones actuales del móvil (las apps protegidas no muestran texto) |
+| `adbuddy screen` | Lista lo que hay en la pantalla del móvil y dónde tocar |
+| `adbuddy tap` | Toca un elemento de la pantalla por texto, id o punto |
+| `adbuddy type "<text>"` | Escribe texto en el campo con foco del móvil |
+| `adbuddy foreground` | Enseña la app y la actividad en primer plano del móvil |
+| `adbuddy notifications` | Lista las notificaciones actuales del móvil |
 | `adbuddy screenshot` | Guarda una captura del móvil, reducida |
-| `adbuddy send <file>` | Envía un fichero del entorno al móvil del usuario (para el agente) |
+| `adbuddy send <file>` | Envía un fichero al móvil del usuario (para el agente) |
 | `adbuddy version` | Muestra la versión de ADBuddy |
 
 ## Documentación

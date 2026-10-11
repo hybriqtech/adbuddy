@@ -146,6 +146,12 @@ func TestSetupKnownPhoneAtItsAddress(t *testing.T) {
 // serveOnce runs serve until it is serving (then stops it) or fails, and
 // returns its exit code, stderr, what it answered to a ping and the fake adb's log.
 func serveOnce(t *testing.T, rules []testutil.FakeRule, cfg config.Config) (int, string, ipc.Ping, string) {
+	return serveOnceMarker(t, rules, cfg, "ADBuddy is serving")
+}
+
+// serveOnceMarker is serveOnce for a language other than English: marker is
+// what serve prints (in that language) when it is serving.
+func serveOnceMarker(t *testing.T, rules []testutil.FakeRule, cfg config.Config, marker string) (int, string, ipc.Ping, string) {
 	t.Helper()
 	data := isolate(t)
 	if err := config.Save(filepath.Join(os.Getenv("ADBUDDY_CONFIG_DIR"), "config.toml"), cfg); err != nil {
@@ -158,7 +164,7 @@ func serveOnce(t *testing.T, rules []testutil.FakeRule, cfg config.Config) (int,
 	var ping ipc.Ping
 	pinged := make(chan struct{})
 	serving := make(chan struct{})
-	cancelWhen(t, &errb, "ADBuddy is serving", func() { close(serving) })
+	cancelWhen(t, &errb, marker, func() { close(serving) })
 	go func() {
 		defer close(pinged)
 		defer cancel()
@@ -258,7 +264,7 @@ func TestServeSavedAddressesGoneSaysWhichWereTried(t *testing.T) {
 func TestSetupQRHintWhenNoPhoneIsVisible(t *testing.T) {
 	setVar(t, &qrHintDelay, 50*time.Millisecond)
 	setVar(t, &pairingWait, 600*time.Millisecond)
-	const hint = "I can't see any phone with wireless debugging on this network. If the phone is on another network (for example Tailscale) or this Wi-Fi blocks mDNS, press Ctrl+C and run `adbuddy setup --code`."
+	const hint = "No phone with wireless debugging is visible on this network. If the phone is on another network (for example Tailscale) or this Wi-Fi blocks mDNS, press Ctrl+C and run `adbuddy setup --code`."
 	for name, c := range map[string]struct {
 		mdns string
 		want int

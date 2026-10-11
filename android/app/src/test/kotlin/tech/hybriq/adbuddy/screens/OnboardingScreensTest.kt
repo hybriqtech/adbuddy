@@ -80,10 +80,13 @@ class OnboardingScreensTest(private val mode: ScreenMode) {
         }
         compose.onNodeWithText(text(R.string.step_progress, 2, 2)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.onboarding_skip)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.onboarding_done)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.access_later_hint)).assertExists()
+        compose.onNodeWithText(text(R.string.access_restricted_hint)).assertExists()
+        compose.onNodeWithText(text(R.string.onboarding_done)).assertDoesNotExist()
         compose.assertTextsFit()
         compose.shot("onboarding_2_notification_access", mode)
         compose.onNodeWithText(text(R.string.access_open)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.access_later_hint)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(text(R.string.access_codes_hint)).performScrollTo().assertIsDisplayed()
         // What was under the bottom bar: scrolled into view, whole and apart from the bar's buttons.
         compose.assertTextsFit(scrolled = true)
@@ -99,6 +102,7 @@ class OnboardingScreensTest(private val mode: ScreenMode) {
         compose.onNodeWithText(text(R.string.access_state_granted)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.onboarding_done)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.onboarding_skip)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.access_later_hint)).assertDoesNotExist()
         compose.assertTextsFit()
     }
 

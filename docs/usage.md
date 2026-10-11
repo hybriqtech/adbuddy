@@ -26,7 +26,7 @@ Every command gets one of three levels: green (read-only, runs at once), yellow 
 You will see lines like these, and more:
 
 ```text
-Waiting for the phone on ADBuddy's adb server (port 5038)…
+Waiting for the phone (up to 45 s). Is Wireless debugging on, and are the phone and this PC on the same Wi-Fi?
 ADBuddy is serving <phone> (session s_…).
 Journal: <environment>/journal
 Press Ctrl+C to stop.

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -101,5 +102,37 @@ func TestRemoteDeniedFixIsSpanish(t *testing.T) {
 	exit, _, es := runCLI(t, "remote", "on")
 	if exit != 126 || !strings.Contains(es, "Error: REMOTE_DENIED — the remote mode was not turned on\nArreglo: Vuelve a ejecutar `adbuddy remote on` y permite la pregunta") {
 		t.Fatalf("exit %d %q", exit, es)
+	}
+}
+
+// A usage error points at the help of the command that failed.
+func TestAnErrorPointsAtTheHelpOfItsCommand(t *testing.T) {
+	isolate(t)
+	i18ntest.Lang(t, i18n.EN)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"tap"}, "Run `adbuddy tap --help`"},
+		{[]string{"journal", "--bad"}, "Run `adbuddy journal --help`"},
+		{[]string{"serv"}, "Run `adbuddy --help`"},
+	} {
+		exit, _, errOut := runCLI(t, c.args...)
+		if exit != 2 || !strings.Contains(errOut, c.want) {
+			t.Fatalf("%v: exit %d %q", c.args, exit, errOut)
+		}
+	}
+	jexit, out, _ := runCLI(t, "tap", "--json")
+	if jexit != 2 || !strings.Contains(out, `"fix":"Run `+"`adbuddy tap --help`"+` to see the usage."`) || !strings.Contains(out, `"code":"USAGE"`) {
+		t.Fatalf("--json: exit %d %s", jexit, out)
+	}
+	noFix := regexp.MustCompile(`"fix":"[^"]*",`).ReplaceAllString(out, "")
+	if strings.TrimSpace(noFix) != `{"ok":false,"error":{"code":"USAGE","message":"tap needs exactly one of a text, --id or --xy","transient":false}}` {
+		t.Fatalf("--json envelope without fix: %s", noFix)
+	}
+	i18ntest.Lang(t, i18n.ES)
+	exit, _, es := runCLI(t, "tap")
+	if exit != 2 || !strings.Contains(es, "adbuddy tap --help") || !strings.Contains(es, "cómo se usa") {
+		t.Fatalf("es: exit %d %q", exit, es)
 	}
 }

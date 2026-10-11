@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.flows
 
+import android.Manifest
 import android.content.res.Configuration
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -19,6 +20,7 @@ import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.robolectric.Shadows.shadowOf
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -41,6 +43,10 @@ import tech.hybriq.adbuddy.screens.PHONE
 @Config(qualifiers = PHONE)
 class ProtectedAppsFlowTest {
     @get:Rule val compose = createAndroidComposeRule<ChatBubbleActivity>()
+
+    init {
+        shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+    }
 
     private val app get() = RuntimeEnvironment.getApplication()
 
