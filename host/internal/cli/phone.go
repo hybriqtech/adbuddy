@@ -194,7 +194,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 				fmt.Fprintln(app.Stderr, app.T("phone.still_paused_resume_from_the"))
 			}
 			// A question already on the phone would wait there for
-			// nobody: it moves here too.
+			// nobody: it goes to the fallback confirmer of --confirm too.
 			l.conf.AppGone()
 			l.onGone()
 		},

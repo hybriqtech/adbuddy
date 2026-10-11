@@ -12,12 +12,12 @@ Examples:
   adbuddy serve --json > journal.ndjson
 
 Flags:
-      --adb string             path to the real adb (default: adb_path in config.toml, else the adb installed by adbuddy setup)
-      --confirm string         where to confirm 🔴 commands: auto (this terminal if interactive, else deny), terminal (read the answers from stdin even when it is not interactive, e.g. a pipe) or deny (default "auto")
-  -h, --help                   help for serve
-      --no-agent adbuddy run   do not start the agent here: run it yourself with adbuddy run (no chat from the phone)
-      --serial string          the phone to use when several are connected
-      --workspace string       agent environment (default: workspace in config.toml, else ~/ADBuddy/default)
+      --adb string         path to the real adb (default: adb_path in config.toml, else the adb installed by adbuddy setup)
+      --confirm string     where to confirm 🔴 commands when the phone app is not connected: auto (this terminal if its input is interactive, else deny), terminal (reads standard input even if it is not a terminal, such as a pipe) or deny (default "auto")
+  -h, --help               help for serve
+      --no-agent           do not start the agent here: run it yourself with 'adbuddy run' (no chat from the phone)
+      --serial string      the phone to use when several are connected
+      --workspace string   agent environment (default: workspace in config.toml, else ~/ADBuddy/default)
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

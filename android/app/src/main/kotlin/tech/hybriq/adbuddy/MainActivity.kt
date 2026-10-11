@@ -1,9 +1,6 @@
 package tech.hybriq.adbuddy
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -16,6 +13,7 @@ import androidx.compose.runtime.setValue
 import tech.hybriq.adbuddy.bridge.BridgePrefs
 import tech.hybriq.adbuddy.bridge.BridgeService
 import tech.hybriq.adbuddy.ui.ConsentScreen
+import tech.hybriq.adbuddy.ui.Onboarding
 import tech.hybriq.adbuddy.ui.ChatRoot
 
 class MainActivity : ComponentActivity() {
@@ -31,11 +29,6 @@ class MainActivity : ComponentActivity() {
         val prefs = BridgePrefs(this)
         if (savedInstanceState == null) {
             handle(intent)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-            }
         } else {
             // A rotation keeps what was on screen; the consent only while the host still waits.
             showConsent = savedInstanceState.getBoolean(STATE_CONSENT) && prefs.consent == "pending"
@@ -54,12 +47,18 @@ class MainActivity : ComponentActivity() {
                         host = prefs.consentHost,
                         onAnswer = { accepted ->
                             prefs.consent = if (accepted) "granted" else "denied"
-                            if (accepted) Toast.makeText(this, R.string.consent_done, Toast.LENGTH_LONG).show()
+                            // The first-run steps follow in the app only when they have not been done: the message says what comes next.
+                            val message = when {
+                                !accepted -> R.string.consent_declined
+                                Onboarding.of(this).done() -> R.string.consent_done
+                                else -> R.string.consent_done_steps
+                            }
+                            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
                             showConsent = false
                         },
                     )
                 } else {
-                    ChatRoot(app, focusConfirm, closed) { closed = closed + it }
+                    ChatRoot(app, focusConfirm, closed, onReopen = { closed = closed - it }) { closed = closed + it }
                 }
             }
         }

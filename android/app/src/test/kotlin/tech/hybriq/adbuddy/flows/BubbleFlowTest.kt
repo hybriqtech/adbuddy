@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.flows
 
+import android.Manifest
 import android.app.NotificationManager
 import android.content.ComponentName
 import android.provider.Settings
@@ -42,6 +43,10 @@ import tech.hybriq.adbuddy.ui.Onboarding
 class BubbleFlowTest {
     @get:Rule val compose = createAndroidComposeRule<ChatBubbleActivity>()
 
+    init {
+        shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
     private val app get() = RuntimeEnvironment.getApplication()
 
     private fun text(id: Int, vararg args: Any): String = app.getString(id, *args)
@@ -75,6 +80,12 @@ class BubbleFlowTest {
         compose.onNodeWithText(text(R.string.onboarding_skip)).assertDoesNotExist()
         // And it does not mark them done either: the app still shows them on its first run.
         assertFalse(Onboarding.of(app).done())
+    }
+
+    @Test fun theBubbleStartsWithTheTerminalFolded() {
+        // C12: the bubble is ~600 dp tall; an open terminal would leave the messages a few dp.
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_show)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_hide)).assertDoesNotExist()
     }
 
     @Test fun settingsLeadsToTheProtectedAppsAndTheNotificationAccess() {
@@ -159,5 +170,13 @@ class BubbleFlowTest {
         compose.waitUntil(15_000) { compose.onAllNodes(hasText(text(R.string.access_state_unknown))).fetchSemanticsNodes().isNotEmpty() }
         assertFalse(NotificationConsent.of(app).confirmed())
         compose.onNodeWithText(text(R.string.access_confirm)).assertDoesNotExist()
+    }
+
+    @Test fun theBubbleNeverAsksForTheNotificationPermission() {
+        // Denied and never asked: the app would show the reason, the bubble (600 dp) does not.
+        shadowOf(app).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        compose.activityRule.scenario.recreate()
+        compose.onNodeWithContentDescription(text(R.string.action_menu)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.notifications_rationale_title)).assertDoesNotExist()
     }
 }

@@ -26,4 +26,13 @@ class FormatsTest {
     @Test fun theZoneIsTheOneAsked() {
         assertEquals("16:05:09", plain(Formats.time(at, FormatStyle.MEDIUM, ZoneOffset.ofHours(2), Locale.forLanguageTag("es-ES"))))
     }
+
+    @Test fun countdownWritesMinutesAndSeconds() {
+        assertEquals("0:00", Formats.countdown(0))
+        assertEquals("0:09", Formats.countdown(9))
+        assertEquals("0:42", Formats.countdown(42))
+        assertEquals("1:00", Formats.countdown(60))
+        assertEquals("2:05", Formats.countdown(125))
+        assertEquals("60:00", Formats.countdown(3600))
+    }
 }

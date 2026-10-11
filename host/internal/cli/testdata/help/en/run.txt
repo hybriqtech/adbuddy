@@ -12,8 +12,8 @@ Examples:
   adbuddy run codex -- --model o4
 
 Flags:
-  -h, --help                      help for run
-      --workspace adbuddy serve   agent environment; must be the one adbuddy serve is watching (default: that one)
+  -h, --help               help for run
+      --workspace string   agent environment; must be the one 'adbuddy serve' is watching (default: that one)
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

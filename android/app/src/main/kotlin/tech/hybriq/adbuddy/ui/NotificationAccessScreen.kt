@@ -125,13 +125,14 @@ fun NotificationAccessContent(
         bottomBar = {
             if (step != null) {
                 Surface(tonalElevation = 3.dp) {
-                    Row(
-                        Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
-                    ) {
-                        if (effective != Effective.ON) SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip)
-                        Button(onClick = onDone) { Text(stringResource(R.string.onboarding_done)) }
-                    }
+                    ActionFooter(
+                        modifier = Modifier.navigationBarsPadding().padding(horizontal = 24.dp, vertical = 12.dp),
+                        main = { m ->
+                            // Nothing is on yet: "Done" would only look like it.
+                            if (effective == Effective.ON) Button(onClick = onDone, modifier = m) { Text(stringResource(R.string.onboarding_done)) }
+                            else SecondaryActionButton(stringResource(R.string.onboarding_skip), onSkip, m)
+                        },
+                    )
                 }
             }
         },
@@ -149,10 +150,13 @@ fun NotificationAccessContent(
                 if (effective == Effective.NEEDS_CONFIRMATION) Button(onClick = onConfirm) { Text(stringResource(R.string.access_confirm)) }
                 if (confirmed) OutlinedButton(onClick = onWithdraw) { Text(stringResource(R.string.access_withdraw)) }
             }
+            // The advice that matters when the system's switch is greyed out sits between the state and the button.
+            if (!checking && (effective == Effective.OFF || effective == Effective.UNKNOWN)) RestrictedHint()
             FilledTonalButton(onClick = onOpen) { Text(stringResource(R.string.access_open)) }
-            if (!checking && (effective == Effective.OFF || effective == Effective.UNKNOWN)) {
+            // The way out of the step says it is later, and where to turn it on.
+            if (step != null && effective != Effective.ON) {
                 Text(
-                    stringResource(R.string.access_restricted_hint),
+                    stringResource(R.string.access_later_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -162,6 +166,18 @@ fun NotificationAccessContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/** Why the system's switch may be greyed out, and what to do: an information card, not the smallest line. */
+@Composable
+private fun RestrictedHint() {
+    val scheme = MaterialTheme.colorScheme
+    Surface(modifier = Modifier.semantics(mergeDescendants = true) {}, color = scheme.secondaryContainer, contentColor = scheme.onSecondaryContainer, shape = MaterialTheme.shapes.medium) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.Top) {
+            Icon(Icons.Default.Info, contentDescription = null)
+            Text(stringResource(R.string.access_restricted_hint), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

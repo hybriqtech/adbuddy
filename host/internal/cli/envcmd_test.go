@@ -19,7 +19,7 @@ func TestGroupSkillPaths(t *testing.T) {
 		"  created AGENTS.md",
 		"  created .gemini/settings.json",
 		"  created 2 skills in .claude/skills",
-		"  created 1 skills in .agents/skills",
+		"  created 1 skill in .agents/skills",
 	}
 	if got := groupSkillPaths("created", in); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %q\nwant %q", got, want)

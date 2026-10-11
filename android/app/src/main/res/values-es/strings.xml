@@ -19,6 +19,11 @@
     <string name="notif_capture_failed">No se pudo hacer la captura</string>
     <string name="notif_cut_failed">No se pudo cortar el acceso adb</string>
     <string name="channel_confirm">Confirmaciones</string>
+    <string name="channel_ask">Preguntas del agente</string>
+    <string name="channel_ask_description">Te avisa cuando el agente pide tu permiso, para que puedas contestar a tiempo.</string>
+    <string name="channel_conversation_description">La notificación fija con la conversación y sus botones.</string>
+    <string name="channel_done_description">Te avisa cuando el agente ha terminado.</string>
+    <string name="channel_confirm_description">Preguntas sobre comandos delicados, con Permitir y Rechazar.</string>
     <string name="status_connected">Conectado a %1$s</string>
     <string name="status_connecting">Conectando con el PC…</string>
     <string name="status_waiting">Esperando al PC (ejecuta adbuddy serve)</string>
@@ -26,10 +31,20 @@
     <string name="status_update_app">Esta app es demasiado antigua para el ADBuddy de tu PC: instala una compilación más reciente con adbuddy setup --apk &lt;fichero&gt; en el PC (setup a secas no reemplaza una app instalada)</string>
     <string name="status_update_host">El ADBuddy de tu PC es demasiado antiguo para esta app: actualízalo en el PC</string>
     <string name="status_cut">Acceso adb cortado</string>
+    <string name="status_not_set_up">Este móvil aún no está configurado: en el PC, ejecuta adbuddy setup</string>
+    <string name="status_short_cut">Acceso cortado</string>
+    <string name="status_short_update">Hay que actualizar</string>
+    <string name="status_short_connecting">Conectando…</string>
+    <string name="status_short_waiting">Esperando al PC</string>
+    <string name="status_short_paused">En pausa</string>
+    <string name="status_short_not_set_up">Sin configurar</string>
+    <string name="status_short_connected">Conectado</string>
+    <string name="notifications_blocked">Las notificaciones de ADBuddy están desactivadas o silenciadas: no se te avisará cuando el agente te pregunte algo. Actívalas en los ajustes del sistema.</string>
+    <string name="notifications_open_settings">Ajustes</string>
 
     <string name="action_allow">Permitir</string>
     <string name="action_deny">Rechazar</string>
-    <string name="action_allow_session">Permitir durante la sesión</string>
+    <string name="action_allow_session">Permitir este mismo comando durante la sesión</string>
     <string name="action_pause">Pausar</string>
     <string name="action_resume">Reanudar</string>
     <string name="action_cut">Cortar acceso</string>
@@ -40,6 +55,7 @@
     <string name="confirm_title">El agente quiere: %1$s</string>
     <string name="confirm_special">Puede cortar la conexión con el PC o afectar a ADBuddy.</string>
     <string name="confirm_expires">Caduca: %1$s</string>
+    <string name="confirm_expires_in">Caduca en %1$s</string>
     <string name="confirm_sending">Respondida: esperando al PC</string>
     <string name="confirm_offline">Sin conexión con el PC</string>
     <string name="confirm_expired">Caducada: ya no se puede responder.</string>
@@ -47,6 +63,7 @@
     <string name="confirm_open_special">Abre ADBuddy para leer el aviso y permitirlo.</string>
     <string name="confirm_too_long">El comando es demasiado largo para enseñarlo entero: solo se puede rechazar.</string>
     <string name="confirm_scroll">Desplázate hasta el final para permitirlo</string>
+    <string name="confirm_waiting_show">Ver</string>
     <string name="action_open">Abrir</string>
     <plurals name="confirm_more">
         <item quantity="one">y %1$d más</item>
@@ -56,24 +73,37 @@
         <item quantity="one">%1$d carácter del comando no se muestra</item>
         <item quantity="other">%1$d caracteres del comando no se muestran</item>
     </plurals>
+    <plurals name="confirm_waiting">
+        <item quantity="one">%1$d acción delicada espera tu respuesta</item>
+        <item quantity="other">%1$d acciones delicadas esperan tu respuesta</item>
+    </plurals>
 
     <string name="consent_title">Configurar ADBuddy con %1$s</string>
     <string name="consent_intro">El PC \"%1$s\" pide terminar de configurar ADBuddy. Si aceptas, va a:</string>
     <string name="consent_grant">Dar a ADBuddy el permiso para cambiar ajustes seguros, que usa para cortar y reactivar desde el móvil el acceso del PC por adb.</string>
     <string name="consent_battery">Quitar a ADBuddy de la optimización de batería, para que el canal con el PC siga abierto.</string>
-    <string name="consent_a11y">Activar el servicio de accesibilidad de ADBuddy, sin quitar ninguno de los que ya uses.</string>
+    <string name="consent_a11y">Activar el servicio de accesibilidad de ADBuddy: permite al agente leer la pantalla, tocarla y escribir en ella, con un marco y un botón de Pausa mientras actúa, y nunca en ADBuddy ni en las apps protegidas. Los demás servicios que uses se quedan activados.</string>
     <string name="consent_note">ADBuddy no envía nada fuera: el PC y el móvil hablan por la conexión adb que emparejaste. Lo que lee el agente de código va adonde ese agente lo envíe.</string>
     <string name="consent_accept">Aceptar</string>
     <string name="consent_decline">Ahora no</string>
     <string name="consent_done">Listo. Puedes volver al PC.</string>
+    <string name="consent_done_steps">Listo. Quedan dos pasos rápidos aquí; después vuelve al PC.</string>
+    <string name="consent_declined">No se ha configurado nada. Para repetirlo, ejecuta adbuddy setup en el PC.</string>
 
     <string name="home_activity">Actividad</string>
     <string name="home_empty">Nada todavía. Aquí aparecerá cada comando adb del agente.</string>
+    <string name="chat_empty_ready">Escribe al agente aquí abajo. Los comandos delicados piden tu confirmación.</string>
     <string name="cut_done">La depuración está apagada: el PC no puede llegar al móvil.</string>
     <string name="cut_restored">La depuración vuelve a estar activa. Si el modo remoto estaba activo, su puerto de red sigue abierto hasta que el PC se conecte o reinicies el móvil.</string>
     <string name="cut_failed">No se ha podido apagar la depuración. Apaga la depuración USB y la depuración inalámbrica en Opciones de desarrollador.</string>
     <string name="restore_failed">No se ha podido volver a activar la depuración. Actívala en Opciones de desarrollador.</string>
     <string name="filter_all">Todo</string>
+    <string name="level_green">Seguro</string>
+    <string name="level_yellow">Cuidado</string>
+    <string name="level_red">Delicado</string>
+    <string name="level_chip">%1$s %2$s</string>
+    <string name="activity_filter_empty">Nada de este nivel todavía.</string>
+    <string name="activity_undo_hint">Para deshacerlo, en el PC: adbuddy undo %1$s</string>
     <string name="overlay_pill">Agente usando la pantalla · Pausar</string>
 
     <string name="action_cancel">Cancelar</string>
@@ -85,12 +115,14 @@
     <string name="session_stopped">Parado</string>
     <string name="chat_hint">Escribe al agente</string>
     <string name="chat_send">Enviar</string>
+    <string name="chat_stop">Parar</string>
     <string name="chat_attach">Adjuntar</string>
     <string name="chat_photo">Foto</string>
     <string name="chat_file">Fichero</string>
     <string name="chat_capture">Captura de pantalla</string>
     <string name="chat_terminal_show">Mostrar la terminal</string>
     <string name="chat_terminal_hide">Ocultar la terminal</string>
+    <string name="terminal_offline">Sin conexión con el PC: las teclas no se envían</string>
     <string name="perm_title">Claude Code pregunta</string>
     <string name="perm_summary">Descripción del agente: %1$s</string>
     <string name="perm_allow">Sí</string>
@@ -109,10 +141,13 @@
     <string name="tool_error">falló</string>
     <string name="confirm_label">ADBuddy: acción delicada</string>
     <string name="notif_asking">Claude Code necesita una respuesta</string>
+    <string name="notif_ask_title">El agente necesita una respuesta</string>
+    <string name="notif_ask_text">Abre ADBuddy para contestar.</string>
     <string name="chat_retry">Reintentar</string>
     <string name="chat_discard">Descartar</string>
     <string name="chat_not_sent">No enviado</string>
     <string name="chat_sending">Enviando…</string>
+    <string name="chat_new_messages">Mensajes nuevos</string>
     <string name="menu_activity">Actividad</string>
     <string name="menu_new_conversation">Nueva conversación</string>
     <string name="new_conversation_title">¿Empezar una conversación nueva?</string>
@@ -149,6 +184,9 @@
     <string name="listener_label">Lector de notificaciones de ADBuddy</string>
     <string name="step_progress">Paso %1$d de %2$d</string>
     <string name="onboarding_skip">Ahora no</string>
+    <string name="notifications_rationale_title">¿Recibir avisos?</string>
+    <string name="notifications_rationale_body">ADBuddy puede avisarte cuando el agente te pide permiso o termina. Sin notificaciones solo verías sus preguntas con la app abierta, y caducan.</string>
+    <string name="notifications_rationale_continue">Continuar</string>
     <string name="onboarding_done">Listo</string>
     <string name="protected_count">Apps protegidas: %1$d</string>
     <string name="protected_title">Apps protegidas</string>
@@ -170,7 +208,7 @@
     <string name="access_title">Acceso a las notificaciones</string>
     <string name="access_intro">Permite que el agente lea lo que dicen tus notificaciones, por ejemplo para ver un mensaje que acabas de recibir. De las apps protegidas y de ADBuddy solo ve que hay una notificación, nunca lo que dice. No puede descartar ni pulsar ninguna notificación. Es opcional.</string>
     <string name="access_state_granted">Permitido</string>
-    <string name="access_state_confirm">Permitido en el sistema, sin confirmar aquí</string>
+    <string name="access_state_confirm">Android lo permite; falta tu confirmación</string>
     <string name="access_state_denied">No permitido</string>
     <string name="access_state_unknown">Desconocido</string>
     <string name="access_state_checking">Comprobando…</string>
@@ -183,6 +221,7 @@
     <string name="access_withdraw">Que el agente deje de leerlas</string>
     <string name="access_open">Abrir los ajustes del sistema</string>
     <string name="access_restricted_hint">Si el interruptor sale en gris, abre la Información de la app de ADBuddy, toca los tres puntos y elige \"Permitir ajustes restringidos\".</string>
+    <string name="access_later_hint">Podrás activarlo luego en Ajustes de ADBuddy, en Acceso a las notificaciones.</string>
     <string name="menu_settings">Ajustes</string>
     <string name="settings_title">Ajustes</string>
     <string name="settings_protected_proposed">Lista propuesta (%1$d). Revísala y confírmala.</string>

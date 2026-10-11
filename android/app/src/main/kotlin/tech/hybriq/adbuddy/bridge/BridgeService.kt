@@ -29,6 +29,7 @@ import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.confirm.ConfirmNotifier
 import tech.hybriq.adbuddy.confirm.UnlockWait
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.notify.AskNotice
 import tech.hybriq.adbuddy.notify.ConversationNotifier
 import tech.hybriq.adbuddy.notify.ConversationView
 import tech.hybriq.adbuddy.notify.DoneDetector
@@ -78,12 +79,19 @@ class BridgeService : LifecycleService() {
         shown = first
         // Questions left by an earlier process: nobody can answer them now; the host sends them again.
         ConfirmNotifier.clear(this)
+        ConversationNotifier.cancelAsk(this)
         // While the service lives (it posts the questions): a system broadcast, nobody else's to send.
         ContextCompat.registerReceiver(this, screenOn, IntentFilter(Intent.ACTION_SCREEN_ON), ContextCompat.RECEIVER_NOT_EXPORTED)
         listening = true
         val app = application as AdbuddyApp
         lifecycleScope.launch {
             app.bridge.state.collect { s -> ConfirmNotifier.sync(this@BridgeService, s) }
+        }
+        lifecycleScope.launch {
+            var announced = emptySet<String>()
+            combine(app.bridge.state, app.foreground) { s, fg -> s to fg }.collect { (s, fg) ->
+                announced = AskNotice.apply(this@BridgeService, announced, s, fg)
+            }
         }
         lifecycleScope.launch {
             combine(app.bridge.state, CutAccess.observe(this@BridgeService)) { s, cut -> ConversationView.of(s, cut) }.collect { v ->
@@ -186,6 +194,7 @@ class BridgeService : LifecycleService() {
             (application as AdbuddyApp).bridge.stop()
             // Nobody can answer the questions without the channel.
             ConfirmNotifier.clear(this)
+            ConversationNotifier.cancelAsk(this)
         }
         super.onDestroy()
     }

@@ -10,9 +10,9 @@ Examples:
   adbuddy tap --xy 540,1200
 
 Flags:
-  -h, --help                help for tap
-      --id adbuddy screen   the element's id, as adbuddy screen lists it
-      --xy string           a point on the screen, x,y in pixels
+  -h, --help        help for tap
+      --id string   the element's id, as 'adbuddy screen' lists it
+      --xy string   a point on the screen, x,y in pixels
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

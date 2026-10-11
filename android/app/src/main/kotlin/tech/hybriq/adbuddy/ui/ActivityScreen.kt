@@ -2,6 +2,8 @@ package tech.hybriq.adbuddy.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,10 +29,16 @@ import tech.hybriq.adbuddy.bridge.Inverse
 import tech.hybriq.adbuddy.bridge.JournalEntry
 import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 /** Every adb command of the agent, with the level the host gave it and how to undo it (spec section 6). */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ActivityScreen(state: BridgeState, onBack: () -> Unit) {
+fun ActivityScreen(state: BridgeState, onBack: () -> Unit, now: () -> Long = { System.currentTimeMillis() }) {
     var filter by rememberSaveable { mutableStateOf<String?>(null) }
     Scaffold(
         topBar = {
@@ -38,24 +46,28 @@ fun ActivityScreen(state: BridgeState, onBack: () -> Unit) {
         },
     ) { inner ->
         Column(Modifier.padding(inner).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = filter == null, onClick = { filter = null }, label = { Text(stringResource(R.string.filter_all)) })
                 for (level in listOf("green", "yellow", "red")) {
-                    FilterChip(selected = filter == level, onClick = { filter = level }, label = { Text(levelIcon(level)) })
+                    FilterChip(selected = filter == level, onClick = { filter = level }, label = { Text(stringResource(R.string.level_chip, levelIcon(level), levelName(level))) })
                 }
             }
             // distinctBy: LazyColumn keys must be unique, whatever the host sends.
             val entries = state.journal.asReversed().distinctBy { it.id }.filter { filter == null || it.level == filter }
-            if (entries.isEmpty()) Text(stringResource(R.string.home_empty), style = MaterialTheme.typography.bodyMedium)
+            if (entries.isEmpty()) {
+                val text = if (state.journal.isEmpty()) R.string.home_empty else R.string.activity_filter_empty
+                Text(stringResource(text), style = MaterialTheme.typography.bodyMedium)
+            }
+            val nowMs = now()
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(entries, key = { it.id }) { EntryRow(it) }
+                items(entries, key = { it.id }) { EntryRow(it, nowMs) }
             }
         }
     }
 }
 
 @Composable
-private fun EntryRow(e: JournalEntry) {
+private fun EntryRow(e: JournalEntry, now: Long) {
     ElevatedCard(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
             Text(levelIcon(e.level), style = MaterialTheme.typography.titleMedium)
@@ -66,12 +78,24 @@ private fun EntryRow(e: JournalEntry) {
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                entryTime(e.ts, now)?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 e.inverse?.takeIf { e.undoneBy == null }?.let {
                     Text(
                         stringResource(R.string.activity_inverse, it.argv.joinToString(" ")),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // Without the id, `adbuddy undo` undoes the LAST entry, not this one. The id may carry text the agent
+                    // influences: only the shape the host gives is drawn.
+                    if (e.status == "ok" && JOURNAL_ID.matches(e.id)) {
+                        Text(
+                            stringResource(R.string.activity_undo_hint, e.id),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -88,6 +112,24 @@ private fun statusText(status: String): String = when (status) {
     "blocked" -> stringResource(R.string.activity_status_blocked)
     "timeout" -> stringResource(R.string.activity_status_timeout)
     else -> status
+}
+
+private val JOURNAL_ID = Regex("^j_[0-9A-Za-z]+$")
+
+/** The entry's time in local time: only the hour if it is from today (by [now] and [zone]), date and hour if not; null if [ts] cannot be read. */
+internal fun entryTime(ts: String, now: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): String? =
+    runCatching { OffsetDateTime.parse(ts).toInstant().toEpochMilli() }.getOrNull()?.let { ms ->
+        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate() == Instant.ofEpochMilli(ms).atZone(zone).toLocalDate()
+        if (today) Formats.time(ms, FormatStyle.SHORT, zone)
+        else DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT).withZone(zone).format(Instant.ofEpochMilli(ms))
+    }
+
+@Composable
+private fun levelName(level: String): String = when (level) {
+    "green" -> stringResource(R.string.level_green)
+    "yellow" -> stringResource(R.string.level_yellow)
+    "red" -> stringResource(R.string.level_red)
+    else -> level
 }
 
 private fun levelIcon(level: String) = when (level) {

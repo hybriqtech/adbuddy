@@ -253,6 +253,7 @@ func newForegroundCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:     "foreground",
 		Short:   app.T("help.foreground.short"),
+		Long:    app.T("help.foreground.long"),
 		Example: "  adbuddy foreground\n  adbuddy foreground --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
