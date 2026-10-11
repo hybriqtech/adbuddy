@@ -14,5 +14,11 @@
             android:excludeFromRecents="true"
             android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- ForegroundHeadsOnEmulatorTest: a window with thousands of nested views. -->
+        <activity
+            android:name="tech.hybriq.adbuddy.BigTreeActivity"
+            android:exported="true"
+            android:excludeFromRecents="true" />
     </application>
 </manifest>
