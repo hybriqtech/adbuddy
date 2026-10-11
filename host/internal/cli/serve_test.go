@@ -455,7 +455,7 @@ func TestServeReleasesTheLockWhenItFails(t *testing.T) {
 func TestServeModelAndEffortAreChecked(t *testing.T) {
 	t.Run("flags", func(t *testing.T) {
 		isolate(t)
-		for _, args := range [][]string{{"--model", "--x"}, {"--effort", "ultra"}} {
+		for _, args := range [][]string{{"--model", "--x"}, {"--effort", "ultra"}, {"--effort", "INHERIT"}} {
 			_, errOut, code := run(t, append([]string{"serve", "--adb", "adb"}, args...)...)
 			want := "--model"
 			if args[0] == "--effort" {
@@ -498,24 +498,43 @@ func TestNewSessionPassesModelAndEffort(t *testing.T) {
 		return nil, errors.New("not started")
 	}
 	app := &App{Stdout: io.Discard, Stderr: io.Discard, Getenv: func(string) string { return "" }}
-	m := newSession(app, t.TempDir(), "dev1", func(session.Info) {}, "opus", "low")
-	t.Cleanup(m.Stop)
-	for agentName, want := range map[string]string{
-		"claude": "--model opus --effort low",
-		"codex":  "",
+	for _, c := range []struct{ agent, model, effort, want string }{
+		{"claude", "opus", "low", "--model opus --effort low"},
+		{"claude", "", "", "--model claude-haiku-5-5 --effort low"},
+		{"claude", "inherit", "inherit", ""},
+		{"claude", "inherit", "high", "--effort high"},
+		{"codex", "", "", ""},
+		{"codex", "opus", "", ""},
 	} {
+		m := newSession(app, t.TempDir(), "dev1", func(session.Info) {}, c.model, c.effort)
 		got = nil
-		if err := m.Start(agentName, false); err == nil {
-			t.Fatalf("%s: the fake PTY should have failed", agentName)
+		err := m.Start(c.agent, false)
+		m.Stop()
+		if err == nil {
+			t.Fatalf("%s: the fake PTY should have failed", c.agent)
 		}
-		if strings.Join(got, " ") != want {
-			t.Errorf("%s started with %q, want %q", agentName, got, want)
+		if strings.Join(got, " ") != c.want {
+			t.Errorf("%s (%q, %q) started with %q, want %q", c.agent, c.model, c.effort, got, c.want)
 		}
 	}
 }
 
 // With --no-agent there is no agent to give them to: serve says so.
 func TestServeModelWithNoAgentSaysItIsNotApplied(t *testing.T) {
+	out := serveNoAgent(t, "--model", "opus")
+	if !strings.Contains(out, "--model and --effort do not apply with --no-agent") {
+		t.Fatalf("no notice:\n%s", out)
+	}
+	// Nothing set: the default model is not a setting, so no notice.
+	if out := serveNoAgent(t); strings.Contains(out, "do not apply with --no-agent") {
+		t.Fatalf("notice without flags:\n%s", out)
+	}
+}
+
+// serveNoAgent runs serve --no-agent with extra flags until it is up, stops it
+// and returns what it said.
+func serveNoAgent(t *testing.T, extra ...string) string {
+	t.Helper()
 	data := isolate(t)
 	tmp := t.TempDir()
 	script, err := testutil.WriteScript(tmp, testutil.FakeRule{Match: "^devices$", Stdout: "List of devices attached\ndev1\tdevice\n"})
@@ -530,7 +549,9 @@ func TestServeModelWithNoAgentSaysItIsNotApplied(t *testing.T) {
 	defer cancel()
 	served := make(chan int, 1)
 	go func() {
-		served <- mainContext(ctx, []string{"serve", "--adb", adb, "--serial", "dev1", "--workspace", filepath.Join(tmp, "ws"), "--confirm", "terminal", "--no-agent", "--model", "opus"}, strings.NewReader(""), io.Discard, serveErr)
+		args := []string{"serve", "--adb", adb, "--serial", "dev1", "--workspace", filepath.Join(tmp, "ws"), "--confirm", "terminal", "--no-agent"}
+		args = append(args, extra...)
+		served <- mainContext(ctx, args, strings.NewReader(""), io.Discard, serveErr)
 	}()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
@@ -551,10 +572,9 @@ func TestServeModelWithNoAgentSaysItIsNotApplied(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("serve did not stop")
 	}
-	if !strings.Contains(serveErr.String(), "--model and --effort do not apply with --no-agent") {
-		t.Fatalf("no notice:\n%s", serveErr.String())
-	}
+	return serveErr.String()
 }
+
 func journalOf(t *testing.T, n int) string {
 	t.Helper()
 	isolate(t)
@@ -645,4 +665,37 @@ func tail80(s string) string {
 		return s[len(s)-80:]
 	}
 	return s
+}
+
+// What serve says about the model and effort the agent starts with.
+func TestStartNote(t *testing.T) {
+	for _, c := range []struct {
+		agent, model, effort string
+		key                  string
+		arg                  string
+	}{
+		{"claude", "", "", "serve.model_default", "model claude-haiku-5-5, effort low"},
+		{"claude", "opus", "", "serve.model_default", "model opus, effort low"},
+		{"claude", "", "high", "serve.model_default", "model claude-haiku-5-5, effort high"},
+		{"claude", "opus", "high", "serve.model_applied", "model opus, effort high"},
+		{"claude", "inherit", "inherit", "serve.model_inherited", ""},
+		{"claude", "inherit", "", "serve.model_default", "effort low"},
+		{"claude", "", "inherit", "serve.model_default", "model claude-haiku-5-5"},
+		{"claude", "inherit", "high", "serve.model_applied", "effort high"},
+		{"claude", "opus", "inherit", "serve.model_applied", "model opus"},
+		{"codex", "", "", "", ""},
+		{"codex", "inherit", "inherit", "", ""},
+		{"codex", "opus", "", "serve.model_not_applied", "codex"},
+		{"codex", "", "high", "serve.model_not_applied", "codex"},
+	} {
+		note := startNote(c.agent, c.model, c.effort)
+		key, args := note.Key, note.Args
+		arg := ""
+		if len(args) > 0 {
+			arg = args[0].(string)
+		}
+		if key != c.key || arg != c.arg {
+			t.Errorf("startNote(%q, %q, %q) = %q, %q; want %q, %q", c.agent, c.model, c.effort, key, arg, c.key, c.arg)
+		}
+	}
 }

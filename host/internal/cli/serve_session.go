@@ -56,7 +56,8 @@ func newSession(app *App, ws, serial string, onInfo func(session.Info), model, e
 			}
 		},
 		Args: func(name string) []string {
-			a, _ := agent.Args(name, model, effort)
+			m, e := agent.Effective(name, model, effort)
+			a, _ := agent.Args(name, m, e)
 			return a
 		},
 		OnInfo: onInfo,

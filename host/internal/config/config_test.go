@@ -240,3 +240,17 @@ func TestAgentModelAndEffort(t *testing.T) {
 		t.Fatalf("%+v %v", back, err)
 	}
 }
+
+// "inherit" is a valid agent_model and agent_effort and comes back as it went.
+func TestAgentModelAndEffortInherit(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	c := Default()
+	c.AgentModel, c.AgentEffort = "inherit", "inherit"
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load(p)
+	if err != nil || back.AgentModel != "inherit" || back.AgentEffort != "inherit" {
+		t.Fatalf("%+v %v", back, err)
+	}
+}

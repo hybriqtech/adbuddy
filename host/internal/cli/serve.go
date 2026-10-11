@@ -282,12 +282,8 @@ func newServeCmd(app *App) *cobra.Command {
 				fmt.Fprintln(app.Stderr, app.T("serve.in_another_terminal", agentName))
 				fmt.Fprintln(app.Stderr)
 			} else {
-				if model != "" || effort != "" {
-					if _, unused := agent.Args(agentName, model, effort); len(unused) > 0 {
-						fmt.Fprintln(app.Stderr, app.T("serve.model_not_applied", agentName))
-					} else {
-						fmt.Fprintln(app.Stderr, app.T("serve.model_applied", agent.Describe(model, effort)))
-					}
+				if note := startNote(agentName, model, effort); note.Key != "" {
+					fmt.Fprintln(app.Stderr, note.In(app.speaks()))
 				}
 				startAgent(app, sess, agentName)
 				fmt.Fprintln(app.Stderr)
@@ -431,4 +427,24 @@ func confirmersNote(mode string, interactive bool) i18n.Msg {
 	default:
 		return i18n.M("serve.confirmations_deny")
 	}
+}
+
+// startNote is what serve says about the model and effort the agent starts
+// with; the zero Msg says nothing.
+func startNote(agentName, model, effort string) i18n.Msg {
+	explicit := func(s string) bool { return s != "" && s != agent.Inherit }
+	if agentName != "claude" {
+		if explicit(model) || explicit(effort) {
+			return i18n.M("serve.model_not_applied", agentName)
+		}
+		return i18n.Msg{}
+	}
+	m, e := agent.Effective(agentName, model, effort)
+	switch {
+	case m == "" && e == "":
+		return i18n.M("serve.model_inherited")
+	case model == "" || effort == "":
+		return i18n.M("serve.model_default", agent.Describe(m, e))
+	}
+	return i18n.M("serve.model_applied", agent.Describe(m, e))
 }
