@@ -4,6 +4,10 @@ optional caption. The file must be inside the environment and at most 200 MiB.
 Usage:
   adbuddy send <file> [--caption "…"] [flags]
 
+Examples:
+  adbuddy send screen.png
+  adbuddy send screen.png --caption "Wi-Fi settings"
+
 Flags:
       --caption string   text that goes with the file in the chat (at most 64 KiB)
   -h, --help             help for send

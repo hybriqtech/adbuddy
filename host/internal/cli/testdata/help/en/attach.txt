@@ -5,6 +5,9 @@ While attached, this terminal's size is the agent's.
 Usage:
   adbuddy attach [flags]
 
+Examples:
+  adbuddy attach
+
 Flags:
   -h, --help   help for attach
 

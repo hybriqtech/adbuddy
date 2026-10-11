@@ -98,3 +98,33 @@ func TestHelpShortsFit(t *testing.T) {
 		}
 	}
 }
+
+// H6: every command has an example, and each line of it runs a real command.
+func TestHelpExamples(t *testing.T) {
+	root := NewRoot(&App{Getenv: func(string) string { return "" }, Lang: i18n.EN})
+	for _, path := range helpPaths(root) {
+		if len(path) == 0 || path[0] == "help" || path[0] == "completion" {
+			continue
+		}
+		name := strings.Join(path, " ")
+		c, _, err := root.Find(path)
+		if err != nil || c == nil {
+			t.Fatalf("%v: %v", path, err)
+		}
+		if c.Example == "" {
+			t.Errorf("%q: no Example", name)
+			continue
+		}
+		for _, line := range strings.Split(c.Example, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "adbuddy ") {
+				t.Errorf("%q: example line %q does not start with \"adbuddy \"", name, line)
+				continue
+			}
+			first := strings.Fields(strings.TrimPrefix(line, "adbuddy "))[0]
+			if found, _, err := root.Find([]string{first}); err != nil || found == nil || found == root {
+				t.Errorf("%q: example line %q: %q is not a command", name, line, first)
+			}
+		}
+	}
+}
