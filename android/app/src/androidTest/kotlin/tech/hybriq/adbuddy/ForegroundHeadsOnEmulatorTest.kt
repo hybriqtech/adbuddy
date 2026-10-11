@@ -22,6 +22,7 @@ import org.junit.runner.RunWith
 import tech.hybriq.adbuddy.a11y.AgentAccessibilityService
 import tech.hybriq.adbuddy.a11y.UiExecutor
 import tech.hybriq.adbuddy.a11y.UiNode
+import tech.hybriq.adbuddy.a11y.UiWindowHead
 import tech.hybriq.adbuddy.bridge.UiOp
 import tech.hybriq.adbuddy.bridge.UiRequest
 import tech.hybriq.adbuddy.bridge.UiResponse
@@ -120,10 +121,44 @@ class ForegroundHeadsOnEmulatorTest {
         shell("input keyevent KEYCODE_HOME")
     }
 
-    private fun startTree(views: Int) {
+    /**
+     * P5 task 3: windowHeads() (what foreground now reads) equals windows() reduced to (type, package), same order, on
+     * Settings alone, with a floating dialog-themed activity over it, with the keyboard and with the notification shade. The two reads are not
+     * atomic, so up to 5 tries (letting the screen settle) before failing.
+     */
+    @Test fun headsMatchWindows() {
+        val service = AgentAccessibilityService.current!!
+        val seen = ArrayList<String>()
+        val savedHardIme = shell("settings get secure show_ime_with_hard_keyboard").trim()
+        val cases = listOf<Triple<String, () -> Unit, (List<UiWindowHead>) -> Boolean>>(
+            Triple("settings", { startSettings() }, { true }),
+            Triple("floating over Settings", { startSettings(); Thread.sleep(2_000); startTree(20, "--ez floating true", force = false) }, { true } /* outside split-screen only the front app window is listed: no dialog-typed window can appear; typeOf is covered in the JVM */),
+            Triple("keyboard", { shell("settings put secure show_ime_with_hard_keyboard 1"); startTree(20, "--ez edit true") }, { h -> h.any { it.type == "ime" } }),
+            Triple("shade", { startSettings(); Thread.sleep(2_000); shell("cmd statusbar expand-notifications") }, { h -> h.any { it.pkg == "com.android.systemui" } }),
+        )
+        for ((name, setup, expect) in cases) {
+            setup()
+            var last = ""
+            var ok = false
+            for (attempt in 1..5) {
+                Thread.sleep(2_500)
+                val heads = service.windowHeads()
+                val full = service.windows().map { UiWindowHead(it.type, it.pkg) }
+                if (heads == full && expect(heads)) { ok = true; seen += "$name: $heads"; break }
+                last = "heads=$heads full=$full"
+            }
+            if (name == "shade") shell("cmd statusbar collapse")
+            if (name == "keyboard") restoreSetting("show_ime_with_hard_keyboard", savedHardIme)
+            assertTrue("$name: windowHeads() differs from windows() (or the case did not appear) in 5 tries: $last", ok)
+        }
+        Log.i(TAG, "equivalence ok: ${seen.joinToString(" | ")}")
+        shell("input keyevent KEYCODE_HOME")
+    }
+
+    private fun startTree(views: Int, extras: String = "", force: Boolean = true) {
         // am start, as TapjackOverlayActivity: the activity lives in the tests' own process, which the
         // instrumentation's startActivitySync refuses.
-        val out = shell("am start -S -W -n ${instr.context.packageName}/tech.hybriq.adbuddy.BigTreeActivity --ei views $views")
+        val out = shell("am start ${if (force) "-S " else ""}-W -n ${instr.context.packageName}/tech.hybriq.adbuddy.BigTreeActivity --ei views $views $extras")
         assertTrue("BigTreeActivity did not start: $out", out.contains("Status: ok"))
     }
 

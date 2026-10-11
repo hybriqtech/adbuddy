@@ -55,3 +55,5 @@ Rama `perf/latencia`, worktree `<worktree>`.
   39 tests completed, 2 failed
   ```
   Restaurado después (diff sin `false ||`). `:app:testDebugUnitTest` + `lintDebug` verdes: 1017 tests, 0 fallos.
+- Tarea 3 (emulador API 34): `foreground` baja de 33 a ~4,5 ms (2000 vistas), de ~50 a ~4,5 ms (8000) y de 16 a ~3 ms (Ajustes): se cumple lo de la mitad. Equivalencia `windowHeads()` = `windows()` a la primera en Ajustes, actividad flotante, teclado y panel de notificaciones.
+- Ruling: la equivalencia no cubre una ventana `dialog` real — fuera de pantalla dividida el sistema lista solo la ventana de app del frente (ni un `AlertDialog` ni una actividad con tema de diálogo dan una segunda ventana de app) y `--windowingMode 6` no divide en este emulador — cuesta: la rama `dialog` de `typeOf` solo la prueba el test JVM; la lógica de `guardedOnScreen` ya la cubre con cabeceras `dialog`.

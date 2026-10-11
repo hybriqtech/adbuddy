@@ -19,10 +19,22 @@ public class BigTreeActivity extends Activity {
     private static final int FANOUT = 4;
 
     @Override protected void onCreate(Bundle b) {
+        // P5 task 3: floating dialog theme, so the activity beneath (Settings) stays visible as a second application window.
+        if (getIntent().getBooleanExtra("floating", false)) setTheme(android.R.style.Theme_DeviceDefault_Dialog);
         super.onCreate(b);
         int views = getIntent().getIntExtra("views", 2000);
         setContentView(build(views), new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (getIntent().getBooleanExtra("edit", false)) {
+            // P5 task 3: a field with focus and the soft keyboard, so an input-method window exists.
+            final android.widget.EditText e = new android.widget.EditText(this);
+            addContentView(e, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            e.requestFocus();
+            getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            e.postDelayed(new Runnable() { public void run() {
+                getSystemService(android.view.inputmethod.InputMethodManager.class).showSoftInput(e, 0);
+            } }, 500);
+        }
     }
 
     /** A subtree of exactly n views (n >= 1). */
