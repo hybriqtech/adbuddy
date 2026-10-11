@@ -20,12 +20,12 @@ func TestValidModel(t *testing.T) {
 }
 
 func TestValidEffort(t *testing.T) {
-	for _, s := range []string{"low", "medium", "high", "xhigh", "max"} {
+	for _, s := range []string{"low", "medium", "high", "xhigh", "max", "inherit"} {
 		if !ValidEffort(s) {
 			t.Errorf("%q should be valid", s)
 		}
 	}
-	for _, s := range []string{"LOW", "", "ultra"} {
+	for _, s := range []string{"LOW", "", "ultra", "INHERIT"} {
 		if ValidEffort(s) {
 			t.Errorf("%q should be invalid", s)
 		}
@@ -53,5 +53,22 @@ func TestArgs(t *testing.T) {
 func TestDescribe(t *testing.T) {
 	if Describe("a", "low") != "model a, effort low" || Describe("a", "") != "model a" || Describe("", "low") != "effort low" || Describe("", "") != "" {
 		t.Fatal("Describe")
+	}
+}
+
+func TestEffective(t *testing.T) {
+	for _, c := range []struct{ name, model, effort, wantModel, wantEffort string }{
+		{"claude", "", "", "claude-haiku-5-5", "low"},
+		{"claude", "opus", "", "opus", "low"},
+		{"claude", "inherit", "high", "", "high"},
+		{"claude", "inherit", "inherit", "", ""},
+		{"codex", "", "", "", ""},
+		{"codex", "opus", "", "opus", ""},
+		{"codex", "inherit", "inherit", "", ""},
+	} {
+		m, e := Effective(c.name, c.model, c.effort)
+		if m != c.wantModel || e != c.wantEffort {
+			t.Errorf("Effective(%q, %q, %q) = %q, %q; want %q, %q", c.name, c.model, c.effort, m, e, c.wantModel, c.wantEffort)
+		}
 	}
 }
