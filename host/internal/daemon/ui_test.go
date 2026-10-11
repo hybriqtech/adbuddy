@@ -147,6 +147,23 @@ func TestScreenFallsBackWhenTheServiceIsOff(t *testing.T) {
 	}
 }
 
+// A dump the app cannot announce (no notice drawn) fails closed: it must not fall back to uiautomator.
+func TestDumpThatTheAppCannotAnnounceDoesNotFallBackToADB(t *testing.T) {
+	e := newEnv(t)
+	a := e.withApp()
+	a.errs[bridge.UIOpDump] = &UIError{Code: bridge.CodeFailed, Text: "can't show the notice"}
+	e.adb.out["exec-out uiautomator dump /dev/tty"] = `<hierarchy rotation="0"><node package="p.q" class="a.B" text="Hi" bounds="[0,0][10,10]"/></hierarchy>`
+	_, exit := e.helper(t, bridge.UIOpDump, bridge.UIDumpArgs{})
+	if exit.ErrorCode != "UI_FAILED" {
+		t.Fatalf("exit %+v", exit)
+	}
+	for _, r := range e.adb.ran() {
+		if strings.Contains(r, "uiautomator") {
+			t.Fatalf("fell back to adb: %q", e.adb.ran())
+		}
+	}
+}
+
 func TestTap(t *testing.T) {
 	e := newEnv(t)
 	a := e.withApp()
