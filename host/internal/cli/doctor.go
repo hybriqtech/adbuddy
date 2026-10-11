@@ -274,7 +274,8 @@ func printVerdict(app *App, rep doctorReport) {
 // phone, identity, network port, phone app, environment. A check that
 // depends on one that failed is reported as skipped. It never changes
 // anything, on the PC or on the phone (starting ADBuddy's private adb server
-// aside, as any adb call does).
+// aside, as any adb call does). onCheck, if not nil, is called with each
+// check right after it is added, in report order.
 func runDoctor(ctx context.Context, app *App, onCheck func(check)) (rep doctorReport) {
 	add := func(c check) {
 		rep.Checks = append(rep.Checks, c)
