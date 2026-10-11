@@ -79,11 +79,9 @@ func TestRawReadsAskForTheNotice(t *testing.T) {
 		if ranAtNotice[0] != 0 {
 			t.Errorf("%q: adb ran before the notice", argv)
 		}
-		if argv[1] == "screenrecord" && asked[0] != 1 {
-			t.Errorf("%q: the notice came before the Allow (%d questions)", argv, asked[0])
-		}
-		if argv[1] != "screenrecord" && asked[0] != 0 {
-			t.Errorf("%q: asked the user for a green read", argv)
+		// Whatever the user is asked (screenrecord is red), the notice comes after the Allow.
+		if asked[0] != len(e.conf.asked) || argv[1] == "screenrecord" && asked[0] != 1 {
+			t.Errorf("%q: the notice came before the Allow (%d of %d questions)", argv, asked[0], len(e.conf.asked))
 		}
 	}
 }
