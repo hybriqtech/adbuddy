@@ -88,7 +88,7 @@ func TestConnectRefusesAnotherPhone(t *testing.T) {
 	e := newSetupEnv(t, addrRules("ZZZZ9999"))
 	saveConfig(t, e, phoneSerial)
 	out, errOut, code := runWithInput(t, "", "connect", tsAddr, "--json")
-	if code != ExitFailure || !strings.Contains(out, `"WRONG_PHONE"`) || !strings.Contains(out, "that address is another phone; check the IP and port on the phone you set up") {
+	if code != ExitFailure || !strings.Contains(out, `"WRONG_PHONE"`) || !strings.Contains(out, "That address is another phone; check the IP and port on the phone you set up.") {
 		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
 	}
 	// The other phone does not stay on ADBuddy's adb server.

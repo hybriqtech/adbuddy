@@ -424,7 +424,7 @@ func TestDoctorCtrlCDuringFix(t *testing.T) {
 func TestDoctorBrokenJSONEnvelope(t *testing.T) {
 	doctorEnv(t, doctorRules(testutil.FakeRule{Match: `^devices$`, Stdout: "List of devices attached\n"}))
 	out, _, code := runWithInput(t, "", "doctor", "--json")
-	if code != 1 || !strings.HasPrefix(out, `{"ok":false,"error":{"code":"DOCTOR_BROKEN"`) || !strings.Contains(out, `"data":{"verdict":"broken"`) {
+	if code != 1 || !strings.HasPrefix(out, `{"ok":false,"error":{"code":"DOCTOR_BROKEN"`) || !strings.Contains(out, `"data":{"verdict":"broken"`) || strings.Count(out, `{"ok":`) != 1 {
 		t.Fatalf("exit %d %s", code, out)
 	}
 }

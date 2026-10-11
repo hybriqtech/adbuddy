@@ -21,4 +21,4 @@ Opciones:
   -h, --help   ayuda de doctor
 
 Opciones globales:
-      --json   escribe JSON legible por programas en la salida estándar
+      --json   salida JSON para programas, en los comandos que la admiten

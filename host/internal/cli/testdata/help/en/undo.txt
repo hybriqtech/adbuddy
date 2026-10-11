@@ -13,8 +13,8 @@ Examples:
   adbuddy undo session --session s_01J9Y…
 
 Flags:
-  -h, --help                   help for undo
-      --session undo session   session for undo session (default: the current one)
+  -h, --help             help for undo
+      --session string   session for 'undo session' (default: the current one)
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

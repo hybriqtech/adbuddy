@@ -119,3 +119,14 @@ func TestDoctorAgentAndBrokenConfigInSpanish(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorPhoneHowMentionsSetup(t *testing.T) {
+	for _, l := range []i18n.Lang{i18n.EN, i18n.ES} {
+		app := &App{Lang: l, Getenv: func(string) string { return "" }}
+		for _, k := range []string{app.T("doctor.phone.how_wifi"), app.T("doctor.phone.how_tailscale")} {
+			if !strings.Contains(k, "adbuddy setup") {
+				t.Errorf("%v: %q", l, k)
+			}
+		}
+	}
+}

@@ -104,3 +104,24 @@ func TestRunExportsTheIdentity(t *testing.T) {
 		t.Fatalf("agent calls %+v (%v)", calls, err)
 	}
 }
+
+// Contract of mainContext: the exit code of the agent passes through as it is,
+// with no INTERNAL "exit status" error (it must not go through AsError).
+func TestRunPassesTheExitCodeOfTheAgentThrough(t *testing.T) {
+	ws := t.TempDir()
+	data := isolate(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	fakeDaemon(t, data, ipc.Ping{Version: Version, Session: "s_1", Serial: "192.0.2.10:41000", Identity: "adb-AAAA1111-bbb._adb-tls-connect._tcp", Journal: workspace.JournalDir(ws)}, ipc.Exit{})
+	script, err := testutil.WriteScript(t.TempDir(), testutil.FakeRule{Match: ".*", Exit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKEADB_SCRIPT", script)
+	t.Setenv("FAKEADB_LOG", filepath.Join(t.TempDir(), "agent.log"))
+	_, errOut, code := run(t, "run", fakeADB(t))
+	if code != 3 || strings.Contains(errOut, "INTERNAL") || strings.Contains(errOut, "exit status") || strings.Contains(errOut, "Error:") {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+}

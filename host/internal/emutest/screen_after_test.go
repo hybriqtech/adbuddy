@@ -124,6 +124,34 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 		}
 	})
 
+	// With the animations slowed down the transition lasts seconds: the screen
+	// the tap leaves is on show long after the tap, so a wait that took the old
+	// screen as settled, or ended before the new one, would fail here. At normal
+	// speed the emulator changes screen before the first read and this cannot fail.
+	t.Run("a slow transition never settles on the old screen nor taps twice", func(t *testing.T) {
+		for _, k := range []string{"window_animation_scale", "transition_animation_scale", "animator_duration_scale"} {
+			e.restoreAtCleanup(t, "global", k, e.shell(t, "settings get global "+k))
+			e.shell(t, "settings put global "+k+" 8")
+		}
+		e.openSettings(t)
+		time.Sleep(3 * time.Second)
+		h := newLatencyHost(t, e, ui)
+		for i := range 3 {
+			exit, c, _ := tapScreen(t, h, tapNet)
+			if exit.Code != 0 || c.Screen == nil {
+				t.Fatalf("run %d: exit %+v, note %q", i, exit, c.Note)
+			}
+			if c.Screen.Changed == nil || !*c.Screen.Changed || !screenHas(c.Screen.UIDump, "Internet") {
+				t.Errorf("run %d: settled on the old screen (changed %v): %+v", i, c.Screen.Changed, c.Screen.UIDump.Elements)
+			}
+			e.shell(t, "input keyevent 4")
+			time.Sleep(4 * time.Second)
+		}
+		if n := h.clicks(t); n != 3 {
+			t.Errorf("%d clicks in the journal, want 3 (one per tap)", n)
+		}
+	})
+
 	t.Run("Back 20 times is never blocked and shows the home", func(t *testing.T) {
 		e.openSettings(t)
 		time.Sleep(2 * time.Second)

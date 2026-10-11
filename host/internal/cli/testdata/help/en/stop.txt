@@ -7,4 +7,4 @@ Flags:
   -h, --help   help for stop
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

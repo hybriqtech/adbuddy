@@ -16,4 +16,4 @@ Flags:
       --settle   wait until the screen stops changing (up to about 3 s), for after a raw adb command such as am start
 
 Global Flags:
-      --json   print machine-readable JSON on stdout
+      --json   machine-readable JSON output, for the commands that support it

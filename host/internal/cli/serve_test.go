@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/pty"
@@ -57,7 +59,7 @@ func TestJournalEmptyJSON(t *testing.T) {
 	t.Setenv("ADBUDDY_CONFIG_DIR", t.TempDir())
 	t.Setenv("ADBUDDY_DATA_DIR", t.TempDir())
 	out, _, code := run(t, "journal", "--json", "--workspace", t.TempDir())
-	if code != 0 || strings.TrimSpace(out) != `{"ok":true,"data":{"entries":[],"skippedLines":0}}` {
+	if code != 0 || strings.TrimSpace(out) != `{"ok":true,"data":{"entries":[],"skippedLines":0,"total":0,"truncated":false}}` {
 		t.Fatalf("exit %d, stdout %q", code, out)
 	}
 }
@@ -552,4 +554,95 @@ func TestServeModelWithNoAgentSaysItIsNotApplied(t *testing.T) {
 	if !strings.Contains(serveErr.String(), "--model and --effort do not apply with --no-agent") {
 		t.Fatalf("no notice:\n%s", serveErr.String())
 	}
+}
+func journalOf(t *testing.T, n int) string {
+	t.Helper()
+	isolate(t)
+	ws := t.TempDir()
+	var es []journal.Entry
+	for i := 0; i < n; i++ {
+		es = append(es, journal.Entry{ID: fmt.Sprintf("j_%03d", i), Level: "green", Status: "ok",
+			Description: "d", Argv: []string{"shell", "true"}})
+	}
+	appendEntries(t, ws, nil, es...)
+	return ws
+}
+
+func TestJournalSaysWhenItTruncates(t *testing.T) {
+	ws := journalOf(t, 60)
+	out, errOut, code := run(t, "journal", "--limit", "50", "--workspace", ws)
+	if code != 0 || strings.Count(out, "\n") != 50 || !strings.Contains(errOut, "Showing the last 50 of 60 entries (use --limit 0 for all).") {
+		t.Fatalf("exit %d, lines %d, stderr %q", code, strings.Count(out, "\n"), errOut)
+	}
+	out, errOut, code = run(t, "journal", "--limit", "0", "--workspace", ws)
+	if code != 0 || strings.Count(out, "\n") != 60 || strings.Contains(errOut, "Showing the last") {
+		t.Fatalf("exit %d, lines %d, stderr %q", code, strings.Count(out, "\n"), errOut)
+	}
+	out, _, _ = run(t, "journal", "--limit", "50", "--workspace", ws, "--json")
+	if !strings.Contains(out, `"total":60`) || !strings.Contains(out, `"truncated":true`) {
+		t.Fatalf("json %q", tail80(out))
+	}
+	out, _, _ = run(t, "journal", "--limit", "0", "--workspace", ws, "--json")
+	if !strings.Contains(out, `"total":60`) || !strings.Contains(out, `"truncated":false`) {
+		t.Fatalf("json %q", tail80(out))
+	}
+	t.Setenv("ADBUDDY_LANG", "es")
+	_, errOut, _ = run(t, "journal", "--limit", "50", "--workspace", ws)
+	if !strings.Contains(errOut, "Mostrando las últimas 50 de 60 entradas (usa --limit 0 para verlas todas).") {
+		t.Fatalf("stderr %q", errOut)
+	}
+}
+
+func TestServeWaitingTextIsAboutThePhone(t *testing.T) {
+	for _, l := range []i18n.Lang{i18n.EN, i18n.ES} {
+		app := &App{Lang: l, Getenv: func(string) string { return "" }}
+		got := app.T("serve.waiting_for_the_phone_on", 45)
+		if strings.Contains(got, "adb server") || strings.Contains(got, "servidor adb") || strings.Contains(got, "5038") || !strings.Contains(got, "45 s") {
+			t.Errorf("%v: %q", l, got)
+		}
+	}
+	// Looked up in the syntax tree, not as text: the call must pass the
+	// seconds of deviceWait.
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "serve.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	passes := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		c, ok := n.(*ast.CallExpr)
+		if !ok || len(c.Args) != 2 {
+			return true
+		}
+		if lit, ok := c.Args[0].(*ast.BasicLit); !ok || lit.Value != `"serve.waiting_for_the_phone_on"` {
+			return true
+		}
+		ast.Inspect(c.Args[1], func(m ast.Node) bool {
+			if id, ok := m.(*ast.Ident); ok && id.Name == "deviceWait" {
+				passes = true
+			}
+			return true
+		})
+		return true
+	})
+	if !passes {
+		t.Fatal("serve must pass the seconds of deviceWait")
+	}
+}
+
+func TestSetupCodeWithoutTerminalHasItsOwnFix(t *testing.T) {
+	e := newSetupEnv(t, phoneRules())
+	_, errOut, code := runWithInput(t, "", "setup", "--code", "--adb", fakeADB(t), "--workspace", e.ws)
+	if code != ExitUsage || !strings.Contains(errOut, "Error: USAGE — no answer on stdin") ||
+		!strings.Contains(errOut, "Run it in a terminal, or give the answers on stdin, one per line.") || strings.Contains(errOut, "--help") {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+}
+
+// tail80 is the last 80 bytes of s (all of it if shorter), for failure messages.
+func tail80(s string) string {
+	if len(s) > 80 {
+		return s[len(s)-80:]
+	}
+	return s
 }

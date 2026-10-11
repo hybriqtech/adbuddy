@@ -39,3 +39,9 @@ Rama `perf/latencia`, worktree `<worktree>`.
 - Ruling: `Changed` nil = desconocido, nunca «no cambió»; el CLI avisa «no cambió» solo con falso — un aviso falso invitaría a repetir el tap — cuesta: una partida que falla alarga la espera a `settleIdle` (2 s).
 - Ruling: los bloqueos de la guarda y los `UI_PROTECTED` del dump se reintentan hasta `settleBlockWait` (2 s); pausa y pregunta 🔴 no — es lo que cura el bloqueo espurio tras una transición — cuesta: un bloqueo real avisa a los ~2 s en vez de al instante; cada intento pasa la guarda completa y no se devuelve nada leído antes de un bloqueo.
 - Pendiente: S2 en el emulador (prueba escrita: `screen_after_test.go`, 804d788d) y el hueco estable para calibrar `settleQuiet` (350 ms por defecto).
+
+## settle2: validación en emulador tras integrar main (2026-10-11)
+
+- Merge de origin/main (777fe578) en perf/latencia: conflictos solo en `serve_test.go`, catálogos en/es y ayudas `serve`/`tap` (se conservan `--model`/`--effort` y `--screen` junto a los textos nuevos de main); `go vet` y `go test ./...` verdes.
+- Ruling: validar en API 34 con AVD propio (`adbuddy-latencia34`, puertos 5602/5072) — la imagen API 37 hace caer surfaceflinger en bucle con swiftshader y swangle en este PC — cuesta: la sincronía de animaciones de API 37 no se mide; el APK es `adbuddy-4395b50-debug` (los cambios de android/ de main son textos de consentimiento/estado y no tocan el dump).
+- Ruling: añadir al test S2 una subprueba con animaciones ×8 — a velocidad normal la prueba pasaba con cualquier `settleQuiet` (vacua) — cuesta: +25 s de test en emulador. Mutaciones: `settleQuiet`=100 y `case still` la hacen fallar; 600 pasa.

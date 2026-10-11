@@ -101,25 +101,25 @@ These are the commands of `adbuddy --help`; `adbuddy <command> --help` shows the
 
 | Command | What it does |
 |---|---|
-| `adbuddy setup` | Set up ADBuddy: get adb, pair the phone over Wi-Fi and prepare the agent environment |
-| `adbuddy serve` | Run the ADBuddy host: live journal and confirmations for the agent's adb commands |
+| `adbuddy setup` | Set up ADBuddy: adb, phone pairing and agent environment |
+| `adbuddy serve` | Run the ADBuddy host: live journal and confirmations |
 | `adbuddy run` | Start a coding agent in the ADBuddy environment |
-| `adbuddy attach` | Connect this terminal to the agent's session in `adbuddy serve` (Ctrl+] to detach) |
-| `adbuddy new` | Start a new conversation in `adbuddy serve`, with another agent if given |
+| `adbuddy attach` | Connect this terminal to the agent (Ctrl+] detaches) |
+| `adbuddy new` | Start a new conversation, with another agent if given |
 | `adbuddy stop` | Stop the agent that `adbuddy serve` runs (serve keeps running) |
 | `adbuddy journal` | Show the journal of adb commands and their inverses |
 | `adbuddy undo` | Undo journaled changes by running their inverses |
-| `adbuddy connect <ip:port>` | Connect to the phone by IP address and port (Tailscale or another network without mDNS) |
-| `adbuddy remote` | Open adb's network port 5555 for 12 hours (remote mode), close it, or see its state |
-| `adbuddy doctor` | Check that ADBuddy, adb, the phone and the app are ready, and say how to fix what is not |
+| `adbuddy connect <ip:port>` | Connect to the phone by IP address and port |
+| `adbuddy remote` | Open or close adb's network port 5555 (remote mode) |
+| `adbuddy doctor` | Check everything ADBuddy needs and say how to fix it |
 | `adbuddy env` | Manage the agent environment |
-| `adbuddy screen` | List what is on the phone's screen: ids, texts and where to tap |
-| `adbuddy tap` | Tap an element of the phone's screen by its text, its id or a point |
-| `adbuddy type "<text>"` | Type text in the focused field of the phone (it replaces what the field has) |
+| `adbuddy screen` | List what is on the phone's screen and where to tap |
+| `adbuddy tap` | Tap a screen element by text, id or point |
+| `adbuddy type "<text>"` | Type text in the phone's focused field |
 | `adbuddy foreground` | Show the app and activity in the phone's foreground |
-| `adbuddy notifications` | List the phone's current notifications (protected apps show no text) |
+| `adbuddy notifications` | List the phone's current notifications |
 | `adbuddy screenshot` | Save a screenshot of the phone, scaled down |
-| `adbuddy send <file>` | Send a file of the environment to the user's phone (for the agent) |
+| `adbuddy send <file>` | Send a file to the user's phone (for the agent) |
 | `adbuddy version` | Print the ADBuddy version |
 
 ## Documentation
