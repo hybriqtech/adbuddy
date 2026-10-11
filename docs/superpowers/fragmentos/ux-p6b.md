@@ -31,3 +31,9 @@ Seis, solo con el bloque `Examples:` añadido: `host/internal/cli/testdata/help/
 
 - QR de `setup` en una consola de Windows antigua, en un terminal oscuro con `NO_COLOR=1` y redirigido a un fichero.
 - `doctor` con el móvil apagado: las líneas van saliendo una a una.
+
+## Menores de la revisión final (DEFER, baratos para el siguiente paquete)
+
+- `errors.go:220,226`: `GetSpecifiedName()[:1]` corta un flag corto no ASCII (`-ñ`) en medio de un carácter UTF-8; usar el nombre sin recortar.
+- `en.toml`/`es.toml` (`unknown_flag`, `flag_needs_value`, `bad_syntax`): el argumento del usuario se interpola con `%s` sin pasar por `classify.Printable` (caracteres de control a stderr; ya ocurría con el texto de cobra).
+- `doctor_stream_test.go:95`: umbral de 500 ms, algo justo en una CI cargada. Puntuación distinta entre "unknown option %s" y "opción desconocida: %s".
