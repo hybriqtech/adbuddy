@@ -36,8 +36,10 @@ import tech.hybriq.adbuddy.bridge.UiResponse
  * valid (the service bound, the window was the one measured, the answer ok and not protected).
  *
  * It enables the service through the shell and restores both settings in @After. It FAILS, it does not skip, if the
- * service does not bind. It only runs with `-e adbuddyPerf true` (the whole suite, TestInstrumentedSuite, skips it)
- * and only on an emulator.
+ * service does not bind. It only runs with `-e adbuddyPerf true` (TestInstrumentedSuite skips both tests, listed in its allowedSkips;
+ * headsMatchWindows, a safety check, is run by TestHeadsMatchWindowsOnTheEmulator in host/internal/emutest)
+ * and only on an emulator. The settings it changes (services, show_ime_with_hard_keyboard, the shade) are restored in
+ * @After, also when a case fails.
  */
 @RunWith(AndroidJUnit4::class)
 class ForegroundHeadsOnEmulatorTest {
@@ -45,6 +47,7 @@ class ForegroundHeadsOnEmulatorTest {
     private lateinit var automation: UiAutomation
     private var savedServices: String? = null
     private var savedEnabled: String? = null
+    private var savedHardIme: String? = null
     private var armed = false
 
     @Before fun enableService() {
@@ -55,6 +58,7 @@ class ForegroundHeadsOnEmulatorTest {
         automation = instr.getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
         savedServices = shell("settings get secure enabled_accessibility_services").trim()
         savedEnabled = shell("settings get secure accessibility_enabled").trim()
+        savedHardIme = shell("settings get secure show_ime_with_hard_keyboard").trim()
         armed = true
         shell("settings put secure enabled_accessibility_services $SERVICE")
         shell("settings put secure accessibility_enabled 1")
@@ -69,6 +73,8 @@ class ForegroundHeadsOnEmulatorTest {
         if (!armed) return
         restoreSetting("enabled_accessibility_services", savedServices)
         restoreSetting("accessibility_enabled", savedEnabled)
+        restoreSetting("show_ime_with_hard_keyboard", savedHardIme)
+        shell("cmd statusbar collapse")
     }
 
     @Test fun foregroundAgainstWindows() {
@@ -129,10 +135,9 @@ class ForegroundHeadsOnEmulatorTest {
     @Test fun headsMatchWindows() {
         val service = AgentAccessibilityService.current!!
         val seen = ArrayList<String>()
-        val savedHardIme = shell("settings get secure show_ime_with_hard_keyboard").trim()
         val cases = listOf<Triple<String, () -> Unit, (List<UiWindowHead>) -> Boolean>>(
-            Triple("settings", { startSettings() }, { true }),
-            Triple("floating over Settings", { startSettings(); Thread.sleep(2_000); startTree(20, "--ez floating true", force = false) }, { true } /* outside split-screen only the front app window is listed: no dialog-typed window can appear; typeOf is covered in the JVM */),
+            Triple("settings", { startSettings() }, { h -> h.any { it.type == "app" && it.pkg == "com.android.settings" } }),
+            Triple("floating over Settings", { startSettings(); Thread.sleep(2_000); startTree(20, "--ez floating true", force = false) }, { h -> h.any { it.type == "app" && it.pkg == APP + ".test" } } /* outside split-screen only the front app window is listed: no dialog-typed window can appear; typeOf is covered in the JVM */),
             Triple("keyboard", { shell("settings put secure show_ime_with_hard_keyboard 1"); startTree(20, "--ez edit true") }, { h -> h.any { it.type == "ime" } }),
             Triple("shade", { startSettings(); Thread.sleep(2_000); shell("cmd statusbar expand-notifications") }, { h -> h.any { it.pkg == "com.android.systemui" } }),
         )
@@ -147,8 +152,6 @@ class ForegroundHeadsOnEmulatorTest {
                 if (heads == full && expect(heads)) { ok = true; seen += "$name: $heads"; break }
                 last = "heads=$heads full=$full"
             }
-            if (name == "shade") shell("cmd statusbar collapse")
-            if (name == "keyboard") restoreSetting("show_ime_with_hard_keyboard", savedHardIme)
             assertTrue("$name: windowHeads() differs from windows() (or the case did not appear) in 5 tries: $last", ok)
         }
         Log.i(TAG, "equivalence ok: ${seen.joinToString(" | ")}")

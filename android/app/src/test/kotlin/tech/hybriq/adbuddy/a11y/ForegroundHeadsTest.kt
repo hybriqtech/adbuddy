@@ -55,6 +55,8 @@ class ForegroundHeadsTest {
         assertEquals(true, protectedOf(listOf(UiWindowHead("app", "com.android.settings"), UiWindowHead("dialog", Packages.ADBUDDY))))
         // a guarded app in the second half
         assertEquals(true, protectedOf(listOf(UiWindowHead("app", "com.android.settings"), UiWindowHead("dialog", "com.example.bank"))))
+        // a dialog window without content hides what it is
+        assertEquals(true, protectedOf(listOf(UiWindowHead("app", "com.android.settings"), UiWindowHead("dialog", ""))))
     }
 
     @Test fun typeOfHasItsFourBranches() {

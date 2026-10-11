@@ -4,7 +4,7 @@
 
 **Objetivo:** que la operación `foreground` de la app (la que la guarda del host pide en cada orden con pantalla) deje de copiar el árbol entero de todas las ventanas, sin cambiar **ni un bit** de lo que decide.
 
-**Rama:** `perf/p5-foreground` desde `perf/latencia` (una vez integrada #74); solo toca `android/`, más una fila de docs. Commits con identidad local hybriqtech y el trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+**Rama:** `perf/foreground-ligero`; solo toca `android/`, más una fila de docs. Commits con identidad local hybriqtech y el trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Contexto (código actual)
 

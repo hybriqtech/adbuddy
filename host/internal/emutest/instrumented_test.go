@@ -35,8 +35,18 @@ var requiredClasses = []string{"TokenProviderTest", "AdbWifiObserverTest", "Loca
 // GuardOnEmulatorTest holds a heads-up or a bubble for the guard's tests
 // (guard_test.go), with -e adbuddyGuard; NotificationListenerOnEmulatorTest
 // reads the listener and the gate for listener_test.go, with -e
-// adbuddyListener gate or content: this suite passes none of them.
-var allowedSkips = map[string]bool{cutTest: true, tickerTest: true, guardTest: true, listenerGateTest: true, listenerContentTest: true}
+// adbuddyListener gate or content; ForegroundHeadsOnEmulatorTest measures (foregroundAgainstWindows) and checks
+// (headsMatchWindows, run by TestHeadsMatchWindowsOnTheEmulator) the app's foreground with -e adbuddyPerf true:
+// this suite passes none of them.
+var allowedSkips = map[string]bool{cutTest: true, tickerTest: true, guardTest: true, listenerGateTest: true, listenerContentTest: true,
+	perfTest: true, headsTest: true}
+
+// perfTest and headsTest are the app's instrumented foreground timing and equivalence check
+// (android/app/src/androidTest/…/ForegroundHeadsOnEmulatorTest.kt).
+const (
+	perfTest  = phoneapp.Package + ".ForegroundHeadsOnEmulatorTest#foregroundAgainstWindows"
+	headsTest = phoneapp.Package + ".ForegroundHeadsOnEmulatorTest#headsMatchWindows"
+)
 
 // tickerTest is the app's instrumented half of TestNotificationReadsAndTheCodes
 // (android/app/src/androidTest/…/TickerOnEmulatorTest.kt).
@@ -110,12 +120,12 @@ func parseInstrument(out string) (tests int, classes, skipped []string, failed b
 // minInstrumentedTests is how many tests the app's APK has (the cut, the
 // ticker, the guard's and the listener's two, skipped here, included): fewer
 // means a class was dropped from the run.
-const minInstrumentedTests = 20
+const minInstrumentedTests = 22
 
 func enoughInstrumentedTests(n int) bool { return n >= minInstrumentedTests }
 
 func TestEnoughInstrumentedTests(t *testing.T) {
-	for n, want := range map[int]bool{0: false, 19: false, 20: true, 21: true} {
+	for n, want := range map[int]bool{0: false, 21: false, 22: true, 23: true} {
 		if got := enoughInstrumentedTests(n); got != want {
 			t.Errorf("%d tests: enough = %v, want %v", n, got, want)
 		}
@@ -231,7 +241,7 @@ func TestInstrumentedSuite(t *testing.T) {
 	}
 	// The cut, the ticker, the guard's and the listener's must have been
 	// skipped here, not run: they are in the APK and this suite never passes
-	// -e adbuddyCut 1, -e adbuddyTicker 1, -e adbuddyGuard nor -e adbuddyListener.
+	// -e adbuddyCut 1, -e adbuddyTicker 1, -e adbuddyGuard, -e adbuddyListener nor -e adbuddyPerf.
 	if len(skipped) != len(allowedSkips) {
 		t.Errorf("skipped %v, want each of %v skipped once", skipped, allowedSkips)
 	}

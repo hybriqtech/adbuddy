@@ -13,7 +13,7 @@ import android.widget.TextView;
  * exposes only the visible rows). Fan-out 4, so the depth stays near 7 for 2000 and 9 for 9000.
  *
  * Java and exported for the same reasons as TapjackOverlayActivity: it runs in the tests' own package and
- * process, which carries no Kotlin stdlib, and the instrumentation starts it with startActivitySync.
+ * process, which carries no Kotlin stdlib, and the test starts it with `am start` (extras: views, floating, edit).
  */
 public class BigTreeActivity extends Activity {
     private static final int FANOUT = 4;
