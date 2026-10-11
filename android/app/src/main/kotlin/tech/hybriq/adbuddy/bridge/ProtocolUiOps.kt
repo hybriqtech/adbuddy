@@ -15,6 +15,7 @@ object UiOp {
     const val SET_TEXT = "setText"
     const val FOREGROUND = "foreground"
     const val NOTIFICATIONS = "notifications"
+    const val NOTICE = "notice"
 
     /** Each operation and the serializers of its args and result. */
     val ALL: Map<String, Pair<KSerializer<*>, KSerializer<*>>> = mapOf(
@@ -23,6 +24,7 @@ object UiOp {
         SET_TEXT to (UiSetTextArgs.serializer() to UiTextSet.serializer()),
         FOREGROUND to (Empty.serializer() to UiForeground.serializer()),
         NOTIFICATIONS to (Empty.serializer() to UiNotifications.serializer()),
+        NOTICE to (Empty.serializer() to Empty.serializer()),
     )
 }
 

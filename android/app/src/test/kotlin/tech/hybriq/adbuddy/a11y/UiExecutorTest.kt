@@ -31,7 +31,8 @@ class UiExecutorTest {
         var actingWorks: Boolean = true,
     ) : Screen {
         val did = mutableListOf<String>()
-        override fun windows() = windows
+        var windowsRead = false
+        override fun windows() = windows.also { windowsRead = true }
         override fun screen() = ScreenFixtures.SCREEN
         override fun rotation() = 0
         override fun locked() = locked
@@ -220,7 +221,7 @@ class UiExecutorTest {
         screen!!.focused = UiNode(pkg = "com.android.settings", cls = "android.widget.EditText", bounds = Box(0, 0, 10, 10), editable = true, focused = true)
         assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.CLICK, obj("x" to 1, "y" to 1)))))
         assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.SET_TEXT, obj("text" to "hi")))))
-        assertTrue(x.run(req(UiOp.DUMP)).ok)
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.DUMP))))
         assertFalse(screen!!.did.any { it.startsWith("tap") || it.startsWith("setText") || (it.startsWith("acting") && it != "acting null") })
     }
 
@@ -363,8 +364,57 @@ class UiExecutorTest {
             assertEquals(msg, a.error!!.text)
         }
         assertFalse(s.did.any { it.startsWith("click") || it.startsWith("tap") || it.startsWith("setText") })
-        assertTrue(x.run(req(UiOp.DUMP)).ok)
         assertTrue(x.run(req(UiOp.FOREGROUND)).ok)
+    }
+
+    @Test fun withoutTheNoticeDumpDoesNotRead() {
+        val s = FakeScreen(actingWorks = false)
+        screen = s
+        val a = x.run(req(UiOp.DUMP))
+        assertEquals(ErrorCode.FAILED, error(a))
+        assertEquals("ADBuddy can't show the on-screen notice, so it won't read the screen. Ask the user to do this part.", a.error!!.text)
+        // The tree is not read at all: the check comes before s.windows().
+        assertFalse(s.windowsRead)
+        // Foreground only reads the name of the app, not what it shows: it still answers.
+        assertTrue(x.run(req(UiOp.FOREGROUND)).ok)
+    }
+
+    @Test fun aProtectedAppIsRefusedBeforeTheNotice() {
+        screen = FakeScreen(actingWorks = false, fg = "com.example.bank" to "com.example.bank.Main")
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.DUMP))))
+    }
+
+    @Test fun pausedDumpIsRefused() {
+        // Paused: AgentAccessibilityService.acting() is true without drawing, so the dump must not rely on it
+        // (the pause can arrive after the host's doors looked).
+        paused = true
+        val s = FakeScreen()
+        screen = s
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.DUMP))))
+        assertFalse(s.windowsRead)
+    }
+
+    @Test fun noticeOpShowsTheOverlay() {
+        val s = FakeScreen()
+        screen = s
+        val a = x.run(req(UiOp.NOTICE))
+        assertTrue(a.ok)
+        assertTrue(s.did.contains("acting null"))
+        assertFalse(s.windowsRead)
+    }
+
+    @Test fun noticeOpFailsClosed() {
+        val s = FakeScreen(actingWorks = false)
+        screen = s
+        assertEquals(ErrorCode.FAILED, error(x.run(req(UiOp.NOTICE))))
+    }
+
+    @Test fun noticeOpRefusedWhilePaused() {
+        paused = true
+        val s = FakeScreen()
+        screen = s
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.NOTICE))))
+        assertFalse(s.did.any { it.startsWith("acting") })
     }
 
     @Test fun neverTwiceTheSameId() {

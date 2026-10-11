@@ -146,6 +146,13 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			firstBlocked = true
 		}
 	}
+	// The notice of the on-screen frame goes before the last pause check, so a
+	// pause that arrives meanwhile blocks (after the guard: no notice for what it refuses).
+	if req.UIOp == OpScreenshot {
+		if why := d.showNotice(ctx); why != "" {
+			return d.stopUI(ctx, e, why)
+		}
+	}
 	guarded := time.Now() // right after the guard said yes
 	if d.o.Paused() {     // paused while the guard looked
 		return d.blockUI(e, PausedMessage)
@@ -541,15 +548,15 @@ func checkResult(op string, raw json.RawMessage) (any, error) {
 // uiautomator dumps the screen by adb, unless ADBuddy's accessibility
 // service is on: uiautomator would disconnect it (M5 spec §5).
 func (d *Daemon) uiautomator(ctx context.Context) ([]byte, *uiFailure) {
-	out, code, err := d.o.ADB.Shell(ctx, "dumpsys accessibility")
-	if err != nil || code != 0 {
+	on, err := d.serviceOn(ctx)
+	if err != nil {
 		return nil, fail(exitTransient, "UI_UNAVAILABLE", "could not check ADBuddy's accessibility service on the phone")
 	}
-	if uidump.ServiceOn(out) {
+	if on {
 		return nil, fail(exitTransient, "UI_UNAVAILABLE", "ADBuddy's accessibility service is running but the app is not connected: open the ADBuddy app and try again")
 	}
 	var buf, errb bytes.Buffer
-	code, err = d.o.ADB.Run(ctx, "", []string{"exec-out", "uiautomator", "dump", "/dev/tty"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
+	code, err := d.o.ADB.Run(ctx, "", []string{"exec-out", "uiautomator", "dump", "/dev/tty"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
 	if err != nil || code != 0 {
 		return nil, fail(1, "UI_FAILED", "uiautomator dump failed: "+classify.Printable(strings.TrimSpace(errb.String())))
 	}
@@ -651,4 +658,30 @@ func (l *limited) Write(p []byte) (int, error) {
 	}
 	l.n -= len(p)
 	return l.w.Write(p)
+}
+
+// serviceOn reports whether ADBuddy's accessibility service is listed by
+// dumpsys accessibility (enabled or bound). An error when the phone cannot
+// say: the callers fail closed.
+func (d *Daemon) serviceOn(ctx context.Context) (bool, error) {
+	out, code, err := d.o.ADB.Shell(ctx, "dumpsys accessibility")
+	if err != nil {
+		return false, err
+	}
+	if code != 0 {
+		return false, fmt.Errorf("dumpsys accessibility exited with %d", code)
+	}
+	return uidump.ServiceOn(out), nil
+}
+
+// stopUI ends a helper that the guard or the notice refused: blocked, or
+// abandoned when the agent or serve went away meanwhile.
+func (d *Daemon) stopUI(ctx context.Context, e journal.Entry, why string) ipc.Exit {
+	if ctx.Err() != nil {
+		code := ExitDenied
+		e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
+		d.record(e)
+		return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
+	}
+	return d.blockUI(e, why)
 }
