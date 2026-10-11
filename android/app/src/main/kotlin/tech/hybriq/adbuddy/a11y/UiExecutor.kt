@@ -183,6 +183,8 @@ class UiExecutor(
 
     private fun noNotice(r: UiRequest) = fail(r, ErrorCode.FAILED, "ADBuddy can't show the on-screen notice, so it won't act. Ask the user to do this part.")
 
+    private fun noNoticeToRead(r: UiRequest) = fail(r, ErrorCode.FAILED, "ADBuddy can't show the on-screen notice, so it won't read the screen. Ask the user to do this part.")
+
     private fun pausedNow(r: UiRequest) = fail(r, ErrorCode.PROTECTED, "The agent is paused from the phone.")
 
     private fun dump(r: UiRequest, s: Screen, a: UiDumpArgs): UiResponse {
@@ -191,7 +193,8 @@ class UiExecutor(
         // Locked: there is no active app window, so the "last app seen" would be stale.
         val (pkg, activity) = if (locked) "" to "" else s.foreground()
         if (!locked && guarded(pkg)) return protectedApp(r, pkg)
-        s.acting(null)
+        if (paused()) return pausedNow(r)
+        if (!s.acting(null)) return noNoticeToRead(r)
         val d = Dumper.dump(s.windows(), s.screen(), s.rotation(), pkg.takeUnless { it == Packages.ADBUDDY }.orEmpty(), activity, locked, a.all == true, ::guarded)
         // A heads-up may have appeared while the tree was read: drop what was read.
         if (notificationOnScreen()) return notificationBlocked(r)
