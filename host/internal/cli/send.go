@@ -50,10 +50,11 @@ var (
 func newSendCmd(app *App) *cobra.Command {
 	var caption string
 	cmd := &cobra.Command{
-		Use:   "send <file> [--caption \"…\"]",
-		Short: app.T("help.send.short"),
-		Long:  app.T("help.send.long"),
-		Args:  cobra.ExactArgs(1),
+		Use:     "send <file> [--caption \"…\"]",
+		Example: "  adbuddy send screen.png\n  adbuddy send screen.png --caption \"Wi-Fi settings\"",
+		Short:   app.T("help.send.short"),
+		Long:    app.T("help.send.long"),
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(caption) > maxSendCaption {
 				return UsageError("the caption is too large: at most 64 KiB")
