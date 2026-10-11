@@ -77,11 +77,6 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        with:
-          go-version-file: host/go.mod
-          cache: ${{ runner.environment == 'github-hosted' }}
-          cache-dependency-path: host/go.sum
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
@@ -90,6 +85,12 @@ jobs:
         with:
           gradle-version: "9.8.0"
           cache-disabled: ${{ runner.environment != 'github-hosted' }}
+      # After setup-java and setup-gradle: on GitHub-hosted runners they put /usr/bin (an older go) first in PATH.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: host/go.mod
+          cache: ${{ runner.environment == 'github-hosted' }}
+          cache-dependency-path: host/go.sum
       - name: Point the emulator at the AVD (Linux runners)
         if: runner.os == 'Linux'
         run: '[ -z "$XDG_CONFIG_HOME" ] || echo "ANDROID_AVD_HOME=$XDG_CONFIG_HOME/.android/avd" >> "$GITHUB_ENV"'
