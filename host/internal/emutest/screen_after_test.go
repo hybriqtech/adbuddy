@@ -51,6 +51,24 @@ func (h *latencyHost) clicks(t *testing.T) int {
 	return len(ids)
 }
 
+// restoreAnimationScaleAtCleanup leaves the animation scale key as the test found
+// it. A scale that was not set cannot be restored by deleting it alone: the window
+// manager keeps its current value when the setting disappears (it reads it with the
+// current value as the default), so the emulator would stay at the slowed-down scale
+// and every later test would run its animations that slow (TestTerminalWorksOffline
+// never saw "Step 2 of 2" in CI). The system default, 1.0, is put first and the key
+// is deleted after it.
+func (e *emu) restoreAnimationScaleAtCleanup(t *testing.T, key string) {
+	t.Helper()
+	prev := e.shell(t, "settings get global "+key)
+	if prev != "null" && prev != "" {
+		e.restoreAtCleanup(t, "global", key, prev)
+		return
+	}
+	e.restoreAtCleanup(t, "global", key, "null") // runs last: deletes the key
+	e.restoreAtCleanup(t, "global", key, "1.0")  // runs first: back to the default
+}
+
 func screenHas(d bridge.UIDump, text string) bool {
 	for _, e := range d.Elements {
 		if strings.Contains(e.Text, text) || strings.Contains(e.Desc, text) {
@@ -130,7 +148,7 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 	// speed the emulator changes screen before the first read and this cannot fail.
 	t.Run("a slow transition never settles on the old screen nor taps twice", func(t *testing.T) {
 		for _, k := range []string{"window_animation_scale", "transition_animation_scale", "animator_duration_scale"} {
-			e.restoreAtCleanup(t, "global", k, e.shell(t, "settings get global "+k))
+			e.restoreAnimationScaleAtCleanup(t, k)
 			e.shell(t, "settings put global "+k+" 8")
 		}
 		e.openSettings(t)
