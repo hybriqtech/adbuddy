@@ -137,11 +137,19 @@ class UiExecutor(
                 UiOp.CLICK -> click(r, s, args(r, UiClickArgs.serializer()) ?: return invalid(r))
                 UiOp.SET_TEXT -> setText(r, s, args(r, UiSetTextArgs.serializer()) ?: return invalid(r))
                 UiOp.FOREGROUND -> foreground(r, s)
+                UiOp.NOTICE -> if (args(r, Empty.serializer()) == null) invalid(r) else notice(r, s)
                 else -> fail(r, ErrorCode.UNSUPPORTED, "This version of the ADBuddy app does not handle ${r.op.take(64)}.")
             }
         } catch (e: RuntimeException) {
             fail(r, ErrorCode.FAILED, "The app could not do it: ${e.javaClass.simpleName}.")
         }
+    }
+
+    /** The host is about to read the screen by adb (screencap, uiautomator): show the notice first. It reads nothing, so no heads-up check; the pause does count. */
+    private fun notice(r: UiRequest, s: Screen): UiResponse = when {
+        paused() -> pausedNow(r) // acting() is true without drawing while paused: the host must not read then
+        s.acting(null) -> ok(r, Empty, Empty.serializer())
+        else -> noNoticeToRead(r)
     }
 
     /**
@@ -183,6 +191,8 @@ class UiExecutor(
 
     private fun noNotice(r: UiRequest) = fail(r, ErrorCode.FAILED, "ADBuddy can't show the on-screen notice, so it won't act. Ask the user to do this part.")
 
+    private fun noNoticeToRead(r: UiRequest) = fail(r, ErrorCode.FAILED, "ADBuddy can't show the on-screen notice, so it won't read the screen. Ask the user to do this part.")
+
     private fun pausedNow(r: UiRequest) = fail(r, ErrorCode.PROTECTED, "The agent is paused from the phone.")
 
     private fun dump(r: UiRequest, s: Screen, a: UiDumpArgs): UiResponse {
@@ -191,7 +201,8 @@ class UiExecutor(
         // Locked: there is no active app window, so the "last app seen" would be stale.
         val (pkg, activity) = if (locked) "" to "" else s.foreground()
         if (!locked && guarded(pkg)) return protectedApp(r, pkg)
-        s.acting(null)
+        if (paused()) return pausedNow(r)
+        if (!s.acting(null)) return noNoticeToRead(r)
         val d = Dumper.dump(s.windows(), s.screen(), s.rotation(), pkg.takeUnless { it == Packages.ADBUDDY }.orEmpty(), activity, locked, a.all == true, ::guarded)
         // A heads-up may have appeared while the tree was read: drop what was read.
         if (notificationOnScreen()) return notificationBlocked(r)
