@@ -283,6 +283,18 @@ Códigos de salida:
 "error.usage_fix" = "Ejecuta `adbuddy --help` para ver cómo se usa."
 "error.usage_fix_cmd" = "Ejecuta `%[1]s --help` para ver cómo se usa."
 "err.help.unknown_topic" = "tema de ayuda desconocido %[1]q"
+"err.usage.unknown_command" = "el comando %[1]q no existe"
+"err.usage.unknown_command_suggest" = "el comando %[1]q no existe: ¿querías decir %[2]q?"
+"err.usage.no_args" = "%[1]s no admite argumentos (recibió %[2]q)"
+"err.usage.unknown_flag" = "opción desconocida: %[1]s"
+"err.usage.flag_needs_value" = "%[1]s necesita un valor"
+"err.usage.bad_value" = "valor no válido %[1]q para %[2]s"
+"err.usage.bad_syntax" = "opción mal escrita: %[1]s"
+"err.usage.args_exact.one" = "%[2]s admite %[1]d argumento, recibió %[3]d"
+"err.usage.args_exact.other" = "%[2]s admite %[1]d argumentos, recibió %[3]d"
+"err.usage.args_at_most.one" = "%[2]s admite como máximo %[1]d argumento, recibió %[3]d"
+"err.usage.args_at_most.other" = "%[2]s admite como máximo %[1]d argumentos, recibió %[3]d"
+"err.help.unknown_topic_suggest" = "tema de ayuda desconocido %[1]q: ¿querías decir %[2]q?"
 
 # attach.go: error
 "err.attach.agent_session" = "`adbuddy attach` no se puede ejecutar desde la sesión del agente"

@@ -44,7 +44,14 @@ func NewRoot(app *App) *cobra.Command {
 	root.SetErr(app.Stderr)
 	root.SetVersionTemplate("adbuddy {{.Version}}\n")
 	root.PersistentFlags().BoolVar(&app.JSON, "json", false, app.T("help.root.flag.json"))
-	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return UsageError(err.Error()) })
+	// cobra's "Did you mean this?" lists commands that do not look alike; ours is suggestCommand.
+	root.DisableSuggestions = true
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		if t := translateFlagError(err); t != nil {
+			return t
+		}
+		return UsageError(err.Error())
+	})
 	root.AddGroup(
 		&cobra.Group{ID: "start", Title: app.T("help.group.start")},
 		&cobra.Group{ID: "daily", Title: app.T("help.group.daily")},
@@ -89,7 +96,13 @@ func NewRoot(app *App) *cobra.Command {
 		RunE: func(c *cobra.Command, args []string) error {
 			target, _, err := c.Root().Find(args)
 			if target == nil || err != nil {
-				return UsageErrorT("err.help.unknown_topic", strings.Join(args, " "))
+				topic := strings.Join(args, " ")
+				if len(args) == 1 {
+					if s := suggestCommand(c.Root(), args[0]); s != "" {
+						return UsageErrorT("err.help.unknown_topic_suggest", topic, s)
+					}
+				}
+				return UsageErrorT("err.help.unknown_topic", topic)
 			}
 			target.InitDefaultHelpFlag()
 			target.InitDefaultVersionFlag()
@@ -133,6 +146,12 @@ func mainContext(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	cmd, err := root.ExecuteContextC(ctx)
 	if err != nil {
 		var code *exitCodeError
+		var typed *Error
+		if !errors.As(err, &code) && !errors.As(err, &typed) {
+			if t := translateArgsError(root, cmd, err); t != nil {
+				err = t
+			}
+		}
 		if !errors.As(err, &code) && cmd != nil {
 			name := cmd.CommandPath()
 			// help's own usage error points at the root, not at `adbuddy help --help`.

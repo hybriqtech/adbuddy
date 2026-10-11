@@ -684,25 +684,20 @@ func abs(n int) int {
 	return n
 }
 
-// authActionsMayBeDropped is a known defect of the app this test shows and T4
-// does not fix. On API 34 a notification button that asks to unlock
-// (setAuthenticationRequired) is delivered when the PIN is accepted, before
-// the keyguard has gone: the Allow that brought up the bouncer reached
-// ConfirmReceiver at 05:11:51.202 and the keyguard's going-away transition
-// started at 05:11:51.499. isDeviceLocked is still true then, so the app's own
-// second check (ConfirmReceiver for Allow, BridgeService for Send screenshot)
-// drops it silently: nothing reaches the host, the question stays open and has
-// to be allowed again. Measured: Allow dropped in 7 runs of 7, Send screenshot
-// in 1 of 2 (a race). Safe (nothing is allowed while locked), but M2-8 does not
-// work as specified. The test accepts the drop only while this is true, and
-// then checks that the same button, on the unlocked phone, works; once fixed,
-// set it to false and the drop fails the test.
-const authActionsMayBeDropped = true
+// authActionsMayBeDropped is false since M2-8. On API 34 a notification button
+// that asks to unlock (setAuthenticationRequired) is delivered when the PIN is
+// accepted, before the keyguard has gone, so isDeviceLocked was still true and
+// the app's own second check (ConfirmReceiver for Allow, BridgeService for Send
+// screenshot) dropped the tap silently (measured with a 300 ms wait: Allow
+// dropped in 7 runs of 7). Now the app waits up to 2 s for the unlock from the
+// moment of delivery, so the tap that brought up the bouncer reaches the host
+// without a second press. The drop fails the test.
+const authActionsMayBeDropped = false
 
 // M2-5 and M2-8, with a PIN (T1-7): on the locked phone, Deny in the shade
 // answers at once, without unlocking; Allow brings up the bouncer and sends
-// nothing while the device is locked; once the PIN is typed it should reach
-// the host as allow (see authActionsMayBeDropped). M3b-5, its locked
+// nothing while the device is locked; once the PIN is typed it reaches
+// the host as allow, without a second press (authActionsMayBeDropped). M3b-5, its locked
 // part: Send screenshot asks to unlock too. M4-d: the conversation's notice of
 // the agent's question is on the silent channel (LOW) and the lock screen
 // shows its line, never the question's words.
@@ -746,18 +741,7 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 			t.Errorf("Allow after the bouncer sent %+v", r)
 		}
 	} else {
-		if !authActionsMayBeDropped {
-			t.Fatal("no confirm.reply 15 s after unlocking on the bouncer that Allow brought up")
-		}
-		t.Log("known defect (authActionsMayBeDropped): the Allow that brought up the bouncer was dropped")
-		// The question is still open, and Allow, now unlocked, answers.
-		if got := recordActions(confirmRecord(e.shell(t, "dumpsys notification --noredact"), q2.ID)); !slices.Contains(got, txtAllow) {
-			t.Fatalf("after the dropped Allow the question has %q", got)
-		}
-		e.tapInShade(t, "The agent wants to: "+q2.Title, txtAllow)
-		if r := l.confirmReply(t, 10*time.Second); r.ID != q2.ID || r.Decision != "allow" {
-			t.Errorf("Allow on the unlocked shade sent %+v", r)
-		}
+		t.Fatal("no confirm.reply 15 s after unlocking on the bouncer that Allow brought up")
 	}
 	e.closeShade(t)
 	l.settle(t, q2.ID)
@@ -778,12 +762,7 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 	}
 	e.unlockOnBouncer(t)
 	if _, ok := l.take(bridge.TypeCaptureReq, 10*time.Second); !ok {
-		if !authActionsMayBeDropped {
-			t.Fatal("no capture.request 10 s after unlocking on the bouncer that Send screenshot brought up")
-		}
-		t.Log("known defect (authActionsMayBeDropped): the Send screenshot that brought up the bouncer was dropped")
-		e.tapInShade(t, "ADBuddy", txtCapture)
-		l.waitFor(t, bridge.TypeCaptureReq, 10*time.Second)
+		t.Fatal("no capture.request 10 s after unlocking on the bouncer that Send screenshot brought up")
 	}
 	e.closeShade(t)
 
@@ -845,6 +824,77 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 	if strings.Contains(lockScreen, secret) || strings.Contains(lockScreen, "rm -rf photos") {
 		t.Error("the lock screen shows the agent's question")
 	}
+}
+
+// M2-8: the Allow tap that brought up the bouncer is delivered only to an
+// unlock of its own. (i) With the bouncer dismissed by Back and the phone
+// unlocked by another route, nothing is allowed, the question stays open and
+// a fresh Allow answers. (ii) With the bouncer left open longer than the
+// app's wait (2 s), the PIN still lets the tap through: the wait starts at the
+// delivery, after the PIN, not at the tap.
+func TestAnAllowedTapOnTheLockedShadeNeedsTheUnlockOfItsOwn(t *testing.T) {
+	l := openLink(t)
+	e := l.e
+	e.lockWithPIN(t)
+
+	// (i) Negative: Back closes the bouncer without unlocking.
+	q1 := question("j_back", "Restart the phone", "adb shell reboot")
+	l.ask(t, q1)
+	l.drain()
+	e.tapInShade(t, "The agent wants to: "+q1.Title, txtAllow)
+	e.waitNodes(t, "bouncer after Allow on the locked shade", 10*time.Second, bouncer)
+	e.shell(t, "input keyevent KEYCODE_BACK")
+	nodes := e.waitNodes(t, "the bouncer to be gone after Back", 10*time.Second, func(nodes []uiNode) bool { return !bouncer(nodes) })
+	if !e.locked(t) {
+		t.Fatalf("the device is unlocked after Back on the bouncer: %+v", nodes)
+	}
+	if m, ok := l.take(bridge.TypeConfirmReply, 3*time.Second); ok {
+		t.Fatalf("Allow answered after the bouncer was dismissed: %s", m.Payload)
+	}
+	// After Back the lock screen keeps the shade open and a swipe up does not reach the bouncer: put the screen to
+	// sleep and wake it on a clean lock screen, as a person who gave up would find it later.
+	e.lock(t)
+	e.unlock(t)
+	if m, ok := l.take(bridge.TypeConfirmReply, 5*time.Second); ok {
+		t.Fatalf("an unlock by another route let the old Allow tap through: %s", m.Payload)
+	}
+	if got := recordActions(confirmRecord(e.shell(t, "dumpsys notification --noredact"), q1.ID)); !slices.Contains(got, txtAllow) {
+		t.Fatalf("the question has %q after the unlock: it should still be open", got)
+	}
+	// Positive control: unlocked, Allow answers.
+	e.tapInShade(t, "The agent wants to: "+q1.Title, txtAllow)
+	if r := l.confirmReply(t, 10*time.Second); r.ID != q1.ID || r.Decision != "allow" {
+		t.Errorf("Allow on the unlocked shade sent %+v", r)
+	}
+	e.closeShade(t)
+	l.settle(t, q1.ID)
+
+	// (ii) Positive: the bouncer open for longer than the app's wait.
+	e.lock(t)
+	q2 := question("j_slow", "Restart the phone", "adb shell reboot")
+	l.ask(t, q2)
+	l.drain()
+	e.tapInShade(t, "The agent wants to: "+q2.Title, txtAllow)
+	e.waitNodes(t, "bouncer after Allow on the locked shade", 10*time.Second, bouncer)
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		if !bouncer(e.screen(t)) {
+			t.Fatal("the bouncer went away by itself while waiting")
+		}
+		if m, ok := l.take(bridge.TypeConfirmReply, 500*time.Millisecond); ok {
+			t.Fatalf("Allow answered with the bouncer open: %s", m.Payload)
+		}
+	}
+	e.unlockOnBouncer(t)
+	m, ok := l.take(bridge.TypeConfirmReply, 15*time.Second)
+	if !ok {
+		t.Fatal("no confirm.reply 15 s after the PIN, typed on a bouncer open for longer than the app's wait")
+	}
+	if r := payload[bridge.ConfirmReply](t, m); r.ID != q2.ID || r.Decision != "allow" {
+		t.Errorf("Allow after the slow PIN sent %+v", r)
+	}
+	e.closeShade(t)
+	l.settle(t, q2.ID)
 }
 
 // lowImportanceRe anchors the channel's importance field (IMPORTANCE_LOW = 2)
