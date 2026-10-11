@@ -96,7 +96,7 @@ y junto a `noNotice`:
 **Protocolo** (común; los tests de fixtures lo exigen en los dos lados):
 - `host/internal/bridge/ui_ops.go`: `UIOpNotice = "notice"` y en `UIOps`: `UIOpNotice: {func() any { return new(Empty) }, func() any { return new(Empty) }},`.
 - `ProtocolUiOps.kt`: `const val NOTICE = "notice"` y `NOTICE to (Empty.serializer() to Empty.serializer())` en `ALL`.
-- `protocol/fixtures/ui.json`: `"notice"` en `ops` y una respuesta `"ui.response@notice": "notice"` con su fichero de ejemplo (`result: {}`), a la manera de las de `foreground` (los tests `TestUIOps` y `UiOpsFixturesTest.kt:79` comparan los conjuntos) y `protocol/fixtures/host/ui.request@notice.json` con `args: {}`. Proceso: visto bueno de adbuddy-e5 para cambiar el protocolo (M5 §12) y Go + Kotlin + fixtures en un solo commit (protocolo §10).
+- `protocol/fixtures/ui.json`: `"notice"` en `ops` y una respuesta `"ui.response@notice": "notice"` con su fichero de ejemplo (`result: {}`), a la manera de las de `foreground` (los tests `TestUIOps` y `UiOpsFixturesTest.kt:79` comparan los conjuntos) y `protocol/fixtures/host/ui.request@notice.json` (`args: {}`) y `protocol/fixtures/app/ui.response@notice.json` (`result: {}`); el nombre `notice` coincide con el tipo de mensaje de primer nivel `notice` pero son espacios distintos (op de `ui.request` frente a `type`): se queda, ruling en el ledger. Proceso: visto bueno de adbuddy-e5 para cambiar el protocolo (M5 §12) y Go + Kotlin + fixtures en un solo commit (protocolo §10).
 
 **App** (`UiExecutor.run`, en el `when`):
 
@@ -115,44 +115,48 @@ La rama `UiOp.NOTICE` va antes del `else ->` del `when` (`UiExecutor.kt:140`).
 
 **Host** (`ui.go`):
 
+Primero se extrae de `uiautomator()` (`ui.go:449-455`) la comprobación que ya hace, `func (d *Daemon) serviceOn(ctx context.Context) (bool, error)` (`ADB.Shell("dumpsys accessibility")` + `uidump.ServiceOn`; error si el shell falla o sale con código distinto de 0), y `uiautomator()` pasa a usarla (mismo comportamiento: error → `UI_UNAVAILABLE`).
+
 ```go
 // showNotice asks the app to put up its on-screen notice before the host reads
 // the screen by adb (screenshot, raw screencap/screenrecord/uiautomator,
-// dumpsys that dumps the view). It is an allowlist: only these answers let the
-// read go on, because there is nobody to tell or the notice is up. Anything
-// else (failed, protected because of a pause, invalid, expired, a channel
-// error) refuses, as tap and type do.
+// dumpsys that dumps the view). Allowlist: only these let the read go on.
+// Anything else (failed, protected because of a pause, invalid, expired, a
+// channel error) refuses, as tap and type do.
 func (d *Daemon) showNotice(ctx context.Context) string {
 	_, err := d.callApp(ctx, bridge.UIOpNotice, nil)
 	var ue *UIError
 	switch {
 	case err == nil:
 		return ""
-	case errors.Is(err, ErrNoApp), errors.As(err, &ue) && (ue.Code == bridge.CodeUnavailable || ue.Code == bridge.CodeUnsupported):
-		// No app, accessibility off, or an older app: nobody to tell. But if the
-		// accessibility service is still bound the app is stuck, not absent:
-		// use the check the dump fallback already makes (find it near
-		// d.uiautomator/inFront; if there is none, one over `dumpsys accessibility`)
-		// and refuse then.
-		if d.serviceBound(ctx) {
+	case errors.As(err, &ue) && ue.Code == bridge.CodeUnsupported:
+		return "" // an older app that answers: it cannot show the notice, but it is not stuck
+	case errors.Is(err, ErrNoApp), errors.As(err, &ue) && ue.Code == bridge.CodeUnavailable:
+		// No app, or accessibility off: nobody to tell... unless the
+		// accessibility service is still bound (the app is stuck, not absent),
+		// or it cannot be checked (fail closed, as uiautomator() does).
+		on, serr := d.serviceOn(ctx)
+		switch {
+		case serr != nil:
+			return "could not check ADBuddy's accessibility service, so ADBuddy cannot tell whether it can show the on-screen notice; ask the user to do this part"
+		case on:
 			return "the ADBuddy app does not answer but its accessibility service is on, so it cannot show the on-screen notice; ask the user to open the ADBuddy app"
 		}
 		return ""
-	}
-	if errors.Is(err, ErrUITimeout) { // 10 s: the app hung; the overlay answers in 2 s at most
+	case errors.Is(err, ErrUITimeout): // 10 s: the app hung; the overlay answers in 2 s at most
 		return "the ADBuddy app did not answer in time, so ADBuddy cannot show the on-screen notice; ask the user to open the ADBuddy app"
 	}
 	return "ADBuddy can't show the on-screen notice, so it won't read the screen; ask the user to do this part"
 }
 ```
 
-(`serviceBound` es la comprobación de I1: si no existe una reutilizable, se escribe sobre `dumpsys accessibility` con la misma tolerancia a fallos: si no se puede leer, se toma como no vinculado. El implementador la nombra y la prueba.)
+Nota de efecto: un `unsupported` (app antigua con accesibilidad activa) deja leer; el coste de `serviceOn` es un `adb shell` extra solo cuando no hay app o está apagada, y los tests de lecturas sin app preparan `e.adb.shell["dumpsys accessibility"]` (el `fakeADB.Shell` devuelve exit 1 por defecto, `daemon_test.go:38`) y cuentan una entrada más en `e.adb.ran()`: revisar `grep -ln screencap host/internal/daemon/*_test.go` (daemon, dumpsys_guard, guard_api34, guard_home, guard_notice, shade, ui).
 
 Llamadas (siempre ANTES de la última comprobación de pausa, para que una pausa que llegue mientras tanto bloquee):
-- `ui()`, justo antes de `if d.o.Paused()` de `ui.go:144` («paused while the guard looked»): `if req.UIOp == OpScreenshot { if why := d.showNotice(ctx); why != "" { return d.blockUI(e, why) } }`. `blockUI` pone el prefijo `Blocked by ADBuddy:` (M5 §8). Se quita la llamada de `screenshot()`.
+- `ui()`, justo antes de `if d.o.Paused()` de `ui.go:144` («paused while the guard looked»): `if req.UIOp == OpScreenshot { if why := d.showNotice(ctx); why != "" { return d.blockUI(e, why) } }`. `blockUI` pone el prefijo `Blocked by ADBuddy:` (M5 §8). Si `ctx` se canceló durante el aviso, se repite la rama de abandono de la guarda (`ui.go:134-139`: `abandoned`, no `blocked`), mejor en un helper común.
 - `daemon.go`, justo después de `d.guard` (`:592`) y antes de la comprobación de pausa de `:595`: `if readsScreen(res) { if why := d.showNotice(ctx); why != "" { return d.refuse(ctx, e, s, why) } }`, con `readsScreen(res classify.Result) bool` que recorre `res.Findings` con `screenAction` (`reads`), sin cambiar la firma de `guard`.
 
-Tests (host, adb y app falsos; `fakeApp` registra `calls`): `TestScreenshotAsksTheAppForTheNoticeFirst` (`UIOpNotice` en `a.calls` antes de `exec-out screencap -p`); `TestRawReadsAskForTheNotice` (tabla: `screencap -p`, `screenrecord`, `uiautomator dump`, `dumpsys activity top`); `TestNoNoticePossibleStillReads` (`ErrNoApp`, `unavailable`, `unsupported`, con el servicio no vinculado: la captura sale); `TestStuckAppWithServiceBoundBlocks` (`ErrNoApp` o tiempo agotado con el servicio vinculado → `UI_BLOCKED`, ningún `screencap`); `TestAppCannotDrawNoticeBlocksTheScreenshot` (`CodeFailed` → `UI_BLOCKED` con prefijo `Blocked by ADBuddy:`, ningún `screencap`); `TestAppPausedAnswerBlocks` (`CodeProtected` → bloquea); `TestPauseDuringTheNoticeBlocksTheScreenshot` (el `fakeApp` activa la pausa al recibir `notice`: ningún `screencap`); `TestNoticeComesAfterTheGuard` (app protegida delante: `UI_BLOCKED` por la guarda y ninguna op `notice`). App: `noticeOpShowsTheOverlay` (`did` contiene `acting null`), `noticeOpFailsClosed` (`actingWorks=false` → `FAILED`) y `noticeOpRefusedWhilePaused` (`paused=true` → `PROTECTED`, `did` sin `acting`).
+Tests (host, adb y app falsos; `fakeApp` registra `calls`): `TestScreenshotAsksTheAppForTheNoticeFirst` (`UIOpNotice` en `a.calls` antes de `exec-out screencap -p`); `TestRawReadsAskForTheNotice` (tabla de argv: `exec-out screencap -p`, `shell screencap -p /sdcard/s.png`, `shell uiautomator dump /sdcard/u.xml`, `shell dumpsys activity top`, y `shell screenrecord /sdcard/r.mp4`, que es 🔴: el test contesta la confirmación y comprueba que el aviso sale después del Allow); `TestNoNoticePossibleStillReads` (`ErrNoApp`, `unavailable`, `unsupported`, con el servicio no vinculado: la captura sale; `unsupported` sale siempre); `TestStuckAppWithServiceBoundBlocks` (también `dumpsys accessibility` que falla → bloquea; `ErrNoApp` o tiempo agotado con el servicio vinculado → `UI_BLOCKED`, ningún `screencap`); `TestAppCannotDrawNoticeBlocksTheScreenshot` (`CodeFailed` → `UI_BLOCKED` con prefijo `Blocked by ADBuddy:`, ningún `screencap`); `TestAppPausedAnswerBlocks` (`CodeProtected` → bloquea); `TestPauseDuringTheNoticeBlocksTheScreenshot` (el `fakeApp` gana un campo `onCall func(op string)`, llamado fuera de `a.mu`, que activa la pausa al recibir `notice`: ningún `screencap`); `TestNoticeComesAfterTheGuard` (app protegida delante: `UI_BLOCKED` por la guarda y ninguna op `notice`). App: `noticeOpShowsTheOverlay` (`did` contiene `acting null`), `noticeOpFailsClosed` (`actingWorks=false` → `FAILED`) y `noticeOpRefusedWhilePaused` (`paused=true` → `PROTECTED`, `did` sin `acting`).
 
 **Prueba no vacua.** Quitar la llamada de `ui()` → `TestScreenshotAsksTheAppForTheNoticeFirst` en rojo; quitar la de `daemon.go` → `TestRawReadsAskForTheNotice` en rojo; `showNotice` que siempre devuelve `""` → `TestAppCannotDrawNoticeBlocksTheScreenshot` en rojo; mover la llamada después de la comprobación de pausa → `TestPauseDuringTheNoticeBlocksTheScreenshot` en rojo; `notice` de la app que devuelve `ok` sin llamar a `acting` → `noticeOpShowsTheOverlay` en rojo; quitar `paused() ->` de `notice` → `noticeOpRefusedWhilePaused` en rojo. Ejecutar con `cd host && go test -count=1 -timeout 3m ./internal/daemon/ ./internal/bridge/` y el gradle de T1 (más `*UiOpsFixturesTest*`).
 
