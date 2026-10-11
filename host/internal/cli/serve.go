@@ -276,7 +276,7 @@ func newServeCmd(app *App) *cobra.Command {
 			fmt.Fprintln(app.Stderr, confirmersNote(confirmMode, interactive).In(app.speaks()))
 			fmt.Fprintln(app.Stderr, app.T("serve.adbuddy_is_serving_session_journal", activeSerial, session, workspace.JournalDir(ws)))
 			if noAgent {
-				if model != "" || effort != "" {
+				if explicitSetting(model) || explicitSetting(effort) {
 					fmt.Fprintln(app.Stderr, app.T("serve.model_no_agent"))
 				}
 				fmt.Fprintln(app.Stderr, app.T("serve.in_another_terminal", agentName))
@@ -432,9 +432,8 @@ func confirmersNote(mode string, interactive bool) i18n.Msg {
 // startNote is what serve says about the model and effort the agent starts
 // with; the zero Msg says nothing.
 func startNote(agentName, model, effort string) i18n.Msg {
-	explicit := func(s string) bool { return s != "" && s != agent.Inherit }
 	if agentName != "claude" {
-		if explicit(model) || explicit(effort) {
+		if explicitSetting(model) || explicitSetting(effort) {
 			return i18n.M("serve.model_not_applied", agentName)
 		}
 		return i18n.Msg{}
@@ -448,3 +447,7 @@ func startNote(agentName, model, effort string) i18n.Msg {
 	}
 	return i18n.M("serve.model_applied", agent.Describe(m, e))
 }
+
+// explicitSetting reports whether the person chose a model or effort, as
+// opposed to leaving it unset or asking for Claude Code's own (inherit).
+func explicitSetting(s string) bool { return s != "" && s != agent.Inherit }

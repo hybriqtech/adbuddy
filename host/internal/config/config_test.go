@@ -254,3 +254,14 @@ func TestAgentModelAndEffortInherit(t *testing.T) {
 		t.Fatalf("%+v %v", back, err)
 	}
 }
+
+// inherit is lower case only, and the error says it is accepted.
+func TestAgentEffortInheritIsCaseSensitive(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(p, []byte("agent_effort = \"INHERIT\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "agent_effort") || !strings.Contains(err.Error(), "inherit") {
+		t.Fatalf("%v", err)
+	}
+}

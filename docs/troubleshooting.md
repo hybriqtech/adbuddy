@@ -334,7 +334,7 @@ Install it, open a new terminal so that your `PATH` is refreshed, and start the 
 
 ### The agent does not start after an update
 
-`adbuddy serve` starts Claude Code with `--model claude-haiku-5-5 --effort low` unless you chose otherwise. If Claude Code does not accept that model (for example your setup sets `ANTHROPIC_MODEL`, or you use Bedrock or Vertex, which have their own model ids), start serve with the settings you have in Claude Code: `adbuddy serve --model inherit --effort inherit`. To make it permanent, set `agent_model = "inherit"` and `agent_effort = "inherit"` in `config.toml`.
+`adbuddy serve` starts Claude Code with `--model claude-haiku-5-5 --effort low` unless you chose otherwise. Claude Code takes that, and the flag wins over `ANTHROPIC_MODEL` and over the model in Claude Code's own settings. If you use Bedrock or Vertex, which have their own model ids, that id may not exist for you. Start serve with the settings you have in Claude Code instead: `adbuddy serve --model inherit --effort inherit`. To make it permanent, set `agent_model = "inherit"` and `agent_effort = "inherit"` in `config.toml`.
 
 ### Another `adb` in the `PATH`
 

@@ -529,6 +529,10 @@ func TestServeModelWithNoAgentSaysItIsNotApplied(t *testing.T) {
 	if out := serveNoAgent(t); strings.Contains(out, "do not apply with --no-agent") {
 		t.Fatalf("notice without flags:\n%s", out)
 	}
+	// Only inherit: it passes validation and there is nothing to say.
+	if out := serveNoAgent(t, "--model", "inherit", "--effort", "inherit"); strings.Contains(out, "do not apply with --no-agent") {
+		t.Fatalf("notice for inherit:\n%s", out)
+	}
 }
 
 // serveNoAgent runs serve --no-agent with extra flags until it is up, stops it
