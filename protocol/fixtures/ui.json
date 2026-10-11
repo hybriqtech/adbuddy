@@ -4,7 +4,8 @@
     "click",
     "setText",
     "foreground",
-    "notifications"
+    "notifications",
+    "notice"
   ],
   "responses": {
     "ui.response": "click",
@@ -14,7 +15,8 @@
     "ui.response@settext": "setText",
     "ui.response@foreground": "foreground",
     "ui.response@notifications": "notifications",
-    "ui.response@notificationsmany": "notifications"
+    "ui.response@notificationsmany": "notifications",
+    "ui.response@notice": "notice"
   },
   "errors": [
     "ui.response@error",

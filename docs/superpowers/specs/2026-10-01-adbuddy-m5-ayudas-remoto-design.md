@@ -155,12 +155,20 @@ La app lo sabe por los `TYPE_WINDOW_STATE_CHANGED` de la ventana de aplicación 
 
 ### 3.6 `adbuddy screenshot [--scale 0.5] [--format png|jpeg] [-o fichero]`
 
-La hace el host, nunca la app: `exec-out screencap -p` por el adb del host. Antes pasa por la guarda (§4.3).
+La hace el host, nunca la app: `exec-out screencap -p` por el adb del host. Antes pasa por la guarda (§4.3) y pide el aviso de la superposición a la app (§6, «Cuándo»).
 
 - **Escala:** por defecto 0,5; `--scale 1` deja el tamaño original. El reescalado es un filtro de caja con la biblioteca estándar de Go (`image`, `image/png`, `image/jpeg`), sin dependencias nuevas.
 - **Formato:** PNG por defecto, o JPEG con calidad 80.
 - **Fichero:** `-o` relativo a la carpeta del agente. Por defecto, `screenshots/<AAAAMMDD-hhmmss>.png` dentro del entorno. Lo escribe la CLI, en el proceso del agente: el daemon le manda los bytes por el flujo de datos del IPC, en tramas de 1 MiB.
 - Con el modo remoto activo, el valor por defecto pasa a 0,5 en JPEG (M5b, §3.3 de la v1; lo decide el daemon, §13).
+
+### 3.7 `notice` (sin comando de CLI)
+
+Pide a la app que muestre la superposición (§6) sin hacer nada más. La usa el host antes de `screenshot` y de las lecturas crudas por adb (§6, «Cuándo»). `args` y `result` son `{}` (`bridge.Empty`).
+
+- Respuestas: `ok`; `failed` si la app no puede dibujar la superposición; `protected` con la sesión en pausa; `unavailable` con el servicio apagado; `unsupported` en una app anterior.
+- El host solo deja leer sin aviso con `ErrNoApp`, `unavailable` (con el servicio no vinculado) y `unsupported`; cualquier otra respuesta bloquea.
+- No lleva guarda de app protegida: no lee nada. El nombre es el mismo que el del tipo de mensaje `notice`, pero son espacios de nombres distintos (op de `ui.request`).
 
 ## 4. Seguridad
 
@@ -240,7 +248,11 @@ Las órdenes del respaldo las ejecuta el daemon con el adb del host, ya admitida
 
 `AgentAccessibilityService` dibuja una ventana `TYPE_ACCESSIBILITY_OVERLAY`, que no necesita `SYSTEM_ALERT_WINDOW`:
 
-- **Cuándo:** al empezar cualquier `ui.request` de acción (`click` y `setText`), y también con `dump`. Se oculta 4 s después de la última operación. Con la sesión en pausa no se muestra nunca.
+- **Cuándo:** al empezar cualquier `ui.request` de acción (`click` y `setText`), y también con `dump`, que falla como `click` y `setText` si la app no puede mostrarla. Se oculta 4 s después de la última operación. Con la sesión en pausa no se muestra nunca (la app lo comprueba también en `dump` y `notice`, por si la pausa llega tras las puertas del host).
+  - **Lecturas por adb:** antes de `screenshot` y de los `screencap`, `screenrecord`, `uiautomator` y `dumpsys` que vuelque la vista (crudos), el host pide el aviso a la app con la op `notice` (§3.7). Va después de la guarda y de la confirmación (si el comando es 🔴), y antes de la última comprobación de pausa: una pausa que llegue durante el aviso bloquea la lectura.
+  - **Sin aviso posible:** sin app conectada o con el servicio de accesibilidad apagado no hay aviso, y la lectura sigue (el agente conserva su experiencia normal). Una app anterior que contesta `unsupported` también deja leer, sin consultar el servicio.
+  - **Se bloquea** (`UI_BLOCKED`, `Blocked by ADBuddy: …`, sin ejecutar nada por adb) cuando la accesibilidad está activa y la app no está conectada o no contesta a tiempo, cuando no se puede comprobar si lo está (`dumpsys accessibility` falla), cuando la app no puede dibujar el aviso (`failed`) y cuando está en pausa (`protected`).
+  - `screenrecord` solo avisa al empezar: el overlay se oculta a los 4 s aunque la grabación siga. Es 🔴 y la persona la confirma.
 - **Qué:** un marco fino del color de acento del tema y una píldora arriba: "Agent using the screen · Pause" / "Agente usando la pantalla · Pausar". Tocar la píldora envía `pause` (el tipo de M2) con `Bridge.send`.
 - **Marca del toque:** un círculo de 48 dp que se desvanece en 600 ms, centrado en el punto o en el centro de los límites del nodo.
 - **Toques:** toda la ventana es `FLAG_NOT_TOUCHABLE` salvo la píldora, que es una ventana aparte, pequeña y tocable. La superposición nunca tapa la interfaz: no intercepta el toque de `dispatchGesture` ni los del usuario.
@@ -372,6 +384,7 @@ Todos aditivos (§11 del protocolo: sigue siendo `v1`):
    - los límites: `MaxUIResult` 512 KiB, `MaxNotifications` 50, `MaxNotificationText` 1024, `MaxSetText` 4096 code points, `MaxProtectedApps` 1000 y `MaxPackage` 255;
    - los casos de `ValidPackage`.
    - `notifications` gana `truncated`.
+5. **La op `notice` de `ui.request`** (screen-overlay-frame): `args` y `result` vacíos (`Empty`). Go: `UIOpNotice` en `UIOps`; Kotlin: `UiOp.NOTICE` en `UiOp.ALL`. Fixtures `host/ui.request@notice.json` y `app/ui.response@notice.json`, y entrada en `protocol/fixtures/ui.json`. Aditivo; un commit con Go, Kotlin y fixtures.
 
 Van en un solo commit (Go, Kotlin y fixtures), como pide §10 del protocolo, y se avisa a tern-51 y a skimmer-32 al integrar.
 

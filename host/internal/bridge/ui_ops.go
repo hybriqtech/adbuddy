@@ -18,6 +18,7 @@ const (
 	UIOpSetText       = "setText"
 	UIOpForeground    = "foreground"
 	UIOpNotifications = "notifications"
+	UIOpNotice        = "notice"
 )
 
 // UIOp makes new values of an operation's args and result.
@@ -33,6 +34,7 @@ var UIOps = map[string]UIOp{
 	UIOpSetText:       {func() any { return new(UISetTextArgs) }, func() any { return new(UITextSet) }},
 	UIOpForeground:    {func() any { return new(Empty) }, func() any { return new(UIForeground) }},
 	UIOpNotifications: {func() any { return new(Empty) }, func() any { return new(UINotifications) }},
+	UIOpNotice:        {func() any { return new(Empty) }, func() any { return new(Empty) }},
 }
 
 // Limits of the helpers (M5 spec §3, §4.3 and protocol spec §9). Text is
