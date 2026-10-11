@@ -29,6 +29,9 @@ import tech.hybriq.adbuddy.listener.NotificationReport
 /** What the helpers need of the accessibility service (AgentAccessibilityService); a fake in tests. */
 interface Screen {
     fun windows(): List<UiWindow>
+
+    /** type and root package of each window, in windows() order; the service reads them without the tree. */
+    fun windowHeads(): List<UiWindowHead> = windows().map { UiWindowHead(it.type, it.pkg) }
     fun screen(): Box
     fun rotation(): Int
     fun locked(): Boolean
@@ -178,7 +181,7 @@ class UiExecutor(
      * window whose content the service cannot see): with a split screen the
      * other half counts too.
      */
-    private fun guardedOnScreen(windows: List<UiWindow>) =
+    private fun guardedOnScreen(windows: List<UiWindowHead>) =
         windows.any { (it.type == "app" || it.type == "dialog") && (it.pkg.isEmpty() || guarded(it.pkg)) }
 
     private fun noNotice(r: UiRequest) = fail(r, ErrorCode.FAILED, "ADBuddy can't show the on-screen notice, so it won't act. Ask the user to do this part.")
@@ -274,7 +277,7 @@ class UiExecutor(
         // Locked: unknown (empty), so the host falls back to dumpsys instead of trusting a stale app.
         if (s.locked()) return ok(r, UiForeground("", "", false), UiForeground.serializer())
         val (pkg, activity) = s.foreground()
-        val protected = notificationOnScreen() || (pkg.isNotEmpty() && (guarded(pkg) || guardedOnScreen(s.windows())))
+        val protected = notificationOnScreen() || (pkg.isNotEmpty() && (guarded(pkg) || guardedOnScreen(s.windowHeads())))
         return ok(r, UiForeground(pkg, activity, protected), UiForeground.serializer())
     }
 

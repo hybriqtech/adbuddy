@@ -40,3 +40,18 @@ Rama `perf/latencia`, worktree `<worktree>`.
 - Merge de origin/main (777fe578) en perf/latencia: conflictos solo en `serve_test.go`, catálogos en/es y ayudas `serve`/`tap` (se conservan `--model`/`--effort` y `--screen` junto a los textos nuevos de main); `go vet` y `go test ./...` verdes.
 - Ruling: validar en API 34 con AVD propio (`adbuddy-latencia34`, puertos 5602/5072) — la imagen API 37 hace caer surfaceflinger en bucle con swiftshader y swangle en este PC — cuesta: la sincronía de animaciones de API 37 no se mide; el APK es `adbuddy-4395b50-debug` (los cambios de android/ de main son textos de consentimiento/estado y no tocan el dump).
 - Ruling: añadir al test S2 una subprueba con animaciones ×8 — a velocidad normal la prueba pasaba con cualquier `settleQuiet` (vacua) — cuesta: +25 s de test en emulador. Mutaciones: `settleQuiet`=100 y `case still` la hacen fallar; 600 pasa.
+
+## P5: foreground ligero (plan 2026-10-11-latencia-p5-foreground-ligero.md)
+
+- Tarea 1 (ac08f40f): mediana de `foreground` en la app con ~2000 vistas 33 ms (>= 20 ms: se sigue).
+- Ruling: `foreground` decide con `Screen.windowHeads()` (tipo y paquete de la raíz, sin copiar el árbol) y `typeOf` pasa a una función pura única usada por `windows()` y `windowHeads()` — mismo veredicto, menos idas y vueltas binder — cuesta: si `windowHeads()` divergiera de `windows()` dejaría pasar una ventana protegida (lo cubre el test de equivalencia en emulador y el valor por defecto de la interfaz).
+- Ruling: único cambio de comportamiento: si `windows()` lanzaba al recorrer el árbol, `foreground` daba `FAILED` y ahora da un veredicto; igual de cerrado (raíz ilegible = paquete vacío = protegida).
+- Mutación a mano (T2e): `it.pkg.isEmpty()` -> `false` en `guardedOnScreen` hace fallar los tests; salida:
+  ```
+  > Task :app:testDebugUnitTest FAILED
+  ForegroundHeadsTest > headsDecideWithoutReadingTheTree FAILED
+      java.lang.AssertionError at ForegroundHeadsTest.kt:46
+  UiExecutorTest > aWindowItCannotSee FAILED
+  39 tests completed, 2 failed
+  ```
+  Restaurado después (diff sin `false ||`). `:app:testDebugUnitTest` + `lintDebug` verdes: 1017 tests, 0 fallos.
