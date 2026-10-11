@@ -32,6 +32,13 @@ object ConfirmUi {
     }
 
     /**
+     * Whole seconds left until the question expires at [now] (the host's clock), rounded up as
+     * PermissionUi.secondsLeft (so "0:00" never shows with Allow still on), never below zero; null when it
+     * has no readable expiry.
+     */
+    fun secondsLeft(r: ConfirmRequest, now: Long): Long? = expiry(r)?.let { ((it - now + 999) / 1000).coerceAtLeast(0) }
+
+    /**
      * Whether the question can be answered at now. An answer on its way wins
      * (it left before the expiry); an unreadable expiry cannot be trusted to
      * be in the future, so it counts as expired; then the connection.
@@ -109,6 +116,10 @@ object ConfirmUi {
         val open = shown.filter { status(it, state, now) == Status.OPEN }
         return open.firstOrNull { it.id == focus } ?: open.firstOrNull() ?: shown.firstOrNull()
     }
+
+    /** The open questions the person closed: the chat says they are still waiting (and "Show" opens the same dialog again). */
+    fun closedWaiting(state: BridgeState, closed: Set<String>, now: Long): List<ConfirmRequest> =
+        state.pending.filter { it.id in closed && status(it, state, now) == Status.OPEN }
 
     /**
      * What a question shows: whether it carries the ⚠ warning, the first [maxDetail] lines of the host's detail

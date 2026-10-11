@@ -44,7 +44,7 @@
 
     <string name="action_allow">Permitir</string>
     <string name="action_deny">Rechazar</string>
-    <string name="action_allow_session">Permitir durante la sesión</string>
+    <string name="action_allow_session">Permitir este mismo comando durante la sesión</string>
     <string name="action_pause">Pausar</string>
     <string name="action_resume">Reanudar</string>
     <string name="action_cut">Cortar acceso</string>
@@ -55,6 +55,7 @@
     <string name="confirm_title">El agente quiere: %1$s</string>
     <string name="confirm_special">Puede cortar la conexión con el PC o afectar a ADBuddy.</string>
     <string name="confirm_expires">Caduca: %1$s</string>
+    <string name="confirm_expires_in">Caduca en %1$s</string>
     <string name="confirm_sending">Respondida: esperando al PC</string>
     <string name="confirm_offline">Sin conexión con el PC</string>
     <string name="confirm_expired">Caducada: ya no se puede responder.</string>
@@ -62,6 +63,7 @@
     <string name="confirm_open_special">Abre ADBuddy para leer el aviso y permitirlo.</string>
     <string name="confirm_too_long">El comando es demasiado largo para enseñarlo entero: solo se puede rechazar.</string>
     <string name="confirm_scroll">Desplázate hasta el final para permitirlo</string>
+    <string name="confirm_waiting_show">Ver</string>
     <string name="action_open">Abrir</string>
     <plurals name="confirm_more">
         <item quantity="one">y %1$d más</item>
@@ -71,12 +73,16 @@
         <item quantity="one">%1$d carácter del comando no se muestra</item>
         <item quantity="other">%1$d caracteres del comando no se muestran</item>
     </plurals>
+    <plurals name="confirm_waiting">
+        <item quantity="one">%1$d acción delicada espera tu respuesta</item>
+        <item quantity="other">%1$d acciones delicadas esperan tu respuesta</item>
+    </plurals>
 
     <string name="consent_title">Configurar ADBuddy con %1$s</string>
     <string name="consent_intro">El PC \"%1$s\" pide terminar de configurar ADBuddy. Si aceptas, va a:</string>
     <string name="consent_grant">Dar a ADBuddy el permiso para cambiar ajustes seguros, que usa para cortar y reactivar desde el móvil el acceso del PC por adb.</string>
     <string name="consent_battery">Quitar a ADBuddy de la optimización de batería, para que el canal con el PC siga abierto.</string>
-    <string name="consent_a11y">Activar el servicio de accesibilidad de ADBuddy, sin quitar ninguno de los que ya uses.</string>
+    <string name="consent_a11y">Activar el servicio de accesibilidad de ADBuddy: permite al agente leer la pantalla, tocarla y escribir en ella, con un marco y un botón de Pausa mientras actúa, y nunca en ADBuddy ni en las apps protegidas. Los demás servicios que uses se quedan activados.</string>
     <string name="consent_note">ADBuddy no envía nada fuera: el PC y el móvil hablan por la conexión adb que emparejaste. Lo que lee el agente de código va adonde ese agente lo envíe.</string>
     <string name="consent_accept">Aceptar</string>
     <string name="consent_decline">Ahora no</string>
@@ -202,7 +208,7 @@
     <string name="access_title">Acceso a las notificaciones</string>
     <string name="access_intro">Permite que el agente lea lo que dicen tus notificaciones, por ejemplo para ver un mensaje que acabas de recibir. De las apps protegidas y de ADBuddy solo ve que hay una notificación, nunca lo que dice. No puede descartar ni pulsar ninguna notificación. Es opcional.</string>
     <string name="access_state_granted">Permitido</string>
-    <string name="access_state_confirm">Permitido en el sistema, sin confirmar aquí</string>
+    <string name="access_state_confirm">Android lo permite; falta tu confirmación</string>
     <string name="access_state_denied">No permitido</string>
     <string name="access_state_unknown">Desconocido</string>
     <string name="access_state_checking">Comprobando…</string>

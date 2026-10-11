@@ -198,6 +198,25 @@ class ConfirmUiTest {
         assertEquals("j_2", ConfirmUi.question(open, focus = "j_1", now = now, closed = setOf("j_1"))?.id)
     }
 
+    @Test fun onlyClosedAndOpenQuestionsAreWaiting() {
+        val s = state(q("j_1"), q("j_2"), q("j_3"), q("j_4", expiresAt = "2026-09-30T09:59:00Z"), q("j_5"), answering = setOf("j_3"))
+        val closed = setOf("j_1", "j_3", "j_4", "j_5")
+        // j_2 is open but not closed, j_3 is on its way, j_4 expired: j_1 and j_5, in the order of pending.
+        assertEquals(listOf("j_1", "j_5"), ConfirmUi.closedWaiting(s, closed, now).map { it.id })
+        assertEquals(emptyList<String>(), ConfirmUi.closedWaiting(s, emptySet(), now).map { it.id })
+    }
+
+    @Test fun aClosedQuestionWithoutConnectionIsNotWaiting() {
+        val s = state(q("j_1"), connection = BridgeState.Connection.WAITING)
+        assertEquals(emptyList<String>(), ConfirmUi.closedWaiting(s, setOf("j_1"), now).map { it.id })
+    }
+
+    @Test fun aClosedQuestionNoLongerWaitsOnceItExpires() {
+        val s = state(q("j_1"))
+        assertEquals(1, ConfirmUi.closedWaiting(s, setOf("j_1"), now).size)
+        assertEquals(0, ConfirmUi.closedWaiting(s, setOf("j_1"), now + 60_000).size)
+    }
+
     @Test fun noQuestionNoDialog() {
         assertNull(ConfirmUi.question(state(), focus = "j_1", now = now))
     }
@@ -435,5 +454,22 @@ class ConfirmUiTest {
         val p = ConfirmUi.repaint(mapOf("j_1" to ConfirmUi.Status.OPEN, "j_9" to ConfirmUi.Status.OPEN), state(q("j_1")), now)
         assertEquals(setOf("j_9"), p.cancel)
         assertEquals(mapOf("j_1" to ConfirmUi.Status.OPEN), p.shown)
+    }
+
+    // --- the countdown ---
+
+    @Test fun secondsLeftRoundsUpAndNeverGoesBelowZero() {
+        val r = q("j_1", expiresAt = "2026-09-30T10:00:42Z")
+        assertEquals(42L, ConfirmUi.secondsLeft(r, now))
+        assertEquals("41.2 s left shows 42", 42L, ConfirmUi.secondsLeft(r, now + 800))
+        val soon = q("j_1", expiresAt = "2026-09-30T10:00:00.400Z")
+        assertEquals("0.4 s left shows 1", 1L, ConfirmUi.secondsLeft(soon, now))
+        assertEquals(0L, ConfirmUi.secondsLeft(r, now + 42_000))
+        assertEquals("already expired", 0L, ConfirmUi.secondsLeft(r, now + 90_000))
+    }
+
+    @Test fun secondsLeftIsNullWhenTheExpiryCannotBeRead() {
+        assertNull(ConfirmUi.secondsLeft(q("j_1", expiresAt = "soon"), now))
+        assertNull(ConfirmUi.secondsLeft(q("j_1", expiresAt = ""), now))
     }
 }

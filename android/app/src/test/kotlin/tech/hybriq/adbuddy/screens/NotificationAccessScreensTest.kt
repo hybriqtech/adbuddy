@@ -78,6 +78,9 @@ class NotificationAccessScreensTest(private val mode: ScreenMode) {
 
     @Test fun allowedInTheSystemNotConfirmedHere() {
         show(Effective.NEEDS_CONFIRMATION, confirmed = false)
+        // The wording is the contract: plain words, no "here" without saying where.
+        val expected = if (mode == ScreenMode.FONT_200_ES) "Android lo permite; falta tu confirmación" else "Android allows it; your confirmation is missing"
+        compose.onNodeWithText(expected).assertIsDisplayed()
         check(
             "access_needs_confirmation", R.string.access_state_confirm, R.string.access_detail_confirm,
             shown = listOf(R.string.access_confirm, R.string.access_open),
