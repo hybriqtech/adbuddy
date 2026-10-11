@@ -169,10 +169,12 @@ M5 §6 «Cuándo»: «…y con `dump` (si no se puede mostrar, `dump` falla como
 
 ## Validaciones manuales pendientes
 
-Necesitan emulador o móvil; no se hacen en esta rama.
+Necesitan emulador o móvil. Hechas en emulador (AVD adbuddy-dev36, API 36) el 2026-10-11 con `host/internal/emutest/notice_test.go`:
 
-- (a) Overlay visible durante `adbuddy screenshot` en emulador: `emutest` lanza `adbuddy screenshot` con la accesibilidad activa y comprueba con `dumpsys window` que existe la ventana `TYPE_ACCESSIBILITY_OVERLAY` de ADBuddy; la mutación de T2 la pone en rojo.
-- (b) `dump` con la pantalla bloqueada: o el overlay se dibuja sobre el keyguard, o `dump` devuelve `FAILED` («won't read», porque la app no puede mostrar el aviso). Ambas son aceptables; lo que no puede pasar es leer sin aviso.
+- (a) HECHA: `TestTheNoticeWhenTheHostReadsTheScreen`. Tras `adbuddy screenshot` están las dos ventanas `TYPE_ACCESSIBILITY_OVERLAY` de ADBuddy (marco y píldora) en `dumpsys window windows`, y el marco sale en la propia captura (los 6 puntos de los bordes difieren de un `screencap` sin overlay). `adbuddy screen` (dump de la app) también lo muestra. En pausa (solo la app, y luego también el host) ambas lecturas se bloquean y el overlay no aparece. Mutaciones en rojo: quitar `showNotice` del screenshot en `ui.go` y una op `notice` de la app que contesta ok sin `acting` («the overlay is not on screen»). Nota: justo tras activar la accesibilidad llega siempre una notificación y el guarda rechaza la primera lectura («A notification that just arrived…»); el test reintenta a los 10 s, como indica el propio mensaje.
+- (a, texto original) Overlay visible durante `adbuddy screenshot` en emulador: `emutest` lanza `adbuddy screenshot` con la accesibilidad activa y comprueba con `dumpsys window` que existe la ventana `TYPE_ACCESSIBILITY_OVERLAY` de ADBuddy; la mutación de T2 la pone en rojo.
+- (b) HECHA: `TestADumpOfTheLockedScreen` (PIN de prueba, pantalla de bloqueo): el overlay se dibuja sobre el keyguard y el dump se lee (`locked=true`, 0 elementos, marco y píldora en pantalla); no devuelve FAILED. El test acepta ambas salidas y falla si se lee sin overlay.
+- (b, texto original) `dump` con la pantalla bloqueada: o el overlay se dibuja sobre el keyguard, o `dump` devuelve `FAILED` («won't read», porque la app no puede mostrar el aviso). Ambas son aceptables; lo que no puede pasar es leer sin aviso.
 
 ## 4. Rulings
 
