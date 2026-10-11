@@ -52,6 +52,7 @@ func (a *fakeApp) called() []string {
 func (e *env) withApp(protected ...string) *fakeApp {
 	a := &fakeApp{results: map[string]any{
 		bridge.UIOpForeground: bridge.UIForeground{Package: "com.android.settings", Activity: "com.android.settings.Settings"},
+		bridge.UIOpNotice:     bridge.Empty{}, // like the real app
 	}, errs: map[string]error{}}
 	e.d.o.UI = a.ui
 	e.d.o.Protected = func(pkg string) bool {
@@ -136,6 +137,21 @@ func TestScreenByADB(t *testing.T) {
 	for _, r := range e.adb.ran()[len(e.adb.ran())-1:] {
 		if strings.Contains(r, "uiautomator") {
 			t.Fatalf("uiautomator ran with the service on: %q", e.adb.ran())
+		}
+	}
+}
+
+func TestScreenByADBFailsClosedWhenTheServiceCannotBeChecked(t *testing.T) {
+	e := newEnv(t)                               // no app
+	delete(e.adb.shell, "dumpsys accessibility") // the fake exits 1
+	e.adb.out["exec-out uiautomator dump /dev/tty"] = `<hierarchy rotation="0"/>`
+	_, exit := e.helper(t, bridge.UIOpDump, bridge.UIDumpArgs{}, "adbuddy", "screen")
+	if exit.ErrorCode != "UI_UNAVAILABLE" || !strings.Contains(exit.Error, "could not check") {
+		t.Fatalf("exit %+v", exit)
+	}
+	for _, r := range e.adb.ran() {
+		if strings.Contains(r, "uiautomator") {
+			t.Fatalf("uiautomator ran without knowing the service state: %q", e.adb.ran())
 		}
 	}
 }

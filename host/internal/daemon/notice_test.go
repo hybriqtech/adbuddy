@@ -57,7 +57,7 @@ func TestRawReadsAskForTheNotice(t *testing.T) {
 		{"shell", "screencap", "-p", "/sdcard/s.png"},
 		{"shell", "uiautomator", "dump", "/sdcard/u.xml"},
 		{"shell", "dumpsys", "activity", "top"},
-		{"shell", "screenrecord", "/sdcard/r.mp4"}, // red: the notice comes after the Allow
+		{"shell", "screenrecord", "/sdcard/r.mp4"}, // red: writes to /sdcard
 	} {
 		e := newEnv(t)
 		a := e.withApp()
@@ -79,7 +79,9 @@ func TestRawReadsAskForTheNotice(t *testing.T) {
 		if ranAtNotice[0] != 0 {
 			t.Errorf("%q: adb ran before the notice", argv)
 		}
-		// Whatever the user is asked (screenrecord is red), the notice comes after the Allow.
+		// screencap -p /sdcard/s.png, uiautomator dump /sdcard/u.xml and screenrecord are red
+		// (they write to /sdcard): the test answers the confirmations, and the notice
+		// must come after them.
 		if asked[0] != len(e.conf.asked) || argv[1] == "screenrecord" && asked[0] != 1 {
 			t.Errorf("%q: the notice came before the Allow (%d of %d questions)", argv, asked[0], len(e.conf.asked))
 		}
