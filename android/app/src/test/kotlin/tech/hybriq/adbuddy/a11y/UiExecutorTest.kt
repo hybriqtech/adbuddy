@@ -394,6 +394,29 @@ class UiExecutorTest {
         assertFalse(s.windowsRead)
     }
 
+    @Test fun noticeOpShowsTheOverlay() {
+        val s = FakeScreen()
+        screen = s
+        val a = x.run(req(UiOp.NOTICE))
+        assertTrue(a.ok)
+        assertTrue(s.did.contains("acting null"))
+        assertFalse(s.windowsRead)
+    }
+
+    @Test fun noticeOpFailsClosed() {
+        val s = FakeScreen(actingWorks = false)
+        screen = s
+        assertEquals(ErrorCode.FAILED, error(x.run(req(UiOp.NOTICE))))
+    }
+
+    @Test fun noticeOpRefusedWhilePaused() {
+        paused = true
+        val s = FakeScreen()
+        screen = s
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.NOTICE))))
+        assertFalse(s.did.any { it.startsWith("acting") })
+    }
+
     @Test fun neverTwiceTheSameId() {
         fun message(id: String) = Message(v = Protocol.VERSION, type = Protocol.UI_REQUEST, ts = "2026-10-01T10:00:00Z", payload = Protocol.json.encodeToJsonElement(UiRequest.serializer(), req(UiOp.FOREGROUND, id = id)))
         x.onMessage(message("u_1"))
