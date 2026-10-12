@@ -9,6 +9,7 @@
 - **Lo que aún no está en `main`:** el texto "Automatizada en M2.5b" del plan de M2, las secciones "Validaciones que solo se pueden hacer en el Pixel" y "Validaciones ampliadas aún no hechas" de `pendientes-m3-m5.md` y el ledger de M2.5b (`.superpowers/sdd/2026-10-03-adbuddy-m2.5b-app-emulador/progress.md`) solo existen en la rama `feat/m2.5b-app-emulador` (1c35794, PR abierto, sin integrar a 80d6b86). Aquí se citan desde esa rama. "Hecha (M2.5b)" quiere decir "hecha en esa rama".
 - `docs/safety.md` no tiene validaciones pendientes. Las specs (M3 §11, M4 §11, M5 §6, M6b §6, M6c §10, M2.5 §7) repiten lo que dicen los planes: no añaden filas. La única excepción es la spec M4 §11, que entra en las filas M4-a y M4-b.
 - La revisión UX (P1) deja tres comprobaciones con TalkBack para el Pixel (`pendientes-m3-m5.md`, «Revisión UX (P1)»). No se piden al usuario ahora y no entran en el recuento.
+- Las filas OVL-1 y OVL-2 (aviso del overlay al leer la pantalla) se añadieron el 2026-10-12, ya hechas; no entran en el recuento del resumen.
 - Las filas repetidas, que son la misma comprobación escrita en dos planes, se marcan con "=" y no se cuentan: M3a-c a M3a-g (= M3b-1 a M3b-6), M5c-35 (= M5b-18), UIJ-3 (= M5c-27/34), PTY-b (= O2M-a) y las de ola 2 H copiadas en pendientes.
 
 ## Resumen
@@ -362,7 +363,7 @@ Fuera de la lista también se midió:
 | PTY-a | macOS: `Stop` con un agente que no lee | No (CI) | — | — | bajo | CI |
 | PTY-b | Linux real con un agente que no lee | = O2M-a | — | — | — | — |
 
-### Revisión de seguridad, tarjetas (A4), bidi y M2.5b
+### Revisión de seguridad, tarjetas (A4), bidi, M2.5b, overlay y tapjacking
 
 | # | Qué se valida | Emulador | Cómo | Por qué no / paso mínimo | Valor | Orden |
 |---|---|---|---|---|---|---|
@@ -374,6 +375,8 @@ Fuera de la lista también se midió:
 | UIJ-1 | Las imágenes de referencia en Linux y macOS | No (CI) | — | — | bajo | CI |
 | UIJ-2 | Las imágenes en otra máquina Windows | No (CI) | — | — | bajo | CI |
 | UIJ-3 | Lo que sigue para el Pixel de M5c-27 y 34 | = M5c-27/34 | — | — | — | — |
+| OVL-1 | Overlay visible durante `adbuddy screenshot` (aviso al leer la pantalla, `fix/screen-overlay-frame`) | Sí, hecha (2026-10-11, API 36) | `TestTheNoticeWhenTheHostReadsTheScreen` (`host/internal/emutest/notice_test.go`), con la accesibilidad de ADBuddy activa: tras `adbuddy screenshot` están las dos ventanas `TYPE_ACCESSIBILITY_OVERLAY` de ADBuddy (marco y píldora) en `dumpsys window windows`, y el marco sale en la propia captura. La mutación de la T2 (quitar la llamada al aviso) la pone en rojo. | — | alto | Hecha |
+| OVL-2 | `dump` con la pantalla bloqueada: el overlay se dibuja sobre el keyguard o `dump` devuelve `FAILED`; nunca lee sin aviso | Sí, hecha (2026-10-11, API 36) | `TestADumpOfTheLockedScreen` (PIN de prueba, pantalla de bloqueo). Resultado: el overlay se dibuja sobre el keyguard y el dump se lee (`locked=true`, 0 elementos, marco y píldora en pantalla). El test acepta ambas salidas y falla si se lee sin overlay. | — | alto | Hecha |
 
 ## Imágenes para lo que depende de Android 15-17
 
