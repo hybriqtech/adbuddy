@@ -15,7 +15,7 @@ go build -o adbuddy ./cmd/adbuddy      # adbuddy.exe on Windows
 ./adbuddy --version                    # a build from source says "adbuddy dev"
 ```
 
-A build from source pins no signing certificate for the phone app, so `adbuddy setup` does not download it: install your own build with `adbuddy setup --apk <file>`. Releases are built by the pipeline described in `docs/releasing.md`. To run CI on your own machine, see `docs/ci-self-hosted.md`.
+A build from source pins no signing certificate for the phone app, so `adbuddy setup` does not download it: install your own build with `adbuddy setup --apk <file>`. Releases are built by the pipeline described in `docs/releasing.md`. CI runs only on GitHub-hosted runners (`docs/ci-self-hosted.md`).
 
 ## Languages
 
