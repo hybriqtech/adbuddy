@@ -5,7 +5,7 @@ name: host
 
 # docs/superpowers/** (specs, plans, validation notes) is design material that no test reads
 # (the Pages test excludes it); a change that touches only it runs no CI. host.yml is not a
-# required check (no branch protection on a private free repository), so skipping is safe.
+# required check, so skipping is safe.
 on:
   pull_request:
     paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/**"]
