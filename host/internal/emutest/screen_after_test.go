@@ -170,14 +170,16 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 	// speed the emulator changes screen before the first read and this cannot fail.
 	//
 	// What it checks is that the wait never says "settled" on a screen that is
-	// not the new one. At 8x the transition (about 2.4 s) lasts as long as the
-	// wait's cap (settleMax, 3 s), so the wait normally ends at the cap with
-	// settled=false, "still changing", and the read it carries is whichever
-	// frame of the transition the cap fell on: on a slow runner the activity
-	// starts late and that frame can still be the old screen or have no app
-	// window yet (it failed on GitHub's runners asking for the new
-	// screen here). That outcome is the documented one, so only a settled=true
-	// read is held to being the new screen.
+	// not the new one, and that the tap happens once. At 8x the transition
+	// (about 2.4 s here, longer on GitHub's runners) lasts as long as the wait's
+	// cap (settleMax, 3 s) or longer, so the wait can end in three documented
+	// ways: settled=false with whichever frame of the transition the cap fell on
+	// (the old screen, or one with no app window yet); no screen, because the
+	// guard blocked the window of the transition for longer than settleBlockWait,
+	// with the note that the tap was done; or, once the new screen is drawn and
+	// quiet, settled=true. A read with no app window never settles (bareApp).
+	// Only a settled=true read is held to being the new screen, and a missing
+	// screen to carrying the note that says the tap happened.
 	t.Run("a slow transition never settles on the old screen nor taps twice", func(t *testing.T) {
 		for _, k := range []string{"window_animation_scale", "transition_animation_scale", "animator_duration_scale"} {
 			e.restoreAnimationScaleAtCleanup(t, k)
@@ -188,10 +190,14 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 		h := newLatencyHost(t, e, ui)
 		for i := range 3 {
 			exit, c, _ := tapScreen(t, h, tapNet)
-			if exit.Code != 0 || c.Screen == nil {
+			if exit.Code != 0 {
 				t.Fatalf("run %d: exit %+v, note %q", i, exit, c.Note)
 			}
-			if c.Screen.Settled && (c.Screen.Changed == nil || !*c.Screen.Changed || !screenHas(c.Screen.UIDump, "Internet")) {
+			if c.Screen == nil {
+				if !strings.HasPrefix(c.Note, "The action was done; do not repeat it") {
+					t.Errorf("run %d: no screen and no note that the tap was done: %q", i, c.Note)
+				}
+			} else if c.Screen.Settled && (c.Screen.Changed == nil || !*c.Screen.Changed || !screenHas(c.Screen.UIDump, "Internet")) {
 				t.Errorf("run %d: settled on a screen that is not the new one (changed %v): %+v", i, c.Screen.Changed, c.Screen.UIDump.Elements)
 			}
 			e.shell(t, "input keyevent 4")

@@ -535,12 +535,26 @@ func (e *emu) unlockOnBouncer(t *testing.T) {
 }
 
 // unlock brings up the bouncer from the lock screen with a swipe up and types the PIN.
+// The swipe is repeated every 4 s until the bouncer shows: with the shade still
+// open over the lock screen (it failed so on GitHub's runners, with the quick
+// settings and the notification stack in the dump) the first swipe up only
+// closes it.
 func (e *emu) unlock(t *testing.T) {
 	t.Helper()
 	w, h := e.screenSize(t)
 	x, y0, y1 := swipeUpPoints(w, h)
-	e.shell(t, fmt.Sprintf("input swipe %d %d %d %d 300", x, y0, x, y1))
-	e.waitNodes(t, "bouncer after swiping up on the lock screen", 10*time.Second, bouncer)
+	var nodes []uiNode
+	var swiped time.Time
+	if !poll(20*time.Second, func() bool {
+		if time.Since(swiped) >= 4*time.Second {
+			e.shell(t, fmt.Sprintf("input swipe %d %d %d %d 300", x, y0, x, y1))
+			swiped = time.Now()
+		}
+		nodes = e.screen(t)
+		return bouncer(nodes)
+	}) {
+		t.Fatalf("no bouncer after swiping up on the lock screen in 20 s: %+v", nodes)
+	}
 	e.unlockOnBouncer(t)
 }
 
