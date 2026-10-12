@@ -627,3 +627,17 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 - **Hecho:** `ObscuredTouchGuard` en el consentimiento y en `RemoteCard` (#77) y filtro por botón en las teclas rápidas del terminal (`refuseObscuredTouches()`). Automatizado en el emulador API 34 (2026-10-04, primera pasada): `TestAnObscuringOverlayRefusesTheTapsThatGrant` pasa los 3 casos y no es vacuo (con el guard anulado fallan). Filas TAP-1 a TAP-3 del inventario de validaciones.
 - **Sin automatizar:** Android 11 (sin imagen API 30; la del CI es API 34) y las tarjetas y el 🔴 abiertos dentro de la burbuja propia (TAP-2). PermissionCard, apps protegidas y los demás diálogos (enlace, nueva conversación) llevan el mismo guard y sus tests de fuente en la JVM, pero no están en el test de emulador; se pueden añadir con el mismo patrón.
 - **Post-v1:** el rechazo del filtro de las teclas rápidas es mudo (el chip no hace nada y no dice por qué): un aviso breve al rechazar.
+
+## Latencia del agente (rama `perf/latencia`, planes `2026-10-03-latencia.md` y `2026-10-03-latencia-impl.md`)
+
+- **Hecho:** `tap --screen`, `type --screen` y `screen --settle` (el daemon sondea el `dump` hasta que dos lecturas iguales pasan `settleMin` y devuelve la pantalla, cada lectura con la misma guarda que `screen`; una lectura bloqueada tras un tap deja la nota «la acción ya se hizo, no la repitas» y sale 0); plantillas del agente (`@NOTES.md`, encadenar, `adb crudo && screen --settle`); `--model`/`--effort` opcionales en `adbuddy serve` (por defecto los del usuario). Banco: tests con `ADBUDDY_LATENCY=1` (`latbench`, `emutest/latency*_test.go`, `cmd/adbuddy/latency*_test.go`). Resultado: turnos 6,4 → 3,8; el modelo no cambia la latencia.
+- **Haiku 5.5 low por defecto** (`perf/haiku-default`, orden de la persona usuaria 2026-10-11, plan `2026-10-11-haiku-por-defecto.md`): el agente Claude Code de `adbuddy serve` arranca con `claude-haiku-5-5` y effort `low` salvo `--model/--effort` o `agent_model/agent_effort`; `inherit` en cualquiera de los dos vuelve a lo configurado en Claude Code (`agent.Effective`, `startNote`). Pendiente: la medición (T4) en `2026-10-03-latencia.md` y comprobar `claude -p hi --model claude-haiku-5-5 --effort low` en este entorno.
+- **Pendiente con dispositivo (emulador y móvil real con permiso):**
+  - medir el arnés de dispositivo (etapas de la guarda);
+  - P4, consultas de la guarda en paralelo;
+  - P5, `foreground` ligero en la app (`Screen.windows()` copia todo el árbol de todas las ventanas): solo hay plan, `2026-10-11-latencia-p5-foreground-ligero.md`; no se implementa sin el OK del líder;
+  - P6, cliente del protocolo adb sin proceso por orden;
+  - ajustar `settleFirst/Gap/Min/Max` con transiciones reales (hoy cada `--screen` cuesta ≥ 0,5 s aunque se asiente al instante);
+  - comprobar la nota de bloqueo con una notificación entrante tras abrir una app.
+- **Imagen API 37 local:** `system-images;android-37.0;google_apis;x86_64` hace caer `surfaceflinger` en bucle en este PC con `swiftshader_indirect` y con `swangle_indirect` (el script de arranque sale con «not stable»). La validación de S2 (2026-10-11) se hizo con API 34 (`ADBUDDY_EMU_IMAGE=system-images;android-34;google_apis;x86_64` y un `ADBUDDY_EMU_AVD` propio).
+- **No hacer:** captura en flujo (`screenrecord`/scrcpy) para el agente; caché de primer plano (abre un hueco de la guarda).
