@@ -149,6 +149,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			firstBlocked = true
 		}
 	}
+	guarded := time.Now() // right after the guard said yes: how old the guard is is measured from here, notice and veil included
 	// The notice of the on-screen frame goes before the last pause check, so a
 	// pause that arrives meanwhile blocks (after the guard: no notice for what it refuses).
 	if req.UIOp == OpScreenshot {
@@ -156,8 +157,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			return d.stopUI(ctx, e, why)
 		}
 	}
-	guarded := time.Now() // right after the guard said yes
-	if d.o.Paused() {     // paused while the guard looked
+	if d.o.Paused() { // paused while the guard looked
 		return d.blockUI(e, PausedMessage)
 	}
 	// An act with Screen: read the screen before it, the one the wait starts
@@ -209,7 +209,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			return *done
 		}
 	} else {
-		data, via, f = d.runUI(ctx, req.UIOp, req.UIArgs, s)
+		data, via, f = d.runUI(ctx, req.UIOp, req.UIArgs, s, guarded)
 		if req.Screen && req.UIOp == bridge.UIOpDump {
 			var done *ipc.Exit
 			switch first, ok := asDump(data); {
@@ -476,12 +476,12 @@ func (d *Daemon) callApp(ctx context.Context, op string, args json.RawMessage) (
 
 // runUI does the helper, by the app or by adb, and returns the data for the
 // client and how it was done.
-func (d *Daemon) runUI(ctx context.Context, op string, raw json.RawMessage, s Stream) (any, string, *uiFailure) {
+func (d *Daemon) runUI(ctx context.Context, op string, raw json.RawMessage, s Stream, guarded time.Time) (any, string, *uiFailure) {
 	switch op {
 	case OpScreenshot:
 		var a ScreenshotArgs
 		_ = json.Unmarshal(raw, &a)
-		return d.screenshot(ctx, a, s)
+		return d.screenshot(ctx, a, s, guarded)
 	case bridge.UIOpForeground:
 		f, err := d.inFront(ctx)
 		if err != nil {
@@ -635,9 +635,8 @@ func (d *Daemon) shellRun(ctx context.Context, args []string) *uiFailure {
 // screenshot takes the capture by adb, scales it and sends it on stdout. The
 // app's on-screen notice was shown before (showNotice); it is taken off the
 // screen for the capture itself, so the frame and the pill do not cover the
-// image, and put back right after.
-func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream) (any, string, *uiFailure) {
-	veilStart := time.Now()
+// image, and put back right after. guarded is when the guard said yes.
+func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream, guarded time.Time) (any, string, *uiFailure) {
 	restore, inImage, f := d.veilNotice(ctx)
 	if f != nil {
 		return nil, "", f
@@ -648,7 +647,7 @@ func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream) (an
 	// The guard said yes before the notice. If taking the notice off was slow
 	// (the app dwells so that the person can see it, or it hung), look at the
 	// foreground again, as an act does after a slow baseline.
-	if time.Since(veilStart) > baselineSlack {
+	if time.Since(guarded) > baselineSlack {
 		if why := d.guardForeground(ctx, nil); why != "" {
 			restore()
 			return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+why)
@@ -659,7 +658,9 @@ func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream) (an
 	}
 	var buf, errb bytes.Buffer
 	code, err := d.o.ADB.Run(ctx, "", []string{"exec-out", "screencap", "-p"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
-	restore()
+	if !d.o.Paused() { // a paused session gets no notice back
+		restore()
+	}
 	if err != nil || code != 0 {
 		return nil, "", fail(1, "UI_FAILED", "screencap failed: "+classify.Printable(strings.TrimSpace(errb.String())))
 	}

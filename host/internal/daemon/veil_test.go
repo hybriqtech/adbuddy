@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -126,15 +127,15 @@ func TestScreenshotPausedWhileTheNoticeComesOffIsBlocked(t *testing.T) {
 	for _, how := range []string{"the app says so", "the host knows"} {
 		e := newEnv(t)
 		a := e.withApp()
-		paused := false
-		e.d.o.Paused = func() bool { return paused }
+		var paused atomic.Bool
+		e.d.o.Paused = func() bool { return paused.Load() }
 		e.adb.out["exec-out screencap -p"] = pngBytes(t)
 		if how == "the app says so" {
 			a.errs[bridge.UIOpHideNotice] = &UIError{Code: bridge.CodeProtected, Text: "The agent is paused from the phone."}
 		} else {
 			a.onCall = func(op string) {
 				if op == bridge.UIOpHideNotice {
-					paused = true
+					paused.Store(true)
 				}
 			}
 		}
@@ -208,5 +209,30 @@ func TestRawReadsDoNotHideTheNotice(t *testing.T) {
 	}
 	if len(*order) != 1 || (*order)[0].op != bridge.UIOpNotice {
 		t.Fatalf("ops %+v, want only the notice", *order)
+	}
+}
+
+// The guard's age counts from when it said yes, notice included: a slow
+// notice (not a slow veil) leaves the guard old too.
+func TestScreenshotLooksAtTheGuardAgainAfterASlowNotice(t *testing.T) {
+	e := newEnv(t)
+	a := e.withApp("com.example.bank")
+	e.adb.out["exec-out screencap -p"] = pngBytes(t)
+	slow := true
+	a.onCall = func(op string) {
+		if op == bridge.UIOpNotice && slow {
+			slow = false
+			time.Sleep(baselineSlack + 100*time.Millisecond)
+			a.mu.Lock()
+			a.results[bridge.UIOpForeground] = bridge.UIForeground{Package: "com.example.bank"}
+			a.mu.Unlock()
+		}
+	}
+	s, exit := e.helper(t, OpScreenshot, helperArgs(OpScreenshot))
+	if exit.Code != ExitDenied || exit.ErrorCode != "UI_BLOCKED" || !strings.Contains(exit.Error, "is a protected app") {
+		t.Fatalf("exit %+v", exit)
+	}
+	if screenRead(e) || s.out.Len() != 0 {
+		t.Fatalf("adb ran %q, %d bytes out", ranOnPhone(e), s.out.Len())
 	}
 }
