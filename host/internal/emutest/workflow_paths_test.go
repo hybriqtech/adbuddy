@@ -84,8 +84,8 @@ var runnerOfMatrix = regexp.MustCompile(`"runner":"([^"]+)"`)
 // run on a self-hosted runner (a pull request from a fork would run its code on
 // a maintainer's machine). Every job's runs-on is a GitHub-hosted label, or
 // ${{ matrix.runner }} with only hosted labels in the matrix, and nothing in a
-// workflow mentions self-hosted or the CI_* variables that used to pick a
-// runner. It fails, never skips.
+// workflow mentions self-hosted or reads a repository variable (vars.*; the
+// CI_* ones used to pick a runner). It fails, never skips.
 func TestWorkflowsUseHostedRunnersOnly(t *testing.T) {
 	dir := filepath.FromSlash("../../../.github/workflows")
 	var files []string
@@ -114,9 +114,9 @@ func TestWorkflowsUseHostedRunnersOnly(t *testing.T) {
 		var walk func(n *yaml.Node)
 		walk = func(n *yaml.Node) {
 			if n.Kind == yaml.ScalarNode {
-				for _, bad := range []string{"self-hosted", "vars.CI_"} {
+				for _, bad := range []string{"self-hosted", "vars."} {
 					if strings.Contains(n.Value, bad) {
-						t.Errorf("%s:%d: mentions %q: CI runs on GitHub-hosted runners only", name, n.Line, bad)
+						t.Errorf("%s:%d: mentions %q: CI runs on GitHub-hosted runners only, with no variable that picks a runner", name, n.Line, bad)
 					}
 				}
 				for _, m := range runnerOfMatrix.FindAllStringSubmatch(n.Value, -1) {
