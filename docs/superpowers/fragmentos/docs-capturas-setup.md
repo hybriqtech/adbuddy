@@ -6,7 +6,7 @@ Rama `docs/capturas-setup`. Sustituye los 8 marcadores `img/pending.svg` de `doc
 
 - Capturas hechas en el emulador (Android 14, API 34, imagen `google_apis`), nunca en el móvil real, primero con el sistema en inglés y luego en español: `01-build-number`, `02-wireless-debugging`, `03-pair-qr` y `04-pair-code`, cada una con su `-es`. Recortadas a lo que explica cada paso y reducidas a 480 px de ancho con paleta de 64 colores (11-19 KB cada una).
 - Recortes sin datos personales: sin barra de estado, sin el título «About emulated device» y sin la lista «Paired devices» (que enseña el nombre de usuario y del equipo del PC). El cuadro del código de emparejamiento y la pantalla de depuración inalámbrica enseñan solo la IP interna del emulador (`10.0.2.x`) y un código de un solo uso.
-- Textos de los menús comprobados contra el emulador en los dos idiomas. Corregidos en español: «Dispositivos vinculados» pasa a «Dispositivos emparejados» y «código de vinculación Wi-Fi» a «código de vinculación de Wi-Fi». El resto coincide.
+- Textos de los menús comprobados contra las pantallas completas del emulador en los dos idiomas (incluidos el aviso de red, «Permitir siempre en esta red» y los dos botones de emparejar, que las capturas recortadas no enseñan). Corregidos en español: «Dispositivos vinculados» pasa a «Dispositivos emparejados» y «código de vinculación Wi-Fi» a «código de vinculación de Wi-Fi». El resto coincide.
 
 ## Pendiente
 
