@@ -1,4 +1,6 @@
-# Ledger: pantalla oculta y overlay en la captura (P1), 2026-10-12
+# SDD ledger — plan: docs/superpowers/plans/2026-10-12-p1-pantalla-oculta.md
+
+Ledger de P1 (pantalla oculta y overlay en la captura), 2026-10-12.
 
 Rama `fix/p1-pantalla-oculta` (desde main aa7f3698). Plan: `docs/superpowers/plans/2026-10-12-p1-pantalla-oculta.md`. Spec: `docs/superpowers/specs/2026-10-12-p1-pantalla-oculta-design.md`. Compañero `seguridad`.
 
@@ -61,3 +63,26 @@ Veredicto: con reservas. Hallazgos y resolución:
 ## Mutaciones
 
 (se apuntan al ejecutar cada tarea)
+
+## Visto bueno del líder (2026-10-12)
+
+- Ruling: OK a R1-R6 y P1.1 tal cual; R10 con `MIN_SHOWN_MS = 400` (decisión del líder: el aviso existe para que la persona lo vea; cuesta 0-0,4 s sobre una captura de 3-5 s; si se equivoca, se baja la constante) — dado por el líder — se baja la constante.
+- Ruling: condiciones del líder añadidas al plan — (1) test de que `hideNotice` no es helper ni se pide desde la CLI (T3, `TestTheAgentCannotAskToHideTheNotice`, ya estaba); (2) test de que la app restaura sola al vencer el tope aunque el host muera tras `hideNotice`, con mutación «quitar la auto-restauración» (T4, `TestTheHiddenNoticeComesBackByItself`, mutación (b), ya estaba); (3) en pausa no se reponen ni el aviso de actuar ni la píldora (T4: añadido un `click` rechazado en pausa que no debe levantar el overlay; además mutación (c)); (4) `noticeInImage` documentado en `docs/usage.md` y `docs/safety.md` (T8, paso 0 nuevo) — por qué: pedido por el líder — qué cuesta: nada.
+- Ruling: el texto para el agente no promete la causa (ya es así) — pedido por el líder.
+- Diagnóstico del Pixel (líder, solo lectura): `SubSettings` con `pfl=HIDE_NON_SYSTEM_OVERLAY_WINDOWS`, sin FLAG_SECURE; el servicio SÍ ve la ventana en su lista (`A11yWindow` active/focused, TYPE_APPLICATION). Encaja con R9 (ventana listada pero `root == null` → `Dumper` la salta y `foreground()` da «unknown app»); `unreadable` cubre «alguna ventana de app con root null». Hipótesis nueva sin verificar: interacción de `HIDE_NON_SYSTEM_OVERLAY_WINDOWS` con el overlay; el log de T7 no lo distingue, lo apunta la validación manual. Los ficheros llevan datos personales: no se copian al repo.
+
+## Escaneo previo del plan (controlador)
+
+| Par / tarea | Producido vs consumido | Resultado |
+|---|---|---|
+| T1 -> T2 | `bridge.UIOpHideNotice`, `UIHideNoticeArgs{Ms}`, `MaxHideNoticeMs`; Kotlin `UiOp.HIDE_NOTICE`, `UiHideNoticeArgs`, `UiLimits.MAX_HIDE_NOTICE_MS` | coherente |
+| T1 -> T3 | mismas constantes Go + `withApp()` | coherente (T3 cambia `withApp`) |
+| T2 -> T4 | `Overlay.hideFor`, `MIN_SHOWN_MS` 400 | coherente |
+| T3 -> T4 | `d.veilNotice(ctx)`, `ScreenshotResult.NoticeInImage` | coherente |
+| T5 -> T6 | `UiDump.Unreadable` (Go) | coherente |
+| T5 -> T7 | `Dumper.describe` | coherente |
+| T2/T7 | ambos tocan `AgentAccessibilityService.kt` / `Dumper.kt`; T7 va tras T5 | secuencial, sin conflicto |
+| T3/T6 | ambos tocan `helpers.go` / `printScreen`; T6 tras T5, T3 antes | secuencial |
+| Cada tarea | texto de tests contra código | revisado por opus (16 hallazgos aplicados) |
+
+Orden: T1, T2, T3 (secuencial: dos implementadores en árboles disjuntos podrían ir juntos, pero el repo es uno solo; host y android son disjuntos, se paralelizan T2 y T3), T4, T5, T6 y T7, T8.

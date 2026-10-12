@@ -1044,6 +1044,14 @@ func TestTheHiddenNoticeComesBackByItself(t *testing.T) {
 	if w := e.overlayWindows(t); len(w) != 0 {
 		t.Errorf("the overlay came back for a paused session: %v", w)
 	}
+	// Nor does the heads-up for acting: while paused, the app refuses the op
+	// before it shows anything (ruling of the leader, 2026-10-12).
+	if r := l.uiCall(t, bridge.UIOpClick, bridge.UIClickArgs{Text: "any"}); r.OK {
+		t.Errorf("a click was accepted while paused: %+v", r)
+	}
+	if w := e.overlayWindows(t); len(w) != 0 {
+		t.Errorf("a refused click in a paused session put the overlay up: %v", w)
+	}
 }
 ```
 
@@ -1365,6 +1373,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `docs/superpowers/specs/2026-10-01-adbuddy-protocolo-m3-m5-design.md` (lista «Operaciones de partida»: añadir `hideNotice`, y el campo `unreadable` de `dump`)
 - Create: `docs/superpowers/fragmentos/fix-p1-pantalla-oculta.md`
 - Modify: este plan (sección «Validaciones manuales pendientes» al final: marcar estados)
+- Modify: `docs/safety.md`, `docs/usage.md` (visto bueno del líder: `noticeInImage` documentado para el agente)
+
+- [ ] **Step 0: `docs/safety.md` y `docs/usage.md`.** En `docs/safety.md`, al final del párrafo que empieza «While the agent reads the screen», añade (inglés): «`adbuddy screenshot` takes the frame and the pill off the screen for a moment while it captures, so they do not cover the image, and puts them back right after; the notice is up for at least 400 ms before that. If it cannot take them off, the picture still comes out and says so: `noticeInImage` in `--json`, or a note on stderr.» En `docs/usage.md`, en la viñeta de `adbuddy screenshot` («saves a picture, scaled to half by default»), añade: «If ADBuddy's on-screen notice could not be taken off for the capture, `--json` has `"noticeInImage": true` and a note is printed on stderr: ignore the thin frame and the pill near the top.» Y, en `docs/safety.md` junto al párrafo de `adbuddy screen` (línea que empieza «The agent can read and act on the screen»), una frase: «When ADBuddy cannot read a screen (Android or the app hides its content from accessibility services), `adbuddy screen` says so (`unreadable` in `--json`); `adbuddy screenshot` may still show it. The cause is not known in every case, so the note does not name one.»
 
 - [ ] **Step 1: M5.** En §6, «Cuándo» (línea que empieza «**Cuándo:**»), añade al final: «En `adbuddy screenshot` el aviso lleva en pantalla 400 ms como mínimo antes de retirarse y se retira unos 0,3 s durante la propia captura (`hideNotice`, con restauración automática a los 2 s como mucho y nunca en pausa) para que el marco y la píldora no tapen la imagen; vuelve justo después. Las lecturas en bruto del agente no lo retiran.» En §3.6 (`screenshot`, «La hace el host…») añade: «Entre el aviso y `screencap` pide `hideNotice`; si no puede retirarlo, la captura sale con el aviso dentro y `ScreenshotResult.noticeInImage` lo dice.» Tras la descripción de `notice` (línea «Pide a la app que muestre la superposición…») añade un párrafo para `hideNotice`: `args {ms: 1..5000}`, `result {}`; la app quita las vistas, espera 3 fotogramas y se restaura a los `ms` salvo pausa; `PROTECTED` en pausa; `FAILED` si no puede. En §3.1 (`dump`) añade `unreadable` al resultado. En §12 añade dos ítems tras el 5: «6. La op `hideNotice` de `ui.request` (p1-pantalla-oculta): `args {ms}`, `result` vacío; `MaxHideNoticeMs` 5000. … Aditivo; un commit con Go, Kotlin y fixtures.» y «7. El campo `unreadable` de `UiDump` (p1-pantalla-oculta): `bool` con `omitempty` en Go, `Boolean?` sin emitir `false` en Kotlin; fixture `app/ui.response@dumpunreadable.json`. Aditivo.»
 
