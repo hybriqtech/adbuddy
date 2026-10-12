@@ -31,10 +31,10 @@ var (
 
 // ScreenSettled is dump's data when the client asked to wait for the screen
 // to settle. Settled is false when the screen was still changing at the end
-// of the wait (an animation, a video), or when all that it showed was the
-// system's own windows with no application window (see bareApp). Changed
-// says whether the screen that comes out is not the one it started from: false with Settled means the
-// screen is the start again (nothing happened on screen, or it changed and
+// of the wait (an animation, a video), or when the screen it started from had
+// an application window and all that it showed was the system's own windows
+// (see bareApp). Changed says whether the screen that comes out is not the
+// one it started from: false with Settled means the screen is the start again (nothing happened on screen, or it changed and
 // came back); nil means it is not known (the start could not be read, or
 // this read came another way than the start: the app and uiautomator differ
 // in format, so they are not compared).
@@ -110,8 +110,9 @@ func noFocus(es []bridge.UIElement) []bridge.UIElement {
 // windows, or no element at all. A transition does that, while the window the
 // tap opens (or the one it leaves) has no content to read yet; the longer the
 // transition, the longer it lasts, and it can outlast settleQuiet. It is not
-// a screen the agent can use, so it never counts as settled: the wait goes on
-// until the cap, which gives it back with Settled false. Only the app's reads
+// a screen the agent can use, so when the start had an application window
+// (settle checks that, not bareApp) it never counts as settled: the wait goes
+// on until the cap, which gives it back with Settled false. Only the app's reads
 // say which window each element is in (a read made by uiautomator marks every
 // element "app"): a read made another way is never taken as bare.
 func bareApp(d bridge.UIDump, how string) bool {
@@ -164,12 +165,17 @@ type settleIn struct {
 // read before comes out. why and f are both empty when the context ended (the
 // agent or serve went away). It fails closed: nothing it could not read is
 // returned. A read of the app that shows no application window (bareApp: a
-// transition that has not drawn the window yet) is never quiet, so it does
-// not settle. via says how the read that comes out was made. No goroutines.
+// transition that has not drawn the window yet), when the start had one, is
+// never quiet, so it does not settle. via says how the read that comes out was made. No goroutines.
 func (d *Daemon) settle(ctx context.Context, in settleIn) (screen *ScreenSettled, via, why string, f *uiFailure) {
 	firstWait, gap, quiet, idle, blockWait, max, maxTries := settleFirst, settleGap, settleQuiet, settleIdle, settleBlockWait, settleMax, settleReads
 	base, baseVia, cur, via := in.base, in.baseVia, in.first, in.via
 	deadline := in.start.Add(max)
+	// A bare read only holds the wait back when the start was not bare: a tap that
+	// leaves a screen with an application window for one without (a transition
+	// that has not drawn its window). From a start that was bare already (a game,
+	// the camera) or unknown, it is the screen there is, as before.
+	protectBare := in.base != nil && !bareApp(*in.base, in.baseVia)
 	changed := false     // some read made the way base was differed from it
 	lastMove := in.start // when the screen last moved (a read differed from the one before, or first from base)
 	blocked := ""
@@ -265,7 +271,7 @@ func (d *Daemon) settle(ctx context.Context, in settleIn) (screen *ScreenSettled
 			changed = true
 		}
 		cur = &read
-		still := now.Sub(lastMove) >= quiet && !bareApp(read, how)
+		still := now.Sub(lastMove) >= quiet && !(protectBare && bareApp(read, how))
 		switch {
 		case changed && still: // it moved and has been quiet
 			return &ScreenSettled{UIDump: read, Settled: true, Changed: vsBase(read, how)}, via, "", nil

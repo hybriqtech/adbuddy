@@ -1782,3 +1782,37 @@ func TestBareAppOnlyForTheAppOnAnUnlockedPhone(t *testing.T) {
 		t.Error("a read with an app window is not bare")
 	}
 }
+
+// A start that was bare already (a game, the camera) is the screen there is:
+// the bare reads after the tap settle as they did before bareApp, with
+// Changed false (nothing differed from the start).
+func TestSettleABareStartSettlesOnBareReads(t *testing.T) {
+	settleTimes(t, fastSettle())
+	e := newEnv(t)
+	a := e.settleApp()
+	a.dumpFn = func(int) bridge.UIDump { return bareDump() }
+	s, exit := e.helperScreen(t, context.Background(), bridge.UIOpClick, xy(1, 1))
+	if exit.Code != 0 {
+		t.Fatalf("exit %+v", exit)
+	}
+	cs := decodeClicked(t, s)
+	if cs.Screen == nil || !cs.Screen.Settled || !is(cs.Screen.Changed, false) {
+		t.Fatalf("result %s", s.data[0])
+	}
+}
+
+// With no start to compare (screen --settle adopts its first read) nothing
+// is known about the window: bare reads settle after the idle wait, as before.
+func TestSettleAnAdoptedBareStartSettlesOnBareReads(t *testing.T) {
+	settleTimes(t, fastSettle())
+	e := newEnv(t)
+	a := e.settleApp()
+	a.dumpFn = func(int) bridge.UIDump { return bareDump() }
+	s, exit := e.helperScreen(t, context.Background(), bridge.UIOpDump, bridge.UIDumpArgs{})
+	if exit.Code != 0 {
+		t.Fatalf("exit %+v", exit)
+	}
+	if d := decodeSettled(t, s); !d.Settled {
+		t.Fatalf("result %s", s.data[0])
+	}
+}
