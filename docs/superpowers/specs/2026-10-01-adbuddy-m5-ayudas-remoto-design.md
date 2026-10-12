@@ -91,6 +91,7 @@ M3.0 dejó `args` y `result` como JSON libre (`json.RawMessage` y `JsonElement`)
 - **Qué ventanas:** todas las interactivas (`flagRetrieveInteractiveWindows`), ordenadas por capa de mayor a menor: la app, sus diálogos, el teclado y la interfaz del sistema. Es la idea de `HierarchyDumper` de ARTEMIS (Apache-2.0; la atribución va en `NOTICE` y en la cabecera del fichero si se copia código). Las ventanas de `tech.hybriq.adbuddy`, incluida la superposición, no salen nunca.
 - **Qué nodos:** los visibles para el usuario, con los límites recortados a la pantalla, a su ventana y a sus antepasados desplazables (paridad con UIAutomator). Entre ellos, solo los informativos (texto, descripción o pista) o los que se pueden usar (pulsar, editar, desplazar o marcar). Las capas sin nada de eso desaparecen. `--all` (`args: {"all": true}`) incluye todos los nodos visibles.
 - **Topes:** 2000 elementos, profundidad 75. Más que eso pone `truncated: true`. Si el JSON del resultado pasa de 512 KiB (bytes UTF-8 ya codificados, `MaxUIResult`), se recortan los textos largos a 200 caracteres y, si aún no cabe, los últimos elementos.
+- **`unreadable`:** `true` cuando alguna ventana de aplicación o diálogo no entrega contenido (o no hay ventanas); el host lo dice al agente con una nota que no promete la causa. Ausente si no (Go `omitempty`).
 - **Contraseñas:** de un nodo con `isPassword` sale `password: true`, y `text` y `hint` salen vacíos.
 - **Bloqueado:** con el móvil bloqueado (`KeyguardManager.isKeyguardLocked`), `locked: true` y `elements` vacío. El agente no debe intentar desbloquear (la regla 14 de `AGENTS.md`).
 - **App protegida en primer plano:** `error` `protected` (§4.3).
@@ -155,7 +156,7 @@ La app lo sabe por los `TYPE_WINDOW_STATE_CHANGED` de la ventana de aplicación 
 
 ### 3.6 `adbuddy screenshot [--scale 0.5] [--format png|jpeg] [-o fichero]`
 
-La hace el host, nunca la app: `exec-out screencap -p` por el adb del host. Antes pasa por la guarda (§4.3) y pide el aviso de la superposición a la app (§6, «Cuándo»).
+La hace el host, nunca la app: `exec-out screencap -p` por el adb del host. Antes pasa por la guarda (§4.3) y pide el aviso de la superposición a la app (§6, «Cuándo»). Entre el aviso y `screencap` pide `hideNotice`; si no puede retirarlo, la captura sale con el aviso dentro y `ScreenshotResult.noticeInImage` lo dice.
 
 - **Escala:** por defecto 0,5; `--scale 1` deja el tamaño original. El reescalado es un filtro de caja con la biblioteca estándar de Go (`image`, `image/png`, `image/jpeg`), sin dependencias nuevas.
 - **Formato:** PNG por defecto, o JPEG con calidad 80.
@@ -169,6 +170,13 @@ Pide a la app que muestre la superposición (§6) sin hacer nada más. La usa el
 - Respuestas: `ok`; `failed` si la app no puede dibujar la superposición; `protected` con la sesión en pausa; `unavailable` con el servicio apagado; `unsupported` en una app anterior.
 - El host solo deja leer sin aviso con `ErrNoApp`, `unavailable` (con el servicio no vinculado) y `unsupported`; cualquier otra respuesta bloquea.
 - No lleva guarda de app protegida: no lee nada. El nombre es el mismo que el del tipo de mensaje `notice`, pero son espacios de nombres distintos (op de `ui.request`).
+
+### 3.8 `hideNotice` (sin comando de CLI)
+
+Pide a la app que retire la superposición (marco y píldora) un instante, para que `adbuddy screenshot` no la lleve en la imagen. `args` `{ms: 1..5000}` (`MaxHideNoticeMs`), `result` `{}`. La app quita las vistas, espera 3 fotogramas y se restaura sola a los `ms` salvo pausa (nunca la repone en pausa; `show()` y `remove()` cancelan el temporizador).
+
+- Respuestas: `ok`; `invalid` si `ms` está fuera de 1..5000; `protected` con la sesión en pausa; `failed` si no puede retirarla.
+- No es un helper del agente: solo la pide el host dentro de `screenshot`.
 
 ## 4. Seguridad
 
@@ -248,7 +256,7 @@ Las órdenes del respaldo las ejecuta el daemon con el adb del host, ya admitida
 
 `AgentAccessibilityService` dibuja una ventana `TYPE_ACCESSIBILITY_OVERLAY`, que no necesita `SYSTEM_ALERT_WINDOW`:
 
-- **Cuándo:** al empezar cualquier `ui.request` de acción (`click` y `setText`), y también con `dump`, que falla como `click` y `setText` si la app no puede mostrarla. Se oculta 4 s después de la última operación. Con la sesión en pausa no se muestra nunca (la app lo comprueba también en `dump` y `notice`, por si la pausa llega tras las puertas del host).
+- **Cuándo:** al empezar cualquier `ui.request` de acción (`click` y `setText`), y también con `dump`, que falla como `click` y `setText` si la app no puede mostrarla. Se oculta 4 s después de la última operación. Con la sesión en pausa no se muestra nunca (la app lo comprueba también en `dump` y `notice`, por si la pausa llega tras las puertas del host). En `adbuddy screenshot` el aviso lleva en pantalla 400 ms como mínimo antes de retirarse y se retira unos 0,3 s durante la propia captura (`hideNotice`, con restauración automática a los 2 s como mucho y nunca en pausa) para que el marco y la píldora no tapen la imagen; vuelve justo después. Las lecturas en bruto del agente no lo retiran.
   - **Lecturas por adb:** antes de `screenshot` y de los `screencap`, `screenrecord`, `uiautomator` y `dumpsys` que vuelque la vista (crudos), el host pide el aviso a la app con la op `notice` (§3.7). Va después de la guarda y de la confirmación (si el comando es 🔴), y antes de la última comprobación de pausa: una pausa que llegue durante el aviso bloquea la lectura.
   - **Sin aviso posible:** sin app conectada o con el servicio de accesibilidad apagado no hay aviso, y la lectura sigue (el agente conserva su experiencia normal). Una app anterior que contesta `unsupported` también deja leer, sin consultar el servicio.
   - **Se bloquea** (`UI_BLOCKED`, `Blocked by ADBuddy: …`, sin ejecutar nada por adb) cuando la accesibilidad está activa y la app no está conectada o no contesta a tiempo, cuando no se puede comprobar si lo está (`dumpsys accessibility` falla), cuando la app no puede dibujar el aviso (`failed`) y cuando está en pausa (`protected`).
@@ -385,8 +393,10 @@ Todos aditivos (§11 del protocolo: sigue siendo `v1`):
    - los casos de `ValidPackage`.
    - `notifications` gana `truncated`.
 5. **La op `notice` de `ui.request`** (screen-overlay-frame): `args` y `result` vacíos (`Empty`). Go: `UIOpNotice` en `UIOps`; Kotlin: `UiOp.NOTICE` en `UiOp.ALL`. Fixtures `host/ui.request@notice.json` y `app/ui.response@notice.json`, y entrada en `protocol/fixtures/ui.json`. Aditivo; un commit con Go, Kotlin y fixtures.
+6. **La op `hideNotice` de `ui.request`** (p1-pantalla-oculta): `args {ms}`, `result` vacío; `MaxHideNoticeMs` 5000. Go: `UIOpHideNotice` en `UIOps` y `UIHideNoticeArgs`; Kotlin: `UiOp.HIDE_NOTICE` y `UiHideNoticeArgs`. Fixtures de petición y respuesta, y entrada en `protocol/fixtures/ui.json`. Aditivo; un commit con Go, Kotlin y fixtures.
+7. **El campo `unreadable` de `UiDump`** (p1-pantalla-oculta): `bool` con `omitempty` en Go, `Boolean?` sin emitir `false` en Kotlin; fixture `app/ui.response@dumpunreadable.json`. Aditivo.
 
-Van en un solo commit (Go, Kotlin y fixtures), como pide §10 del protocolo, y se avisa a tern-51 y a skimmer-32 al integrar.
+Cada cambio fue en su propio commit (Go, Kotlin y fixtures; los de los puntos 6 y 7 en dos commits, uno por cambio), como pide §10 del protocolo, y se avisa a tern-51 y a skimmer-32 al integrar.
 
 ## 13. Decisiones
 

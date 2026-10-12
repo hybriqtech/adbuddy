@@ -356,6 +356,7 @@ Todos los mensajes llevan el sobre `{"v":1,"seq":<n>,"type":"…","ts":"…","pa
 - **Superposición de accesibilidad** (`TYPE_ACCESSIBILITY_OVERLAY`, que no necesita `SYSTEM_ALERT_WINDOW`): marco sutil, aviso *"Agente usando la pantalla · Pausar"* y marcas donde toca.
 - **Aviso al terminar** (`Stop` o inactividad): *"Listo: <primera línea de la respuesta>"*.
 - **Notificaciones solo locales.** Si se corta la conexión, la app lo avisa ("Desconectado del PC") con la causa probable: cambio de Wi-Fi, PC suspendido o depuración desactivada.
+- El aviso se retira un instante mientras `adbuddy screenshot` captura, para no ensuciar la imagen del agente, y vuelve de inmediato (spec `2026-10-12-p1-pantalla-oculta-design.md`).
 
 ## 6. App Android
 

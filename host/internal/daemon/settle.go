@@ -236,7 +236,7 @@ func (d *Daemon) settle(ctx context.Context, in settleIn) (screen *ScreenSettled
 		if d.o.Paused() { // paused while the guard looked
 			return nil, "", PausedMessage, nil
 		}
-		v, how, uf := d.runUI(ctx, bridge.UIOpDump, in.args, nil)
+		v, how, uf := d.runUI(ctx, bridge.UIOpDump, in.args, nil, time.Time{})
 		if uf != nil {
 			if ctx.Err() != nil { // the agent or serve went away during the read
 				return nil, "", "", nil

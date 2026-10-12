@@ -16,6 +16,7 @@ object UiOp {
     const val FOREGROUND = "foreground"
     const val NOTIFICATIONS = "notifications"
     const val NOTICE = "notice"
+    const val HIDE_NOTICE = "hideNotice"
 
     /** Each operation and the serializers of its args and result. */
     val ALL: Map<String, Pair<KSerializer<*>, KSerializer<*>>> = mapOf(
@@ -25,6 +26,7 @@ object UiOp {
         FOREGROUND to (Empty.serializer() to UiForeground.serializer()),
         NOTIFICATIONS to (Empty.serializer() to UiNotifications.serializer()),
         NOTICE to (Empty.serializer() to Empty.serializer()),
+        HIDE_NOTICE to (UiHideNoticeArgs.serializer() to Empty.serializer()),
     )
 }
 
@@ -37,6 +39,7 @@ object UiLimits {
     const val MAX_SET_TEXT = 4096
     const val MAX_PROTECTED_APPS = 1000
     const val MAX_PACKAGE = 255
+    const val MAX_HIDE_NOTICE_MS = 5000
 
     private val packageRe = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
 
@@ -56,6 +59,10 @@ data class UiClickArgs(val id: String? = null, val text: String? = null, val x: 
 @Serializable
 data class UiSetTextArgs(val text: String)
 
+/** hideNotice's args: how long, 1 to MAX_HIDE_NOTICE_MS milliseconds, the notice stays off the screen for a capture by adb; it comes back by itself. */
+@Serializable
+data class UiHideNoticeArgs(val ms: Int)
+
 /** dump's result: the screen as the agent may see it. elements is empty while the phone is locked. */
 @Serializable
 data class UiDump(
@@ -67,6 +74,8 @@ data class UiDump(
     val rotation: Int,
     val truncated: Boolean,
     val elements: List<UiElement> = emptyList(),
+    /** true when an app window gave no content (Android or the app hides it from this service) or there is no window at all; absent otherwise. */
+    val unreadable: Boolean? = null,
 )
 
 /**

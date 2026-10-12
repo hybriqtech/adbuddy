@@ -13,6 +13,7 @@ import org.junit.Test
 import tech.hybriq.adbuddy.bridge.ErrorCode
 import tech.hybriq.adbuddy.bridge.Message
 import tech.hybriq.adbuddy.bridge.Protocol
+import tech.hybriq.adbuddy.bridge.UiLimits
 import tech.hybriq.adbuddy.bridge.UiOp
 import tech.hybriq.adbuddy.bridge.UiRequest
 import tech.hybriq.adbuddy.bridge.UiResponse
@@ -29,6 +30,7 @@ class UiExecutorTest {
         var tapWorks: Boolean = true,
         var afterClick: (() -> Unit)? = null,
         var actingWorks: Boolean = true,
+        var hideWorks: Boolean = true,
     ) : Screen {
         val did = mutableListOf<String>()
         var windowsRead = false
@@ -44,6 +46,10 @@ class UiExecutorTest {
         override fun acting(mark: Box?): Boolean {
             did += "acting $mark"
             return actingWorks
+        }
+        override fun hideNotice(ms: Long): Boolean {
+            did += "hideNotice $ms"
+            return hideWorks
         }
     }
 
@@ -415,6 +421,47 @@ class UiExecutorTest {
         screen = s
         assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.NOTICE))))
         assertFalse(s.did.any { it.startsWith("acting") })
+    }
+
+    @Test fun hideNoticeTakesTheOverlayOffForTheCapture() {
+        val s = FakeScreen()
+        screen = s
+        val r = x.run(req(UiOp.HIDE_NOTICE, obj("ms" to 2000)))
+        assertTrue(r.ok)
+        assertEquals(listOf("hideNotice 2000"), s.did)
+        assertFalse(s.windowsRead)
+    }
+
+    @Test fun hideNoticeFailsWhenTheOverlayCannotBeTakenOff() {
+        val s = FakeScreen(hideWorks = false)
+        screen = s
+        assertEquals(ErrorCode.FAILED, error(x.run(req(UiOp.HIDE_NOTICE, obj("ms" to 2000)))))
+    }
+
+    @Test fun hideNoticeIsRefusedWhilePaused() {
+        paused = true
+        val s = FakeScreen()
+        screen = s
+        assertEquals(ErrorCode.PROTECTED, error(x.run(req(UiOp.HIDE_NOTICE, obj("ms" to 2000)))))
+        assertTrue(s.did.isEmpty())
+    }
+
+    @Test fun hideNoticeNeedsATimeWithinTheLimit() {
+        val s = FakeScreen()
+        screen = s
+        for (ms in listOf(0, -1, UiLimits.MAX_HIDE_NOTICE_MS + 1)) {
+            assertEquals("ms=$ms", ErrorCode.INVALID, error(x.run(req(UiOp.HIDE_NOTICE, obj("ms" to ms)))))
+        }
+        assertEquals(ErrorCode.INVALID, error(x.run(req(UiOp.HIDE_NOTICE))))
+        assertEquals(ErrorCode.INVALID, error(x.run(req(UiOp.HIDE_NOTICE, obj("ms" to 2000, "extra" to 1)))))
+        assertTrue(s.did.isEmpty())
+        assertTrue(x.run(req(UiOp.HIDE_NOTICE, obj("ms" to 1))).ok)
+        assertTrue(x.run(req(UiOp.HIDE_NOTICE, obj("ms" to UiLimits.MAX_HIDE_NOTICE_MS))).ok)
+    }
+
+    @Test fun hideNoticeWithoutTheServiceIsUnavailable() {
+        screen = null
+        assertEquals(ErrorCode.UNAVAILABLE, error(x.run(req(UiOp.HIDE_NOTICE, obj("ms" to 2000)))))
     }
 
     @Test fun neverTwiceTheSameId() {

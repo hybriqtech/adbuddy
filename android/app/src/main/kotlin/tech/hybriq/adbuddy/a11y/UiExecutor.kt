@@ -16,6 +16,7 @@ import tech.hybriq.adbuddy.bridge.UiClickArgs
 import tech.hybriq.adbuddy.bridge.UiClicked
 import tech.hybriq.adbuddy.bridge.UiDumpArgs
 import tech.hybriq.adbuddy.bridge.UiForeground
+import tech.hybriq.adbuddy.bridge.UiHideNoticeArgs
 import tech.hybriq.adbuddy.bridge.UiLimits
 import tech.hybriq.adbuddy.bridge.UiNotifications
 import tech.hybriq.adbuddy.bridge.UiOp
@@ -50,6 +51,14 @@ interface Screen {
 
     /** The agent is acting: show the overlay, with a mark where it touches (null: no mark). false when the notice could not be shown: the agent must not act. */
     fun acting(mark: Box?): Boolean
+
+    /**
+     * The host is about to capture the screen by adb: take the overlay off the
+     * screen for ms at most and wait until it is gone from what is drawn. It
+     * comes back by itself (never while paused), or with the next acting().
+     * false when it could not be taken off.
+     */
+    fun hideNotice(ms: Long): Boolean
 }
 
 /**
@@ -138,6 +147,7 @@ class UiExecutor(
                 UiOp.SET_TEXT -> setText(r, s, args(r, UiSetTextArgs.serializer()) ?: return invalid(r))
                 UiOp.FOREGROUND -> foreground(r, s)
                 UiOp.NOTICE -> if (args(r, Empty.serializer()) == null) invalid(r) else notice(r, s)
+                UiOp.HIDE_NOTICE -> hideNotice(r, s, args(r, UiHideNoticeArgs.serializer()) ?: return invalid(r))
                 else -> fail(r, ErrorCode.UNSUPPORTED, "This version of the ADBuddy app does not handle ${r.op.take(64)}.")
             }
         } catch (e: RuntimeException) {
@@ -150,6 +160,15 @@ class UiExecutor(
         paused() -> pausedNow(r) // acting() is true without drawing while paused: the host must not read then
         s.acting(null) -> ok(r, Empty, Empty.serializer())
         else -> noNoticeToRead(r)
+    }
+
+    /** The host is about to capture the screen by adb: take the notice off the screen for the capture. It reads nothing, so no heads-up check; the pause does count. */
+    private fun hideNotice(r: UiRequest, s: Screen, a: UiHideNoticeArgs): UiResponse = when {
+        a.ms < 1 || a.ms > UiLimits.MAX_HIDE_NOTICE_MS -> invalid(r)
+        paused() -> pausedNow(r)
+        // The host, not the app, decides the pause for a capture: the app learns of a pause only from session.state, and the host re-checks it after hideNotice.
+        s.hideNotice(a.ms.toLong()) -> ok(r, Empty, Empty.serializer())
+        else -> fail(r, ErrorCode.FAILED, "ADBuddy could not take its notice off the screen for the capture.")
     }
 
     /**

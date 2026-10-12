@@ -1,12 +1,8 @@
 name: emulator-app
-# Trust rule: a pull request opened by anyone but the repository owner
-# (Dependabot, other bots, collaborators) never reaches a self-hosted runner;
-# it runs on GitHub-hosted runners whatever the CI_* variables say. See
-# docs/ci-self-hosted.md section 6.
-# Its job is skipped for such pull requests; the owner runs it by hand
-# (workflow_dispatch) after reviewing the diff.
-# Runners come from repository variables (docs/ci-self-hosted.md); with none
-# set, GitHub-hosted runners are used.
+# Runs on a GitHub-hosted runner (docs/ci-self-hosted.md). Its job is skipped for
+# a pull request opened by anyone but the repository owner (Dependabot, other
+# bots, collaborators): the owner runs it by hand (workflow_dispatch) after
+# reviewing the diff.
 
 # The app's tests: its instrumented tests and the host against it (M2.5b), on
 # an android-34 image. The classifier's oracle has its own workflow
@@ -17,8 +13,7 @@ name: emulator-app
 # main: merges to main are fast-forwards of a pull request that already passed
 # it, so main's tree is the one it validated.
 # A required check that a path filter skips stays pending: neither this
-# workflow nor emulator-oracle.yml may be made a required check
-# (docs/ci-self-hosted.md).
+# workflow nor emulator-oracle.yml may be made a required check.
 on:
   pull_request:
     paths: ["host/internal/emutest/**", "host/internal/adb/**", "host/internal/bridge/**", "host/internal/classify/**", "host/internal/confirm/**", "host/internal/daemon/**", "host/internal/device/**", "host/internal/i18n/**", "host/internal/ipc/**", "host/internal/journal/**", "host/internal/pairing/**", "host/internal/pathguard/**", "host/internal/phoneapp/**", "host/internal/precheck/**", "host/internal/procinfo/**", "host/internal/remote/**", "host/internal/safeio/**", "host/internal/screenshot/**", "host/internal/shq/**", "host/internal/uidump/**", "host/go.mod", "host/go.sum", "android/**", "protocol/**", "scripts/emulator.sh", ".github/workflows/emulator-app.yml"]
@@ -37,18 +32,14 @@ concurrency:
 jobs:
   app:
     name: the app on the emulator
-    # Fork pull requests never reach a self-hosted runner.
-    if: ${{ vars.CI_RUNNER_EMULATOR != '"none"' && (vars.CI_RUNNER_EMULATOR == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) }}
-    runs-on: ${{ fromJSON(vars.CI_RUNNER_EMULATOR || '"ubuntu-latest"') }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner }}
+    runs-on: ubuntu-latest
     timeout-minutes: 75
     # Its own AVD, emulator port and adb server, so it never collides with an
     # emulator started by hand with the script's defaults (just names). The
     # ports differ from the oracle's (5590 and 5049) so the two workflows never
-    # share a console or adb port. One emulator fits in RAM at a time: with a
-    # single runner carrying the emulator label the two workflows run one after
-    # the other; with two runners on the same machine they would run together,
-    # and neither the RAM nor the log file adbuddy-emulator.log (shared, in the
-    # temp folder) would hold: see docs/ci-self-hosted.md.
+    # share a console or adb port. Each job has its own runner, so they may run
+    # at the same time.
     # android-34, because android-37 loops in surfaceflinger with every GPU mode
     # tried. Each start (the first one and the restart between the two groups
     # of tests) rewrites the ADBUDDY_* variables of $GITHUB_ENV with the same
@@ -71,8 +62,6 @@ jobs:
     # whatever ANDROID_AVD_HOME says, and the emulator looks under
     # ANDROID_AVD_HOME or $HOME/.android: the step "Point the emulator at the
     # AVD" makes the emulator look where avdmanager wrote it.
-    # adb on Windows loads %USERPROFILE%\.android\adbkey whatever HOME/USERPROFILE/ANDROID_USER_HOME say (measured),
-    # so isolating the environment does not protect the key; see docs/ci-self-hosted.md section 6.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -84,46 +73,40 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           gradle-version: "9.8.0"
-          cache-disabled: ${{ runner.environment != 'github-hosted' }}
       # After setup-java and setup-gradle: on GitHub-hosted runners they put /usr/bin (an older go) first in PATH.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: host/go.mod
-          cache: ${{ runner.environment == 'github-hosted' }}
+          cache: true
           cache-dependency-path: host/go.sum
-      - name: Point the emulator at the AVD (Linux runners)
-        if: runner.os == 'Linux'
+      - name: Point the emulator at the AVD
         run: '[ -z "$XDG_CONFIG_HOME" ] || echo "ANDROID_AVD_HOME=$XDG_CONFIG_HOME/.android/avd" >> "$GITHUB_ENV"'
       - name: Enable KVM
-        if: runner.os == 'Linux'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      # On Windows sdkmanager is sdkmanager.bat.
       - name: Install the emulator and the android-34 system image
         run: |
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" emulator "system-images;android-34;google_apis;x86_64" > /dev/null
       # Built before any emulator starts, so they never share the RAM. No device
       # and no ANDROID_SERIAL here: no connected* task is ever run (Gradle's own
       # adb server is 5037, where a phone may be); the host installs the APKs
       # through the emulator's adb server (internal/emutest).
       # compileSdk = 37: its SDK package is "platforms;android-37.0", as in android.yml.
-      # Kotlin in-process: no Kotlin daemon is left running on a self-hosted runner.
+      # Kotlin in-process: no Kotlin daemon is left running after the build.
       - name: Build the app and its instrumented tests
         working-directory: android
         run: |
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" "platforms;android-37.0" > /dev/null
           gradle --no-daemon -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Clear a leftover emulator of this job
         run: scripts/emulator.sh stop
       # The env of this step and of "Restart the android-34 emulator" is the
       # job's (the restart is the same start).
-      # ADBUDDY_EMU_RAM (plain MB) lowers the guest's RAM; see docs/ci-self-hosted.md.
+      # ADBUDDY_EMU_RAM (plain MB) lowers the guest's RAM; see scripts/emulator.sh.
       - name: Start the android-34 emulator
         id: start34
         shell: bash # with pipefail: a failed start fails this step, not the next one
@@ -164,7 +147,7 @@ jobs:
       # Evidence for a failed start: why the emulator did not boot. The
       # emulator has its own adb server (scripts/emulator.sh).
       - name: Emulator diagnostics
-        if: failure() && runner.os == 'Linux'
+        if: failure()
         env:
           ANDROID_ADB_SERVER_PORT: ${{ env.ADBUDDY_EMU_ADB_PORT }}
         run: |
@@ -177,19 +160,6 @@ jobs:
           "$ADB" devices -l || true
           timeout 20 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" shell getprop | grep -E "boot|init.svc.(surfaceflinger|zygote|system_server)" || true
           timeout 30 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" logcat -d -b crash,system | tail -n 150 || true
-      # The same on Windows, with the job's own adb server (never 5037). The log
-      # is the one of the emulator started last by this job (the restart's).
-      - name: Emulator diagnostics (Windows)
-        if: failure() && runner.os == 'Windows'
-        shell: bash
-        env:
-          ANDROID_ADB_SERVER_PORT: ${{ env.ADBUDDY_EMU_ADB_PORT }}
-        run: |
-          ADB="$ANDROID_HOME/platform-tools/adb.exe"
-          tail -n 200 "${TMPDIR:-/tmp}/adbuddy-emulator.log" || true
-          echo "job AVD: $ADBUDDY_EMU_AVD; running AVD:"
-          timeout 20 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" emu avd name || true
-          "$ADB" devices -l || true
       - name: Stop the emulator
         if: always()
         run: scripts/emulator.sh stop

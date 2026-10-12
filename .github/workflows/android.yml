@@ -1,13 +1,8 @@
 name: android
-# Trust rule: a pull request opened by anyone but the repository owner
-# (Dependabot, other bots, collaborators) never reaches a self-hosted runner;
-# it runs on GitHub-hosted runners whatever the CI_* variables say. See
-# docs/ci-self-hosted.md section 6.
-# Runners come from repository variables (docs/ci-self-hosted.md); with none
-# set, GitHub-hosted runners are used.
+# Runs on a GitHub-hosted runner (docs/ci-self-hosted.md).
 
 # Like host.yml: only on pull requests and pushes to main, never on every
-# branch push. One runner (Linux by default; Windows self-hosted works too).
+# branch push. One runner (Linux).
 on:
   pull_request:
     paths: ["android/**", "protocol/**", ".github/workflows/android.yml"]
@@ -27,9 +22,7 @@ concurrency:
 
 jobs:
   unit:
-    # Fork pull requests never reach a self-hosted runner.
-    if: ${{ vars.CI_RUNNER_ANDROID != '"none"' && (vars.CI_RUNNER_ANDROID == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && vars.CI_RUNNER_ANDROID || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
       run:
@@ -46,13 +39,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           gradle-version: "9.8.0"
-          cache-disabled: ${{ runner.environment != 'github-hosted' }}
       # compileSdk = 37 (android/app/build.gradle.kts); its SDK package is "platforms;android-37.0".
-      # On Windows sdkmanager is sdkmanager.bat.
       - name: Install Android SDK platform 37
         run: |
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" "platforms;android-37.0"
       - name: "Unit tests, debug build, lint, and the instrumented tests compile (emulator-app.yml runs them)"
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest

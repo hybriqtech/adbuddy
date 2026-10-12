@@ -224,11 +224,11 @@ La salida del PTY es un flujo con posición propia, fuera del búfer de eventos:
 | `ui.response` | app → host | – | `id`, `ok` y `result` (si `ok`) o `error {code, text}` (si no) |
 
 - **Es un flujo, no un evento:** una petición de la pantalla nunca se reenvía tras reconectar. La app descarta las que ya han caducado (`expiresAt`, juzgado con el reloj del host como en M2) y no ejecuta dos veces el mismo `id`.
-- **Operaciones de partida:** `dump`, `click`, `setText`, `foreground`, `notifications` y `notice` (§6 de la v1; `notice` solo muestra la superposición, la pide el host antes de leer la pantalla por adb). Esta spec fija solo el sobre de cada una:
+- **Operaciones de partida:** `dump`, `click`, `setText`, `foreground`, `notifications`, `notice` y `hideNotice` (§6 de la v1; `notice` solo muestra la superposición, la pide el host antes de leer la pantalla por adb; `hideNotice` la retira un instante durante `adbuddy screenshot`, p1-pantalla-oculta). Esta spec fija solo el sobre de cada una:
   - `click` admite `args` `{id}`, `{text}` o `{x, y}`;
   - `setText` admite `{text}`;
   - las demás van sin `args`;
-  - `dump` devuelve `{locked, package, elements[]}`.
+  - `dump` devuelve `{locked, package, elements[]}` y, aditivo, `unreadable` (p1-pantalla-oculta).
 
   Los campos de cada elemento, los gestos y las operaciones nuevas los fija la spec de M5. M5 puede ampliar `ui.*` (operaciones, `args`, `result`) añadiendo sus fixtures, sin tocar el resto del protocolo.
 
