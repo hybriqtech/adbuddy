@@ -53,12 +53,12 @@ Veredicto: con reservas. Hallazgos y resolución:
 |---|---|---|---|
 | T1 protocolo `hideNotice` | complete | 6b956193 | review opus limpia; minor: T2 debe rechazar ms fuera de rango |
 | T2 app `hideNotice` | complete | 54ef8924 | review opus limpia; 4 minors diferidos |
-| T3 host `screenshot` con velo | ronda 1 de fix | d58c5b93 | Important: ancla de la guarda |
-| T4 emulador | pendiente | | |
-| T5 protocolo `unreadable` | pendiente | | |
-| T6 nota de `screen` | pendiente | | |
-| T7 log de diagnóstico | pendiente | | |
-| T8 docs | pendiente | | |
+| T3 host `screenshot` con velo | complete | d58c5b93, 43607c48 | 1 ronda |
+| T4 emulador | complete | 4c651c77 | review opus limpia |
+| T5 protocolo `unreadable` | complete | e3584807 | review opus limpia |
+| T6 nota de `screen` | complete | a051b70d | review limpia |
+| T7 log de diagnóstico | complete | 75120140 | review opus limpia |
+| T8 docs | complete | a6e6ac04, c66bd026 | 1 ronda |
 
 ## Mutaciones
 
@@ -94,3 +94,18 @@ Task 2: complete (commits c7be7fa9..54ef8924, review clean)
 Task 2: minor (deferred): (1) una pausa durante la espera de 400 ms no se vuelve a comprobar en la app (`hideNotice` responde ok; el host la ve antes por el PAUSE y recomprueba): considerar `pausedNow` tras `s.hideNotice` o en `takeOff` (Overlay.kt:162-165, UiExecutor.kt:357-361) — decidir en la revisión final; (2) la espera de 400 ms se calcula con un timestamp viejo, `takeOff` debería recalcular (Overlay.kt:163); (3) `catch (e: Exception)` traga InterruptedException sin reponer el flag (Overlay.kt:168-173, igual que `show()`); (4) T4 debe cubrir servicio activo con overlay aún sin crear (`?: true`).
 Task 3: review 1 — Important: la comprobación de guarda tras un velo lento se medía desde el inicio del velo, no desde que la guarda dijo sí (un `notice` lento + `hideNotice` rápido dejaba pasar una lectura de >1,5 s). Minors: restore() también en pausa (se arregla), atomic.Bool en el test (se arregla); diferidos: ctx cancelado reportado como UI_BLOCKED (ui.go:653), línea larga de ayuda en en.toml/es.toml.
 Ruling: aceptado el Important 1 aunque la spec dice «si retirar el aviso tardó más de baselineSlack» — es el propósito de seguridad del paso; ancla = el instante de la guarda — cuesta: un dumpsys extra más a menudo (con los 400 ms casi cada captura) — se vuelve a la medida desde el velo.
+Task 3: fix round 1/5 (3 addressed, 0 open — ancla de la guarda, restore solo sin pausa, atomic.Bool; commits d58c5b93..43607c48)
+Task 3: complete (commits c7be7fa9..43607c48, review clean tras 1 ronda; mutación de la ancla apuntada en task-3-report.md)
+
+Task 4: complete (commits 43607c48..4c651c77, review clean). Emulador parado y lock liberado (verificado por el controlador).
+Mutaciones T4 (detalle y salidas en task-4-report.md y t4-*.txt): (a) quitar el velo -> rojo en ambos tests de captura; (b) quitar `postDelayed(restorer)` -> rojo en TestTheHiddenNoticeComesBackByItself; (c) quitar `if (!isPaused())` -> rojo (caso de pausa); (e) MIN_SHOWN_MS=0 -> rojo (mínimo; 76 ms); (f2) quitar las tres comprobaciones de pausa del click -> rojo ({"clicked":true} y overlay arriba). (d) FRAMES_AFTER_HIDE=0 y variantes más fuertes (d2, d3: sin ninguna espera) NO se ponen en rojo en el emulador: el trayecto hasta screencap dura más que el redibujado; no se promete que los 3 fotogramas estén probados.
+Ruling: (d) va a «Validaciones manuales pendientes» (Pixel/Android 17), no se declara probado — por qué: honestidad sobre lo medido — qué cuesta: en un móvil más lento 3 fotogramas podrían ser pocos; la captura saldría con el aviso y no se sabría (noticeInImage sería false).
+Task 4: minor (deferred): (1) TestTheNoticeWhenTheHostReadsTheScreen ya no afirma que screenshot subió el aviso (notice_test.go:198-201): cubierto por el test nuevo; (2) margen de ~100 ms en el dwell (>=300 ms), (3) comparaciones de píxeles estrictas frente a `plain` tomada antes; (4) alternativa automatizable a (d): test instrumentado de `afterFrames(n)` que cuente doFrame — considerar en la revisión final.
+
+Task 5: complete (commits 4c651c77..e3584807, review clean). Minor (deferred): un app window con root null durante una transición puede marcar unreadable un instante (la nota dice «probar una vez más»); verificar en dispositivo.
+
+Task 6: complete (commits e3584807..a051b70d, review clean). Ruling: la nota se reformuló respecto al plan para no prometer causa («possibly because the app hides its content from accessibility services, or because the screen is still changing») — pedido explícito del líder — cuesta: menos precisa. Minor (deferred): el comentario de doc de `printScreen` quedó huérfano por la constante nueva insertada entre él y la función (helpers.go ~179-190); un test podría fijar «no promete causa».
+Task 7: complete (commits e3584807..75120140, review opus limpia). Minors: la condición del log dispara también con ventanas de sistema sin contenido (distinto de `unreadable`, previsto por la spec §5); carrera benigna de `lastWindowsLog`; comentario largo.
+Task 8: review 1 — Important I1 (hideNotice fuera de rango es `invalid`, no `failed`), I2 (con --json no hay nota por stderr), Minors M1-M4 (regla de unreadable, frase de safety.md sin causa, modelo del móvil, lista de menores diferidos): ronda de arreglos 1 en curso.
+Task 8: fix round 1/5 (6 addressed, 0 open — I1, I2, M1-M4; commits a6e6ac04..c66bd026)
+Task 8: complete (commits 4c651c77..c66bd026 salvo e3584807/a051b70d/75120140 de T5-T7, review clean tras 1 ronda). Observación fuera de alcance: spec P1 §4 (design.md:52) afirma «porque Android o la app ocultan su contenido» (causa), cuando la nota real no la promete: alinear en el fix final.
