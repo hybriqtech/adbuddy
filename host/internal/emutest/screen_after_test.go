@@ -72,8 +72,8 @@ func (e *emu) restoreAnimationScaleAtCleanup(t *testing.T, key string) {
 }
 
 // describeScreen is what a log line says of the screen a wait ended with:
-// whether it settled, whether it changed, and how many elements are in an app
-// or dialog window (none: only the system's bars, a transition between two).
+// whether it settled, whether it changed, and how many elements are outside the
+// system windows (none: only the system's bars, a transition between two screens).
 func describeScreen(s *daemon.ScreenSettled) string {
 	if s == nil {
 		return ", no screen"
@@ -88,7 +88,7 @@ func describeScreen(s *daemon.ScreenSettled) string {
 			inApp++
 		}
 	}
-	return fmt.Sprintf(", settled %v, changed %s, %d elements (%d in an app window)", s.Settled, changed, len(s.Elements), inApp)
+	return fmt.Sprintf(", settled %v, changed %s, %d elements (%d outside the system windows)", s.Settled, changed, len(s.Elements), inApp)
 }
 
 func screenHas(d bridge.UIDump, text string) bool {
@@ -175,7 +175,7 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 	// settled=false, "still changing", and the read it carries is whichever
 	// frame of the transition the cap fell on: on a slow runner the activity
 	// starts late and that frame can still be the old screen or have no app
-	// window yet (one run in five failed on GitHub's runners asking for the new
+	// window yet (it failed on GitHub's runners asking for the new
 	// screen here). That outcome is the documented one, so only a settled=true
 	// read is held to being the new screen.
 	t.Run("a slow transition never settles on the old screen nor taps twice", func(t *testing.T) {
