@@ -645,9 +645,17 @@ func TestTheListenerContent(t *testing.T) {
 	if list := e.shell(t, "cmd notification list"); strings.Contains(list, "|"+phoneapp.Package+"|74") {
 		t.Errorf("notifications of the test are still posted after it:\n%s", list)
 	}
+	// am force-stop returns before the notification service has cancelled the
+	// package's notifications: it does so when it handles the package-restart
+	// broadcast, on its own handler (measured on the emulator: 0.05-1 s, and
+	// longer on a loaded runner). So the fillers are waited for, not read once.
 	e.shell(t, "am force-stop com.android.shell")
-	if list := e.shell(t, "cmd notification list"); strings.Contains(list, "t6fill") {
-		t.Errorf("the host's fillers are still posted after force-stop of com.android.shell:\n%s", list)
+	var list string
+	if !poll(30*time.Second, func() bool {
+		list = e.shell(t, "cmd notification list")
+		return !strings.Contains(list, "t6fill")
+	}) {
+		t.Errorf("the host's fillers are still posted 30 s after force-stop of com.android.shell:\n%s", list)
 	}
 }
 

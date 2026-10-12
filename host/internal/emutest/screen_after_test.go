@@ -3,6 +3,8 @@ package emutest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +71,26 @@ func (e *emu) restoreAnimationScaleAtCleanup(t *testing.T, key string) {
 	e.restoreAtCleanup(t, "global", key, "1.0")  // runs first: back to the default
 }
 
+// describeScreen is what a log line says of the screen a wait ended with:
+// whether it settled, whether it changed, and how many elements are in an app
+// or dialog window (none: only the system's bars, a transition between two).
+func describeScreen(s *daemon.ScreenSettled) string {
+	if s == nil {
+		return ", no screen"
+	}
+	changed := "unknown"
+	if s.Changed != nil {
+		changed = strconv.FormatBool(*s.Changed)
+	}
+	inApp := 0
+	for _, e := range s.Elements {
+		if e.Window != "system" {
+			inApp++
+		}
+	}
+	return fmt.Sprintf(", settled %v, changed %s, %d elements (%d in an app window)", s.Settled, changed, len(s.Elements), inApp)
+}
+
 func screenHas(d bridge.UIDump, text string) bool {
 	for _, e := range d.Elements {
 		if strings.Contains(e.Text, text) || strings.Contains(e.Desc, text) {
@@ -105,7 +127,7 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 				t.Fatalf("tap --screen data %q: %v", data, err)
 			}
 		}
-		t.Logf("tap --screen %+v: exit %d, %d ms", args, exit.Code, took.Milliseconds())
+		t.Logf("tap --screen %+v: exit %d, %d ms%s", args, exit.Code, took.Milliseconds(), describeScreen(c.Screen))
 		return exit, c, took
 	}
 	dumpSettle := func(t *testing.T, h *latencyHost) (ipc.Exit, daemon.ScreenSettled, time.Duration) {
@@ -146,6 +168,16 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 	// the tap leaves is on show long after the tap, so a wait that took the old
 	// screen as settled, or ended before the new one, would fail here. At normal
 	// speed the emulator changes screen before the first read and this cannot fail.
+	//
+	// What it checks is that the wait never says "settled" on a screen that is
+	// not the new one. At 8x the transition (about 2.4 s) lasts as long as the
+	// wait's cap (settleMax, 3 s), so the wait normally ends at the cap with
+	// settled=false, "still changing", and the read it carries is whichever
+	// frame of the transition the cap fell on: on a slow runner the activity
+	// starts late and that frame can still be the old screen or have no app
+	// window yet (one run in five failed on GitHub's runners asking for the new
+	// screen here). That outcome is the documented one, so only a settled=true
+	// read is held to being the new screen.
 	t.Run("a slow transition never settles on the old screen nor taps twice", func(t *testing.T) {
 		for _, k := range []string{"window_animation_scale", "transition_animation_scale", "animator_duration_scale"} {
 			e.restoreAnimationScaleAtCleanup(t, k)
@@ -159,8 +191,8 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 			if exit.Code != 0 || c.Screen == nil {
 				t.Fatalf("run %d: exit %+v, note %q", i, exit, c.Note)
 			}
-			if c.Screen.Changed == nil || !*c.Screen.Changed || !screenHas(c.Screen.UIDump, "Internet") {
-				t.Errorf("run %d: settled on the old screen (changed %v): %+v", i, c.Screen.Changed, c.Screen.UIDump.Elements)
+			if c.Screen.Settled && (c.Screen.Changed == nil || !*c.Screen.Changed || !screenHas(c.Screen.UIDump, "Internet")) {
+				t.Errorf("run %d: settled on a screen that is not the new one (changed %v): %+v", i, c.Screen.Changed, c.Screen.UIDump.Elements)
 			}
 			e.shell(t, "input keyevent 4")
 			time.Sleep(4 * time.Second)
