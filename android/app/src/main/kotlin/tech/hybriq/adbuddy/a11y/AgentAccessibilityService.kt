@@ -29,7 +29,9 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
 
     override fun onServiceConnected() {
         Log.i(TAG, "connected")
-        overlay = Overlay(this) { (application as AdbuddyApp).bridge.pause(true) }
+        overlay = Overlay(this, isPaused = { (application as AdbuddyApp).bridge.state.value.sessionState.paused }) {
+            (application as AdbuddyApp).bridge.pause(true)
+        }
         current = this
     }
 
@@ -180,6 +182,8 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
         if (app.bridge.state.value.sessionState.paused) return true // the executor refuses while paused
         return overlay?.show(mark) ?: false
     }
+
+    override fun hideNotice(ms: Long): Boolean = overlay?.hideFor(ms) ?: true // no overlay object: nothing on the screen
 
     companion object {
         private const val TAG = "ADBuddyA11y"
