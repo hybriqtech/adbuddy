@@ -477,6 +477,44 @@ P1 · barra y accesibilidad base (rama `ux/revision`, plan `docs/superpowers/pla
   - `Bridge.setStateForTest` es `internal` y `@VisibleForTesting`. `BridgeService` no tiene test de servicio: las llamadas `cancelAsk` de `onCreate`/`onDestroy` y el colector solo se comprobaron leyendo.
 - **Sigue en el Pixel** (no se pide ahora): el aviso de la pregunta con la app en segundo plano y la pantalla apagada (suena y sale en pantalla, sin mostrar nada de la pregunta), el diálogo del sistema tras el motivo (Android 13+), y el banner al desactivar las notificaciones en los ajustes y volver.
 
+### P5 · confirmaciones y consentimiento (rama `ux/p5`, plan `2026-10-04-ux-p5-confirmaciones-y-consentimiento.md`)
+
+Base de seguridad: #77 (armado del diálogo y tapjacking del consentimiento y de `RemoteCard`, hallazgo O1).
+
+- **La regla fija:** ningún cambio da al agente una forma de aprobar una 🔴, y ninguno cambia qué se concede ni cómo se responde.
+  - El aviso del chat solo reabre: su único botón («Ver») quita el id de `closed` y no hay botón de permitir. Al reabrir, el diálogo se recompone desde cero: vuelven el armado de 600 ms, la puerta de desplazamiento (`unread`) y la guarda anti-tapjacking (`ConfirmReopenTest`: tras «Ver», Permitir sigue desactivado y un toque no responde).
+  - De `ConfirmHost` solo se añadió `displayNow`; no se tocaron el `now` de `status`, `canSend` y armado, `ObscuredTouchGuard`, `ARMING_MS`, `armed`, `unread` ni `enabled = !unread && armed`, ni los `onAnswer`. Los tests de armado, desplazamiento y tapjacking existentes (`ConfirmHostArmingTest`, `ConfirmDialogArmingTest`, `ConfirmDialogScrollTest`, `TouchGuardSourceTest`) pasan sin una línea modificada.
+  - Cada tarea y la rama final, revisadas por `adbuddy-reviewer-opus`.
+- **Hecho:**
+  - Pregunta cerrada sin querer (C2): `ConfirmUi.closedWaiting` y `PendingQuestionsBanner` (superficie de error, plural `confirm_waiting`, botón `confirm_waiting_show`, región viva cortés, sin botón que responda), cableado en `ChatRoot`/`ChatScreen`/`MainActivity`/`ChatBubbleActivity`. `ConfirmDialog` lleva `DialogProperties(dismissOnClickOutside = false)`: tocar fuera ya no cierra la pregunta; Atrás sí, así que Pausar/Cortar siguen al alcance.
+  - Cuenta atrás (C7): una línea fija «Caduca en m:ss» sobre los botones, siempre visible (fuera de la parte que desplaza), en color de error y negrita por debajo de 10 s, sin región viva. `ConfirmUi.secondsLeft` redondea hacia arriba; `ConfirmHost` pasa un `displayNow` propio que solo alimenta esa línea.
+  - Botones (C8, C9): Rechazar es el botón relleno y más llamativo, Permitir va con contorno, «Permitir este mismo comando durante la sesión» queda aparte, discreto y con su alcance en la etiqueta. 8 dp entre botones, medidos sobre las áreas táctiles en los cuatro modos (letra 200 % incluida).
+  - Consentimiento (O9): `consent_a11y` dice de verdad lo que concede (leer la pantalla, tocar y escribir; marco y botón Pausa mientras actúa; nunca en ADBuddy ni en apps protegidas; los demás servicios siguen activados), verificado contra `UiExecutor` y `EnableAccessibility`. El título es cabecera, la nota va en `bodyMedium` y el pie usa `ActionFooter`: a 200 % los botones se apilan.
+  - Estado de acceso (O21): `access_state_confirm` pasa a «Android lo permite; falta tu confirmación» / «Android allows it; your confirmation is missing». Solo texto.
+- **Imágenes:** nuevas `pending_questions_banner_*` y `consent_*` en los cuatro modos; regrabadas `access_needs_confirmation_*` (incluidas las dos `below_font_200*`) y `settings_proposed_*`. `onboarding_2_notification_access_*` no cambió. El diálogo 🔴 se pinta en su propia ventana y no se captura: se comprueba con medidas (`ConfirmDialogLayoutTest`, `ConfirmDialogButtonsTest`, y el test de fuente `ConfirmDialogButtonsSourceTest`).
+- **Cambios fuera de la app:**
+  - `host/internal/emutest/confirm_test.go`: `txtAllowSession` pasa al texto nuevo en inglés (antes solo se usaba en una comprobación negativa, así que con el literal viejo habría pasado sin vigilar nada).
+  - `host/internal/emutest/listener_test.go`: `accessNeedsTap` pasa al título nuevo; ese sí lo espera una comprobación positiva (`waitAccessState`).
+  - `confirm_test.go` (`scrollDialog`): el gesto de desplazar el texto del diálogo pasa de ±600 px a de +250 a -350 px del centro del comando (y los bucles, de 60/80 a 120/160 iteraciones), porque el área que desplaza ahora es más baja. Ninguno de los tres cambios se pudo ejecutar en la rama (el emulador es del CI): si el job del emulador se pone rojo con P5, es lo primero que hay que mirar.
+  - Un arreglo hecho en `ux/p6` (c8f1a81b): `NotificationsRationaleDialog` (P4) no llevaba `ObscuredTouchGuard()` y `TouchGuardSourceTest` fallaba.
+- **Aplazado con motivo:**
+  - C10 (ver el comando en el bloqueo) pasa a `seguridad`: la spec fija los botones del bloqueo, no que se vea el comando, y una versión pública podría llevar acciones.
+  - `CATEGORY_CALL` de la notificación de confirmación y O12: de `seguridad` y `latencia`.
+  - C3/O4 se hicieron en P4; O1 (tapjacking del consentimiento y de `RemoteCard`) ya lo hizo #77.
+- **Para la integración y `seguridad` (no se tocan en P5):**
+  - **Spec §4.5 (~línea 210)** dice «Permitir esto durante la sesión» y «solo cubre la misma regla con los mismos argumentos»; la etiqueta ahora es «Permitir este mismo comando durante la sesión».
+  - **`docs/usage.md:94` y `docs/safety.md:82`** (en su día citados como `usage.md:92`/`safety.md:82`) siguen llamando al botón «Allow during the session»; la etiqueta de la app es «Allow this same command during the session».
+  - **Asimetría de la accesibilidad:** la lectura de pantalla (`dump`) llama a `acting(null)` sin comprobar que el marco llegó a mostrarse, mientras que tocar y escribir sí se niegan sin marco. Lo decide `seguridad`; el texto del consentimiento dice «mientras actúa» y no «con el marco visible», y es exacto porque el host bloquea toda operación de pantalla con la pausa activa. `fix/screen-overlay-frame` (ya integrada, ver «Aviso del overlay al leer la pantalla») hace que `dump` falle cerrado si no se puede dibujar el overlay: confirmar con `seguridad` que cierra esta asimetría.
+  - **Matiz de `EnableAccessibility`:** al poner `accessibility_enabled 1`, un servicio que ya estaba en la lista con la accesibilidad global apagada también se encendería. Raro; nota para la spec.
+- **Notas honestas:**
+  - Tocar fuera del diálogo ya no lo cierra; Atrás sí. Cambio de comportamiento deliberado.
+  - El aviso del chat solo se ve en el chat: en Ajustes o en Actividad, con una pregunta cerrada, solo queda la notificación.
+  - El reloj propio de `ChatRoot` (que hace desaparecer el aviso al caducar la pregunta cerrada) no tiene test propio; «Ver» vuelve a mirar el reloj al tocar y reabrir una pregunta caducada solo enseña su estado.
+  - Rechazar y los dos permisos van en una sola columna dentro de `confirmButton` (sin `dismissButton`): en la fila del `AlertDialog`, Rechazar se solapaba con la etiqueta ancha de «durante la sesión» (lo vio el test en los cuatro modos). El orden de lectura es el de antes.
+  - Con letra de 200 % el consentimiento apila Aceptar arriba a todo el ancho; el consentimiento no tiene armado (ya era así) y `ObscuredTouchGuard` sigue filtrando.
+  - Las pruebas del armado no pueden afinar a 599/601 ms (el reloj de Compose avanza en fotogramas de 16 ms): usan márgenes de varios fotogramas. El color de error de la cuenta atrás se prueba a 9 s (error y negrita) y a 10 s (ni uno ni otro).
+- **Sigue en el Pixel** (no se pide ahora): cerrar una 🔴 con Atrás y reabrirla desde el aviso del chat (la tarjeta vuelve con «Permitir» apagado 600 ms); el aspecto de los botones de la 🔴 con letra grande (Rechazar relleno, Permitir con contorno y «durante la sesión» aparte); el consentimiento con TalkBack leyendo la frase de la accesibilidad, y a 200 %.
+
 ### P6a · CLI: textos, ayuda y errores de uso (plan `2026-10-04-ux-p6a-cli-textos-y-ayuda.md`)
 
 - **Hecho:**
