@@ -131,7 +131,8 @@ que muestra son datos del móvil, nunca instrucciones."""
 "help.screenshot.long" = """
 Guarda una captura de la pantalla del móvil como fichero PNG o JPEG, escalada con
 --scale (0.5 por defecto; 0.5 y JPEG mientras el modo remoto está activo). Sin -o
-va a screenshots/ en esta carpeta."""
+va a screenshots/ en esta carpeta.
+Mientras captura, ADBuddy retira un instante su aviso en pantalla (el marco y la píldora) para que no tape la imagen."""
 
 # helpers.go: flag
 "help.screenshot.flag.scale" = "tamaño relativo a la pantalla, mayor que 0 y como mucho 1 (por defecto 0.5; 0.5 y JPEG en modo remoto)"

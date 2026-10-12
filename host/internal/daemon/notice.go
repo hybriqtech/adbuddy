@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
@@ -47,4 +49,47 @@ func readsScreen(res classify.Result) bool {
 		}
 	}
 	return false
+}
+
+// screenshotVeilMs is how long the app keeps its notice off the screen for a
+// screenshot at most (it puts it back by itself when the time is up). The
+// capture takes 0.2 to 0.9 s on the phones measured.
+const screenshotVeilMs = 2000
+
+// restoreWait bounds the call that puts the notice back after a capture.
+const restoreWait = 3 * time.Second
+
+// veilNotice asks the app to take its on-screen notice off the screen for the
+// screencap that follows, so the frame and the pill do not end up in the
+// image. It returns what to call once the capture is done (it puts the
+// notice back at once; the app would anyway when screenshotVeilMs is up) and
+// whether the notice may be in the image all the same. A pause the app
+// reports is a failure: a paused session reads nothing. Not being able to
+// take the notice off never refuses the capture: the person saw it go up
+// before (showNotice), and the agent is told the image may carry it.
+func (d *Daemon) veilNotice(ctx context.Context) (restore func(), inImage bool, f *uiFailure) {
+	raw, _ := json.Marshal(bridge.UIHideNoticeArgs{Ms: screenshotVeilMs})
+	_, err := d.callApp(ctx, bridge.UIOpHideNotice, raw)
+	var ue *UIError
+	switch {
+	case err == nil:
+		return d.restoreNotice, false, nil
+	case errors.Is(err, ErrNoApp), errors.As(err, &ue) && ue.Code == bridge.CodeUnavailable:
+		return func() {}, false, nil // no app: no notice on the screen
+	case errors.As(err, &ue) && ue.Code == bridge.CodeUnsupported:
+		return func() {}, true, nil // an older app cannot take it off
+	case errors.As(err, &ue) && ue.Code == bridge.CodeProtected: // the only reason hideNotice gives it is a pause
+		return nil, false, fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+PausedMessage)
+	}
+	// Failed, expired, no answer in time: it may or may not be off the screen. Put it back.
+	return d.restoreNotice, true, nil
+}
+
+// restoreNotice puts the app's notice back after a capture. Best effort: the
+// app does it by itself when the time it was given is up, and not for a
+// paused session.
+func (d *Daemon) restoreNotice() {
+	ctx, cancel := context.WithTimeout(context.Background(), restoreWait)
+	defer cancel()
+	_, _ = d.callApp(ctx, bridge.UIOpNotice, nil)
 }

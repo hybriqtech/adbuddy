@@ -43,8 +43,9 @@ func TestScreenshotAsksTheAppForTheNoticeFirst(t *testing.T) {
 	if _, exit := e.helper(t, OpScreenshot, helperArgs(OpScreenshot)); exit.Code != 0 {
 		t.Fatalf("exit %+v", exit)
 	}
-	if len(order) != 1 || strings.Contains(order[0], "screencap") {
-		t.Fatalf("the notice must come before screencap: %q", order)
+	// The first notice comes before screencap, the second (the notice put back) after it.
+	if len(order) != 2 || strings.Contains(order[0], "screencap") || !strings.Contains(order[1], "screencap") {
+		t.Fatalf("the notice must come before screencap and again after it: %q", order)
 	}
 	if r := ranOnPhone(e); len(r) != 1 || r[0] != "exec-out screencap -p" {
 		t.Fatalf("adb ran %q", r)

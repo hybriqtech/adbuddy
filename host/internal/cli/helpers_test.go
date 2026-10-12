@@ -17,6 +17,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // helperDaemon answers the helpers as serve would: answer gets each request
@@ -699,4 +700,62 @@ func TestTapTypeJSONWithoutScreenIsUnchanged(t *testing.T) {
 			t.Errorf("%v: exit %d %q, want data %s", c.args, code, out, want)
 		}
 	}
+}
+
+// The notice that could not be taken off the screen is in the image: the agent is told.
+func TestScreenshotSaysWhenTheNoticeIsInTheImage(t *testing.T) {
+	img := []byte("\x89PNG fake bytes")
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_, _ = c.Stdout().Write(img)
+		_ = c.Data(daemon.ScreenshotResult{Format: "png", Bytes: len(img), NoticeInImage: true})
+		return ipc.Exit{}
+	})
+	t.Chdir(t.TempDir())
+	out, errOut, code := runHelper(t, "screenshot")
+	if code != 0 || strings.Contains(out, "notice") || !strings.Contains(errOut, "on-screen notice") || !strings.Contains(errOut, "ignore it") {
+		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	out, _, code = runHelper(t, "screenshot", "-o", "s.png", "--json")
+	if code != 0 || !strings.Contains(out, `"noticeInImage":true`) {
+		t.Fatalf("json: %d %q", code, out)
+	}
+}
+
+func TestScreenshotWithoutNoticeInTheImageSaysNothing(t *testing.T) {
+	img := []byte("\x89PNG fake bytes")
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_, _ = c.Stdout().Write(img)
+		_ = c.Data(daemon.ScreenshotResult{Format: "png", Bytes: len(img)})
+		return ipc.Exit{}
+	})
+	t.Chdir(t.TempDir())
+	out, errOut, code := runHelper(t, "screenshot")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	out, _, code = runHelper(t, "screenshot", "-o", "s.png", "--json")
+	if code != 0 || strings.Contains(out, "noticeInImage") {
+		t.Fatalf("json: %d %q", code, out)
+	}
+}
+
+// hideNotice is for screenshot only: no command of the CLI, nor any of their
+// subcommands or flags, exposes it to the agent.
+func TestNoCommandExposesHideNotice(t *testing.T) {
+	app := &App{Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, Getenv: os.Getenv}
+	var walk func(c *cobra.Command)
+	walk = func(c *cobra.Command) {
+		names := []string{c.Name()}
+		names = append(names, c.Aliases...)
+		c.Flags().VisitAll(func(f *pflag.Flag) { names = append(names, f.Name) })
+		for _, n := range names {
+			if strings.Contains(strings.ToLower(n), "hidenotice") || strings.Contains(strings.ToLower(n), "hide-notice") {
+				t.Errorf("%s exposes %q", c.CommandPath(), n)
+			}
+		}
+		for _, s := range c.Commands() {
+			walk(s)
+		}
+	}
+	walk(NewRoot(app))
 }

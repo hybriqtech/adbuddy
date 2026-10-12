@@ -53,6 +53,7 @@ func (e *env) withApp(protected ...string) *fakeApp {
 	a := &fakeApp{results: map[string]any{
 		bridge.UIOpForeground: bridge.UIForeground{Package: "com.android.settings", Activity: "com.android.settings.Settings"},
 		bridge.UIOpNotice:     bridge.Empty{}, // like the real app
+		bridge.UIOpHideNotice: bridge.Empty{}, // like the real app
 	}, errs: map[string]error{}}
 	e.d.o.UI = a.ui
 	e.d.o.Protected = func(pkg string) bool {

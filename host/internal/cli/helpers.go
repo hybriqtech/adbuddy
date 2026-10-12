@@ -121,6 +121,11 @@ func newScreenCmd(app *App) *cobra.Command {
 	return cmd
 }
 
+// noticeInImage is what the agent reads on stderr when ADBuddy's on-screen
+// notice could not be taken off the screen for a screenshot. Fixed English,
+// for the agent.
+const noticeInImage = "(ADBuddy's on-screen notice, a thin frame round the screen and a pill near the top, may be in this image because it could not be taken off the screen for the capture: ignore it)"
+
 // stillChanging is what the agent reads when the screen did not settle in time.
 const stillChanging = "(the screen was still changing: run adbuddy screen again if you need it steady)"
 
@@ -459,8 +464,15 @@ func newScreenshotCmd(app *App) *cobra.Command {
 					return NewError("WRITE_FAILED", err.Error(), "")
 				}
 			}
+			if r.NoticeInImage && !app.JSON {
+				fmt.Fprintln(app.Stderr, noticeInImage)
+			}
 			if app.JSON {
-				return WriteData(app.Stdout, map[string]any{"path": out, "format": r.Format, "bytes": img.Len()})
+				data := map[string]any{"path": out, "format": r.Format, "bytes": img.Len()}
+				if r.NoticeInImage {
+					data["noticeInImage"] = true
+				}
+				return WriteData(app.Stdout, data)
 			}
 			fmt.Fprintln(app.Stdout, out)
 			return nil
