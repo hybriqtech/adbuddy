@@ -697,7 +697,7 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 
 ## Dependabot (plan `docs/superpowers/plans/2026-10-03-adbuddy-dependabot.md`)
 
-- **Hecho (hasta 2026-10-12; el reparto por runners propios desapareció con ellos, ver la nota de «CI y runners»):** `dependabot.yml` (actions, gomod, gradle), y los workflows mandan a los PR de autores que no son el propietario a runners de GitHub (lista blanca por autor; `scripts/check-ci-runner-rules.py` comprueba la tabla). Cierra A5-8. Regla y proceso en `docs/ci-self-hosted.md` §6.
+- **Hecho (hasta 2026-10-12; el reparto por runners propios desapareció con ellos, ver la nota de «CI y runners»):** `dependabot.yml` (actions, gomod, gradle), y los workflows mandan a los PR de autores que no son el propietario a runners de GitHub (lista blanca por autor; `scripts/check-ci-runner-rules.py` comprueba la tabla). Cierra A5-8. Regla y proceso en `docs/ci-self-hosted.md` §6 (esa página ya no tiene §6: ver la nota de «CI y runners»).
 - **No comprobado (lo confirma el primer PR de Dependabot):**
   - Con el token de `gh` actual (sin `admin:repo_hook`) no se puede consultar `security_and_analysis`: no se sabe qué más está activo en el repositorio.
   - Cómo trata Dependabot las acciones fijadas por SHA con comentario `# vX` (se espera: sube el SHA y el comentario y mantiene el fijado).
@@ -751,8 +751,8 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 
 ## Tapjacking del consentimiento y de los botones que conceden (hallazgo O1; `fix/tapjacking-consent`)
 
-- **Hecho:** `ObscuredTouchGuard` en el consentimiento y en `RemoteCard` (#77) y filtro por botón en las teclas rápidas del terminal (`refuseObscuredTouches()`). Automatizado en el emulador API 34 (2026-10-04, primera pasada): `TestAnObscuringOverlayRefusesTheTapsThatGrant` pasa los 3 casos y no es vacuo (con el guard anulado fallan). Filas TAP-1 a TAP-3 del inventario de validaciones.
-- **Sin automatizar:** Android 11 (sin imagen API 30; la del CI es API 34) y las tarjetas y el 🔴 abiertos dentro de la burbuja propia (TAP-2). PermissionCard, apps protegidas y los demás diálogos (enlace, nueva conversación) llevan el mismo guard y sus tests de fuente en la JVM, pero no están en el test de emulador; se pueden añadir con el mismo patrón.
+- **Hecho:** `ObscuredTouchGuard` en el consentimiento y en `RemoteCard` (#77) y filtro por botón en las teclas rápidas del terminal (`refuseObscuredTouches()`). Automatizado en el emulador API 34 (2026-10-04, primera pasada): `TestAnObscuringOverlayRefusesTheTapsThatGrant` pasa los 3 casos y no es vacuo (con el guard anulado fallan). Filas TAP-1, TAP-2a, TAP-2b y TAP-3 del inventario de validaciones.
+- **Sin automatizar:** Android 11 (sin imagen API 30; la del CI es API 34) y las tarjetas y el 🔴 abiertos dentro de la burbuja propia (TAP-2a y TAP-2b). PermissionCard, apps protegidas y los demás diálogos (enlace, nueva conversación) llevan el mismo guard y sus tests de fuente en la JVM, pero no están en el test de emulador; se pueden añadir con el mismo patrón.
 - **Post-v1:** el rechazo del filtro de las teclas rápidas es mudo (el chip no hace nada y no dice por qué): un aviso breve al rechazar.
 
 ## Latencia del agente (rama `perf/latencia`, planes `2026-10-03-latencia.md` y `2026-10-03-latencia-impl.md`)

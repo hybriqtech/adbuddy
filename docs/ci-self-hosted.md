@@ -6,7 +6,7 @@ Every workflow in `.github/workflows/` runs on runners hosted by GitHub (a fresh
 
 ## Why not self-hosted
 
-The repository is public. Anyone can open a pull request from a fork, and a pull request can change the code that CI runs: tests, the Gradle build, a workflow file. On a self-hosted runner that code would run on a maintainer's own machine, as the user that runs the runner, with whatever that user can reach: the adb key authorised on their phone, the adb server, SSH keys, the `gh` token, the credentials of any coding agent. A hosted runner is thrown away after the job and holds none of that.
+The repository is public. Anyone can open a pull request from a fork, and a pull request can change the code that CI runs: tests, the Gradle build, a workflow file. On a self-hosted runner that code would run on a maintainer's own machine, as the user that runs the runner, with whatever that user can reach: the adb key authorized on their phone, the adb server, SSH keys, the `gh` token, the credentials of any coding agent. A hosted runner is thrown away after the job and holds none of that.
 
 So the rule is simple and has no exceptions: no self-hosted runner is registered for this repository, and none is added "just for the emulator" or "just for Dependabot".
 
