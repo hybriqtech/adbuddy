@@ -51,7 +51,7 @@ Veredicto: con reservas. Hallazgos y resolución:
 
 | Tarea | Estado | Commit | Notas |
 |---|---|---|---|
-| T1 protocolo `hideNotice` | pendiente (espera OK del líder) | | |
+| T1 protocolo `hideNotice` | complete | 6b956193 | review opus limpia; minor: T2 debe rechazar ms fuera de rango |
 | T2 app `hideNotice` | pendiente | | |
 | T3 host `screenshot` con velo | pendiente | | |
 | T4 emulador | pendiente | | |
@@ -86,3 +86,6 @@ Veredicto: con reservas. Hallazgos y resolución:
 | Cada tarea | texto de tests contra código | revisado por opus (16 hallazgos aplicados) |
 
 Orden: T1, T2, T3 (secuencial: dos implementadores en árboles disjuntos podrían ir juntos, pero el repo es uno solo; host y android son disjuntos, se paralelizan T2 y T3), T4, T5, T6 y T7, T8.
+
+Task 1: complete (commits c41f03b8..6b956193, review clean)
+Task 1: minor (deferred): ningún fixture cubre ms fuera de rango; T2 (app) y su revisión deben comprobar que se rechaza (`a.ms < 1 || a.ms > MAX_HIDE_NOTICE_MS`), nunca «ocultar indefinidamente».
