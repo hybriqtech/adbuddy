@@ -621,3 +621,9 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
   - `unsupported` deja leer siempre, sin consultar el servicio: una app antigua que responde no está atascada y el orden de merge host/app queda indiferente. Coste: lectura sin aviso con una app antigua y accesibilidad activa.
   - `screenrecord` solo avisa al empezar: el overlay se oculta a los 4 s (`HIDE_AFTER_MS`); es 🔴 y la persona lo confirma. Coste: grabación larga sin marco visible.
   - El cambio de protocolo (op `notice`) lo aprueba el líder, sin e5: añade una op al protocolo común de `ui.request` sin tocar la seguridad. Coste: revisar la spec del protocolo.
+
+## Tapjacking del consentimiento y de los botones que conceden (hallazgo O1; `fix/tapjacking-consent`)
+
+- **Hecho:** `ObscuredTouchGuard` en el consentimiento y en `RemoteCard` (#77) y filtro por botón en las teclas rápidas del terminal (`refuseObscuredTouches()`). Automatizado en el emulador API 34 (2026-10-04, primera pasada): `TestAnObscuringOverlayRefusesTheTapsThatGrant` pasa los 3 casos y no es vacuo (con el guard anulado fallan). Filas TAP-1 a TAP-3 del inventario de validaciones.
+- **Sin automatizar:** Android 11 (sin imagen API 30; la del CI es API 34) y las tarjetas y el 🔴 abiertos dentro de la burbuja propia (TAP-2). PermissionCard, apps protegidas y los demás diálogos (enlace, nueva conversación) llevan el mismo guard y sus tests de fuente en la JVM, pero no están en el test de emulador; se pueden añadir con el mismo patrón.
+- **Post-v1:** el rechazo del filtro de las teclas rápidas es mudo (el chip no hace nada y no dice por qué): un aviso breve al rechazar.
