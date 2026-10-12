@@ -16,7 +16,7 @@ Deja `adbuddy setup` en marcha en el PC mientras sigues estos pasos.
 
 1. Abre **Ajustes → Información del teléfono**.
 2. Toca **Número de compilación** siete veces. Puede que el móvil te pida el PIN.
-3. Verás "¡Ya eres desarrollador!".
+3. Verás "¡Ahora están activadas las opciones para desarrolladores!". El texto cambia según el móvil y la región (por ejemplo, "¡Ya eres desarrollador!"); lo que importa es que aparezca el aviso.
 
 ![Ajustes, Información del teléfono: la fila Número de compilación](../img/01-build-number-es.png){: width="240"}
 

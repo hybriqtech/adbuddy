@@ -10,6 +10,6 @@ Rama `docs/capturas-setup`. Sustituye los 8 marcadores `img/pending.svg` de `doc
 
 ## Pendiente
 
-- El emulador titula la pantalla «About emulated device» / «Información sobre el dispositivo emulado» (por `Build.IS_EMULATOR`), no «About phone» / «Información del teléfono» como en un móvil real. Las capturas se recortaron para no enseñarlo y los textos de la guía son los de un móvil real, que no se pudieron comprobar en el emulador.
-- El aviso en español al tocar siete veces «Número de compilación» no se capturó y no se ha comprobado que diga «¡Ya eres desarrollador!» tal como está en la guía; en inglés es exacto («You are now a developer!»).
+- El emulador titula la pantalla «About emulated device» / «Información sobre el dispositivo emulado» (por `Build.IS_EMULATOR`), no «About phone» / «Información del teléfono» como en un móvil real. Las capturas se recortaron para no enseñarlo y los textos de la guía son los de un móvil real. «About phone» solo se pudo comprobar por el texto de otros recursos de Ajustes.
+- El aviso al tocar siete veces «Número de compilación»: el texto de Ajustes (`show_dev_on`, sacado del APK de Settings del AVD con `aapt2 dump resources`) es «¡Ahora están activadas las opciones para desarrolladores!» en es y «¡Ya eres desarrollador!» solo en es-US; la guía usa el primero y avisa de que cambia según móvil y región. En inglés es exacto («You are now a developer!»). «Información del teléfono» (es) está en AOSP, en el texto de la garantía de Ajustes.
 - Opcional: sustituir las capturas por otras de un móvil real (Pixel) cuando haya ocasión; los nombres de fichero no cambian.
