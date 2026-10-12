@@ -52,8 +52,8 @@ Veredicto: con reservas. Hallazgos y resolución:
 | Tarea | Estado | Commit | Notas |
 |---|---|---|---|
 | T1 protocolo `hideNotice` | complete | 6b956193 | review opus limpia; minor: T2 debe rechazar ms fuera de rango |
-| T2 app `hideNotice` | pendiente | | |
-| T3 host `screenshot` con velo | pendiente | | |
+| T2 app `hideNotice` | complete | 54ef8924 | review opus limpia; 4 minors diferidos |
+| T3 host `screenshot` con velo | ronda 1 de fix | d58c5b93 | Important: ancla de la guarda |
 | T4 emulador | pendiente | | |
 | T5 protocolo `unreadable` | pendiente | | |
 | T6 nota de `screen` | pendiente | | |
@@ -89,3 +89,8 @@ Orden: T1, T2, T3 (secuencial: dos implementadores en árboles disjuntos podría
 
 Task 1: complete (commits c41f03b8..6b956193, review clean)
 Task 1: minor (deferred): ningún fixture cubre ms fuera de rango; T2 (app) y su revisión deben comprobar que se rechaza (`a.ms < 1 || a.ms > MAX_HIDE_NOTICE_MS`), nunca «ocultar indefinidamente».
+
+Task 2: complete (commits c7be7fa9..54ef8924, review clean)
+Task 2: minor (deferred): (1) una pausa durante la espera de 400 ms no se vuelve a comprobar en la app (`hideNotice` responde ok; el host la ve antes por el PAUSE y recomprueba): considerar `pausedNow` tras `s.hideNotice` o en `takeOff` (Overlay.kt:162-165, UiExecutor.kt:357-361) — decidir en la revisión final; (2) la espera de 400 ms se calcula con un timestamp viejo, `takeOff` debería recalcular (Overlay.kt:163); (3) `catch (e: Exception)` traga InterruptedException sin reponer el flag (Overlay.kt:168-173, igual que `show()`); (4) T4 debe cubrir servicio activo con overlay aún sin crear (`?: true`).
+Task 3: review 1 — Important: la comprobación de guarda tras un velo lento se medía desde el inicio del velo, no desde que la guarda dijo sí (un `notice` lento + `hideNotice` rápido dejaba pasar una lectura de >1,5 s). Minors: restore() también en pausa (se arregla), atomic.Bool en el test (se arregla); diferidos: ctx cancelado reportado como UI_BLOCKED (ui.go:653), línea larga de ayuda en en.toml/es.toml.
+Ruling: aceptado el Important 1 aunque la spec dice «si retirar el aviso tardó más de baselineSlack» — es el propósito de seguridad del paso; ancla = el instante de la guarda — cuesta: un dumpsys extra más a menudo (con los 400 ms casi cada captura) — se vuelve a la medida desde el velo.
