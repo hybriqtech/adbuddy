@@ -25,6 +25,7 @@ import tech.hybriq.adbuddy.AdbuddyApp
  */
 class AgentAccessibilityService : AccessibilityService(), Screen {
     @Volatile private var foreground: Pair<String, String> = "" to ""
+    @Volatile private var lastWindowsLog = ""
     private var overlay: Overlay? = null
 
     override fun onServiceConnected() {
@@ -99,7 +100,7 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
         // A window without content (an app that hides it from accessibility
         // services) stays, with no package: nothing taps it and it counts as
         // protected (UiExecutor).
-        return windows.map { w ->
+        val list = windows.map { w ->
             val root = w.root
             val r = Rect().also { w.getBoundsInScreen(it) }
             val type = when (w.type) {
@@ -110,6 +111,16 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
             }
             UiWindow(type, w.layer, Box(r.left, r.top, r.right, r.bottom), root?.let { copy(it, 0) })
         }
+        // For a phone where the system does not hand over the content (Android 17 on a Pixel, plan 2026-10-12-p1-pantalla-oculta): once per change, no content in the line.
+        if (list.isEmpty() || list.any { it.root == null }) {
+            Dumper.describe(list).takeIf { it != lastWindowsLog }?.let {
+                lastWindowsLog = it
+                Log.i(TAG, it)
+            }
+        } else {
+            lastWindowsLog = "" // readable again: the next unreadable state is logged again
+        }
+        return list
     }
 
     override fun screen(): Box {

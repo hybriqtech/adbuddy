@@ -63,6 +63,14 @@ object Dumper {
         return fit(d)
     }
 
+    /**
+     * One line about the windows for the log: type, layer and whether the
+     * window gave content. Never titles, packages or text.
+     */
+    fun describe(windows: List<UiWindow>): String =
+        windows.sortedByDescending { it.layer }
+            .joinToString(prefix = "${windows.size} windows: ", separator = ", ") { "${it.type}@${it.layer}:${if (it.root == null) "no content" else "content"}" }
+
     private fun element(n: UiNode, b: Box, window: String) = UiElement(
         id = n.id,
         text = if (n.password) "" else n.text,

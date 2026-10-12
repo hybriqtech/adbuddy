@@ -115,4 +115,12 @@ class DumperTest {
         assertEquals(Dumper.MAX_ELEMENTS, d.elements.size)
         assertTrue(d.truncated)
     }
+
+    @Test fun describeSaysTypesAndNothingElse() {
+        val secret = UiNode(pkg = "com.example.bank", cls = "android.widget.TextView", text = "1234 5678", bounds = SCREEN)
+        val s = Dumper.describe(listOf(UiWindow("system", 0, Box(0, 0, 1344, 199), null), UiWindow("app", 1, SCREEN, secret)))
+        assertEquals("2 windows: app@1:content, system@0:no content", s)
+        assertFalse(s.contains("bank") || s.contains("1234"))
+        assertEquals("0 windows: ", Dumper.describe(emptyList()))
+    }
 }
