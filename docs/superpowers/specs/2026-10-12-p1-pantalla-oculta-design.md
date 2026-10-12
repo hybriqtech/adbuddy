@@ -49,7 +49,7 @@ Medido en emulador API 36 (`adb exec-out screencap -p` incluye marco y píldora;
 ## 4. Diseño de P1.1: decir la verdad cuando no se puede leer
 
 - **Protocolo (aditivo):** `UiDump.unreadable` (`bool`, `omitempty` en Go; `Boolean? = null` en Kotlin). La app lo pone a `true` cuando no hay ninguna ventana, o alguna ventana de app o diálogo no entrega su contenido.
-- **CLI:** `printScreen` imprime, tras la cabecera, una nota fija en inglés (es para el agente): ADBuddy no puede leer esta pantalla porque Android o la app ocultan su contenido a los servicios de accesibilidad (o está cambiando: probar una vez más); `adbuddy screenshot` puede enseñarla (negra si la app bloquea las capturas); ADBuddy rechaza tocar lo que no puede leer: pedir a la persona esa parte. `--json` lleva `"unreadable": true`.
+- **CLI:** `printScreen` imprime, tras la cabecera, una nota fija en inglés (es para el agente): ADBuddy no puede leer esta pantalla, posiblemente porque la app oculta su contenido a los servicios de accesibilidad, o porque la pantalla aún está cambiando (probar una vez más); `adbuddy screenshot` puede enseñarla (negra si la app bloquea las capturas); ADBuddy rechaza tocar lo que no puede leer: pedir a la persona esa parte. `--json` lleva `"unreadable": true`.
 - Sin sugerir rodeos: no se menciona `uiautomator`, ni activar nada.
 
 ## 5. Diagnóstico para la causa

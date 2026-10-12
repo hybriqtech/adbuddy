@@ -396,7 +396,7 @@ Todos aditivos (§11 del protocolo: sigue siendo `v1`):
 6. **La op `hideNotice` de `ui.request`** (p1-pantalla-oculta): `args {ms}`, `result` vacío; `MaxHideNoticeMs` 5000. Go: `UIOpHideNotice` en `UIOps` y `UIHideNoticeArgs`; Kotlin: `UiOp.HIDE_NOTICE` y `UiHideNoticeArgs`. Fixtures de petición y respuesta, y entrada en `protocol/fixtures/ui.json`. Aditivo; un commit con Go, Kotlin y fixtures.
 7. **El campo `unreadable` de `UiDump`** (p1-pantalla-oculta): `bool` con `omitempty` en Go, `Boolean?` sin emitir `false` en Kotlin; fixture `app/ui.response@dumpunreadable.json`. Aditivo.
 
-Van en un solo commit (Go, Kotlin y fixtures), como pide §10 del protocolo, y se avisa a tern-51 y a skimmer-32 al integrar.
+Cada cambio fue en su propio commit (Go, Kotlin y fixtures; los de los puntos 6 y 7 en dos commits, uno por cambio), como pide §10 del protocolo, y se avisa a tern-51 y a skimmer-32 al integrar.
 
 ## 13. Decisiones
 

@@ -166,6 +166,7 @@ class UiExecutor(
     private fun hideNotice(r: UiRequest, s: Screen, a: UiHideNoticeArgs): UiResponse = when {
         a.ms < 1 || a.ms > UiLimits.MAX_HIDE_NOTICE_MS -> invalid(r)
         paused() -> pausedNow(r)
+        // The host, not the app, decides the pause for a capture: the app learns of a pause only from session.state, and the host re-checks it after hideNotice.
         s.hideNotice(a.ms.toLong()) -> ok(r, Empty, Empty.serializer())
         else -> fail(r, ErrorCode.FAILED, "ADBuddy could not take its notice off the screen for the capture.")
     }
