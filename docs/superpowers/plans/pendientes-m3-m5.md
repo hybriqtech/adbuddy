@@ -697,7 +697,7 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 
 ## Dependabot (plan `docs/superpowers/plans/2026-10-03-adbuddy-dependabot.md`)
 
-- **Hecho (hasta 2026-10-12; el reparto por runners propios desapareció con ellos, ver la nota de «CI y runners»):** `dependabot.yml` (actions, gomod, gradle), y los workflows mandan a los PR de autores que no son el propietario a runners de GitHub (lista blanca por autor; `scripts/check-ci-runner-rules.py` comprueba la tabla). Cierra A5-8. Regla y proceso en `docs/ci-self-hosted.md` §6 (esa página ya no tiene §6: ver la nota de «CI y runners»).
+- **Hecho (hasta 2026-10-12; el reparto por runners propios desapareció con ellos, ver la nota de «CI y runners»):** `dependabot.yml` (actions, gomod, gradle), y los workflows mandan a los PR de autores que no son el propietario a runners de GitHub (lista blanca por autor; la tabla la comprobaba `scripts/check-ci-runner-rules.py`, borrado al quitar los runners propios: ahora `TestWorkflowsUseHostedRunnersOnly` en `host/internal/emutest`). Cierra A5-8. Regla y proceso en `docs/ci-self-hosted.md` §6 (esa página ya no tiene §6: ver la nota de «CI y runners»).
 - **No comprobado (lo confirma el primer PR de Dependabot):**
   - Con el token de `gh` actual (sin `admin:repo_hook`) no se puede consultar `security_and_analysis`: no se sabe qué más está activo en el repositorio.
   - Cómo trata Dependabot las acciones fijadas por SHA con comentario `# vX` (se espera: sube el SHA y el comentario y mantiene el fijado).
@@ -713,7 +713,7 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
   - Riesgo I6 aceptado: revisar el diff no revisa el código de la dependencia, que tras el merge corre en los runners propios; falta `gradle/verification-metadata.xml` y la cuenta de Windows dedicada. Opcional: subir `semver-major-days` del cooldown de gradle.
   - Si los PR del propietario los abre otra cuenta (un agente): lista `CI_TRUSTED_PR_AUTHORS` en la regla (anotada en §6, no implementada).
 
-- DEFER (menores de la revisión del diff de Dependabot): `scripts/check-ci-runner-rules.py` tiene la lista de jobs fija en el código (añadir una comprobación de estructura que falle si algún job con `vars.` en `runs-on`/matriz no está cubierto) y su evaluador no reconoce los literales `true`/`false`/`null`; opción más estricta del predicado de confianza: `&& !startsWith(github.event.pull_request.head.ref, 'dependabot/')` (cubre al propietario abriendo a mano un PR desde una rama `dependabot/**`).
+- DEFER (menores de la revisión del diff de Dependabot; lo del script, OBSOLETO: el script ya no existe): `scripts/check-ci-runner-rules.py` tenía la lista de jobs fija en el código (añadir una comprobación de estructura que falle si algún job con `vars.` en `runs-on`/matriz no está cubierto) y su evaluador no reconoce los literales `true`/`false`/`null`; opción más estricta del predicado de confianza: `&& !startsWith(github.event.pull_request.head.ref, 'dependabot/')` (cubre al propietario abriendo a mano un PR desde una rama `dependabot/**`).
 
 ## VB-41 · `persist.adb.tcp.port` (plan `docs/superpowers/plans/2026-10-04-adbuddy-vb41-persist-port.md`)
 
