@@ -773,3 +773,43 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 
 - HECHO: las 8 capturas de `docs/setup/` (EN y ES) salen del emulador API 34, recortadas sin datos personales; textos de los menús comprobados contra los recursos de Ajustes (`aapt2 dump resources` del APK de Settings). En español: «Dispositivos emparejados», «código de vinculación de Wi-Fi» y el aviso de «Número de compilación» con el texto de `es` («¡Ahora están activadas las opciones para desarrolladores!»; «¡Ya eres desarrollador!» es el de es-US), con la nota de que varía según móvil y región.
 - Pendiente (menor): el título «About phone» / «Información del teléfono» de la pantalla no se ve en el emulador (que la titula «About emulated device» por `Build.IS_EMULATOR`); solo se comprobó por otros recursos de Ajustes. Opcional: recapturar con un Pixel real (mismos nombres de fichero).
+
+## Pantalla oculta y aviso en la captura (P1; #91, 2026-10-12; spec `2026-10-12-p1-pantalla-oculta-design.md`, plan `2026-10-12-p1-pantalla-oculta.md`)
+
+- **Hecho:**
+  - `adbuddy screen` explica una pantalla que el servicio de accesibilidad no puede leer (`UiDump.unreadable` y una nota que no promete la causa).
+  - `adbuddy screenshot` retira marco y píldora durante la captura: op `hideNotice`, 3 fotogramas, aviso visible al menos 400 ms antes (`MIN_SHOWN_MS`) y restauración automática en 2 s, nunca en pausa.
+  - Si el aviso no se puede retirar, la captura sale igualmente con `noticeInImage`.
+  - Validado en el emulador API 36: `TestTheScreenshotDoesNotCarryTheNotice` y `TestTheHiddenNoticeComesBackByItself`. Las mutaciones (a), (b), (c), (e) y (f2) ponen en rojo sus pruebas.
+  - Filas OVL-3 a OVL-8 del inventario de validaciones.
+- **Rulings** (el detalle y lo que cuesta cada uno, en la spec y el ledger `.superpowers/sdd/2026-10-12-p1-pantalla-oculta/progress.md`):
+  - Velo con `hideNotice` en lugar de `takeScreenshot` de accesibilidad. `takeScreenshot` no está documentado, incluye el marco y añade una capacidad al servicio. Coste: el aviso falta unos 0,3 s, con un tope de 2 s.
+  - Si el velo falla, la captura no se bloquea (`noticeInImage` y una nota por stderr). Coste: una captura con el aviso dentro, y el agente lo sabe.
+  - Las lecturas en bruto (`screencap`, `screenrecord`, `uiautomator`) no retiran el aviso. Coste: para una captura limpia, el agente usa `adbuddy screenshot`.
+  - Sin `isAccessibilityTool` ni rodeos para leer lo que el sistema oculta. Coste: esas pantallas se quedan sin lectura en Android 17.
+  - `hideNotice` no es un helper del agente (`TestTheAgentCannotAskToHideTheNotice`).
+  - `MIN_SHOWN_MS = 400`, decisión del líder: el aviso existe para que la persona lo vea. Coste: de 0 a 0,4 s más por captura.
+  - Tras un velo lento se repite la guarda de primer plano antes de `screencap`, anclada al instante en que la guarda dijo sí. Coste: un `dumpsys` extra en casi cada captura.
+  - Límites documentados: una lectura o un `tap` concurrentes pueden cruzarse con el velo y dejar la nota imprecisa. `restoreNotice` no tiene test propio; lo garantiza el temporizador de la app.
+- **Pendiente:**
+  - Causa de la pantalla oculta en Opciones para desarrolladores (Pixel, Android 17). La ventana de la app está activa y listada, sin contenido para el servicio y sin FLAG_SECURE; la ventana lleva `HIDE_NON_SYSTEM_OVERLAY_WINDOWS` (diagnóstico de solo lectura del 2026-10-12). Hipótesis sin verificar: esa marca interactúa con el overlay. Queda probar con el APK de main y leer la línea de log `ADBuddyA11y` (OVL-3).
+  - **Decisión de la persona usuaria, FLAG_SECURE:** `adbuddy screenshot` sale negra con una app con `FLAG_SECURE` no protegida, mientras que `adbuddy screen` la lee. Hay que decidir si se protege, se avisa o se deja.
+  - Permiso de notificaciones del Pixel (Android 17): comprobarlo y, si falta, guiar a la persona.
+- **Menores diferidos** (la revisión final los dejó como están):
+  - T2: una pausa durante la espera de 400 ms no se recomprueba en la app (el host sí la ve); la espera usa una marca de tiempo vieja en `takeOff`; `catch (e: Exception)` traga `InterruptedException`; falta cubrir el servicio activo con el overlay aún sin crear.
+  - T3: un ctx cancelado se informa como `UI_BLOCKED`; hay una línea de ayuda larga en `en.toml`/`es.toml`.
+  - T4: `TestTheNoticeWhenTheHostReadsTheScreen` ya no afirma que `screenshot` sube el aviso; margen de unos 100 ms en el tiempo mínimo en pantalla; comparaciones de píxeles estrictas; queda la alternativa instrumentada para `afterFrames(n)`.
+  - T6: comentario huérfano de `printScreen`; ningún test fija que la nota no prometa la causa.
+  - T7: el log se dispara también con ventanas de sistema sin contenido; carrera benigna de `lastWindowsLog`.
+
+## Tests inestables del emulador en los runners de GitHub (F1; #92, 2026-10-12; ledger `.superpowers/sdd/2026-10-12-f1-emulador-inestable/progress.md`)
+
+- **Hecho:** 5 de 5 tandas en verde en la CI sobre 0313b3f5 y la CI del PR en verde, emulador incluido.
+  - `TestTheListenerContent` sondea hasta 30 s (`notificationsGone`): la cancelación del listener es asíncrona.
+  - `TestScreenAfterOnTheEmulator/a_slow_transition...`: tenía un defecto de producto. `settle` daba por asentado un fotograma sin ventana de aplicación (solo la barra de estado) cuando la ventana nueva tardaba en tener contenido. Ahora `bareApp` (`daemon/settle.go`) no asienta una lectura sin ventana app/dialog si la partida sí la tenía. Ruling: no se aplica si la partida ya no tenía ventana, así que no penaliza juegos ni cámara.
+  - El test acepta el desenlace documentado en que la guarda bloquea la transición: sin pantalla, con la nota «The action was done...» y «Blocked by ADBuddy». Exige que un `settled=true` sea la pantalla nueva. A 1x ya no exige Settled.
+  - `TestAllowFromTheLockedShadeAsksToUnlock`: `unlock` repite el deslizamiento cada 4 s hasta ver el bouncer, porque el primero solo cerraba la sombra. `shadeUntil` no vuelve a tocar Expand en 6 s ni cuando ya pone Collapse.
+- **Pendiente menor:**
+  - (a) Con `screen --settle`, si la primera lectura quedó bloqueada y se adopta, `protectBare` se calculó con la partida desconocida. Se cierra recalculándolo al adoptar la partida (una línea).
+  - (b) Si la partida se leyó por `uiautomator`, cuenta como «con ventana de app». Si después la app devuelve una lectura sin ventana (un juego), el toque espera el tope de 3 s. Muy raro.
+- **Límite aceptado:** el volcado no distingue una ventana de app con el árbol vacío (juego, cámara) del fotograma de una transición. Al navegar de una pantalla normal a una sin contenido accesible, el primer `--screen` tarda 3 s con `settled=false`. Acotarlo del todo pide un campo de protocolo («hay ventana de app»).
