@@ -503,7 +503,7 @@ Base de seguridad: #77 (armado del diálogo y tapjacking del consentimiento y de
   - C3/O4 se hicieron en P4; O1 (tapjacking del consentimiento y de `RemoteCard`) ya lo hizo #77.
 - **Para la integración y `seguridad` (no se tocan en P5):**
   - **Spec §4.5 (~línea 210)** dice «Permitir esto durante la sesión» y «solo cubre la misma regla con los mismos argumentos»; la etiqueta ahora es «Permitir este mismo comando durante la sesión».
-  - **`docs/usage.md:94` y `docs/safety.md:82`** (en su día citados como `usage.md:92`/`safety.md:82`) siguen llamando al botón «Allow during the session»; la etiqueta de la app es «Allow this same command during the session».
+  - **`docs/usage.md` y `docs/safety.md`:** HECHO (2026-10-12), ya dicen «Allow this same command during the session», la etiqueta de la app.
   - **Asimetría de la accesibilidad:** la lectura de pantalla (`dump`) llama a `acting(null)` sin comprobar que el marco llegó a mostrarse, mientras que tocar y escribir sí se niegan sin marco. Lo decide `seguridad`; el texto del consentimiento dice «mientras actúa» y no «con el marco visible», y es exacto porque el host bloquea toda operación de pantalla con la pausa activa. `fix/screen-overlay-frame` (ya integrada, ver «Aviso del overlay al leer la pantalla») hace que `dump` falle cerrado si no se puede dibujar el overlay: confirmar con `seguridad` que cierra esta asimetría.
   - **Matiz de `EnableAccessibility`:** al poner `accessibility_enabled 1`, un servicio que ya estaba en la lista con la accesibilidad global apagada también se encendería. Raro; nota para la spec.
 - **Notas honestas:**

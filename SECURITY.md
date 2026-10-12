@@ -17,7 +17,7 @@ Please do not post working exploits, your phone's serial number or your IP addre
 
 ## Supported versions
 
-Only the latest release is supported. Fixes land in `main` and ship in the next release; older releases are not patched.
+Until the first release, the `main` branch is the supported version. After that, only the latest release is supported. Fixes land in `main` and ship in the next release; older releases are not patched.
 
 ## What to expect
 
