@@ -1768,3 +1768,17 @@ func TestScreenSettleFirstReadProtected(t *testing.T) {
 		}
 	})
 }
+
+// Only the app's reads say which window each element is in: a read made
+// another way, or one with a lock screen, is never bare.
+func TestBareAppOnlyForTheAppOnAnUnlockedPhone(t *testing.T) {
+	if !bareApp(bareDump(), viaApp) || !bareApp(bridge.UIDump{}, viaApp) {
+		t.Error("a read with only system windows, or none, must be bare")
+	}
+	if bareApp(bareDump(), "uiautomator") || bareApp(bridge.UIDump{}, "uiautomator") {
+		t.Error("a read made another way than the app is never bare")
+	}
+	if bareApp(dumpOf("com.android.settings", "A"), viaApp) {
+		t.Error("a read with an app window is not bare")
+	}
+}

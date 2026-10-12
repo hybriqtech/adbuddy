@@ -122,7 +122,7 @@ func newScreenCmd(app *App) *cobra.Command {
 }
 
 // stillChanging is what the agent reads when the screen did not settle in time.
-const stillChanging = "(the screen was still changing: run adbuddy screen again if you need it steady)"
+const stillChanging = "(the screen was still changing, or showed no app content to read: run adbuddy screen again if you need it steady)"
 
 // noChange is what the agent reads after tap or type --screen when the screen
 // settled and is the one from before the act: the act did nothing visible.

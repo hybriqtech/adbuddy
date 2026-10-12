@@ -411,7 +411,7 @@ func screenOf(pkg string) bridge.UIDump {
 	}}
 }
 
-const wantStillChanging = "(the screen was still changing: run adbuddy screen again if you need it steady)"
+const wantStillChanging = "(the screen was still changing, or showed no app content to read: run adbuddy screen again if you need it steady)"
 
 func TestTapScreen(t *testing.T) {
 	var reply any

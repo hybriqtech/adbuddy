@@ -31,8 +31,9 @@ var (
 
 // ScreenSettled is dump's data when the client asked to wait for the screen
 // to settle. Settled is false when the screen was still changing at the end
-// of the wait (an animation, a video). Changed says whether the screen that
-// comes out is not the one it started from: false with Settled means the
+// of the wait (an animation, a video), or when all that it showed was the
+// system's own windows with no application window (see bareApp). Changed
+// says whether the screen that comes out is not the one it started from: false with Settled means the
 // screen is the start again (nothing happened on screen, or it changed and
 // came back); nil means it is not known (the start could not be read, or
 // this read came another way than the start: the app and uiautomator differ
@@ -111,7 +112,8 @@ func noFocus(es []bridge.UIElement) []bridge.UIElement {
 // transition, the longer it lasts, and it can outlast settleQuiet. It is not
 // a screen the agent can use, so it never counts as settled: the wait goes on
 // until the cap, which gives it back with Settled false. Only the app's reads
-// say which window each element is in; a read made another way cannot be told.
+// say which window each element is in (a read made by uiautomator marks every
+// element "app"): a read made another way is never taken as bare.
 func bareApp(d bridge.UIDump, how string) bool {
 	if how != viaApp || d.Locked {
 		return false

@@ -156,6 +156,9 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 		if c.Screen.Changed == nil || !*c.Screen.Changed {
 			t.Errorf("changed = %v, want true", c.Screen.Changed)
 		}
+		if !c.Screen.Settled {
+			t.Errorf("the screen after the tap did not settle at normal speed: %+v", c.Screen.UIDump.Elements)
+		}
 		if !screenHas(c.Screen.UIDump, "Internet") {
 			t.Errorf("the screen after the tap is not the sub page (no \"Internet\"): %+v", c.Screen.UIDump.Elements)
 		}
@@ -194,7 +197,7 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 				t.Fatalf("run %d: exit %+v, note %q", i, exit, c.Note)
 			}
 			if c.Screen == nil {
-				if !strings.HasPrefix(c.Note, "The action was done; do not repeat it") {
+				if !strings.HasPrefix(c.Note, "The action was done; do not repeat it") || !strings.Contains(c.Note, "Blocked by ADBuddy") {
 					t.Errorf("run %d: no screen and no note that the tap was done: %q", i, c.Note)
 				}
 			} else if c.Screen.Settled && (c.Screen.Changed == nil || !*c.Screen.Changed || !screenHas(c.Screen.UIDump, "Internet")) {
