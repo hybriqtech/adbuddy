@@ -768,3 +768,8 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
   - comprobar la nota de bloqueo con una notificación entrante tras abrir una app.
 - **Imagen API 37 local:** `system-images;android-37.0;google_apis;x86_64` hace caer `surfaceflinger` en bucle en este PC con `swiftshader_indirect` y con `swangle_indirect` (el script de arranque sale con «not stable»). La validación de S2 (2026-10-11) se hizo con API 34 (`ADBUDDY_EMU_IMAGE=system-images;android-34;google_apis;x86_64` y un `ADBUDDY_EMU_AVD` propio).
 - **No hacer:** captura en flujo (`screenrecord`/scrcpy) para el agente; caché de primer plano (abre un hueco de la guarda).
+
+## Capturas de la guía de preparación (rama `docs/capturas-setup`, #90, 2026-10-12)
+
+- HECHO: las 8 capturas de `docs/setup/` (EN y ES) salen del emulador API 34, recortadas sin datos personales; textos de los menús comprobados contra los recursos de Ajustes (`aapt2 dump resources` del APK de Settings). En español: «Dispositivos emparejados», «código de vinculación de Wi-Fi» y el aviso de «Número de compilación» con el texto de `es` («¡Ahora están activadas las opciones para desarrolladores!»; «¡Ya eres desarrollador!» es el de es-US), con la nota de que varía según móvil y región.
+- Pendiente (menor): el título «About phone» / «Información del teléfono» de la pantalla no se ve en el emulador (que la titula «About emulated device» por `Build.IS_EMULATOR`); solo se comprobó por otros recursos de Ajustes. Opcional: recapturar con un Pixel real (mismos nombres de fichero).

@@ -12,11 +12,11 @@ Lista de comprobación. Revisar cada punto antes de cambiar la visibilidad de `h
 - [x] **GitHub Pages:** publicar `docs/` (Settings → Pages → rama `main`, carpeta `/docs`) y comprobar que `https://hybriqtech.github.io/adbuddy/setup/` carga: `adbuddy setup` enseña un QR a esa página. En un repo privado Pages necesita un plan de pago. **Activado el 2026-10-12** desde `main`, carpeta `/docs` (https://hybriqtech.github.io/adbuddy/); `/setup/` responde (comprobado el 2026-10-12).
 - [ ] **Clave de firma del APK** de release, fuera del repositorio (secreto de GitHub Actions) y con copia de seguridad: perderla impide actualizar la app instalada.
 - [ ] **Release del APK** con `adbuddy.apk` y `adbuddy.apk.sha256` (lo que descarga `adbuddy setup`).
-- [ ] **Capturas reales** en `docs/setup/img/` en lugar de `img/pending.svg`: hay 4 marcadores en `docs/setup/index.md` (inglés) y 4 en `docs/setup/es/index.md` (español), 8 en total. Sustituir cada marcador `![Pending screenshot: …](img/pending.svg)` (en español, `![Captura pendiente: …](../img/pending.svg)`) por la captura, con estos nombres de fichero:
-  - [ ] `01-build-number.png` y `01-build-number-es.png`: Ajustes › Acerca del teléfono › Número de compilación (§1 de la guía).
-  - [ ] `02-wireless-debugging.png` y `02-wireless-debugging-es.png`: el interruptor de Depuración inalámbrica (§2).
-  - [ ] `03-pair-qr.png` y `03-pair-qr-es.png`: Emparejar dispositivo con código QR (§3).
-  - [ ] `04-pair-code.png` y `04-pair-code-es.png`: Emparejar dispositivo con código de sincronización (§3, «If the QR code does not work»).
+- [x] **Capturas reales** (hecho el 2026-10-12, #90: capturas del emulador, recortadas sin datos personales; textos de los menús comprobados contra los recursos de Ajustes y `img/pending.svg` borrado) en `docs/setup/img/` en lugar de `img/pending.svg`: hay 4 marcadores en `docs/setup/index.md` (inglés) y 4 en `docs/setup/es/index.md` (español), 8 en total. Sustituir cada marcador `![Pending screenshot: …](img/pending.svg)` (en español, `![Captura pendiente: …](../img/pending.svg)`) por la captura, con estos nombres de fichero:
+  - [x] `01-build-number.png` y `01-build-number-es.png`: Ajustes › Acerca del teléfono › Número de compilación (§1 de la guía).
+  - [x] `02-wireless-debugging.png` y `02-wireless-debugging-es.png`: el interruptor de Depuración inalámbrica (§2).
+  - [x] `03-pair-qr.png` y `03-pair-qr-es.png`: Emparejar dispositivo con código QR (§3).
+  - [x] `04-pair-code.png` y `04-pair-code-es.png`: Emparejar dispositivo con código de sincronización (§3, «If the QR code does not work»).
 
   Revisar además que los textos de los menús de las guías coinciden con Android en inglés y en español, y quitar `img/pending.svg` si ya no lo usa nadie.
 - [ ] **Donaciones: crear las cuentas** (perfil de GitHub Sponsors y página de Ko-fi) y poner los identificadores reales: descomentar `.github/FUNDING.yml` (`github:` y `ko_fi:`) y el comentario HTML "Support the project" de `README.md` y de `README.es.md` (sustituyendo `<handle>`); enlazarlos desde "Acerca de" de la app (M5c). Hasta entonces no hay ningún enlace a Sponsors ni a Ko-fi.
