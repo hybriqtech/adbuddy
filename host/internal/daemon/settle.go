@@ -34,8 +34,8 @@ var (
 // of the wait (an animation, a video), or when the screen it started from had
 // an application window and all that it showed was the system's own windows
 // (see bareApp). Changed says whether the screen that comes out is not the
-// one it started from: false with Settled means the screen is the start again (nothing happened on screen, or it changed and
-// came back); nil means it is not known (the start could not be read, or
+// one it started from: false with Settled means the screen is the start
+// again (nothing happened on screen, or it changed and came back); nil means it is not known (the start could not be read, or
 // this read came another way than the start: the app and uiautomator differ
 // in format, so they are not compared).
 type ScreenSettled struct {
@@ -112,9 +112,9 @@ func noFocus(es []bridge.UIElement) []bridge.UIElement {
 // transition, the longer it lasts, and it can outlast settleQuiet. It is not
 // a screen the agent can use, so when the start had an application window
 // (settle checks that, not bareApp) it never counts as settled: the wait goes
-// on until the cap, which gives it back with Settled false. Only the app's reads
-// say which window each element is in (a read made by uiautomator marks every
-// element "app"): a read made another way is never taken as bare.
+// on until the cap, which gives it back with Settled false. Only the app's
+// reads say which window each element is in (a read made by uiautomator marks
+// every element "app"): a read made another way is never taken as bare.
 func bareApp(d bridge.UIDump, how string) bool {
 	if how != viaApp || d.Locked {
 		return false
@@ -166,7 +166,8 @@ type settleIn struct {
 // agent or serve went away). It fails closed: nothing it could not read is
 // returned. A read of the app that shows no application window (bareApp: a
 // transition that has not drawn the window yet), when the start had one, is
-// never quiet, so it does not settle. via says how the read that comes out was made. No goroutines.
+// never quiet, so it does not settle. via says how the read that comes out
+// was made. No goroutines.
 func (d *Daemon) settle(ctx context.Context, in settleIn) (screen *ScreenSettled, via, why string, f *uiFailure) {
 	firstWait, gap, quiet, idle, blockWait, max, maxTries := settleFirst, settleGap, settleQuiet, settleIdle, settleBlockWait, settleMax, settleReads
 	base, baseVia, cur, via := in.base, in.baseVia, in.first, in.via
