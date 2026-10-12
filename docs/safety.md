@@ -154,10 +154,7 @@ Use a phone and accounts you can afford to repair, keep a backup of what matters
 
 ## Reporting a security problem
 
-The project has no `SECURITY.md` yet, so there is no official channel. Please do this:
-
-1. If the repository has private vulnerability reporting enabled, open a private **security advisory** on the repository's **Security** tab on [GitHub](https://github.com/hybriqtech/adbuddy).
-2. If you do not see that option, open an [issue](https://github.com/hybriqtech/adbuddy/issues) that says you have a security problem, **without** exploit details, and ask for a private way to send them.
+Please report it **privately**, not in a public issue. Open a [private security advisory](https://github.com/hybriqtech/adbuddy/security/advisories/new) on the repository; only the maintainers see it. The [security policy](https://github.com/hybriqtech/adbuddy/blob/main/SECURITY.md) says what to include and which versions are supported.
 
 Please do not post working exploits, your phone's serial number or your IP address in public.
 
