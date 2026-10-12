@@ -40,11 +40,9 @@ jobs:
         with:
           gradle-version: "9.8.0"
       # compileSdk = 37 (android/app/build.gradle.kts); its SDK package is "platforms;android-37.0".
-      # On Windows sdkmanager is sdkmanager.bat.
       - name: Install Android SDK platform 37
         run: |
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" "platforms;android-37.0"
       - name: "Unit tests, debug build, lint, and the instrumented tests compile (emulator-app.yml runs them)"
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:lintDebug :app:assembleDebugAndroidTest

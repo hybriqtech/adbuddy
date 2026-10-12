@@ -79,20 +79,16 @@ jobs:
           go-version-file: host/go.mod
           cache: true
           cache-dependency-path: host/go.sum
-      - name: Point the emulator at the AVD (Linux runners)
-        if: runner.os == 'Linux'
+      - name: Point the emulator at the AVD
         run: '[ -z "$XDG_CONFIG_HOME" ] || echo "ANDROID_AVD_HOME=$XDG_CONFIG_HOME/.android/avd" >> "$GITHUB_ENV"'
       - name: Enable KVM
-        if: runner.os == 'Linux'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      # On Windows sdkmanager is sdkmanager.bat.
       - name: Install the emulator and the android-34 system image
         run: |
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" emulator "system-images;android-34;google_apis;x86_64" > /dev/null
       # Built before any emulator starts, so they never share the RAM. No device
       # and no ANDROID_SERIAL here: no connected* task is ever run (Gradle's own
@@ -104,7 +100,6 @@ jobs:
         working-directory: android
         run: |
           sm="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          [ -e "$sm" ] || sm="$sm.bat"
           yes | "$sm" "platforms;android-37.0" > /dev/null
           gradle --no-daemon -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Clear a leftover emulator of this job
@@ -152,7 +147,7 @@ jobs:
       # Evidence for a failed start: why the emulator did not boot. The
       # emulator has its own adb server (scripts/emulator.sh).
       - name: Emulator diagnostics
-        if: failure() && runner.os == 'Linux'
+        if: failure()
         env:
           ANDROID_ADB_SERVER_PORT: ${{ env.ADBUDDY_EMU_ADB_PORT }}
         run: |
@@ -165,19 +160,6 @@ jobs:
           "$ADB" devices -l || true
           timeout 20 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" shell getprop | grep -E "boot|init.svc.(surfaceflinger|zygote|system_server)" || true
           timeout 30 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" logcat -d -b crash,system | tail -n 150 || true
-      # The same on Windows, with the job's own adb server (never 5037). The log
-      # is the one of the emulator started last by this job (the restart's).
-      - name: Emulator diagnostics (Windows)
-        if: failure() && runner.os == 'Windows'
-        shell: bash
-        env:
-          ANDROID_ADB_SERVER_PORT: ${{ env.ADBUDDY_EMU_ADB_PORT }}
-        run: |
-          ADB="$ANDROID_HOME/platform-tools/adb.exe"
-          tail -n 200 "${TMPDIR:-/tmp}/adbuddy-emulator.log" || true
-          echo "job AVD: $ADBUDDY_EMU_AVD; running AVD:"
-          timeout 20 "$ADB" -s "emulator-$ADBUDDY_EMU_PORT" emu avd name || true
-          "$ADB" devices -l || true
       - name: Stop the emulator
         if: always()
         run: scripts/emulator.sh stop
