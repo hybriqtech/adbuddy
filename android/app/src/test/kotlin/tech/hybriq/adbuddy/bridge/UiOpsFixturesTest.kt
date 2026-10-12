@@ -118,6 +118,7 @@ class UiOpsFixturesTest {
                 "maxSetText" to UiLimits.MAX_SET_TEXT,
                 "maxProtectedApps" to UiLimits.MAX_PROTECTED_APPS,
                 "maxPackage" to UiLimits.MAX_PACKAGE,
+                "maxHideNoticeMs" to UiLimits.MAX_HIDE_NOTICE_MS,
             ),
         )
     }

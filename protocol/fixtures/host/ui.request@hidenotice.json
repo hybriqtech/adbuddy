@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "type": "ui.request",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "u_8",
+    "op": "hideNotice",
+    "args": {
+      "ms": 2000
+    },
+    "expiresAt": "2026-10-01T10:00:10Z"
+  }
+}
