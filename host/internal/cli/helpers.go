@@ -172,6 +172,13 @@ func undecodedAfterAct(app *App, done string) error {
 
 // printScreen writes a dump for the agent, one element per line. Everything
 // comes from the phone: escaped and cut.
+// unreadableScreen is what the agent reads when the app could not read part or
+// all of the screen. The cause is not known (an app may hide its content from
+// accessibility services, or the screen may be changing), so the note states
+// only that and what the agent can do, never how to get round it. Fixed
+// English, for the agent.
+const unreadableScreen = "(ADBuddy cannot read some or all of this screen, possibly because the app hides its content from accessibility services, or because the screen is still changing, so try once more. `adbuddy screenshot` may still show it, unless the app blocks screenshots. `adbuddy tap` refuses to touch what ADBuddy cannot read: ask the user to do this part.)"
+
 func printScreen(w io.Writer, d bridge.UIDump) {
 	if d.Locked {
 		fmt.Fprintln(w, "The phone is locked: ask the user to unlock it.")
@@ -182,6 +189,9 @@ func printScreen(w io.Writer, d bridge.UIDump) {
 		head = "unknown app"
 	}
 	fmt.Fprintf(w, "%s · %d×%d\n", head, d.Width, d.Height)
+	if d.Unreadable {
+		fmt.Fprintln(w, unreadableScreen)
+	}
 	for _, e := range d.Elements {
 		var b strings.Builder
 		if e.ID != "" {

@@ -119,6 +119,48 @@ func TestScreenLocked(t *testing.T) {
 	}
 }
 
+// An app that hides its content from accessibility services: the agent is told
+// what is known, what it can do, and nothing about getting round it.
+func TestScreenSaysWhenItCannotReadIt(t *testing.T) {
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(bridge.UIDump{Width: 1344, Height: 2992, Unreadable: true, Elements: []bridge.UIElement{}})
+		return ipc.Exit{}
+	})
+	out, _, code := runHelper(t, "screen")
+	lines := strings.Split(out, "\n")
+	if code != 0 || lines[0] != "unknown app · 1344×2992" || !strings.Contains(lines[1], "cannot read some or all of this screen") {
+		t.Fatalf("exit %d %q", code, out)
+	}
+	for _, want := range []string{"hides its content from accessibility services", "adbuddy screenshot", "ask the user to do this part"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	for _, never := range []string{"uiautomator", "enable", "disable", "bypass"} {
+		if strings.Contains(strings.ToLower(out), never) {
+			t.Errorf("the note mentions %q:\n%s", never, out)
+		}
+	}
+	out, _, code = runHelper(t, "screen", "--json")
+	if code != 0 || !strings.Contains(out, `"unreadable":true`) {
+		t.Fatalf("json: %d %q", code, out)
+	}
+}
+
+func TestAReadableScreenHasNoUnreadableNote(t *testing.T) {
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(bridge.UIDump{Package: "com.android.settings", Width: 1, Height: 2, Elements: []bridge.UIElement{}})
+		return ipc.Exit{}
+	})
+	out, _, code := runHelper(t, "screen")
+	if code != 0 || strings.Contains(out, "cannot read") {
+		t.Fatalf("exit %d %q", code, out)
+	}
+	if out, _, _ = runHelper(t, "screen", "--json"); strings.Contains(out, "unreadable") {
+		t.Fatalf("json: %q", out)
+	}
+}
+
 func TestTapArgs(t *testing.T) {
 	reqs := helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
 		_ = c.Data(bridge.UIClicked{Clicked: true, Bounds: [4]int{1, 2, 3, 4}, How: "action"})
