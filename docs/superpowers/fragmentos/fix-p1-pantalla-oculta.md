@@ -24,17 +24,25 @@ Rama `fix/p1-pantalla-oculta`. Plan: `docs/superpowers/plans/2026-10-12-p1-panta
 - T4: la mutación (d) (`FRAMES_AFTER_HIDE = 0`, y variantes sin ninguna espera) no se pone en rojo en el emulador API 36 y no se declara probada — por qué: el trayecto hasta `screencap` dura más que el redibujado; honestidad sobre lo medido — qué cuesta: en un móvil más lento 3 fotogramas podrían ser pocos; la captura saldría con el aviso y no se sabría (`noticeInImage` sería false). Va a «Validaciones manuales pendientes».
 - T6: la nota de `adbuddy screen` se reformuló respecto al plan para no prometer causa («possibly because the app hides its content from accessibility services, or because the screen is still changing») — por qué: pedido explícito del líder — qué cuesta: menos precisa.
 
+## Menores diferidos (ledger `.superpowers/sdd/2026-10-12-p1-pantalla-oculta/progress.md`)
+
+- T2: (1) una pausa durante la espera de 400 ms no se vuelve a comprobar en la app (`hideNotice` responde ok; el host la ve antes y recomprueba): decidir en la revisión final; (2) la espera de 400 ms usa un timestamp viejo en `takeOff`; (3) `catch (e: Exception)` traga `InterruptedException` sin reponer el flag; (4) falta cubrir servicio activo con overlay aún sin crear.
+- T3: ctx cancelado reportado como `UI_BLOCKED`; línea de ayuda larga en `en.toml`/`es.toml`.
+- T4: `TestTheNoticeWhenTheHostReadsTheScreen` ya no afirma que `screenshot` sube el aviso; margen de ~100 ms en el dwell; comparaciones de píxeles estrictas; alternativa instrumentada para `afterFrames(n)`.
+- T6: comentario de doc de `printScreen` huérfano tras la constante nueva; un test podría fijar «no promete causa».
+- T7: la condición del log dispara también con ventanas de sistema sin contenido; carrera benigna de `lastWindowsLog`; comentario largo.
+
 ## Filas para `pendientes-m3-m5.md`
 
-- Causa de la pantalla oculta en Opciones para desarrolladores en Android 17 (Pixel 9 Pro XL, Android 17): ventana de app activa y listada, sin contenido para el servicio, sin FLAG_SECURE. Hipótesis sin verificar: interacción de `HIDE_NON_SYSTEM_OVERLAY_WINDOWS` con el overlay. Qué queda: la prueba con el APK de esta rama y la línea de log `ADBuddyA11y` (T7).
+- Causa de la pantalla oculta en Opciones para desarrolladores en Android 17 (Pixel, Android 17): ventana de app activa y listada, sin contenido para el servicio, sin FLAG_SECURE. Hipótesis sin verificar: interacción de `HIDE_NON_SYSTEM_OVERLAY_WINDOWS` con el overlay. Qué queda: la prueba con el APK de esta rama y la línea de log `ADBuddyA11y` (T7).
 - Decisión sobre FLAG_SECURE: `adbuddy screenshot` sale negra con una app con `FLAG_SECURE` sin protección de ADBuddy, mientras `adbuddy screen` la lee. Decidir si se protege, se avisa o se deja.
-- Permiso de notificaciones del Pixel 9 Pro XL (Android 17): pendiente de comprobar y, si falta, de guiar a la persona.
+- Permiso de notificaciones del Pixel (Android 17): pendiente de comprobar y, si falta, de guiar a la persona.
 
 ## Validaciones manuales pendientes
 
 | Validación | Qué comprobar | Estado |
 |---|---|---|
-| Causa de la pantalla oculta en Opciones para desarrolladores (Pixel 9 Pro XL, Android 17) | Con el APK de esta rama: abrir Opciones para desarrolladores, `adbuddy screen` (debe imprimir la nota de pantalla ilegible) y `adb logcat -d -s ADBuddyA11y` (línea `N windows: …@…:no content`). Distingue «el sistema no entrega la ventana» de «la entrega sin contenido». | PENDIENTE: necesita el móvil real |
+| Causa de la pantalla oculta en Opciones para desarrolladores (Pixel, Android 17) | Con el APK de esta rama: abrir Opciones para desarrolladores, `adbuddy screen` (debe imprimir la nota de pantalla ilegible) y `adb logcat -d -s ADBuddyA11y` (línea `N windows: …@…:no content`). Distingue «el sistema no entrega la ventana» de «la entrega sin contenido». | PENDIENTE: necesita el móvil real |
 | El velo en Android 17 | `adbuddy screenshot` en el Pixel con el aviso visible: la captura sin marco ni píldora y el aviso de vuelta tras el comando; latencia razonable. Medido solo en API 36. | PENDIENTE: Android 17 no corre en emulador |
 | FLAG_SECURE negro | Una app con `FLAG_SECURE` en primer plano (no protegida): `adbuddy screenshot` sale negra; `adbuddy screen` la lee con normalidad (FLAG_SECURE no oculta el contenido a accesibilidad), sin nota de pantalla ilegible. | PENDIENTE |
 | Velo en API 36 (emulador) | `TestTheScreenshotDoesNotCarryTheNotice`, `TestTheHiddenNoticeComesBackByItself` | HECHA (2026-10-12): en verde en el emulador API 36; las mutaciones (a), (b), (c), (e) y (f2) ponen en rojo sus pruebas |

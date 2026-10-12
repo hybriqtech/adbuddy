@@ -1391,7 +1391,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 | Validación | Qué comprobar | Estado |
 |---|---|---|
-| Causa de la pantalla oculta en Opciones para desarrolladores (Pixel 9 Pro XL, Android 17) | Con el APK de esta rama: abrir Opciones para desarrolladores, `adbuddy screen` (debe imprimir la nota de pantalla ilegible) y `adb logcat -d -s ADBuddyA11y` (línea `N windows: …@…:no content`). Distingue «el sistema no entrega la ventana» de «la entrega sin contenido». | PENDIENTE: necesita el móvil real |
+| Causa de la pantalla oculta en Opciones para desarrolladores (Pixel, Android 17) | Con el APK de esta rama: abrir Opciones para desarrolladores, `adbuddy screen` (debe imprimir la nota de pantalla ilegible) y `adb logcat -d -s ADBuddyA11y` (línea `N windows: …@…:no content`). Distingue «el sistema no entrega la ventana» de «la entrega sin contenido». | PENDIENTE: necesita el móvil real |
 | El velo en Android 17 | `adbuddy screenshot` en el Pixel con el aviso visible: la captura sin marco ni píldora y el aviso de vuelta tras el comando; latencia razonable. Medido solo en API 36. | PENDIENTE: Android 17 no corre en emulador |
 | FLAG_SECURE negro | Una app con `FLAG_SECURE` en primer plano (no protegida): `adbuddy screenshot` sale negra; `adbuddy screen` la lee con normalidad (FLAG_SECURE no oculta el contenido a accesibilidad), sin nota de pantalla ilegible. | PENDIENTE |
 | Velo en API 36 (emulador) | `TestTheScreenshotDoesNotCarryTheNotice`, `TestTheHiddenNoticeComesBackByItself` | HECHA (2026-10-12): en verde en el emulador API 36; las mutaciones (a), (b), (c), (e) y (f2) ponen en rojo sus pruebas |

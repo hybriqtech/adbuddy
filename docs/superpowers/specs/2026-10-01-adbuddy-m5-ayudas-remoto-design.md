@@ -91,7 +91,7 @@ M3.0 dejó `args` y `result` como JSON libre (`json.RawMessage` y `JsonElement`)
 - **Qué ventanas:** todas las interactivas (`flagRetrieveInteractiveWindows`), ordenadas por capa de mayor a menor: la app, sus diálogos, el teclado y la interfaz del sistema. Es la idea de `HierarchyDumper` de ARTEMIS (Apache-2.0; la atribución va en `NOTICE` y en la cabecera del fichero si se copia código). Las ventanas de `tech.hybriq.adbuddy`, incluida la superposición, no salen nunca.
 - **Qué nodos:** los visibles para el usuario, con los límites recortados a la pantalla, a su ventana y a sus antepasados desplazables (paridad con UIAutomator). Entre ellos, solo los informativos (texto, descripción o pista) o los que se pueden usar (pulsar, editar, desplazar o marcar). Las capas sin nada de eso desaparecen. `--all` (`args: {"all": true}`) incluye todos los nodos visibles.
 - **Topes:** 2000 elementos, profundidad 75. Más que eso pone `truncated: true`. Si el JSON del resultado pasa de 512 KiB (bytes UTF-8 ya codificados, `MaxUIResult`), se recortan los textos largos a 200 caracteres y, si aún no cabe, los últimos elementos.
-- **`unreadable`:** `true` cuando alguna ventana de aplicación activa no entrega contenido (o no hay ventanas); el host lo dice al agente con una nota que no promete la causa. Ausente si no (Go `omitempty`).
+- **`unreadable`:** `true` cuando alguna ventana de aplicación o diálogo no entrega contenido (o no hay ventanas); el host lo dice al agente con una nota que no promete la causa. Ausente si no (Go `omitempty`).
 - **Contraseñas:** de un nodo con `isPassword` sale `password: true`, y `text` y `hint` salen vacíos.
 - **Bloqueado:** con el móvil bloqueado (`KeyguardManager.isKeyguardLocked`), `locked: true` y `elements` vacío. El agente no debe intentar desbloquear (la regla 14 de `AGENTS.md`).
 - **App protegida en primer plano:** `error` `protected` (§4.3).
@@ -175,7 +175,7 @@ Pide a la app que muestre la superposición (§6) sin hacer nada más. La usa el
 
 Pide a la app que retire la superposición (marco y píldora) un instante, para que `adbuddy screenshot` no la lleve en la imagen. `args` `{ms: 1..5000}` (`MaxHideNoticeMs`), `result` `{}`. La app quita las vistas, espera 3 fotogramas y se restaura sola a los `ms` salvo pausa (nunca la repone en pausa; `show()` y `remove()` cancelan el temporizador).
 
-- Respuestas: `ok`; `protected` con la sesión en pausa; `failed` si no puede retirarla o `ms` está fuera de rango.
+- Respuestas: `ok`; `invalid` si `ms` está fuera de 1..5000; `protected` con la sesión en pausa; `failed` si no puede retirarla.
 - No es un helper del agente: solo la pide el host dentro de `screenshot`.
 
 ## 4. Seguridad
