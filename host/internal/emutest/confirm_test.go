@@ -627,7 +627,10 @@ func bouncer(nodes []uiNode) bool {
 // its nodes, or fails. Over the lock screen, and below another notification, a
 // notification shows collapsed (one line, and over the lock screen without its
 // buttons): until ready, the Expand button nearest the title is tapped, again
-// every 3 s (a tap during the shade's animation can be lost).
+// no sooner than 6 s later (a tap during the shade's animation can be lost, but
+// on a slow runner the buttons can take longer than 3 s to appear, and a second
+// tap would fold what the first one opened). It is never tapped when the button
+// nearest the title says Collapse: the row is open already.
 func (e *emu) shadeUntil(t *testing.T, title string, ready func([]uiNode) bool) []uiNode {
 	t.Helper()
 	var nodes []uiNode
@@ -638,17 +641,17 @@ func (e *emu) shadeUntil(t *testing.T, title string, ready func([]uiNode) bool) 
 			return true
 		}
 		row := slices.IndexFunc(nodes, func(n uiNode) bool { return n.Text == title })
-		if row < 0 || time.Since(expanded) < 3*time.Second {
+		if row < 0 || time.Since(expanded) < 6*time.Second {
 			return false
 		}
-		expand := -1
+		toggle := -1 // the Expand or Collapse button nearest the title
 		for i, n := range nodes {
-			if n.ID == "android:id/expand_button" && n.Desc == "Expand" && (expand < 0 || abs(n.Y-nodes[row].Y) < abs(nodes[expand].Y-nodes[row].Y)) {
-				expand = i
+			if n.ID == "android:id/expand_button" && (n.Desc == "Expand" || n.Desc == "Collapse") && (toggle < 0 || abs(n.Y-nodes[row].Y) < abs(nodes[toggle].Y-nodes[row].Y)) {
+				toggle = i
 			}
 		}
-		if expand >= 0 {
-			e.tap(t, nodes[expand])
+		if toggle >= 0 && nodes[toggle].Desc == "Expand" {
+			e.tap(t, nodes[toggle])
 			expanded = time.Now()
 		}
 		return false
