@@ -8,10 +8,10 @@ name: host
 # required check (no branch protection on a private free repository), so skipping is safe.
 on:
   pull_request:
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/**"]
   push:
     branches: [main]
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/**"]
 
 permissions:
   contents: read
