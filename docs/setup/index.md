@@ -18,7 +18,7 @@ Keep `adbuddy setup` running on the PC while you follow these steps.
 2. Tap **Build number** seven times. The phone may ask for your PIN.
 3. You will see "You are now a developer!".
 
-![Pending screenshot: About phone, Build number](img/pending.svg){: width="240"}
+![Settings, About phone: the Build number row](img/01-build-number.png){: width="240"}
 
 On some phones **Build number** is under **Settings → About phone → Software information**.
 
@@ -28,7 +28,7 @@ On some phones **Build number** is under **Settings → About phone → Software
 2. Turn on **Wireless debugging**.
 3. When the phone asks "Allow wireless debugging on this network?", tick **Always allow on this network** and tap **Allow**. This network becomes a trusted network: the phone reconnects on it by itself.
 
-![Pending screenshot: Wireless debugging switch](img/pending.svg){: width="240"}
+![Developer options: the Wireless debugging switch turned on](img/02-wireless-debugging.png){: width="240"}
 
 The phone and the PC must be on the **same Wi-Fi network**.
 
@@ -40,7 +40,7 @@ The phone and the PC must be on the **same Wi-Fi network**.
 2. Tap **Pair device with QR code**.
 3. Scan the **second** QR code with the scanner that opens on the phone, not with the camera app.
 
-![Pending screenshot: Pair device with QR code](img/pending.svg){: width="240"}
+![The QR code scanner the phone opens](img/03-pair-qr.png){: width="240"}
 
 The phone shows the PC in **Paired devices** and the terminal says "Paired".
 
@@ -53,7 +53,7 @@ Run `adbuddy setup --code` instead:
 1. On the phone, tap **Pair device with pairing code**. Keep that popup open until the terminal says "Paired": closing it cancels the code.
 2. Type into the terminal the **IP address & Port** and the 6-digit **Wi-Fi pairing code** shown inside that popup, not the IP address and port on the main Wireless debugging screen.
 
-![Pending screenshot: Pair device with pairing code](img/pending.svg){: width="240"}
+![The pairing code popup with the Wi-Fi pairing code and the IP address and port](img/04-pair-code.png){: width="240"}
 
 ### If the phone is on another network (Tailscale)
 

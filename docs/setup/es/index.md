@@ -16,9 +16,9 @@ Deja `adbuddy setup` en marcha en el PC mientras sigues estos pasos.
 
 1. Abre **Ajustes → Información del teléfono**.
 2. Toca **Número de compilación** siete veces. Puede que el móvil te pida el PIN.
-3. Verás "¡Ya eres desarrollador!".
+3. Verás "¡Ahora están activadas las opciones para desarrolladores!". El texto cambia según el móvil y la región (por ejemplo, "¡Ya eres desarrollador!"); lo que importa es que aparezca el aviso.
 
-![Captura pendiente: Información del teléfono, Número de compilación](../img/pending.svg){: width="240"}
+![Ajustes, Información del teléfono: la fila Número de compilación](../img/01-build-number-es.png){: width="240"}
 
 En algunos móviles, **Número de compilación** está en **Ajustes → Información del teléfono → Información de software**.
 
@@ -28,7 +28,7 @@ En algunos móviles, **Número de compilación** está en **Ajustes → Informac
 2. Activa **Depuración inalámbrica**.
 3. Cuando el móvil pregunte "¿Permitir la depuración inalámbrica en esta red?", marca **Permitir siempre en esta red** y toca **Permitir**. Así esa red queda como red de confianza y el móvil se vuelve a conectar solo en ella.
 
-![Captura pendiente: interruptor de Depuración inalámbrica](../img/pending.svg){: width="240"}
+![Opciones para desarrolladores: el interruptor de Depuración inalámbrica activado](../img/02-wireless-debugging-es.png){: width="240"}
 
 El móvil y el PC tienen que estar en la **misma red Wi-Fi**.
 
@@ -40,9 +40,9 @@ El móvil y el PC tienen que estar en la **misma red Wi-Fi**.
 2. Toca **Emparejar dispositivo con código QR**.
 3. Escanea el **segundo** código QR con el lector que se abre en el móvil, no con la app de la cámara.
 
-![Captura pendiente: Emparejar dispositivo con código QR](../img/pending.svg){: width="240"}
+![El lector de códigos QR que abre el móvil](../img/03-pair-qr-es.png){: width="240"}
 
-El móvil muestra el PC en **Dispositivos vinculados** y el terminal dice "Paired".
+El móvil muestra el PC en **Dispositivos emparejados** y el terminal dice "Paired".
 
 Tienes unos 3 minutos desde que aparece el segundo código QR.
 
@@ -51,9 +51,9 @@ Tienes unos 3 minutos desde que aparece el segundo código QR.
 Ejecuta `adbuddy setup --code`:
 
 1. En el móvil, toca **Emparejar dispositivo con código de sincronización**. Deja ese cuadro abierto hasta que el terminal diga "Paired": si lo cierras, el código deja de valer.
-2. Escribe en el terminal la **dirección IP y puerto** y el **código de vinculación Wi-Fi** de 6 cifras que aparecen dentro de ese cuadro, no la dirección IP y el puerto de la pantalla principal de Depuración inalámbrica.
+2. Escribe en el terminal la **dirección IP y puerto** y el **código de vinculación de Wi-Fi** de 6 cifras que aparecen dentro de ese cuadro, no la dirección IP y el puerto de la pantalla principal de Depuración inalámbrica.
 
-![Captura pendiente: Emparejar dispositivo con código de sincronización](../img/pending.svg){: width="240"}
+![El cuadro del código de sincronización con el código de vinculación de Wi-Fi y la dirección IP y puerto](../img/04-pair-code-es.png){: width="240"}
 
 ### Si el móvil está en otra red (Tailscale)
 
