@@ -13,6 +13,32 @@ class DumperTest {
     private fun dump(all: Boolean = false, locked: Boolean = false) =
         Dumper.dump(windows, SCREEN, 0, "com.android.settings", "com.android.settings.Settings", locked, all, { false })
 
+    private fun dumpOf(windows: List<UiWindow>) =
+        Dumper.dump(windows, SCREEN, 0, "", "", false, false, { false })
+
+    @Test fun anAppWindowWithoutContentMakesTheScreenUnreadable() {
+        val d = dumpOf(listOf(UiWindow("system", 2, Box(0, 0, 1344, 199), null), UiWindow("app", 1, SCREEN, null)))
+        assertEquals(true, d.unreadable)
+        assertTrue(d.elements.isEmpty())
+    }
+
+    @Test fun aDialogWithoutContentMakesItUnreadableToo() {
+        assertEquals(true, dumpOf(windows + UiWindow("dialog", 5, Box(100, 100, 900, 900), null)).unreadable)
+    }
+
+    @Test fun noWindowsAtAllIsUnreadable() {
+        assertEquals(true, dumpOf(emptyList()).unreadable)
+    }
+
+    @Test fun aReadableScreenIsNotMarked() {
+        assertNull(dump().unreadable)
+        assertNull(dump(all = true).unreadable)
+    }
+
+    @Test fun aSystemWindowWithoutContentAloneIsNotUnreadable() {
+        assertNull(dumpOf(windows + UiWindow("system", 9, Box(0, 0, 1344, 199), null)).unreadable)
+    }
+
     @Test fun showsTheUsableAndInformativeNodes() {
         val d = dump()
         assertEquals("com.android.settings", d.`package`)

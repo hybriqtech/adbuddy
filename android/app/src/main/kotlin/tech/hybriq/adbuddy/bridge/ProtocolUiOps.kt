@@ -74,6 +74,8 @@ data class UiDump(
     val rotation: Int,
     val truncated: Boolean,
     val elements: List<UiElement> = emptyList(),
+    /** true when an app window gave no content (Android or the app hides it from this service) or there is no window at all; absent otherwise. */
+    val unreadable: Boolean? = null,
 )
 
 /**

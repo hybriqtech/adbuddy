@@ -13,6 +13,7 @@
     "ui.response@clickgesture": "click",
     "ui.response@dump": "dump",
     "ui.response@dumplocked": "dump",
+    "ui.response@dumpunreadable": "dump",
     "ui.response@settext": "setText",
     "ui.response@foreground": "foreground",
     "ui.response@notifications": "notifications",

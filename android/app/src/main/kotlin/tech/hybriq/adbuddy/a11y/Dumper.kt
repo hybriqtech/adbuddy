@@ -11,7 +11,8 @@ import tech.hybriq.adbuddy.bridge.UiLimits
  * windows from the top layer down, never ADBuddy's own. Without all, only the
  * informative or usable nodes. A password field never carries its text, and
  * the packages hidden says (the protected apps) are left out, as in the
- * other half of a split screen.
+ * other half of a split screen. It also says when an app window gave no
+ * content (unreadable).
  */
 object Dumper {
     const val MAX_ELEMENTS = 2000
@@ -55,7 +56,10 @@ object Dumper {
             if (w.pkg == Packages.ADBUDDY || hidden(w.pkg)) continue
             walk(root, screen.clip(w.bounds).takeUnless { it.empty } ?: screen, 0, w.type)
         }
-        val d = UiDump(locked = false, `package` = pkg, activity = activity, width = screen.r, height = screen.b, rotation = rotation, truncated = truncated, elements = elements)
+        // A window without content was skipped above: say so, so the agent knows
+        // the empty screen is not an empty app.
+        val unreadable = windows.isEmpty() || windows.any { (it.type == "app" || it.type == "dialog") && it.root == null }
+        val d = UiDump(locked = false, `package` = pkg, activity = activity, width = screen.r, height = screen.b, rotation = rotation, truncated = truncated, elements = elements, unreadable = true.takeIf { unreadable })
         return fit(d)
     }
 

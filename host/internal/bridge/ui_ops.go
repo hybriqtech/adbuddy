@@ -89,7 +89,8 @@ type UIHideNoticeArgs struct {
 }
 
 // UIDump is dump's result: the screen as the agent may see it. Elements is
-// empty while the phone is locked. Package is empty when unknown.
+// empty while the phone is locked. Package is empty when unknown. Unreadable
+// says the screen could not be read.
 type UIDump struct {
 	Locked    bool        `json:"locked"`
 	Package   string      `json:"package"`
@@ -99,6 +100,9 @@ type UIDump struct {
 	Rotation  int         `json:"rotation"`
 	Truncated bool        `json:"truncated"`
 	Elements  []UIElement `json:"elements"`
+	// Unreadable: an app window gave the app no content (Android or the app
+	// hides it from accessibility services) or there is no window at all.
+	Unreadable bool `json:"unreadable,omitempty"`
 }
 
 // UIElement is one element of a dump. Bounds are left, top, right, bottom
