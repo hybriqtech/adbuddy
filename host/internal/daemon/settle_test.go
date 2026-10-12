@@ -379,6 +379,95 @@ func TestSettleQuietAfterTheChange(t *testing.T) {
 	}
 }
 
+// bareDump is what the app reads while a transition has not drawn the app
+// window: the status bar and nothing of an application.
+func bareDump() bridge.UIDump {
+	d := dumpOf("com.android.settings")
+	d.Elements = []bridge.UIElement{
+		{ID: "com.android.systemui:id/clock", Text: "7:46", Class: "TextView", Bounds: [4]int{50, 1, 136, 128}, Enabled: true, Window: "system"},
+	}
+	return d
+}
+
+// A read with only system windows is not a screen: it does not settle however
+// long it lasts, and the screen that comes after it does.
+func TestSettleABareReadNeverSettles(t *testing.T) {
+	c := fastSettle()
+	c.gap, c.quiet, c.idle = 2*time.Millisecond, 20*time.Millisecond, 10*time.Second
+	settleTimes(t, c)
+	e := newEnv(t)
+	a := e.settleApp()
+	const bareReads = 30 // far more than the quiet needs
+	a.dumpFn = func(n int) bridge.UIDump {
+		switch {
+		case n == 1: // the start
+			return dumpOf("com.android.settings", "A")
+		case n <= 1+bareReads:
+			return bareDump()
+		}
+		return dumpOf("com.android.settings", "B")
+	}
+	s, exit := e.helperScreen(t, context.Background(), bridge.UIOpClick, xy(1, 1))
+	if exit.Code != 0 {
+		t.Fatalf("exit %+v", exit)
+	}
+	cs := decodeClicked(t, s)
+	if cs.Screen == nil || !cs.Screen.Settled || !is(cs.Screen.Changed, true) || textOf(cs.Screen) != "B" {
+		t.Fatalf("result %s", s.data[0])
+	}
+	if n := a.countAfter(bridge.UIOpDump); n <= bareReads {
+		t.Fatalf("%d reads after the tap: it settled on a bare one", n)
+	}
+}
+
+// If the window never comes before the cap, the bare read comes out, as the
+// last one read does: not settled.
+func TestSettleABareReadAtTheCapIsNotSettled(t *testing.T) {
+	c := fastSettle()
+	c.gap, c.idle, c.max = 2*time.Millisecond, 10*time.Millisecond, 100*time.Millisecond
+	settleTimes(t, c)
+	e := newEnv(t)
+	a := e.settleApp()
+	a.dumpFn = func(n int) bridge.UIDump {
+		if n == 1 {
+			return dumpOf("com.android.settings", "A")
+		}
+		return bareDump()
+	}
+	s, exit := e.helperScreen(t, context.Background(), bridge.UIOpClick, xy(1, 1))
+	if exit.Code != 0 {
+		t.Fatalf("exit %+v", exit)
+	}
+	cs := decodeClicked(t, s)
+	if cs.Screen == nil || cs.Screen.Settled || !is(cs.Screen.Changed, true) || cs.Note != "" {
+		t.Fatalf("result %s", s.data[0])
+	}
+	if j := e.last(t); !strings.Contains(j.Reason, "settled=false") {
+		t.Fatalf("journal %+v", j)
+	}
+}
+
+// Only a read without application windows on an unlocked phone is bare: the
+// lock screen has none and is a screen like any other.
+func TestSettleTheLockScreenSettles(t *testing.T) {
+	settleTimes(t, fastSettle())
+	e := newEnv(t)
+	a := e.settleApp()
+	a.dumpFn = func(int) bridge.UIDump {
+		d := bareDump()
+		d.Locked, d.Elements = true, []bridge.UIElement{}
+		return d
+	}
+	s, exit := e.helperScreen(t, context.Background(), bridge.UIOpDump, bridge.UIDumpArgs{})
+	if exit.Code != 0 {
+		t.Fatalf("exit %+v", exit)
+	}
+	d := decodeSettled(t, s)
+	if !d.Settled || !d.Locked {
+		t.Fatalf("result %s", s.data[0])
+	}
+}
+
 func TestSettleIgnoresFocusOnly(t *testing.T) {
 	focused := func(text string) bridge.UIDump {
 		d := dumpOf("com.android.settings", text)
