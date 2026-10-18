@@ -113,3 +113,5 @@ Task A3: ronda 1 (revisión sonnet: cumplimiento OK; 5 menores). Arreglos: 1 (re
 Ruling: insets de la barra de estado (menor 4 de A3) no se prueban en Robolectric — se dejan al emulador (T9) — si me equivoco, la banda podría solaparse con la barra de estado hasta T9.
 Task 4: complete (commits f9b6c907, e8fb1071; re-revisión sonnet: puntos 2-5 resueltos, sin hallazgos nuevos)
 Ruling: la cadena android se para tras A3 (orden del líder: UX1 choca con A4 y A5); cuando UX1 esté en main, `git merge main` (nunca rebase ni --force), resolver con revisión y ajustar A2/A3 si hace falta.
+Task 5: complete (commit e5da8659; revisión opus: cumplimiento OK, calidad aprobada, 3 menores)
+Ruling: menores de T5 (hora sin fecha en `yolo status`, Code: 2 literal en YOLO_INVALID, `session` con omitempty en la CLI y no en ipc.YoloStatus) se dejan — cosméticos, el máximo es 1 h — si me equivoco, una hora ambigua cerca de medianoche o un JSON con un campo a veces ausente.
