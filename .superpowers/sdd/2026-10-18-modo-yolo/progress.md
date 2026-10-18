@@ -115,3 +115,6 @@ Task 4: complete (commits f9b6c907, e8fb1071; re-revisión sonnet: puntos 2-5 re
 Ruling: la cadena android se para tras A3 (orden del líder: UX1 choca con A4 y A5); cuando UX1 esté en main, `git merge main` (nunca rebase ni --force), resolver con revisión y ajustar A2/A3 si hace falta.
 Task 5: complete (commit e5da8659; revisión opus: cumplimiento OK, calidad aprobada, 3 menores)
 Ruling: menores de T5 (hora sin fecha en `yolo status`, Code: 2 literal en YOLO_INVALID, `session` con omitempty en la CLI y no en ipc.YoloStatus) se dejan — cosméticos, el máximo es 1 h — si me equivoco, una hora ambigua cerca de medianoche o un JSON con un campo a veces ausente.
+Task A3: complete (commits edbcfe2f, c1294bad; re-revisión sonnet: 5 puntos resueltos, sin hallazgos nuevos; BubbleFlowTest flaky no reproducido 3/3 verde)
+Ruling: el test de A3 que inyecta el WebSocket por reflexión en Bridge.socket se queda (falla con error claro si se renombra); un hook internal setSocketForTest sería mejor, opcional — si me equivoco, un test roto al renombrar el campo, visible al momento.
+Task 6: ronda 1 (revisión opus: cumplimiento OK; 4 menores). Arreglos: 1 (attach publica estado viejo fuera de notifyMu), 2 (chivato de texto de Enable más estricto), 3 (test del log sin sleep). El 4 (srv.Current sin test propio) se deja: defensa en profundidad, mismo patrón que remote.set.
