@@ -28,6 +28,16 @@ class ChatReducerYoloTest {
         assertTrue(s.chat.yoloApprovals.isEmpty())
     }
 
+    // Mutation: append without removing the earlier one of the same id.
+    @Test fun theSameApprovalTwiceStaysOnceAtTheEnd() {
+        var s = BridgeState(session = "s_1")
+        s = s.apply(msg(1, """{"id":"p_1","decision":"allow","by":"yolo","summary":"first"}"""))
+        s = s.apply(msg(2, """{"id":"p_2","decision":"allow","by":"yolo","summary":"second"}"""))
+        s = s.apply(msg(3, """{"id":"p_1","decision":"allow","by":"yolo","summary":"first again"}"""))
+        assertEquals(listOf("p_2", "p_1"), s.chat.yoloApprovals.map { it.id })
+        assertEquals("first again", s.chat.yoloApprovals.last().summary)
+    }
+
     @Test fun anApprovalOfOlderAppsHasNoSummary() {
         val s = BridgeState(session = "s_1").apply(msg(1, """{"id":"p_9","decision":"allow","by":"yolo"}"""))
         assertEquals("", s.chat.yoloApprovals.single().summary)

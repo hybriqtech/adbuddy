@@ -40,7 +40,7 @@ object ChatReducer : Reducer {
             val p = Protocol.payload<PermissionRequest>(m)
             if (p == null || p.id.isEmpty()) s else s.copy(chat = s.chat.copy(permissions = upsertBy(s.chat.permissions, p, MAX_PERMISSIONS) { it.id }))
         }
-        // Whoever answered, and wherever: the card goes (spec M4 §5.1).
+        // Whoever answered, and wherever: the card goes (spec M4 §5.1). What YOLO approved had no card: it is kept to be told.
         Protocol.PERMISSION_RESOLVED -> {
             val r = Protocol.payload<PermissionResolved>(m)
             if (r == null) s else s.copy(

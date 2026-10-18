@@ -68,6 +68,7 @@ data class PermissionRequest(
 data class PermissionReply(val id: String, val decision: String)
 
 /** Takes a PermissionRequest off the phone, wherever it was answered. by: phone, terminal, timeout, agent or yolo.
- * summary: only with by yolo, what was approved (the app had no card for it). */
+ * summary: only with by yolo, what was approved (the app had no card for it).
+ */
 @Serializable
 data class PermissionResolved(val id: String, val decision: String, val by: String, val summary: String = "")

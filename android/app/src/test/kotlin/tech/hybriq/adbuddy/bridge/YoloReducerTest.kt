@@ -52,6 +52,10 @@ class YoloReducerTest {
         val s = BridgeState(session = "s_1", yolo = onState).disconnected()
         assertEquals(onState, s.yolo)
         assertEquals(onState, BridgeState(session = "s_1", yolo = onState).appOutdated().yolo)
+        // A welcome of a host too old to talk to (protocol below the minimum) keeps it too.
+        val old = BridgeState(session = "s_1", yolo = onState).apply(msg(0, Protocol.WELCOME, """{"session":"s_1","fromSeq":1,"protocol":0}"""))
+        assertEquals(BridgeState.Connection.INCOMPATIBLE, old.connection)
+        assertEquals(onState, old.yolo)
     }
 
     @Test fun aNewSessionOrAnUnreadableSnapshotForgetsIt() {

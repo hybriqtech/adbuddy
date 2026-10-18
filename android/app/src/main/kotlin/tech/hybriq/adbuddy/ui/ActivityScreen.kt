@@ -73,6 +73,9 @@ private fun EntryRow(e: JournalEntry, now: Long) {
             Text(levelIcon(e.level), style = MaterialTheme.typography.titleMedium)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(e.description, style = MaterialTheme.typography.bodyLarge)
+                if (e.yolo) {
+                    Text(stringResource(R.string.yolo_entry_mark), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                }
                 Text(
                     stringResource(R.string.activity_entry, statusText(e.status), e.argv.joinToString(" ")),
                     style = MaterialTheme.typography.labelMedium,

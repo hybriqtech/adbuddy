@@ -282,4 +282,11 @@
     <string name="error_expired">That request expired</string>
     <string name="error_ambiguous">More than one thing matches: say which</string>
     <string name="error_unknown">The PC reported an error</string>
+    <string name="yolo_band_timed">YOLO mode · %1$s left</string>
+    <string name="yolo_band_session">YOLO mode · until the session ends</string>
+    <string name="yolo_band_spoken">YOLO mode is on</string>
+    <string name="yolo_band_off">Turn off</string>
+    <string name="yolo_approved">Approved by YOLO: %1$s</string>
+    <string name="yolo_approved_unnamed">Approved by YOLO</string>
+    <string name="yolo_entry_mark">YOLO</string>
 </resources>

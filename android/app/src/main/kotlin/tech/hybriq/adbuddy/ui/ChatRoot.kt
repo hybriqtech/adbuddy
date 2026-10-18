@@ -15,6 +15,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
@@ -28,6 +34,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.fragment.app.FragmentActivity
@@ -123,7 +130,16 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             launchCredential = { intent -> credential.launch(intent) },
         )
     }
-    val openYolo = { if (yoloActive) sendYolo(YoloUi.offRequest(), yoloOffFailed) else yoloAsk = true }
+    val yoloUnknown = stringResource(R.string.yolo_unknown)
+    // An unknown state (the PC has not said) opens no dialog whose button could never be enabled: a Toast says why.
+    val yoloKnown by rememberUpdatedState(state.yolo != null)
+    val openYolo = {
+        when {
+            yoloActive -> sendYolo(YoloUi.offRequest(), yoloOffFailed)
+            !yoloKnown -> Toast.makeText(context, yoloUnknown, Toast.LENGTH_LONG).show()
+            else -> yoloAsk = true
+        }
+    }
     val attachFailed = stringResource(R.string.attach_failed)
     val cutFailed = stringResource(R.string.cut_failed)
     val restoreFailed = stringResource(R.string.restore_failed)
@@ -213,40 +229,48 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val waiting = ConfirmUi.closedWaiting(state, closed, now).size
     val back = { route = route.parent ?: Route.CHAT }
     val first = step
-    if (first != null) {
-        val finish = { onboarding.finish(); step = null }
-        when (first) {
-            OnboardingStep.PROTECTED_APPS ->
-                ProtectedAppsScreen(app, first, onBack = { step = first.previous() }, onDone = { step = first.next() }, onSkip = { step = first.next() })
-            OnboardingStep.NOTIFICATION_ACCESS ->
-                NotificationAccessScreen(first, onBack = { step = first.previous() }, onDone = finish, onSkip = finish)
-        }
-    } else {
-        when (route) {
-            // The chat leaves the composition under Settings and Activity: its state (the text being written,
-            // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
-            Route.CHAT -> holder.SaveableStateProvider("chat") {
-                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured, terminalOpenByDefault = terminalOpenByDefault,
-                    notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) },
-                    pendingQuestions = waiting,
-                    // The clock of the tap, not of the composition: a question that has just expired is not reopened.
-                    onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } }) {
-                    RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
+    val yolo = rememberYoloView(state, app.clock)
+    Column(Modifier.fillMaxSize()) {
+        // On every screen, the first-run steps included: the mode is never out of sight.
+        YoloBand(yolo, onOff = { sendYolo(YoloUi.offRequest(), yoloOffFailed) })
+        // The band took the status bar: the screens below do not leave room for it again.
+        Box(Modifier.weight(1f).then(if (yolo.active) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
+            if (first != null) {
+                val finish = { onboarding.finish(); step = null }
+                when (first) {
+                    OnboardingStep.PROTECTED_APPS ->
+                        ProtectedAppsScreen(app, first, onBack = { step = first.previous() }, onDone = { step = first.next() }, onSkip = { step = first.next() })
+                    OnboardingStep.NOTIFICATION_ACCESS ->
+                        NotificationAccessScreen(first, onBack = { step = first.previous() }, onDone = finish, onSkip = finish)
+                }
+            } else {
+                when (route) {
+                    // The chat leaves the composition under Settings and Activity: its state (the text being written,
+                    // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
+                    Route.CHAT -> holder.SaveableStateProvider("chat") {
+                        ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured, terminalOpenByDefault = terminalOpenByDefault,
+                            notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) },
+                            pendingQuestions = waiting,
+                            // The clock of the tap, not of the composition: a question that has just expired is not reopened.
+                            onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } }) {
+                            RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
+                        }
+                    }
+                    Route.ACTIVITY -> {
+                        BackHandler(onBack = back)
+                        ActivityScreen(state, onBack = back)
+                    }
+                    Route.SETTINGS -> {
+                        BackHandler(onBack = back)
+                        SettingsScreen(
+                            app, state, onOpen = { route = it }, onBack = back, onMessage = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() },
+                            onYolo = { on -> if (on) yoloAsk = true else sendYolo(YoloUi.offRequest(), yoloOffFailed) },
+                        )
+                    }
+                    Route.PROTECTED_APPS -> ProtectedAppsScreen(app, null, onBack = back, onDone = back, onSkip = back)
+                    Route.NOTIFICATION_ACCESS -> NotificationAccessScreen(null, onBack = back, onDone = back, onSkip = back)
                 }
             }
-            Route.ACTIVITY -> {
-                BackHandler(onBack = back)
-                ActivityScreen(state, onBack = back)
-            }
-            Route.SETTINGS -> {
-                BackHandler(onBack = back)
-                SettingsScreen(
-                    app, state, onOpen = { route = it }, onBack = back, onMessage = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() },
-                    onYolo = { on -> if (on) yoloAsk = true else sendYolo(YoloUi.offRequest(), yoloOffFailed) },
-                )
-            }
-            Route.PROTECTED_APPS -> ProtectedAppsScreen(app, null, onBack = back, onDone = back, onSkip = back)
-            Route.NOTIFICATION_ACCESS -> NotificationAccessScreen(null, onBack = back, onDone = back, onSkip = back)
         }
     }
     val prefs = remember(context) { BridgePrefs(context) }

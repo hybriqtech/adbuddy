@@ -113,9 +113,10 @@ fun ChatScreen(
     var askNew by rememberSaveable { mutableStateOf(false) }
     val items = Timeline.of(state.chat, state.sessionState.conversation, outgoing)
     val tools = ToolStrip.of(state.chat, state.sessionState.state)
+    val approvals = state.chat.yoloApprovals
     val listState = rememberLazyListState()
     // The strip is the last item: the list follows it too, so what the agent is doing is in view.
-    val rows = items.size + if (tools.isEmpty()) 0 else 1
+    val rows = items.size + (if (tools.isEmpty()) 0 else 1) + (if (approvals.isEmpty()) 0 else 1)
     // Follows what arrives only while the reader is at the end. New rows go below and do not move the viewport, so "was at
     // the end" is "the row that was last is (at least partly) in the viewport": a last bubble that grew in place now
     // ends below it, and its reader was at the end all the same. A drop in rows (the tool strip going) is not news, and
@@ -183,7 +184,7 @@ fun ChatScreen(
                 }
             }
             val weight = if (terminalOn) 0.55f else 1f
-            if (items.isEmpty() && tools.isEmpty() && status == LinkStatus.CONNECTED) {
+            if (items.isEmpty() && tools.isEmpty() && approvals.isEmpty() && status == LinkStatus.CONNECTED) {
                 ChatEmptyState(Modifier.weight(weight).fillMaxSize())
             } else {
                 Box(Modifier.weight(weight).fillMaxSize()) {
@@ -201,6 +202,7 @@ fun ChatScreen(
                             )
                         }
                         if (tools.isNotEmpty()) item(key = "tools") { ToolStripView(tools) }
+                        if (approvals.isNotEmpty()) item(key = "yolo_approvals") { YoloApprovals(approvals) }
                     }
                     if (unseen) {
                         FilledTonalButton(

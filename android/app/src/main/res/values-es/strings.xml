@@ -280,4 +280,11 @@
     <string name="error_expired">Esa petición caducó</string>
     <string name="error_ambiguous">Hay más de uno que coincide: indica cuál</string>
     <string name="error_unknown">El PC informó de un error</string>
+    <string name="yolo_band_timed">Modo YOLO · quedan %1$s</string>
+    <string name="yolo_band_session">Modo YOLO · hasta el fin de la sesión</string>
+    <string name="yolo_band_spoken">El modo YOLO está activado</string>
+    <string name="yolo_band_off">Apagar</string>
+    <string name="yolo_approved">Aprobado por YOLO: %1$s</string>
+    <string name="yolo_approved_unnamed">Aprobado por YOLO</string>
+    <string name="yolo_entry_mark">YOLO</string>
 </resources>
