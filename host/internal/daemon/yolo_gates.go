@@ -19,6 +19,7 @@ const noRecord = "the journal cannot be written: this ran without a record and c
 type yoloNotes struct {
 	mu    sync.Mutex
 	lines []string
+	told  int // how many of lines were already written
 }
 
 type yoloNotesKey struct{}
@@ -40,13 +41,14 @@ func (n *yoloNotes) add(why string) {
 	n.lines = append(n.lines, why)
 }
 
-// tell writes the notes, one per line.
+// tell writes the notes not told yet, one per line: what was said is not repeated.
 func (n *yoloNotes) tell(w io.Writer) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	for _, l := range n.lines {
+	for _, l := range n.lines[n.told:] {
 		fmt.Fprintln(w, "⚠ YOLO: "+l)
 	}
+	n.told = len(n.lines)
 }
 
 // lift reports whether YOLO lets the request pass a door that would have

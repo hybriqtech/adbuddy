@@ -195,7 +195,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
 	}
 	ctx, notes := withYoloNotes(ctx)
-	defer notes.tell(s.Stderr())
+	yoloAtStart := d.o.Yolo.Active()
 	if t := d.waitingFor(); t != "" && !d.liftQuestion(ctx, t) {
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: t}
 	}
@@ -362,7 +362,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		u := journal.Entry{
 			ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUndo,
 			Argv: e.Inverse.Argv, Level: level, Rule: rule, Description: undoPrefix(d.o.Lang) + e.Description, Undoes: e.ID,
-			Yolo: d.o.Yolo.Active(),
+			Yolo: yoloAtStart || rule == "undo-yolo", // YOLO could expire between the lift and here
 		}
 		item.UndoID = u.ID
 		// The mark goes first, outside the agent's reach: if the host dies
@@ -380,6 +380,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNWRITABLE", Error: fmt.Sprintf("the journal cannot be written (%v); undid %d change(s) before stopping", err, len(res.Undone))}
 		}
 		var errb bytes.Buffer
+		notes.tell(s.Stderr()) // right before it runs, not when the undo ends blocked
 		code, runErr := d.o.ADB.Run(ctx, "", e.Inverse.Argv, nil, io.Discard, &errb)
 		if runErr != nil && code == 0 {
 			code = 1

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
@@ -345,4 +346,120 @@ func TestYoloDoesNotSkipServesOwnQuestions(t *testing.T) {
 	asked(t, held)
 	held.answer <- confirm.Deny
 	<-done
+}
+
+// A guard that repeats after the first notice (the wait of `screen --settle`)
+// lifts a reason the first one did not see: the agent is told of it too, once.
+// Mutation: remove the `notes.tell` that follows the settle block in ui.
+func TestYoloTellsWhatALaterGuardLetsThrough(t *testing.T) {
+	settleTimes(t, fastSettle())
+	e := newEnv(t)
+	a := e.settleApp()
+	a.onOp = func(op string, n int) {
+		if op == bridge.UIOpDump && n == 1 { // the shade is pulled down after the first read
+			e.adb.mu.Lock()
+			e.adb.shell[fixedFocusCmd] = focusShade
+			e.adb.mu.Unlock()
+		}
+	}
+	e.yoloOn(t)
+	s, exit := e.helperScreen(t, context.Background(), bridge.UIOpDump, bridge.UIDumpArgs{})
+	if exit.Code != 0 {
+		t.Fatalf("%+v %q", exit, s.errOut.String())
+	}
+	if got := strings.Count(s.errOut.String(), "⚠ YOLO: the notification shade is open"); got != 1 {
+		t.Fatalf("the late lift was told %d times: %q", got, s.errOut.String())
+	}
+}
+
+// The capture's notice: refused without YOLO, lifted (and told) with it.
+// Mutation: remove `&& !d.lift(ctx, why)` from the screenshot's showNotice in ui.
+func TestYoloLiftsTheNoticeRefusalOfAScreenshot(t *testing.T) {
+	var out [2]struct {
+		s    *stream
+		exit ipc.Exit
+	}
+	for i, yolo := range []bool{false, true} {
+		e := newEnv(t)
+		e.withApp().errs[bridge.UIOpNotice] = ErrUITimeout
+		e.adb.out["exec-out screencap -p"] = pngBytes(t)
+		if yolo {
+			e.yoloOn(t)
+		}
+		out[i].s, out[i].exit = e.helper(t, OpScreenshot, helperArgs(OpScreenshot), "adbuddy", "screenshot")
+	}
+	if out[0].exit.Code == 0 || out[0].exit.ErrorCode == "" {
+		t.Fatalf("without YOLO: %+v", out[0].exit)
+	}
+	if out[1].exit.Code != 0 || !strings.Contains(out[1].s.errOut.String(), "⚠ YOLO: ") || !strings.Contains(out[1].s.errOut.String(), "did not answer in time") {
+		t.Fatalf("with YOLO: %+v %q", out[1].exit, out[1].s.errOut.String())
+	}
+}
+
+// ADBuddy named in a command (am start, monkey) stays protected under YOLO.
+// Mutation: in guard, make the `tok == uidump.AppPackage` branch `&& !d.lift(...)`.
+func TestYoloKeepsADBuddyProtectedWhenNamedInACommand(t *testing.T) {
+	for _, argv := range [][]string{
+		{"shell", "am", "start", "-n", "tech.hybriq.adbuddy/.MainActivity"},
+		{"shell", "monkey", "-p", "tech.hybriq.adbuddy", "-c", "android.intent.category.LAUNCHER", "1"},
+	} {
+		e := newEnv(t)
+		e.yoloOn(t)
+		s, exit := e.exec(t, argv...)
+		if exit.Code != ExitDenied || !strings.Contains(s.errOut.String(), "tech.hybriq.adbuddy is a protected app") || len(ranOnPhone(e)) != 0 {
+			t.Errorf("%v: %+v %q ran %q", argv, exit, s.errOut.String(), ranOnPhone(e))
+		}
+	}
+}
+
+// An undo that ends without running anything does not tell the agent of what
+// YOLO "let through". Mutation: move `notes.tell` in undo back to a defer at the top.
+func TestYoloUndoTellsNothingWhenItRunsNothing(t *testing.T) {
+	e := newEnv(t)
+	e.d.o.OnEntry = func(journal.Entry) {}
+	e.forge(t, "j_f1", putArgv, "shell", "rm", "-rf", "/sdcard/x") // an inverse that does not undo a settings put
+	held := newHeld()
+	e.d.o.Confirmer = held
+	red := e.execAsync("shell", "reboot")
+	asked(t, held)
+	e.yoloOn(t)
+	res, exit, s := e.undoLast(t)
+	if len(res.Undone) != 0 || e.ranContains("rm -rf") {
+		t.Fatalf("it ran: %+v ran %q", res, e.adb.ran())
+	}
+	if strings.Contains(s.errOut.String(), "⚠ YOLO") {
+		t.Fatalf("told of something that did not happen (%+v): %q", exit, s.errOut.String())
+	}
+	held.answer <- confirm.Deny
+	waitResult(t, red)
+}
+
+// YOLO that expires between the lift and the record: the entry still says it
+// ran without asking. Mutation: `Yolo: d.o.Yolo.Active()` in undo's entry.
+func TestYoloUndoEntryKeepsYoloWhenItExpiresMidway(t *testing.T) {
+	e := newEnv(t)
+	c := newYoloClock()
+	e.d.o.Yolo = NewYolo(c.now, c.after)
+	if err := e.d.o.Yolo.Enable(YoloShort); err != nil {
+		t.Fatal(err)
+	}
+	e.forge(t, "j_f1", putArgv, "shell", "settings", "delete", "global", "a")
+	once := false
+	e.d.o.Now = func() time.Time { // the first look at the clock after the lift: 16 minutes later
+		if !once {
+			once = true
+			c.jump(16 * time.Minute)
+		}
+		return c.now()
+	}
+	_, exit, _ := e.undoLast(t)
+	if exit.Code != 0 || !once {
+		t.Fatalf("%+v (clock looked at: %v)", exit, once)
+	}
+	if e.d.o.Yolo.Active() {
+		t.Fatal("YOLO did not expire")
+	}
+	if u := lastUndo(t, e); u.Rule != "undo-yolo" || !u.Yolo {
+		t.Fatalf("undo entry %+v", u)
+	}
 }

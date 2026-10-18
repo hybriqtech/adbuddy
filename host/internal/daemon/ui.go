@@ -234,6 +234,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			}
 		}
 	}
+	notes.tell(s.Stderr()) // what a later guard (the wait, the capture) let through
 	code := 0
 	if f != nil {
 		code = f.exit
@@ -253,6 +254,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if req.Screen && f == nil && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
 			release() // the change is done: a question must not wait for the screen to settle
 			data = d.withScreen(ctx, req, data, base)
+			notes.tell(s.Stderr())
 		}
 		if err := s.Data(data); err != nil {
 			return ipc.Exit{Code: 1, ErrorCode: "UI_FAILED", Error: err.Error()}
