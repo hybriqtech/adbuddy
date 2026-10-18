@@ -142,12 +142,12 @@ class ChatScreensTest(private val mode: ScreenMode) {
     }
 
     @Test fun cutSaysSoInTheBanner() {
-        show(BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), cut = true)
-        compose.onNodeWithText(text(R.string.session_idle)).assertIsDisplayed()
+        show(BridgeState(connection = BridgeState.Connection.WAITING, hostName = "my-pc"), cut = true)
+        compose.onNodeWithText(text(R.string.status_short_cut)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
         compose.onNodeWithText(text(R.string.status_cut)).assertIsDisplayed()
         compose.assertTextsFit()
-        compose.assertTitleFitsTheTopBar(text(R.string.session_idle))
+        compose.assertTitleFitsTheTopBar(text(R.string.status_short_cut))
         compose.shot("chat_cut", mode)
     }
 
@@ -237,7 +237,7 @@ class ChatScreensTest(private val mode: ScreenMode) {
     )
 
     @Test fun aCutBannerDoesNotSurviveTheCutEndingWhileConnecting() =
-        bannerLeavesWhenConnecting(BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), true, false, text(R.string.status_cut))
+        bannerLeavesWhenConnecting(BridgeState(connection = BridgeState.Connection.WAITING, hostName = "my-pc"), true, false, text(R.string.status_cut))
 
     @Test fun aColdStartConnectingHasNoBanner() {
         show(BridgeState(connection = BridgeState.Connection.CONNECTING))
