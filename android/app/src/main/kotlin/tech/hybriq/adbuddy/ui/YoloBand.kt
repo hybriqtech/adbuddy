@@ -27,7 +27,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import tech.hybriq.adbuddy.R
+import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.PermissionResolved
+import tech.hybriq.adbuddy.confirm.HostClock
 import tech.hybriq.adbuddy.yolo.YoloUi
 import tech.hybriq.adbuddy.yolo.YoloUi.Kind
 
@@ -59,6 +61,10 @@ fun YoloBand(view: YoloUi.View, onOff: () -> Unit, modifier: Modifier = Modifier
         }
     }
 }
+
+/** The band of a screen tree: the one that reads the clock (rememberYoloView ticks), so only the band recomposes each second. */
+@Composable
+fun YoloBand(state: BridgeState, clock: HostClock, onOff: () -> Unit, modifier: Modifier = Modifier) = YoloBand(rememberYoloView(state, clock), onOff, modifier)
 
 /** What YOLO approved on its own (the agent's permission questions), in the chat: the last three. */
 @Composable

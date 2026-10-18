@@ -229,12 +229,13 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val waiting = ConfirmUi.closedWaiting(state, closed, now).size
     val back = { route = route.parent ?: Route.CHAT }
     val first = step
-    val yolo = rememberYoloView(state, app.clock)
+    // Cheap and without the clock: the countdown ticks inside the band, not here (UNKNOWN and OFF both read false).
+    val yoloOn = state.yolo?.active == true
     Column(Modifier.fillMaxSize()) {
         // On every screen, the first-run steps included: the mode is never out of sight.
-        YoloBand(yolo, onOff = { sendYolo(YoloUi.offRequest(), yoloOffFailed) })
+        YoloBand(state, app.clock, onOff = { sendYolo(YoloUi.offRequest(), yoloOffFailed) })
         // The band took the status bar: the screens below do not leave room for it again.
-        Box(Modifier.weight(1f).then(if (yolo.active) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
+        Box(Modifier.weight(1f).then(if (yoloOn) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
             if (first != null) {
                 val finish = { onboarding.finish(); step = null }
                 when (first) {

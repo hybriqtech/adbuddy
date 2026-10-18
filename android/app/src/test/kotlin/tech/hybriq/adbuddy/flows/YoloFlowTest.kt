@@ -7,7 +7,11 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import okhttp3.Request
+import okhttp3.WebSocket
+import okio.ByteString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -20,7 +24,9 @@ import org.robolectric.shadows.ShadowToast
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.ChatBubbleActivity
 import tech.hybriq.adbuddy.R
+import tech.hybriq.adbuddy.bridge.Bridge
 import tech.hybriq.adbuddy.bridge.BridgeState
+import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.bridge.YoloState
 import tech.hybriq.adbuddy.screens.PHONE
 import tech.hybriq.adbuddy.ui.YOLO_BAND_TAG
@@ -84,5 +90,37 @@ class YoloFlowTest {
         compose.onNodeWithContentDescription(text(R.string.action_menu)).performClick()
         compose.onNodeWithText(text(R.string.yolo_menu_on)).performClick()
         compose.onNodeWithText(text(R.string.yolo_dialog_title)).assertIsDisplayed()
+    }
+
+    // Mutation: show the band only when `route.parent == null` (so not on the sub-screens of Settings).
+    @Test fun theBandIsOnTheListOfProtectedApps() {
+        host(YoloState(active = true, session = true))
+        compose.onNodeWithContentDescription(text(R.string.action_menu)).performClick()
+        compose.onNodeWithText(text(R.string.menu_settings)).performClick()
+        compose.onNodeWithText(text(R.string.protected_title)).performClick()
+        compose.onNodeWithText(text(R.string.protected_intro)).assertIsDisplayed()
+        compose.onNodeWithTag(YOLO_BAND_TAG).assertIsDisplayed()
+    }
+
+    // What leaves the app is the request to turn off, with no question in between. Mutation: onOff = {} in ChatRoot.
+    @Test fun turnOffInTheBandSendsYoloSetOff() {
+        host(YoloState(active = true, session = true))
+        val sent = mutableListOf<String>()
+        val socket = object : WebSocket {
+            override fun request(): Request = Request.Builder().url("http://localhost/").build()
+            override fun queueSize(): Long = 0
+            override fun send(text: String): Boolean { sent += text; return true }
+            override fun send(bytes: ByteString): Boolean = true
+            override fun close(code: Int, reason: String?): Boolean = true
+            override fun cancel() {}
+        }
+        val field = Bridge::class.java.getDeclaredField("socket").apply { isAccessible = true }
+        field.set(app.bridge, socket)
+        compose.onNodeWithText(text(R.string.yolo_band_off)).performClick()
+        compose.waitForIdle()
+        assertEquals(1, sent.size)
+        assertTrue(sent[0], sent[0].contains("\"type\":\"${Protocol.YOLO_SET}\""))
+        assertTrue(sent[0], sent[0].contains("\"off\":true"))
+        compose.onNodeWithText(text(R.string.yolo_dialog_title)).assertDoesNotExist()
     }
 }
