@@ -169,7 +169,7 @@ class NotificationsRationaleFlowTest {
         val q = PermissionRequest("a", "Bash", "Clean the build folder", "detail", "2099-01-01T00:00:00Z", true)
         setBridgeState(connected(chat = ChatState(permissions = listOf(q))))
         title.assertDoesNotExist()
-        compose.onNodeWithText(text(R.string.perm_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.perm_title, text(R.string.agent_fallback))).assertIsDisplayed()
         assertFalse(BridgePrefs(app).notificationsAsked)
     }
 

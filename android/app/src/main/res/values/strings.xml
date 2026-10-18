@@ -145,7 +145,8 @@
     <string name="chat_terminal_show">Show the terminal</string>
     <string name="chat_terminal_hide">Hide the terminal</string>
     <string name="terminal_offline">No connection with the PC: keys are not sent</string>
-    <string name="perm_title">Claude Code asks</string>
+    <string name="perm_title">%1$s asks</string>
+    <string name="agent_fallback">The agent</string>
     <string name="perm_summary">Agent’s description: %1$s</string>
     <string name="perm_allow">Yes</string>
     <string name="perm_always">Yes, always</string>
@@ -162,7 +163,7 @@
     <string name="tool_done">done</string>
     <string name="tool_error">failed</string>
     <string name="confirm_label">ADBuddy: delicate action</string>
-    <string name="notif_asking">Claude Code needs an answer</string>
+    <string name="notif_asking">Your agent needs an answer</string>
     <string name="notif_ask_title">The agent needs an answer</string>
     <string name="notif_ask_text">Open ADBuddy to answer.</string>
     <string name="chat_retry">Retry</string>

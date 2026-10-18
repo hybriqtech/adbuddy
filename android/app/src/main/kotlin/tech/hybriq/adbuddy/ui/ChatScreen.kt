@@ -99,7 +99,7 @@ fun ChatScreen(
     hostNow: () -> Long = { 0L },
     /** The host has handed this phone a link: without it (and without a channel) the banner says to run adbuddy setup. */
     configured: Boolean = true,
-    /** False in the chat bubble (about 600 dp tall): the terminal starts folded and opens with the arrow. */
+    /** False in the app (R15) and in the bubble; the default stays true for direct callers and previews. The terminal starts folded and opens with the arrow. */
     terminalOpenByDefault: Boolean = true,
     /** Notifications off or the confirm/ask channel silenced: the banner says so and opens the system settings. */
     notificationsBlocked: Boolean = false,
@@ -228,7 +228,7 @@ fun ChatScreen(
             }
             if (terminalOn) QuickKeysRow(enabled = connected) { terminal!!.input(it.bytes) }
             if (chat != null) {
-                PermissionCards(state.chat.permissions, state.connection == BridgeState.Connection.CONNECTED, hostNow, chat)
+                PermissionCards(state.chat.permissions, state.connection == BridgeState.Connection.CONNECTED, hostNow, chat, agent = state.sessionState.agent)
             }
             DraftChips(drafts, actions.removeDraft, actions.retryDraft)
             InputBar(
