@@ -118,3 +118,4 @@ Ruling: menores de T5 (hora sin fecha en `yolo status`, Code: 2 literal en YOLO_
 Task A3: complete (commits edbcfe2f, c1294bad; re-revisión sonnet: 5 puntos resueltos, sin hallazgos nuevos; BubbleFlowTest flaky no reproducido 3/3 verde)
 Ruling: el test de A3 que inyecta el WebSocket por reflexión en Bridge.socket se queda (falla con error claro si se renombra); un hook internal setSocketForTest sería mejor, opcional — si me equivoco, un test roto al renombrar el campo, visible al momento.
 Task 6: ronda 1 (revisión opus: cumplimiento OK; 4 menores). Arreglos: 1 (attach publica estado viejo fuera de notifyMu), 2 (chivato de texto de Enable más estricto), 3 (test del log sin sleep). El 4 (srv.Current sin test propio) se deja: defensa en profundidad, mismo patrón que remote.set.
+Task 6: complete (commits acf4e7a4, 177d48b2; re-revisión sonnet: 3 puntos resueltos, sin hallazgos nuevos)
