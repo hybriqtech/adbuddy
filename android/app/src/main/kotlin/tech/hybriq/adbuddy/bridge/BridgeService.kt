@@ -70,7 +70,7 @@ class BridgeService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         locales = resources.configuration.locales
-        val first = ConversationView.of(BridgeState(), CutAccess.isCut(contentResolver))
+        val first = ConversationView.of(BridgeState(), CutAccess.isCut(this))
         foreground = goForeground(conversationNotification(first))
         if (!foreground) {
             stopSelf()

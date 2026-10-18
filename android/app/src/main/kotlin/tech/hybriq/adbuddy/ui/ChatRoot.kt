@@ -65,7 +65,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val downloads by app.downloads.states.collectAsStateWithLifecycle()
     // Follows both settings, whoever changes them (this screen, the Settings app, adb).
     val cut by remember(context) { CutAccess.observe(context) }
-        .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context.contentResolver))
+        .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context))
     val snackbar = remember { SnackbarHostState() }
     val onboarding = remember(context) { Onboarding.of(context) }
     var step by rememberSaveable { mutableStateOf<OnboardingStep?>(OnboardingStep.initial(firstRun, onboarding.done())) }
@@ -118,7 +118,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             attachment = { a -> onAttachment(context, app, a) },
             pause = app.bridge::pause,
             toggleCut = {
-                val wasCut = CutAccess.isCut(context.contentResolver)
+                val wasCut = CutAccess.isCut(context)
                 val ok = if (wasCut) CutAccess.restore(context) else CutAccess.cut(context)
                 val message = when {
                     !ok && wasCut -> restoreFailed

@@ -102,6 +102,11 @@ once the cache has it; the tests never download anything.
 - **Privacy:** neither the chat nor the terminal text is written to any log, and the
   lock screen shows no message text, no activity and no PC name.
 
+**Cut access state.** The app says "access cut" only after a cut it made itself and read back (its saved values in the
+`cut_access` preferences), and while no readable setting says USB or wireless debugging is on again. It never infers a
+cut from what it reads alone: on Android 17 an app may read `adb_enabled=0` while adb works. `adb logcat -s ADBuddyAccess`
+shows what the app reads and how.
+
 ## Claude Code (M4)
 
 When the agent is Claude Code, the host reads its transcript and hooks and sends

@@ -1,6 +1,5 @@
 package tech.hybriq.adbuddy.control
 
-import android.content.ContentResolver
 import android.content.Context
 import android.database.ContentObserver
 import android.os.Handler
@@ -26,12 +25,8 @@ object CutAccess {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return AccessSwitch(
             object : AccessSwitch.Settings {
-                // Android 12+ may refuse to read a hidden setting to an app: then it counts as never written.
-                override fun get(name: String): Int? = try {
-                    Settings.Global.getString(resolver, name)?.toIntOrNull()
-                } catch (e: SecurityException) {
-                    null
-                }
+                // Throws SecurityException when Android refuses the read: AccessSwitch treats it as unknown.
+                override fun get(name: String): Int? = Settings.Global.getString(resolver, name)?.toIntOrNull()
                 override fun put(name: String, value: Int) {
                     Settings.Global.putInt(resolver, name, value)
                 }
@@ -57,8 +52,11 @@ object CutAccess {
         return switch(context).restore().also { AccessDiag.log(context, "restore.after ok=$it") }
     }
 
-    fun isCut(resolver: ContentResolver): Boolean =
-        Settings.Global.getInt(resolver, Settings.Global.ADB_ENABLED, 1) == 0
+    /** Our cut, not contradicted by a readable setting (AccessSwitch.isCut). */
+    fun isCut(context: Context): Boolean = switch(context).isCut()
+
+    /** restore() will not guess (a record of both off): the person turns debugging on in Developer options. */
+    fun needsManualRestore(context: Context): Boolean = switch(context).needsManualRestore()
 
     /**
      * isCut, now and on every change of either setting (by ADBuddy, the
@@ -73,7 +71,7 @@ object CutAccess {
         fun current(): Boolean {
             AccessDiag.log(context, "observe")
             switch.forgetIfRestored()
-            return isCut(resolver)
+            return switch.isCut()
         }
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {

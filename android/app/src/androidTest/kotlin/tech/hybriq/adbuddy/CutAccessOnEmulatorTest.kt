@@ -33,7 +33,7 @@ class CutAccessOnEmulatorTest {
         val resolver = context.contentResolver
         log("listening before the cut: ${listening()}")
         val cut = CutAccess.cut(context)
-        log("cut=$cut isCut=${CutAccess.isCut(resolver)}")
+        log("cut=$cut isCut=${CutAccess.isCut(context)}")
         var restored = false
         try {
             // adbd stops a moment after the setting changes.
@@ -48,7 +48,7 @@ class CutAccessOnEmulatorTest {
         } finally {
             // Reactivar whatever happened since the cut: nobody else can, adb is gone.
             restored = CutAccess.restore(context)
-            log("restored=$restored isCut=${CutAccess.isCut(resolver)}")
+            log("restored=$restored isCut=${CutAccess.isCut(context)}")
         }
         assertTrue("Cut access failed", cut)
         assertTrue("Reactivar failed", restored)
