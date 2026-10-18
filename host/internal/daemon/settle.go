@@ -214,7 +214,7 @@ func (d *Daemon) settle(ctx context.Context, in settleIn) (screen *ScreenSettled
 		if !sleepCtx(ctx, wait) {
 			return nil, "", "", nil
 		}
-		if d.o.Paused() {
+		if d.paused() {
 			return nil, "", PausedMessage, nil
 		}
 		release, other := d.admit("Read the screen", false)
@@ -233,7 +233,7 @@ func (d *Daemon) settle(ctx context.Context, in settleIn) (screen *ScreenSettled
 			continue // maybe a transition: try again
 		}
 		blocked = ""
-		if d.o.Paused() { // paused while the guard looked
+		if d.paused() { // paused while the guard looked
 			return nil, "", PausedMessage, nil
 		}
 		v, how, uf := d.runUI(ctx, bridge.UIOpDump, in.args, nil, time.Time{})

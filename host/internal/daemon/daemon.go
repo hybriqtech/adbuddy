@@ -92,6 +92,8 @@ type Options struct {
 	// concurrently.
 	Protected func(pkg string) bool
 	Now       func() time.Time
+	// Yolo is the state of the YOLO mode. Nil: New creates one (off).
+	Yolo *Yolo
 }
 
 // Daemon handles IPC requests.
@@ -296,13 +298,13 @@ func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Du
 	}
 	// A pause that came before the question was registered did not
 	// withdraw it: look again now that it is.
-	if d.o.Paused() {
+	if d.paused() {
 		d.answered(q, false)
 		return confirm.Deny, ErrAskPaused
 	}
 	if err := d.waitChanges(qctx, q); err != nil {
 		d.answered(q, false)
-		if d.o.Paused() || withdrawnByPause(qctx) {
+		if d.paused() || withdrawnByPause(qctx) {
 			return confirm.Deny, ErrAskPaused
 		}
 		return confirm.Deny, err
@@ -315,7 +317,7 @@ func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Du
 	// Nothing of serve's own runs as a change in flight: the caller acts
 	// after this returns.
 	d.answered(q, false)
-	if d.o.Paused() || withdrawnByPause(qctx) {
+	if d.paused() || withdrawnByPause(qctx) {
 		return confirm.Deny, ErrAskPaused
 	}
 	return decision, nil
@@ -357,11 +359,31 @@ func New(o Options) *Daemon {
 	if o.ConfirmTimeout <= 0 {
 		o.ConfirmTimeout = 2 * time.Minute
 	}
-	return &Daemon{o: o}
+	if o.Yolo == nil {
+		o.Yolo = NewYolo(o.Now, nil)
+	}
+	d := &Daemon{o: o}
+	o.Yolo.Subscribe(d.yoloEvent)
+	return d
 }
 
 // lang is the language of what serve tells the person (Options.Lang).
 func (d *Daemon) lang() i18n.Lang { return i18n.Lang(d.o.Lang) }
+
+// Yolo is the state of the YOLO mode, for the parts of serve that turn it off
+// or tell the phone (the daemon is created after the phone link).
+func (d *Daemon) Yolo() *Yolo { return d.o.Yolo }
+
+// paused reports whether the person paused the agent from the phone (Options.Paused).
+// A pause also turns YOLO off, for good: resuming does not bring it back. It is
+// the only way the daemon asks about the pause.
+func (d *Daemon) paused() bool {
+	if !d.o.Paused() {
+		return false
+	}
+	d.o.Yolo.Off(YoloOffPause)
+	return true
+}
 
 // identity is the name the journal and undo know the phone by.
 func (d *Daemon) identity() string {
@@ -405,7 +427,7 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 	case ipc.KindUI:
 		return d.ui(ctx, req, s)
 	case ipc.KindPing:
-		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.currentSerial(), Identity: d.identity(), Journal: d.o.Journal.Dir(), Paused: d.o.Paused()})
+		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.currentSerial(), Identity: d.identity(), Journal: d.o.Journal.Dir(), Paused: d.paused()})
 		return ipc.Exit{}
 	}
 	return ipc.Exit{Code: 1, ErrorCode: "UNKNOWN_REQUEST", Error: "unknown request " + req.Kind}
@@ -427,7 +449,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}()
 	g, args := classify.SplitGlobal(req.Argv)
 	res := d.o.Classifier.Classify(args) // pure: nothing reaches adb yet
-	if d.o.Paused() {
+	if d.paused() {
 		p := e // say what was attempted, at its level
 		p.Level, p.Rule, p.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
 		return d.block(p, s, PausedMessage)
@@ -468,7 +490,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if res.Op != nil {
 		d.changes.Lock()
 		defer d.changes.Unlock()
-		if d.o.Paused() { // paused while waiting for the lock
+		if d.paused() { // paused while waiting for the lock
 			return d.block(e, s, PausedMessage)
 		}
 		prep = precheck.Prepare(ctx, d.o.ADB, res.Op, level, precheck.Env{Cwd: req.Cwd, BackupDir: d.o.Journal.BackupDir(e.ID),
@@ -507,7 +529,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		}
 		// A pause that came before the question was registered did not
 		// withdraw it: look again now that it is.
-		if d.o.Paused() {
+		if d.paused() {
 			d.answered(q, false)
 			return d.block(e, s, PausedMessage)
 		}
@@ -516,7 +538,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if err := d.waitChanges(qctx, q); err != nil {
 			d.answered(q, false)
 			// Withdrawn by a pause, even one already resumed.
-			if d.o.Paused() || withdrawnByPause(qctx) {
+			if d.paused() || withdrawnByPause(qctx) {
 				return d.block(e, s, PausedMessage)
 			}
 			code := ExitDenied
@@ -537,7 +559,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		release = d.answered(q, decision == confirm.Allow)
 		// Paused while it was asked: whatever the answer (or none, if the
 		// pause withdrew it, even if it was resumed since), it ends blocked.
-		if d.o.Paused() || withdrawnByPause(qctx) {
+		if d.paused() || withdrawnByPause(qctx) {
 			return d.block(e, s, PausedMessage)
 		}
 		if decision != confirm.Allow {
@@ -575,7 +597,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 	// Paused during the confirmation (an Allow may come after the pause) or
 	// the prechecks: refuse before any running record and before adb.
-	if d.o.Paused() {
+	if d.paused() {
 		return d.block(e, s, PausedMessage)
 	}
 	// Admitted to adb, unless a question started after this command got
@@ -599,7 +621,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			return d.refuse(ctx, e, s, why)
 		}
 	}
-	if d.o.Paused() { // paused while the guard looked
+	if d.paused() { // paused while the guard looked
 		return d.block(e, s, PausedMessage)
 	}
 	if level >= classify.Yellow {

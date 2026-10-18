@@ -24,6 +24,13 @@
 "daemon.journal_failed" = "journal write failed for %[1]s: %[2]s"
 "undo.prefix" = "Undo: "
 "undo.confirm.detail" = "Undoing a change from the journal needs a command that asks for confirmation."
+# yolo: what the journal and serve say when YOLO mode changes (daemon/yolo.go)
+"yolo.event.on_until" = "YOLO mode on until %[1]s: nothing asks for confirmation and no fixed block applies, except the pause"
+"yolo.event.on_session" = "YOLO mode on until the session ends: nothing asks for confirmation and no fixed block applies, except the pause"
+"yolo.event.off_app" = "YOLO mode off (turned off from the phone)"
+"yolo.event.off_cli" = "YOLO mode off (adbuddy yolo off)"
+"yolo.event.off_expired" = "YOLO mode off (its time is up)"
+"yolo.event.off_pause" = "YOLO mode off (the agent was paused from the phone)"
 # remote: the question of `adbuddy remote on` (cli/remotecmd.go)
 "remote.confirm.title" = "Open adb's network port 5555 for 12 hours"
 "remote.confirm.detail" = "adb will listen on port 5555 on any network until you close it with `adbuddy remote off` or 12 hours pass."

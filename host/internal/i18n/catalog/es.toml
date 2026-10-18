@@ -23,6 +23,13 @@
 "daemon.journal_failed" = "falló la escritura en el diario para %[1]s: %[2]s"
 "undo.prefix" = "Deshacer: "
 "undo.confirm.detail" = "Para deshacer un cambio del diario hace falta un comando que pide confirmación."
+# yolo: lo que el diario y serve dicen cuando cambia el modo YOLO (daemon/yolo.go)
+"yolo.event.on_until" = "Modo YOLO activado hasta las %[1]s: nada pide confirmación y no hay bloqueos fijos, salvo la pausa"
+"yolo.event.on_session" = "Modo YOLO activado hasta el fin de la sesión: nada pide confirmación y no hay bloqueos fijos, salvo la pausa"
+"yolo.event.off_app" = "Modo YOLO apagado (desde el móvil)"
+"yolo.event.off_cli" = "Modo YOLO apagado (adbuddy yolo off)"
+"yolo.event.off_expired" = "Modo YOLO apagado (se acabó el tiempo)"
+"yolo.event.off_pause" = "Modo YOLO apagado (el agente se pausó desde el móvil)"
 # remote: la pregunta de `adbuddy remote on` (cli/remotecmd.go)
 "remote.confirm.title" = "Abrir el puerto de red 5555 de adb durante 12 horas"
 "remote.confirm.detail" = "adb escuchará en el puerto 5555 de cualquier red hasta que lo cierres con `adbuddy remote off` o pasen 12 horas."

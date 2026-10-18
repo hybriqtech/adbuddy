@@ -191,7 +191,7 @@ func SelectUndo(entries []journal.Entry, target, session, identity string) (plan
 // the 🔴 ones: those ask like any 🔴 command. It holds the changes lock, so
 // two undos (or an undo and a change) never race.
 func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
-	if d.o.Paused() {
+	if d.paused() {
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
 	}
 	if t := d.waitingFor(); t != "" {
@@ -199,7 +199,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 	d.changes.Lock()
 	defer d.changes.Unlock()
-	if d.o.Paused() { // paused while waiting for the lock
+	if d.paused() { // paused while waiting for the lock
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
 	}
 	// Admitted as a change in flight: a question waits for the inverses.
@@ -249,7 +249,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if ctx.Err() != nil {
 			break // the client left: stop before touching the phone again
 		}
-		if d.o.Paused() {
+		if d.paused() {
 			_ = s.Data(res)
 			return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
 		}
@@ -327,7 +327,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 				continue
 			}
 			// Paused while it was asked (an Allow may come after the pause).
-			if d.o.Paused() {
+			if d.paused() {
 				_ = s.Data(res)
 				return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
 			}

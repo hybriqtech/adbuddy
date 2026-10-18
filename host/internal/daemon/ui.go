@@ -117,7 +117,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if req.Env["ADBUDDY_SOURCE"] == journal.SourceAgent {
 		e.Source = journal.SourceAgent
 	}
-	if d.o.Paused() {
+	if d.paused() {
 		return d.blockUI(e, PausedMessage)
 	}
 	if h.change {
@@ -157,7 +157,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			return d.stopUI(ctx, e, why)
 		}
 	}
-	if d.o.Paused() { // paused while the guard looked
+	if d.paused() { // paused while the guard looked
 		return d.blockUI(e, PausedMessage)
 	}
 	// An act with Screen: read the screen before it, the one the wait starts
@@ -173,7 +173,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if ctx.Err() != nil { // the agent or serve went away: no act
 			return d.abandonUI(ctx, e)
 		}
-		if d.o.Paused() { // paused while the start was read: no act
+		if d.paused() { // paused while the start was read: no act
 			return d.blockUI(e, PausedMessage)
 		}
 		if denied != nil { // the app says there is something protected in front: no act
@@ -186,7 +186,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 				}
 				return d.blockUI(e, why)
 			}
-			if d.o.Paused() {
+			if d.paused() {
 				return d.blockUI(e, PausedMessage)
 			}
 		}
@@ -641,7 +641,7 @@ func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream, gua
 	if f != nil {
 		return nil, "", f
 	}
-	if d.o.Paused() { // paused while the notice came off: nothing is read, and a paused agent gets no notice back
+	if d.paused() { // paused while the notice came off: nothing is read, and a paused agent gets no notice back
 		return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+PausedMessage)
 	}
 	// The guard said yes before the notice. If taking the notice off was slow
@@ -652,13 +652,13 @@ func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream, gua
 			restore()
 			return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+why)
 		}
-		if d.o.Paused() {
+		if d.paused() {
 			return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+PausedMessage)
 		}
 	}
 	var buf, errb bytes.Buffer
 	code, err := d.o.ADB.Run(ctx, "", []string{"exec-out", "screencap", "-p"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
-	if !d.o.Paused() { // a paused session gets no notice back
+	if !d.paused() { // a paused session gets no notice back
 		restore()
 	}
 	if err != nil || code != 0 {
