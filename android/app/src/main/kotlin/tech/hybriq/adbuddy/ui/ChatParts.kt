@@ -86,6 +86,7 @@ import tech.hybriq.adbuddy.files.DraftStatus
 import tech.hybriq.adbuddy.term.QuickKey
 import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
+import tech.hybriq.adbuddy.ui.theme.BubbleShapes
 
 /**
  * The chat's bar: Material 3's TopAppBar has a fixed height and does not clip its title, so a title and a pill that wrap at
@@ -226,15 +227,15 @@ private fun Bubble(
     val container = when {
         failed -> MaterialTheme.colorScheme.errorContainer
         mine -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val content = when {
         failed -> MaterialTheme.colorScheme.onErrorContainer
         mine -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
-        Surface(color = container, contentColor = content, shape = MaterialTheme.shapes.large, modifier = modifier.widthIn(max = 340.dp)) {
+        Surface(color = container, contentColor = content, shape = if (mine) BubbleShapes.mine else BubbleShapes.agent, modifier = modifier.widthIn(max = 340.dp)) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (text.isNotEmpty()) if (markdown) MarkdownText(text, onLink) else LinkedText(text, onLink)
                 for (a in attachments) AttachmentCard(a, downloads[a.id]) { onAttachment(a) }

@@ -193,14 +193,14 @@ fun ChatScreen(
                 })
             }
             if (terminalOn) {
-                Box(Modifier.weight(0.45f).fillMaxSize()) {
+                Box(Modifier.weight(0.35f).fillMaxSize()) {
                     TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.fillMaxSize())
                     if (!connected) TerminalOfflineNotice(Modifier.align(Alignment.TopCenter))
                 }
             }
-            val weight = if (terminalOn) 0.55f else 1f
-            if (items.isEmpty() && tools.isEmpty() && status == LinkStatus.CONNECTED) {
-                ChatEmptyState(Modifier.weight(weight).fillMaxSize())
+            val weight = if (terminalOn) 0.65f else 1f
+            if (items.isEmpty() && tools.isEmpty() && (status == LinkStatus.CONNECTED || status == LinkStatus.PAUSED)) {
+                ChatEmptyState(paused = status == LinkStatus.PAUSED, onSuggestion = { text = it }, modifier = Modifier.weight(weight).fillMaxSize())
             } else {
                 Box(Modifier.weight(weight).fillMaxSize()) {
                     LazyColumn(

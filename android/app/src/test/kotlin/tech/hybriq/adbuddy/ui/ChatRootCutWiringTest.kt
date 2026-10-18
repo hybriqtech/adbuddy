@@ -58,6 +58,13 @@ class ChatRootCutWiringTest {
         AdbuddyTheme(dynamic = false) { ChatRoot(app, focusConfirm = null, closed = emptySet(), firstRun = false, askForNotifications = false, onClose = {}) }
     }
 
+    // R15: the full-screen chat starts with the terminal folded too (the default of ChatRoot).
+    @Test fun theTerminalStartsFolded() {
+        mount()
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_show)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_hide)).assertDoesNotExist()
+    }
+
     @Test fun theShieldCutsBothSettingsAndSaysSo() {
         app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
         put(1, 1)

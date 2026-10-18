@@ -56,7 +56,7 @@ import tech.hybriq.adbuddy.notify.openNotificationSettings
  * the notification access under it), and the red questions over all of them.
  */
 @Composable
-fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = true, askForNotifications: Boolean = true, onReopen: (String) -> Unit = {}, onClose: (String) -> Unit) {
+fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = false, askForNotifications: Boolean = true, onReopen: (String) -> Unit = {}, onClose: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by app.bridge.state.collectAsStateWithLifecycle()

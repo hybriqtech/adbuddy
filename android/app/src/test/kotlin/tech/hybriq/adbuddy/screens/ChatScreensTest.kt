@@ -12,6 +12,9 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -177,6 +180,42 @@ class ChatScreensTest(private val mode: ScreenMode) {
         compose.onNodeWithText(text(R.string.chat_empty_ready)).assertIsDisplayed()
         compose.assertTextsFit()
         compose.shot("chat_connected_empty", mode)
+    }
+
+    @Test fun theEmptyChatShowsWhenPausedToo() {
+        show(BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc", sessionState = SessionState(paused = true)))
+        compose.onNodeWithText(text(R.string.chat_empty_paused)).assertIsDisplayed()
+        // Paused: no suggestions (the agent cannot use the phone).
+        compose.onNodeWithText(text(R.string.suggestion_battery)).assertDoesNotExist()
+    }
+
+    @Test fun aSuggestionFillsTheField_neverSends() {
+        val sent = mutableListOf<String>()
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = false, terminal = null, snackbar = SnackbarHostState(),
+                    actions = ChatActions({ sent += it }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}),
+                )
+            }
+        }
+        compose.onNodeWithText(text(R.string.suggestion_battery)).performClick()
+        compose.onNode(hasSetTextAction()).assert(hasText(text(R.string.suggestion_battery)))
+        assertEquals("a suggestion must never send", emptyList<String>(), sent)
+        compose.shot("chat_connected_empty_suggestions", mode)
+    }
+
+    // Task 8 left it noted: the empty state under the notifications card was cut at 200 % in Spanish. It scrolls now: every text is reachable whole.
+    @Test fun theEmptyStateUnderACardShowsAllItsTextAtAnySize() {
+        show(connected, notificationsBlocked = true)
+        compose.onNodeWithText(text(R.string.notifications_blocked)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.chat_empty_ready)).performScrollTo().assertIsDisplayed()
+        for (id in listOf(R.string.suggestion_battery, R.string.suggestion_volume, R.string.suggestion_screenshot)) {
+            compose.onNodeWithText(text(id)).performScrollTo().assertIsDisplayed()
+        }
+        compose.assertTextsFit(scrolled = true)
+        compose.shot("chat_empty_with_card", mode)
     }
 
     @Test fun connectedWithOnlyTheToolStripIsNotEmpty() {

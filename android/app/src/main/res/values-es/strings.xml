@@ -102,7 +102,11 @@
 
     <string name="home_activity">Actividad</string>
     <string name="home_empty">Nada todavía. Aquí aparecerá cada comando adb del agente.</string>
-    <string name="chat_empty_ready">Escribe al agente aquí abajo. Los comandos delicados piden tu confirmación.</string>
+    <string name="chat_empty_ready">Pídele algo a tu móvil. Si el agente va a hacer algo delicado, te preguntará antes.</string>
+    <string name="chat_empty_paused">El agente está en pausa: no puede usar el móvil hasta que lo reanudes.</string>
+    <string name="suggestion_battery">¿Cuánta batería queda?</string>
+    <string name="suggestion_volume">Baja el volumen</string>
+    <string name="suggestion_screenshot">Haz una captura de pantalla</string>
     <string name="cut_done">Hecho. El PC ya no puede tocar tu móvil.</string>
     <string name="cut_restored">El PC vuelve a tener acceso. Si usabas el modo remoto, su puerto sigue abierto hasta que el PC se conecte o reinicies.</string>
     <string name="cut_failed">No se ha podido apagar la depuración. Apaga la depuración USB y la depuración inalámbrica en Opciones de desarrollador.</string>
