@@ -88,3 +88,6 @@ Plan en HEAD d88c36b9. Setup: el plan pasó dos revisiones opus, una re-revisió
 | T9 | necesita todo y emulador: no se arranca sin OK del líder | |
 
 Cada tarea se revisa: `adbuddy-reviewer-opus` en las [SEG], `adbuddy-reviewer` en el resto, `adbuddy-rereviewer` en las re-revisiones. Briefs y diffs fuera del repo (carpeta temporal).
+
+Task 1: complete (commit 20d14579; revisión opus: cumplimiento OK, calidad aprobada, 2 menores)
+Ruling: los dos menores de T1 (assertNull(s.yolo) en anM2HostIsRead y KDoc de PermissionResolved/Snapshot.yolo) se aplican en A1, la primera tarea de android que toca la app — son comentarios y una aserción, no bloquean la cadena host — si me equivoco, un KDoc desactualizado unas tareas más.
