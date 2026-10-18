@@ -19,9 +19,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * Settings.Global and to the app's private preferences.
  */
 object CutAccess {
+    const val PREFS = "cut_access"
+
     private fun switch(context: Context): AccessSwitch {
         val resolver = context.contentResolver
-        val prefs = context.getSharedPreferences("cut_access", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return AccessSwitch(
             object : AccessSwitch.Settings {
                 // Android 12+ may refuse to read a hidden setting to an app: then it counts as never written.
@@ -44,10 +46,16 @@ object CutAccess {
     }
 
     /** Returns false when the permission is missing or the change did not stick. */
-    fun cut(context: Context): Boolean = switch(context).cut()
+    fun cut(context: Context): Boolean {
+        AccessDiag.log(context, "cut.before")
+        return switch(context).cut().also { AccessDiag.log(context, "cut.after ok=$it") }
+    }
 
     /** Undoes cut(), with the values from before it. */
-    fun restore(context: Context): Boolean = switch(context).restore()
+    fun restore(context: Context): Boolean {
+        AccessDiag.log(context, "restore.before")
+        return switch(context).restore().also { AccessDiag.log(context, "restore.after ok=$it") }
+    }
 
     fun isCut(resolver: ContentResolver): Boolean =
         Settings.Global.getInt(resolver, Settings.Global.ADB_ENABLED, 1) == 0
@@ -63,6 +71,7 @@ object CutAccess {
         val resolver = context.contentResolver
         val switch = switch(context)
         fun current(): Boolean {
+            AccessDiag.log(context, "observe")
             switch.forgetIfRestored()
             return isCut(resolver)
         }
