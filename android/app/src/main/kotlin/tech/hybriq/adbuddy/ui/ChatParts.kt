@@ -336,14 +336,18 @@ fun DraftChips(drafts: List<Draft>, onRemove: (String) -> Unit, onRetry: (String
                             .then(if (failed) Modifier.clickable(role = Role.Button, onClick = { onRetry(d.key) }) else Modifier)
                             .padding(vertical = 8.dp),
                     ) {
-                        Text(
-                            if (failed) d.error.ifEmpty { stringResource(R.string.draft_failed) } else d.name,
-                            style = MaterialTheme.typography.labelLarge, maxLines = if (failed) 4 else 1, overflow = TextOverflow.Ellipsis,
-                        )
+                        Text(d.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (failed) {
+                            Text(
+                                d.error.ifEmpty { stringResource(R.string.draft_failed) },
+                                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error,
+                                maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         if (d.status == DraftStatus.UPLOADING) {
                             // Size 0 is a file still being prepared (or a screenshot being taken): an unknown amount, not an empty one.
-                            if (d.size > 0) LinearProgressIndicator(progress = { (d.progress.toFloat() / d.size).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                            else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            if (d.size > 0) LinearProgressIndicator(progress = { (d.progress.toFloat() / d.size).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.surface)
+                            else LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.surface)
                         }
                     }
                     IconButton(onClick = { onRemove(d.key) }, modifier = Modifier.size(48.dp)) {
