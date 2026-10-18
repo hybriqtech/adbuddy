@@ -147,6 +147,13 @@ class TouchGuardSourceTest {
         assertEquals("a quick key without $filter", emptyList<String>(), keysWithoutFilter(body))
     }
 
+    @Test fun theActionCardButtonRefusesCoveredTouches() {
+        val body = functionBody(CodeScan.code(File(uiDir, "ActionCard.kt").readText()), "ActionCard")
+        assertTrue("ActionCard.kt has no function ActionCard any more: update this test", body != null)
+        assertTrue("no button found in ActionCard: the scanner is looking in the wrong place", keysOf(body!!).isNotEmpty())
+        assertEquals("an ActionCard button without $filter", emptyList<String>(), keysWithoutFilter(body))
+    }
+
     @Test fun theCheckerRejectsBadExamples() {
         assertEquals(1, windowsWithoutGuard("AlertDialog(onDismissRequest = {}, text = { Text(\"x\") })").size)
         assertEquals(1, windowsWithoutGuard("AlertDialog(text = { Text(f(a)) }, title = { ObscuredTouchGuard } )").size)

@@ -27,19 +27,30 @@
     <string name="channel_confirm_description">Questions about risky commands, with Allow and Deny.</string>
     <string name="status_connected">Connected to %1$s</string>
     <string name="status_connecting">Connecting to the PC…</string>
-    <string name="status_waiting">Waiting for the PC (run adbuddy serve)</string>
+    <string name="status_waiting">Looking for your PC… On the PC, run adbuddy serve with wireless debugging on.</string>
     <string name="status_paused">Paused: the agent cannot use the phone</string>
     <string name="status_update_app">This app is too old for the ADBuddy on your PC: install a newer build with adbuddy setup --apk &lt;file&gt; on the PC (plain setup does not replace an installed app)</string>
     <string name="status_update_host">The ADBuddy on your PC is too old for this app: update it on the PC</string>
     <string name="status_cut">Access cut: the PC cannot touch your phone</string>
-    <string name="status_not_set_up">This phone is not set up yet: on the PC, run adbuddy setup</string>
+    <string name="status_not_set_up">Not paired with your PC yet. On the PC: adbuddy setup</string>
     <string name="status_short_cut">Access cut</string>
     <string name="status_short_update">Update needed</string>
     <string name="status_short_connecting">Connecting…</string>
-    <string name="status_short_waiting">Waiting for the PC</string>
+    <string name="status_short_waiting">Looking for your PC…</string>
     <string name="status_short_paused">Paused</string>
     <string name="status_short_not_set_up">Not set up</string>
     <string name="status_short_connected">Connected</string>
+    <string name="status_pill_remote">%1$s · Remote</string>
+    <string name="card_cut_title">The PC cannot touch your phone</string>
+    <string name="card_cut_body">You cut its access. Give it back when you want the agent to work again.</string>
+    <string name="card_update_app_title">Update the app</string>
+    <string name="card_update_host_title">Update ADBuddy on the PC</string>
+    <string name="card_not_set_up_title">Not paired yet</string>
+    <string name="card_notifications_title">Notifications are off</string>
+    <string name="card_paused_title">The agent is paused</string>
+    <string name="card_waiting_title">Your PC is not answering</string>
+    <string name="card_waiting_action">How to connect</string>
+    <string name="setup_guide_url" translatable="false">https://hybriqtech.github.io/adbuddy/setup/</string>
     <string name="notifications_blocked">ADBuddy\'s notifications are off or silenced: you will not be told when the agent asks you something. Turn them on in the system settings.</string>
     <string name="notifications_open_settings">Settings</string>
 
@@ -48,8 +59,8 @@
     <string name="action_allow_session">Allow this same command during the session</string>
     <string name="action_pause">Pause</string>
     <string name="action_resume">Resume</string>
-    <string name="action_cut">Cut access</string>
-    <string name="action_restore">Restore access</string>
+    <string name="action_cut">Cut PC access</string>
+    <string name="action_restore">Give access back</string>
     <string name="action_developer_options">Open Developer options</string>
     <string name="action_close">Close</string>
 

@@ -41,6 +41,8 @@ class PaletteContrastTest {
         "onWarning" to "warning", "onWarningContainer" to "warningContainer",
     )
 
+    private val containers = listOf("surfaceContainerLowest", "surfaceContainerLow", "surfaceContainer", "surfaceContainerHigh", "surfaceContainerHighest")
+
     private fun check(name: String, scheme: Map<String, Int>, extra: Map<String, Int>) {
         for ((fg, bg) in pairs) {
             val c = Palette.contrast(scheme.getValue(fg), scheme.getValue(bg))
@@ -53,6 +55,19 @@ class PaletteContrastTest {
         for (s in listOf("success", "warning")) {
             val c = Palette.contrast(extra.getValue(s), scheme.getValue("surface"))
             assertTrue("$name: $s on surface is $c", c >= 4.5)
+        }
+        // The cards: the outline and the pill dot are graphic elements (3.0, WCAG 1.4.11) on every surface they sit on.
+        for (bg in listOf("surface") + containers) {
+            val c = Palette.contrast(scheme.getValue("outline"), scheme.getValue(bg))
+            assertTrue("$name: outline on $bg is $c", c >= 3.0)
+        }
+        // The button inside the red card is primary text on errorContainer.
+        val button = Palette.contrast(scheme.getValue("primary"), scheme.getValue("errorContainer"))
+        assertTrue("$name: primary on errorContainer is $button", button >= 4.5)
+        // success and warning are used as text and icons on the neutral cards.
+        for (s in listOf("success", "warning")) for (bg in containers) {
+            val c = Palette.contrast(extra.getValue(s), scheme.getValue(bg))
+            assertTrue("$name: $s on $bg is $c", c >= 4.5)
         }
     }
 

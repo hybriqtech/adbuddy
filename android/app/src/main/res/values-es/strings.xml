@@ -26,19 +26,29 @@
     <string name="channel_confirm_description">Preguntas sobre comandos delicados, con Permitir y Rechazar.</string>
     <string name="status_connected">Conectado a %1$s</string>
     <string name="status_connecting">Conectando con el PC…</string>
-    <string name="status_waiting">Esperando al PC (ejecuta adbuddy serve)</string>
+    <string name="status_waiting">Buscando tu PC… En el PC, ejecuta adbuddy serve con la depuración inalámbrica encendida.</string>
     <string name="status_paused">En pausa: el agente no puede usar el móvil</string>
     <string name="status_update_app">Esta app es demasiado antigua para el ADBuddy de tu PC: instala una compilación más reciente con adbuddy setup --apk &lt;fichero&gt; en el PC (setup a secas no reemplaza una app instalada)</string>
     <string name="status_update_host">El ADBuddy de tu PC es demasiado antiguo para esta app: actualízalo en el PC</string>
     <string name="status_cut">Acceso cortado: el PC no puede tocar tu móvil</string>
-    <string name="status_not_set_up">Este móvil aún no está configurado: en el PC, ejecuta adbuddy setup</string>
+    <string name="status_not_set_up">Falta emparejar con tu PC. En el PC: adbuddy setup</string>
     <string name="status_short_cut">Acceso cortado</string>
     <string name="status_short_update">Hay que actualizar</string>
     <string name="status_short_connecting">Conectando…</string>
-    <string name="status_short_waiting">Esperando al PC</string>
+    <string name="status_short_waiting">Buscando tu PC…</string>
     <string name="status_short_paused">En pausa</string>
     <string name="status_short_not_set_up">Sin configurar</string>
     <string name="status_short_connected">Conectado</string>
+    <string name="status_pill_remote">%1$s · Remoto</string>
+    <string name="card_cut_title">El PC no puede tocar tu móvil</string>
+    <string name="card_cut_body">Le cortaste el acceso. Devuélveselo cuando quieras que el agente vuelva a trabajar.</string>
+    <string name="card_update_app_title">Actualiza la app</string>
+    <string name="card_update_host_title">Actualiza ADBuddy en el PC</string>
+    <string name="card_not_set_up_title">Falta emparejar</string>
+    <string name="card_notifications_title">Las notificaciones están apagadas</string>
+    <string name="card_paused_title">El agente está en pausa</string>
+    <string name="card_waiting_title">Tu PC no responde</string>
+    <string name="card_waiting_action">Cómo conectar</string>
     <string name="notifications_blocked">Las notificaciones de ADBuddy están desactivadas o silenciadas: no se te avisará cuando el agente te pregunte algo. Actívalas en los ajustes del sistema.</string>
     <string name="notifications_open_settings">Ajustes</string>
 
@@ -47,8 +57,8 @@
     <string name="action_allow_session">Permitir este mismo comando durante la sesión</string>
     <string name="action_pause">Pausar</string>
     <string name="action_resume">Reanudar</string>
-    <string name="action_cut">Cortar acceso</string>
-    <string name="action_restore">Reactivar acceso</string>
+    <string name="action_cut">Cortar acceso del PC</string>
+    <string name="action_restore">Volver a dar acceso</string>
     <string name="action_developer_options">Abrir Opciones de desarrollador</string>
     <string name="action_close">Cerrar</string>
 
