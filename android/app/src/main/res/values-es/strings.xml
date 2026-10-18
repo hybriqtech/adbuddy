@@ -103,9 +103,14 @@
     <string name="home_activity">Actividad</string>
     <string name="home_empty">Nada todavía. Aquí aparecerá cada comando adb del agente.</string>
     <string name="chat_empty_ready">Escribe al agente aquí abajo. Los comandos delicados piden tu confirmación.</string>
-    <string name="cut_done">La depuración está apagada: el PC no puede llegar al móvil.</string>
-    <string name="cut_restored">La depuración vuelve a estar activa. Si el modo remoto estaba activo, su puerto de red sigue abierto hasta que el PC se conecte o reinicies el móvil.</string>
+    <string name="cut_done">Hecho. El PC ya no puede tocar tu móvil.</string>
+    <string name="cut_restored">El PC vuelve a tener acceso. Si usabas el modo remoto, su puerto sigue abierto hasta que el PC se conecte o reinicies.</string>
     <string name="cut_failed">No se ha podido apagar la depuración. Apaga la depuración USB y la depuración inalámbrica en Opciones de desarrollador.</string>
+    <string name="restore_confirm_title">¿Volver a dar acceso al PC?</string>
+    <string name="restore_confirm_body">ADBuddy vuelve a encender la depuración como estaba antes del corte y el agente del PC podrá volver a usar tu móvil. Si no sabe cómo estaba, te dice cómo hacerlo.</string>
+    <string name="restore_confirm_confirm">Dar acceso</string>
+    <string name="restore_manual">ADBuddy no sabe cómo estaba la depuración antes del corte. Enciende la depuración inalámbrica en Opciones de desarrollador.</string>
+    <string name="title_agent_state">%1$s · %2$s</string>
     <string name="restore_failed">No se ha podido volver a activar la depuración. Actívala en Opciones de desarrollador.</string>
     <string name="filter_all">Todo</string>
     <string name="level_green">Seguro</string>

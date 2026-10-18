@@ -106,9 +106,14 @@
     <string name="home_activity">Activity</string>
     <string name="home_empty">Nothing yet. Every adb command of the agent will appear here.</string>
     <string name="chat_empty_ready">Write to the agent below. Risky commands ask for your confirmation.</string>
-    <string name="cut_done">Debugging is off: the PC cannot reach the phone.</string>
-    <string name="cut_restored">Debugging is back on. If remote mode was on, its network port stays open until the PC connects or the phone restarts.</string>
+    <string name="cut_done">Done. The PC can no longer touch your phone.</string>
+    <string name="cut_restored">The PC has access again. If you used remote mode, its port stays open until the PC connects or the phone restarts.</string>
     <string name="cut_failed">Debugging could not be turned off. Turn off USB debugging and wireless debugging in Developer options.</string>
+    <string name="restore_confirm_title">Give the PC access again?</string>
+    <string name="restore_confirm_body">ADBuddy turns debugging back on as it was before the cut, and the agent on the PC can use your phone again. If it cannot tell how it was, it tells you how to do it.</string>
+    <string name="restore_confirm_confirm">Give access</string>
+    <string name="restore_manual">ADBuddy cannot tell how debugging was before the cut. Turn on wireless debugging in Developer options.</string>
+    <string name="title_agent_state">%1$s · %2$s</string>
     <string name="restore_failed">Debugging could not be turned back on. Turn it on in Developer options.</string>
     <string name="filter_all">All</string>
     <string name="level_green">Safe</string>

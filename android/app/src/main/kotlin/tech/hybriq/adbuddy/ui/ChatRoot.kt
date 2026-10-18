@@ -75,6 +75,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val restoreFailed = stringResource(R.string.restore_failed)
     val cutRestored = stringResource(R.string.cut_restored)
     val cutDone = stringResource(R.string.cut_done)
+    val restoreManual = stringResource(R.string.restore_manual)
     val developerOptions = stringResource(R.string.action_developer_options)
 
     // What the host says (notice) and what it refuses (chat, uploads), as the host wrote it.
@@ -100,6 +101,21 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         }
     }
 
+    fun report(ok: Boolean, restoring: Boolean) {
+        val message = when {
+            !ok && restoring && CutAccess.needsManualRestore(context) -> restoreManual
+            !ok && restoring -> restoreFailed
+            !ok -> cutFailed
+            restoring -> cutRestored
+            else -> cutDone
+        }
+        scope.launch {
+            // Without the permission (or if the change did not stick), the person does it by hand.
+            val r = snackbar.notify(message, actionLabel = if (ok) null else developerOptions)
+            if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
+        }
+    }
+
     val actions = remember(app) {
         ChatActions(
             send = { text ->
@@ -117,21 +133,8 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             retryDraft = app.drafts::retry,
             attachment = { a -> onAttachment(context, app, a) },
             pause = app.bridge::pause,
-            toggleCut = {
-                val wasCut = CutAccess.isCut(context)
-                val ok = if (wasCut) CutAccess.restore(context) else CutAccess.cut(context)
-                val message = when {
-                    !ok && wasCut -> restoreFailed
-                    !ok -> cutFailed
-                    wasCut -> cutRestored
-                    else -> cutDone
-                }
-                scope.launch {
-                    // Without the permission (or if the change did not stick), the person does it by hand.
-                    val r = snackbar.notify(message, actionLabel = if (ok) null else developerOptions)
-                    if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
-                }
-            },
+            cut = { report(ok = CutAccess.cut(context), restoring = false) },
+            restore = { report(ok = CutAccess.restore(context), restoring = true) },
             openActivity = { route = Route.ACTIVITY },
             openSettings = { route = Route.SETTINGS },
             newConversation = app.chat::newConversation,
@@ -175,9 +178,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
                     notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) },
                     pendingQuestions = waiting,
                     // The clock of the tap, not of the composition: a question that has just expired is not reopened.
-                    onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } }) {
-                    RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
-                }
+                    onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } })
             }
             Route.ACTIVITY -> {
                 BackHandler(onBack = back)

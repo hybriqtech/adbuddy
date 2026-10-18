@@ -51,7 +51,7 @@ class ChatScrollTest {
             AdbuddyTheme(dynamic = false) {
                 ChatScreen(
                     state, outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
-                    snackbar = SnackbarHostState(), actions = ChatActions.None, remoteCard = {},
+                    snackbar = SnackbarHostState(), actions = ChatActions.None,
                 )
             }
         }

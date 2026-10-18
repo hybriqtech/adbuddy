@@ -37,7 +37,7 @@ class ChatPendingQuestionsTest {
                 BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"),
                 outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
                 snackbar = SnackbarHostState(), actions = ChatActions.None, configured = true,
-                pendingQuestions = pending, remoteCard = {},
+                pendingQuestions = pending,
             )
         }
     }

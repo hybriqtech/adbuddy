@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -35,10 +36,10 @@ fun StatusPill(status: LinkStatus, host: String, remote: Boolean, modifier: Modi
     }
     val base = if (status == LinkStatus.CONNECTED && host.isNotEmpty()) stringResource(R.string.status_connected, host) else stringResource(status.shortText)
     val text = if (remote && (status == LinkStatus.CONNECTED || status == LinkStatus.PAUSED)) stringResource(R.string.status_pill_remote, base) else base
-    Surface(color = container, contentColor = content, shape = CircleShape, modifier = modifier) {
+    Surface(color = container, contentColor = content, shape = RoundedCornerShape(16.dp), modifier = modifier) {
         Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).background(dot, CircleShape))
-            Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text, style = MaterialTheme.typography.labelLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
     }
 }

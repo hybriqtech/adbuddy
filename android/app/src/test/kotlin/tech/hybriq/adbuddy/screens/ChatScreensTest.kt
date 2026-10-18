@@ -13,6 +13,12 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assert
+import android.content.Intent
+import org.junit.Assert.assertNotNull
+import org.robolectric.Shadows.shadowOf
+import tech.hybriq.adbuddy.bridge.RemoteState
 import androidx.compose.ui.text.TextLayoutResult
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -54,7 +60,7 @@ class ChatScreensTest(private val mode: ScreenMode) {
             AdbuddyTheme(dynamic = false) {
                 ChatScreen(
                     state, outgoing = outgoing, drafts = emptyList(), downloads = emptyMap(), cut = cut, terminal = null,
-                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = configured, terminalOpenByDefault = terminalOpenByDefault, notificationsBlocked = notificationsBlocked, remoteCard = {},
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = configured, terminalOpenByDefault = terminalOpenByDefault, notificationsBlocked = notificationsBlocked,
                 )
             }
         }
@@ -67,13 +73,15 @@ class ChatScreensTest(private val mode: ScreenMode) {
         return results.first().lineCount
     }
 
-    /** The header must fit its bar, the subtitle be one line and the banner (if any) show whole. */
-    private fun check(subtitle: String, banner: String?, name: String) {
+    /** The header must fit its bar, the pill be one line and the card (if any) show whole: its title and, if given, its text. */
+    private fun check(subtitle: String, banner: String?, name: String, body: String? = null) {
         compose.onNodeWithText(subtitle).assertIsDisplayed()
         if (banner != null) {
             compose.onNodeWithText(banner).assertIsDisplayed()
         }
-        assertEquals(1, lineCount(subtitle))
+        if (body != null) compose.onNodeWithText(body).assertIsDisplayed()
+        // One line at normal text; at 200 % the pill may wrap (assertTextsFit below: whole, never cut short or off the bar).
+        if (mode.fontScale == 1f) assertEquals(1, lineCount(subtitle))
         compose.assertTextsFit()
         compose.assertTitleFitsTheTopBar(subtitle)
         compose.shot(name, mode)
@@ -86,12 +94,15 @@ class ChatScreensTest(private val mode: ScreenMode) {
                 chat = ChatState(messages = listOf(ChatMessage("1", "user", "Turn the volume down"), ChatMessage("2", "assistant", "Done. The media volume is now at 20%."))),
             ),
         )
-        compose.onNodeWithText(text(R.string.app_name)).assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.session_idle)).assertIsDisplayed()
+        // The agent and its state are one title now ("ADBuddy · Ready"): each part is in it.
+        compose.onNodeWithText(text(R.string.app_name), substring = true).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.session_idle), substring = true).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.title_agent_state, text(R.string.app_name), text(R.string.session_idle))).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
         compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)).assertCountEquals(0)
         compose.assertTextsFit()
-        compose.assertTitleFitsTheTopBar(text(R.string.session_idle))
+        compose.assertTitleFitsTheTopBar(text(R.string.title_agent_state, text(R.string.app_name), text(R.string.session_idle)))
+        compose.assertTitleFitsTheTopBar(pill(text(R.string.status_connected, "my-pc")))
         compose.shot("chat_connected_messages", mode)
     }
 
@@ -114,7 +125,7 @@ class ChatScreensTest(private val mode: ScreenMode) {
                 chat = ChatState(messages = listOf(ChatMessage("1", "user", "Turn the volume down"))),
             ),
         )
-        compose.onNodeWithText(text(R.string.session_working)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.session_working), substring = true).assertIsDisplayed()
         compose.onNodeWithContentDescription(text(R.string.chat_stop)).assertIsDisplayed()
         compose.assertTextsFit()
         compose.shot("chat_working", mode)
@@ -138,14 +149,15 @@ class ChatScreensTest(private val mode: ScreenMode) {
         show(BridgeState())
         val short = text(R.string.status_short_waiting)
         compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
-        check(short, text(R.string.status_waiting), "chat_offline_waiting")
+        check(short, text(R.string.card_waiting_title), "chat_offline_waiting", body = text(R.string.status_waiting))
     }
 
     @Test fun cutSaysSoInTheBanner() {
         show(BridgeState(connection = BridgeState.Connection.WAITING, hostName = "my-pc"), cut = true)
         compose.onNodeWithText(text(R.string.status_short_cut)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
-        compose.onNodeWithText(text(R.string.status_cut)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.card_cut_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.card_cut_body)).assertIsDisplayed()
         compose.assertTextsFit()
         compose.assertTitleFitsTheTopBar(text(R.string.status_short_cut))
         compose.shot("chat_cut", mode)
@@ -155,7 +167,7 @@ class ChatScreensTest(private val mode: ScreenMode) {
         show(BridgeState().appOutdated())
         val short = text(R.string.status_short_update)
         compose.onNodeWithText(text(R.string.chat_empty_ready)).assertDoesNotExist()
-        check(short, text(R.string.status_update_app), "chat_update_app")
+        check(short, text(R.string.card_update_app_title), "chat_update_app", body = text(R.string.status_update_app))
         // The banner is announced to TalkBack.
         compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite)).assertIsDisplayed()
     }
@@ -192,11 +204,11 @@ class ChatScreensTest(private val mode: ScreenMode) {
             AdbuddyTheme(dynamic = false) {
                 ChatScreen(
                     bridge, outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
-                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = true, remoteCard = {},
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = true,
                 )
             }
         }
-        val waiting = text(R.string.status_waiting)
+        val waiting = text(R.string.card_waiting_title)
         compose.onNodeWithText(waiting).assertIsDisplayed()
         bridge = BridgeState(connection = BridgeState.Connection.CONNECTING)
         compose.waitForIdle()
@@ -217,7 +229,7 @@ class ChatScreensTest(private val mode: ScreenMode) {
             AdbuddyTheme(dynamic = false) {
                 ChatScreen(
                     bridge, outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = cut, terminal = null,
-                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = true, remoteCard = {},
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, configured = true,
                 )
             }
         }
@@ -229,25 +241,270 @@ class ChatScreensTest(private val mode: ScreenMode) {
     }
 
     @Test fun anOutdatedAppBannerDoesNotSurviveConnecting() =
-        bannerLeavesWhenConnecting(BridgeState().appOutdated(), false, false, text(R.string.status_update_app))
+        bannerLeavesWhenConnecting(BridgeState().appOutdated(), false, false, text(R.string.card_update_app_title))
 
     @Test fun aPausedBannerDoesNotSurviveConnecting() = bannerLeavesWhenConnecting(
         BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc", sessionState = SessionState(paused = true)),
-        false, false, text(R.string.status_paused),
+        false, false, text(R.string.card_paused_title),
     )
 
     @Test fun aCutBannerDoesNotSurviveTheCutEndingWhileConnecting() =
-        bannerLeavesWhenConnecting(BridgeState(connection = BridgeState.Connection.WAITING, hostName = "my-pc"), true, false, text(R.string.status_cut))
+        bannerLeavesWhenConnecting(BridgeState(connection = BridgeState.Connection.WAITING, hostName = "my-pc"), true, false, text(R.string.card_cut_title))
 
     @Test fun aColdStartConnectingHasNoBanner() {
         show(BridgeState(connection = BridgeState.Connection.CONNECTING))
-        compose.onNodeWithText(text(R.string.status_waiting)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.card_waiting_title)).assertDoesNotExist()
     }
 
     @Test fun notSetUpSaysToRunSetup() {
         show(BridgeState(), configured = false)
-        check(text(R.string.status_short_not_set_up), text(R.string.status_not_set_up), "chat_not_set_up")
+        check(text(R.string.status_short_not_set_up), text(R.string.card_not_set_up_title), "chat_not_set_up", body = text(R.string.status_not_set_up))
     }
+
+    @Test fun theShieldAlwaysCutsWhenItSaysCut_evenWithACutRecordAndALiveChannel() {
+        var cuts = 0
+        var restores = 0
+        compose.setContent {
+            AdbuddyTheme {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = true, terminal = null, snackbar = SnackbarHostState(),
+                    actions = ChatActions.None.copyWith(cut = { cuts++ }, restore = { restores++ }),
+                )
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        assertEquals(1, cuts)
+        assertEquals(0, restores)
+    }
+
+    @Test fun givingAccessBackAsksFirst() {
+        var restores = 0
+        compose.setContent {
+            AdbuddyTheme {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.WAITING), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = true, terminal = null, snackbar = SnackbarHostState(),
+                    actions = ChatActions.None.copyWith(restore = { restores++ }),
+                )
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_restore)).performClick()
+        assertEquals("the dialog asks first", 0, restores)
+        compose.onNodeWithText(text(R.string.restore_confirm_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.restore_confirm_confirm)).performClick()
+        assertEquals(1, restores)
+    }
+
+    @Test fun theCutCardButtonAlsoAsksFirst() {
+        var restores = 0
+        compose.setContent {
+            AdbuddyTheme {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.WAITING), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = true, terminal = null, snackbar = SnackbarHostState(),
+                    actions = ChatActions.None.copyWith(restore = { restores++ }),
+                )
+            }
+        }
+        // The card's button is text; the header's shield is a content description: two different nodes.
+        compose.onNodeWithText(text(R.string.action_restore)).performClick()
+        assertEquals("the dialog asks first", 0, restores)
+        compose.onNodeWithText(text(R.string.restore_confirm_title)).assertIsDisplayed()
+    }
+
+    @Test fun cancellingTheRestoreDialogRestoresNothing() {
+        var restores = 0
+        compose.setContent {
+            AdbuddyTheme {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.WAITING), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = true, terminal = null, snackbar = SnackbarHostState(),
+                    actions = ChatActions.None.copyWith(restore = { restores++ }),
+                )
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_restore)).performClick()
+        compose.onNodeWithText(text(R.string.action_cancel)).performClick()
+        compose.onNodeWithText(text(R.string.restore_confirm_title)).assertDoesNotExist()
+        assertEquals(0, restores)
+    }
+
+    @Test fun theMenuAlwaysOffersCut_evenWhileCut() {
+        var cuts = 0
+        compose.setContent {
+            AdbuddyTheme {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.WAITING), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = true, terminal = null, snackbar = SnackbarHostState(),
+                    actions = ChatActions.None.copyWith(cut = { cuts++ }),
+                )
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_menu)).performClick()
+        compose.onNodeWithText(text(R.string.action_cut)).performClick()
+        assertEquals(1, cuts)
+    }
+
+    @Test fun theRestoreDialogClosesWhenTheCutEnds() {
+        var cut by mutableStateOf(true)
+        compose.setContent {
+            AdbuddyTheme {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.WAITING), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = cut, terminal = null, snackbar = SnackbarHostState(), actions = ChatActions.None,
+                )
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_restore)).performClick()
+        compose.onNodeWithText(text(R.string.restore_confirm_title)).assertIsDisplayed()
+        cut = false // access came back some other way (Settings, the notification)
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.restore_confirm_title)).assertDoesNotExist()
+        cut = true // a later cut must not bring the dialog back by itself
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.restore_confirm_title)).assertDoesNotExist()
+    }
+
+    @Test fun oneCardOnly_questionsBeatCutAndBlockedNotifications() {
+        compose.setContent {
+            AdbuddyTheme {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.WAITING), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = true, terminal = null, snackbar = SnackbarHostState(), actions = ChatActions.None,
+                    notificationsBlocked = true, pendingQuestions = 2,
+                )
+            }
+        }
+        compose.onNodeWithText(app.resources.getQuantityString(R.plurals.confirm_waiting, 2, 2)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.card_cut_title)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.card_notifications_title)).assertDoesNotExist()
+        compose.shot("chat_questions_card", mode)
+    }
+
+    // Migrated from NotificationsBannerScreensTest (deleted with its banner): whole text, an actionable button, announced politely.
+    @Test fun theNotificationsCardSaysItAndOpensTheSettings() {
+        var opened = 0
+        // With a message: the empty state's text is Task 9's to make scrollable under a card at 200 %.
+        val withMessage = connected.copy(chat = ChatState(messages = listOf(ChatMessage("1", "user", "Hi"))))
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                ChatScreen(
+                    withMessage, outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, notificationsBlocked = true, onOpenNotificationSettings = { opened++ },
+                )
+            }
+        }
+        compose.onNodeWithText(text(R.string.notifications_blocked)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.notifications_open_settings)).assertIsDisplayed()
+        compose.assertTextsFit()
+        compose.onNodeWithText(text(R.string.notifications_blocked)).assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        compose.shot("chat_notifications_card", mode)
+        compose.onNodeWithText(text(R.string.notifications_open_settings)).performClick()
+        assertEquals(1, opened)
+    }
+
+    // Migrated from PendingQuestionsBannerScreensTest: whole text and an actionable "Show" that only reopens.
+    @Test fun theQuestionsCardFitsAndOffersShow() {
+        var shown = 0
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                ChatScreen(
+                    connected, outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
+                    snackbar = SnackbarHostState(), actions = ChatActions.None, pendingQuestions = 2, onShowQuestions = { shown++ },
+                )
+            }
+        }
+        compose.onNodeWithText(text(R.string.confirm_waiting_show)).assertIsDisplayed()
+        compose.assertTextsFit()
+        compose.onNodeWithText(text(R.string.confirm_waiting_show)).performClick()
+        assertEquals(1, shown)
+    }
+
+    // Bug 9: the header never says "Ready" (nor any agent state) beside a pause or a cut; the pill carries the state.
+    @Test fun theHeaderNeverSaysReadyWhilePaused() {
+        show(connected.copy(sessionState = SessionState(paused = true, state = "idle")))
+        compose.onNodeWithText(pill(text(R.string.status_short_paused))).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.session_idle), substring = true).assertDoesNotExist()
+        compose.assertTextsFit()
+        compose.assertTitleFitsTheTopBar(pill(text(R.string.status_short_paused)))
+        compose.shot("chat_paused", mode)
+    }
+
+    @Test fun theHeaderNeverSaysReadyWhileCut() {
+        show(BridgeState(connection = BridgeState.Connection.WAITING, hostName = "my-pc", sessionState = SessionState(state = "idle")), cut = true)
+        compose.onNodeWithText(text(R.string.session_idle), substring = true).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.status_short_cut)).assertIsDisplayed()
+    }
+
+    // The notifications card beats the paused one (R8), but the way to resume stays in the header's menu.
+    @Test fun pausedWithBlockedNotificationsCanStillBeResumedFromTheMenu() {
+        val resumes = mutableListOf<Boolean>()
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                ChatScreen(
+                    connected.copy(sessionState = SessionState(paused = true)), outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(),
+                    cut = false, terminal = null, snackbar = SnackbarHostState(),
+                    actions = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, { resumes += it }, {}, {}, {}, {}, {}, {}),
+                    notificationsBlocked = true,
+                )
+            }
+        }
+        compose.onNodeWithText(text(R.string.card_notifications_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.card_paused_title)).assertDoesNotExist()
+        compose.onNodeWithContentDescription(text(R.string.action_menu)).performClick()
+        compose.onNodeWithText(text(R.string.action_resume)).performClick()
+        assertEquals(listOf(false), resumes)
+    }
+
+    @Test fun thePausedCardResumes() {
+        val resumes = mutableListOf<Boolean>()
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                ChatScreen(
+                    connected.copy(sessionState = SessionState(paused = true)), outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(),
+                    cut = false, terminal = null, snackbar = SnackbarHostState(),
+                    actions = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, { resumes += it }, {}, {}, {}, {}, {}, {}),
+                )
+            }
+        }
+        compose.onNodeWithText(text(R.string.card_paused_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.action_resume)).performClick()
+        assertEquals(listOf(false), resumes)
+    }
+
+    // R8: "How to connect" opens the fixed https guide, nothing else.
+    @Test fun theWaitingCardOpensTheSetupGuide() {
+        show(BridgeState())
+        compose.onNodeWithText(text(R.string.card_waiting_action)).performClick()
+        val started: Intent? = shadowOf(app).nextStartedActivity
+        assertNotNull("no activity started", started)
+        assertEquals(Intent.ACTION_VIEW, started!!.action)
+        assertEquals("https://hybriqtech.github.io/adbuddy/setup/", started.data.toString())
+    }
+
+    // R9: no remote-mode card in the chat; only the "Remote" label of the pill, on (or unknown) and never on a known off.
+    private fun remoteLabel(remote: RemoteState?, expected: Boolean) {
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                ChatScreen(
+                    connected.copy(remote = remote), outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false,
+                    terminal = null, snackbar = SnackbarHostState(), actions = ChatActions.None,
+                )
+            }
+        }
+        val base = text(R.string.status_connected, "my-pc")
+        if (expected) compose.onNodeWithText(pill(base)).assertIsDisplayed() else compose.onNodeWithText(pill(base)).assertDoesNotExist()
+        if (!expected) compose.onNodeWithText(base).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.remote_title)).assertDoesNotExist()
+    }
+
+    @Test fun thePillSaysRemoteWhenItIsOn() = remoteLabel(RemoteState(enabled = true), true)
+    @Test fun thePillSaysRemoteWhenItIsUnknown() = remoteLabel(null, true)
+    @Test fun thePillDoesNotSayRemoteWhenItIsKnownOff() = remoteLabel(RemoteState(enabled = false), false)
+
+    // The pill says "Remote" when the mode is unknown (a state without a remote reading): its text, for the checks of this file.
+    private fun pill(base: String) = text(R.string.status_pill_remote, base)
 
     companion object {
         @JvmStatic

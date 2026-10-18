@@ -24,11 +24,11 @@ import tech.hybriq.adbuddy.screens.ComponentActivityRule
 import tech.hybriq.adbuddy.screens.PHONE
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 
-/** The notice for closed red questions: says how many, "Show" reopens, and nothing in it answers a question. */
+/** The card for closed red questions (ActionCard QUESTIONS): says how many, "Show" reopens, and nothing in it answers a question. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = PHONE)
-class PendingQuestionsBannerTest {
+class QuestionsCardTest {
     private val compose = createAndroidComposeRule<ComponentActivity>()
 
     @get:Rule val rules: RuleChain = RuleChain.outerRule(ComponentActivityRule()).around(compose)
@@ -36,7 +36,7 @@ class PendingQuestionsBannerTest {
     private val app get() = RuntimeEnvironment.getApplication() as AdbuddyApp
 
     private fun show(count: Int, onShow: () -> Unit = {}) =
-        compose.setContent { AdbuddyTheme(dynamic = false) { PendingQuestionsBanner(count, onShow) } }
+        compose.setContent { AdbuddyTheme(dynamic = false) { ActionCard(HomeNotice.QUESTIONS, count, onShow) } }
 
     @Test fun twoQuestionsSayTheirCountAndOfferShow() {
         show(2)
