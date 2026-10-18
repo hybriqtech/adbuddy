@@ -16,9 +16,9 @@ Cierre del plan `2026-10-18-app-visual-y-acceso.md`. Las filas de aquí las inte
 
 ## Inventario (ficheros nuevos principales)
 
-- `access/AccessDiag` (diagnóstico `ADBuddyAccess`), `a11y/OverlayColors` (colores fijos de la superposición).
+- `control/AccessDiag` (diagnóstico `ADBuddyAccess`), `a11y/OverlayColors` (colores fijos de la superposición).
 - `ui/theme/`: `Palette`, `Theme`, `AdbuddyColors`, `Type`, `Shapes`, `ThemePrefs`.
-- `ui/`: `HomeNotice`, `ActionCard` (+ `cardIconRes`), `StatusPill`, `RestoreAccessDialog`, `ChatHeaderBar`.
+- `ui/`: `HomeNotice`, `ActionCard` (+ `cardIconRes`), `StatusPill`, `RestoreAccessDialog`, `ChatHeaderBar` (en `ChatParts.kt`).
 - Iconos: `ic_shield`, `ic_shield_off`, `ic_card_question`, `ic_card_pause`, `ic_card_update`, `ic_launcher_foreground`, `ic_launcher_monochrome`.
 - Capturas en `android/app/src/test/screenshots/` (`-Padbuddy.screens=record|verify`).
 
