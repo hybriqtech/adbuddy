@@ -91,3 +91,10 @@ Cada tarea se revisa: `adbuddy-reviewer-opus` en las [SEG], `adbuddy-reviewer` e
 
 Task 1: complete (commit 20d14579; revisión opus: cumplimiento OK, calidad aprobada, 2 menores)
 Ruling: los dos menores de T1 (assertNull(s.yolo) en anM2HostIsRead y KDoc de PermissionResolved/Snapshot.yolo) se aplican en A1, la primera tarea de android que toca la app — son comentarios y una aserción, no bloquean la cadena host — si me equivoco, un KDoc desactualizado unas tareas más.
+
+Task 2: complete (commit e40adc76; revisión opus: cumplimiento OK, calidad aprobada, 2 menores)
+Ruling: la mutación 4 de T2 (Active sin reloj) solo pone rojo TestYoloExpiryDoesNotNeedTheTimer; TestYoloLastsExactlyTheTimeItWasGiven no puede ponerse rojo porque el temporizador falso dispara justo en la caducidad y deja until a cero — el error era la previsión del plan, no un hueco: lo cubre el otro test — si me equivoco, ninguno (el caso "caducó y el temporizador no disparó" tiene test propio).
+Ruling: reloj de pared hacia atrás (NTP o admin del PC) puede alargar un YOLO en curso (Round(0) deliberado del plan) — quien puede cambiar la hora del PC ya controla el host y `adbuddy yolo off`/la caducidad siguen existiendo; el monotónico añade estado y complica el reloj inyectable — si me equivoco, un YOLO que dura más de lo elegido solo con un atacante que ya es admin del PC. Se anota en docs/safety.md (T8) como límite conocido.
+Ruling: menor 1 de T2 (aserción de State() tras caducidad sin temporizador) se aplica en T3 (mismo fichero de tests) — cobertura, no comportamiento — si me equivoco, una aserción tarde.
+Task A1: complete (commit cde735d3; revisión sonnet: cumplimiento OK, calidad aprobada, 5 menores)
+Ruling: menores 1-4 de A1 (comentario ChatReducer, KDoc de ProtocolChat, test de id repetido, test INCOMPATIBLE por welcome) se aplican en A3; el 5 (View.active no es "apagado") va como nota a A2 y A3 — cosméticos y cobertura — si me equivoco, un comentario o un caso de test tarde.
