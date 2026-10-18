@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
+import androidx.core.content.ContextCompat
 import androidx.core.content.LocusIdCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
@@ -49,18 +50,20 @@ object ConversationNotifier {
         val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val bubbleIntent = PendingIntent.getActivity(ctx, 5, Intent(ctx, ChatBubbleActivity::class.java),
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val bubble = NotificationCompat.BubbleMetadata.Builder(bubbleIntent, IconCompat.createWithResource(ctx, android.R.drawable.sym_action_chat))
+        val bubble = NotificationCompat.BubbleMetadata.Builder(bubbleIntent, IconCompat.createWithResource(ctx, R.mipmap.ic_launcher))
             .setDesiredHeight(600)
             .build()
         // What the lock screen shows: the headline, never the text of the last message.
         val public = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_CONVERSATION)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setSmallIcon(R.drawable.ic_stat_adbuddy)
+            .setColor(ContextCompat.getColor(ctx, R.color.ic_launcher_background))
             .setContentTitle(ctx.getString(R.string.app_name))
             .setContentText(publicLine)
             .build()
 
         val b = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_CONVERSATION)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setSmallIcon(R.drawable.ic_stat_adbuddy)
+            .setColor(ContextCompat.getColor(ctx, R.color.ic_launcher_background))
             .setStyle(style)
             .setSubText(headline)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -100,12 +103,14 @@ object ConversationNotifier {
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
         val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_DONE)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setSmallIcon(R.drawable.ic_stat_adbuddy)
+            .setColor(ContextCompat.getColor(ctx, R.color.ic_launcher_background))
             .setContentTitle(ctx.getString(R.string.notif_done_title))
             .setContentText(line ?: ctx.getString(R.string.notif_done_default))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_DONE)
-                .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+                .setSmallIcon(R.drawable.ic_stat_adbuddy)
+                .setColor(ContextCompat.getColor(ctx, R.color.ic_launcher_background))
                 .setContentTitle(ctx.getString(R.string.notif_done_title))
                 .build())
             .setAutoCancel(true)
@@ -122,12 +127,14 @@ object ConversationNotifier {
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
         val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val public = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_ASK)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setSmallIcon(R.drawable.ic_stat_adbuddy)
+            .setColor(ContextCompat.getColor(ctx, R.color.ic_launcher_background))
             .setContentTitle(ctx.getString(R.string.app_name))
             .setContentText(ctx.getString(R.string.notif_ask_title))
             .build()
         val n = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_ASK)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setSmallIcon(R.drawable.ic_stat_adbuddy)
+            .setColor(ContextCompat.getColor(ctx, R.color.ic_launcher_background))
             .setContentTitle(ctx.getString(R.string.notif_ask_title))
             .setContentText(ctx.getString(R.string.notif_ask_text))
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
