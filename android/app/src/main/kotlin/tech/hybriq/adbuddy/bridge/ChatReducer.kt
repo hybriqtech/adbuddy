@@ -6,6 +6,8 @@ data class ChatState(
     val permissions: List<PermissionRequest> = emptyList(),
     /** What the agent does with its tools (tool.activity, M4): the last [ChatReducer.MAX_TOOLS], oldest first. Not in a snapshot. */
     val tools: List<ToolActivity> = emptyList(),
+    /** What YOLO approved on its own (permission.resolved by yolo): the app never had a card for it, so the chat tells it. Not in a snapshot. */
+    val yoloApprovals: List<PermissionResolved> = emptyList(),
 )
 
 /** The chat's events: M3 fills the messages; M4 the tool activity and the agent's permission questions. */
@@ -16,6 +18,7 @@ object ChatReducer : Reducer {
     /** Tool activity and permission questions kept (M4); the host holds at most 8 questions. */
     const val MAX_TOOLS = 200
     const val MAX_PERMISSIONS = 16
+    const val MAX_YOLO_APPROVALS = 20
 
     override val types = setOf(
         Protocol.CHAT_MESSAGE, Protocol.TOOL_ACTIVITY, Protocol.PERMISSION_REQUEST, Protocol.PERMISSION_RESOLVED,
@@ -40,7 +43,12 @@ object ChatReducer : Reducer {
         // Whoever answered, and wherever: the card goes (spec M4 §5.1).
         Protocol.PERMISSION_RESOLVED -> {
             val r = Protocol.payload<PermissionResolved>(m)
-            if (r == null) s else s.copy(chat = s.chat.copy(permissions = s.chat.permissions.filterNot { it.id == r.id }))
+            if (r == null) s else s.copy(
+                chat = s.chat.copy(
+                    permissions = s.chat.permissions.filterNot { it.id == r.id },
+                    yoloApprovals = if (r.by == "yolo") (s.chat.yoloApprovals.filterNot { it.id == r.id } + r).takeLast(MAX_YOLO_APPROVALS) else s.chat.yoloApprovals,
+                ),
+            )
         }
         else -> s
     }

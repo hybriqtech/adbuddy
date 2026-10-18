@@ -216,7 +216,7 @@ data class Snapshot(
     val permissions: List<JsonElement> = emptyList(),
     /** RemoteState (M5). */
     val remote: JsonElement? = null,
-    /** YoloState. */
+    /** YoloState; null = host without YOLO (unknown), never off. */
     val yolo: JsonElement? = null,
 )
 
