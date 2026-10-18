@@ -30,10 +30,12 @@ repos:
   - repo: local
     hooks:
       # Solo lista (gofmt -l) y falla si hay algo; no reescribe. Arréglalo con `gofmt -w <fichero>` y vuelve a hacer git add.
+      # `files: ^host/`, como el gofmt de la CI: spikes/ es código de prueba que la CI nunca vigiló (y no está formateado).
       - id: gofmt
         name: gofmt -l
         language: system
         entry: bash scripts/hook-go.sh gofmt
+        files: ^host/
         types: [go]
         stages: [pre-commit]
 

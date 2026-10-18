@@ -24,7 +24,7 @@ prek se instala fuera del repo, y no como dependencia, a propósito. Los hooks v
 **Antes de cada commit**, sobre los ficheros que van en él (unos segundos):
 
 - `check-merge-conflict`, `check-case-conflict`, `detect-private-key` y `check-added-large-files` (hasta 1 MB: el mayor fichero versionado es un plan de 600 KB): los de prek, sin dependencias.
-- `gofmt -l` sobre los `.go`. Solo lista; si hay algo, el commit se para. Arréglalo con `gofmt -w <fichero>`, `git add` y repite.
+- `gofmt -l` sobre los `.go` de `host/` (como la CI; `spikes/` no se comprueba). Solo lista; si hay algo, el commit se para. Arréglalo con `gofmt -w <fichero>`, `git add` y repite.
 
 **Antes de cada push**, en dos tandas, y solo si el push toca `host/`:
 
