@@ -71,3 +71,20 @@ Comprobación empírica propia (copia en la carpeta temporal, nada en el worktre
 ## Tareas
 
 (se rellena durante la ejecución: una línea por tarea con SHA, rondas y revisor)
+
+## Ejecución (subagent-driven-development, 2026-10-18)
+
+Plan en HEAD d88c36b9. Setup: el plan pasó dos revisiones opus, una re-revisión acotada y una comprobación empírica de T1-T7 (Go) y A1-A5 (Kotlin) sobre copias; la tabla de conflictos entre tareas que comparten fichero o interfaz es la ya revisada:
+
+| Par / tarea | Qué produce / consume | Hallazgo |
+|---|---|---|
+| T1 → T2..T7, A1 | tipos de protocolo y `journal.Entry.Yolo`, `Snapshot.Yolo`, `PermissionResolved.Summary` | coherentes (comprobado) |
+| T2 → T3, T4, T5, T6, T7 | `daemon.Yolo`, `d.paused()`, `Options.Yolo` | coherentes |
+| T3 ↔ T4 | ambos tocan `daemon.go`/`guard.go`/`ui.go`/`undo.go`: secuenciales | sin solape si van en orden |
+| T5, T6, T7 | `cli/*` y catálogo: `en.toml`/`es.toml` los tocan T2, T5, T6, T7: secuenciales | ok |
+| A1 → A2..A5 | `BridgeState.yolo`, `YoloUi`, `ChatState.yoloApprovals` | coherentes |
+| A2 ↔ A3 | ambos tocan `ChatRoot.kt`, `strings.xml`: secuenciales | ok |
+| A2 | `androidx.biometric` sin caché offline: `YoloBiometric` no compilado | riesgo anotado (R22) |
+| T9 | necesita todo y emulador: no se arranca sin OK del líder | |
+
+Cada tarea se revisa: `adbuddy-reviewer-opus` en las [SEG], `adbuddy-reviewer` en el resto, `adbuddy-rereviewer` en las re-revisiones. Briefs y diffs fuera del repo (carpeta temporal).
