@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.ui
 
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -69,5 +70,25 @@ class PermissionCardSemanticsTest {
         assertNotNull("title is a heading", title.config.getOrNull(SemanticsProperties.Heading))
         val left = compose.onNodeWithText(app.getString(R.string.perm_left, 90), substring = true).fetchSemanticsNode()
         assertNull("the countdown must not be a live region", left.config.getOrNull(SemanticsProperties.LiveRegion))
+    }
+
+    @Test fun theButtonsComeInReadingOrderYesYesAlwaysNo() {
+        val p = PermissionRequest("p1", "Bash", "Clean the build folder", "", "2026-10-01T10:10:00Z", true)
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                PermissionCard(
+                    p, others = 0, connected = true, hostNow = now, answering = false, guardLeftMs = 0,
+                    controllerCanAnswer = true, agent = "", onAnswer = { _, _ -> },
+                )
+            }
+        }
+        compose.waitForIdle()
+        // Reading order in a left-to-right layout: line first, then left edge (the row may wrap on a narrow screen).
+        fun at(id: Int) = compose.onNodeWithText(app.getString(id)).fetchSemanticsNode().boundsInRoot.let { it.top to it.left }
+        val order = listOf(R.string.perm_allow, R.string.perm_always, R.string.perm_deny)
+        val places = order.map { at(it) }
+        val sorted = places.sortedWith(compareBy({ it.first }, { it.second }))
+        assertEquals("Yes, Yes always, No in that order: $places", places, sorted)
+        assertEquals(3, places.toSet().size)
     }
 }

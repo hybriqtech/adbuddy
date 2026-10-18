@@ -44,7 +44,7 @@ class PermissionCardScreensTest(private val mode: ScreenMode) {
         compose.waitForIdle()
         compose.onNodeWithText(app.getString(R.string.perm_title, "claude-code")).assertIsDisplayed()
         compose.onNodeWithText(app.getString(R.string.perm_allow)).assertIsNotEnabled()
-        compose.assertTextsFit(scrolled = true)
+        compose.assertTextsFit()
         compose.shot("permission_card", mode)
     }
 
