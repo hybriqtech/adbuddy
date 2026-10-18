@@ -72,6 +72,8 @@ object Protocol {
     const val DEVICE_INFO = "device.info"
     const val REMOTE_SET = "remote.set"
     const val REMOTE_STATE = "remote.state"
+    const val YOLO_SET = "yolo.set"
+    const val YOLO_STATE = "yolo.state"
 
     /** The longest request id (spec §3). */
     const val MAX_RID = 64
@@ -190,6 +192,7 @@ data class JournalEntry(
     val undoneBy: String? = null,
     val undoes: String = "",
     val reason: String = "",
+    val yolo: Boolean = false,
     val mac: String = "",
 )
 
@@ -213,6 +216,8 @@ data class Snapshot(
     val permissions: List<JsonElement> = emptyList(),
     /** RemoteState (M5). */
     val remote: JsonElement? = null,
+    /** YoloState. */
+    val yolo: JsonElement? = null,
 )
 
 /** Answers a request (by its rid) that failed (spec §4.1). text is for the person, written by the host. */

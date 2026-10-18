@@ -69,4 +69,4 @@ data class PermissionReply(val id: String, val decision: String)
 
 /** Takes a PermissionRequest off the phone, wherever it was answered. by: phone, terminal, timeout or agent. */
 @Serializable
-data class PermissionResolved(val id: String, val decision: String, val by: String)
+data class PermissionResolved(val id: String, val decision: String, val by: String, val summary: String = "")
