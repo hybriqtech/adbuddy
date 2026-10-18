@@ -7,6 +7,9 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import java.time.Instant
+import java.util.TimeZone
+import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -35,6 +38,17 @@ class ConfirmDialogScreensTest(private val mode: ScreenMode) {
     @get:Rule val rules: RuleChain = RuleChain.outerRule(ScreenModeRule(mode)).around(ComponentActivityRule()).around(compose)
 
     private val app get() = RuntimeEnvironment.getApplication() as AdbuddyApp
+    private var savedZone: TimeZone? = null
+
+    // The footer "Expires at" is formatted in the system zone: fixed, so the images do not depend on the PC.
+    @Before fun fixZone() {
+        savedZone = TimeZone.getDefault()
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+    }
+
+    @After fun restoreZone() {
+        savedZone?.let { TimeZone.setDefault(it) }
+    }
 
     // 300+ characters, with quotes and pipes.
     private val cmd = "adb shell \"dumpsys package com.example.app | grep -i 'permission' | sort | uniq\" && " +
