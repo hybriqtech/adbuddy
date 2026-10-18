@@ -3,7 +3,7 @@ package tech.hybriq.adbuddy
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
@@ -16,7 +16,7 @@ import tech.hybriq.adbuddy.ui.ConsentScreen
 import tech.hybriq.adbuddy.ui.Onboarding
 import tech.hybriq.adbuddy.ui.ChatRoot
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private var showConsent by mutableStateOf(false)
     private var focusConfirm by mutableStateOf<String?>(null)
 

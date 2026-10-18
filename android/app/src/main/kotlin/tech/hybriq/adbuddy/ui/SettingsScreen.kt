@@ -48,7 +48,7 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
  * Language, keeping debugging on and About belong to later milestones.
  */
 @Composable
-fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit, onBack: () -> Unit, onMessage: (String) -> Unit) {
+fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit, onBack: () -> Unit, onMessage: (String) -> Unit, onYolo: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val consent = remember(context) { NotificationConsent.of(context) }
     // Read off the main thread; null until read. The system's state and the mark start unknown: nothing is
@@ -69,6 +69,7 @@ fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit,
         onOpen = onOpen,
         onBack = onBack,
         remoteCard = { RemoteCard(state, app.bridge, app.clock, onMessage) },
+        yoloCard = { YoloCard(state, app.clock, onTurnOn = { onYolo(true) }, onTurnOff = { onYolo(false) }) },
     )
 }
 
@@ -81,6 +82,7 @@ fun SettingsContent(
     onOpen: (Route) -> Unit,
     onBack: () -> Unit,
     remoteCard: @Composable () -> Unit,
+    yoloCard: @Composable () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -109,6 +111,7 @@ fun SettingsContent(
                 onClick = { onOpen(Route.NOTIFICATION_ACCESS) },
             )
             remoteCard()
+            yoloCard()
         }
     }
 }

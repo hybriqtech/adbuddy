@@ -100,6 +100,8 @@ fun ChatHeader(
     onSettings: () -> Unit,
     onNewConversation: () -> Unit,
     configured: Boolean = true,
+    yoloOn: Boolean = false,
+    onYolo: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
     val label = SessionLabel.of(state)
@@ -159,6 +161,10 @@ fun ChatHeader(
                     )
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_activity)) }, onClick = { menu = false; onActivity() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_settings)) }, onClick = { menu = false; onSettings() })
+                    DropdownMenuItem(
+                        text = { Text(stringResource(if (yoloOn) R.string.yolo_menu_off else R.string.yolo_menu_on)) },
+                        onClick = { menu = false; onYolo() },
+                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.menu_new_conversation)) },
                         onClick = { menu = false; onNewConversation() },

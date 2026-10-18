@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- canAuthenticate() for the strong-biometrics step that turns YOLO mode on. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Granted by the host over adb (pm grant) to cut and restore access (spec §4.6). -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"

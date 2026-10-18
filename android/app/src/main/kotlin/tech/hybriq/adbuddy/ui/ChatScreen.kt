@@ -72,6 +72,7 @@ class ChatActions(
     val openSettings: () -> Unit,
     val newConversation: () -> Unit,
     val interrupt: () -> Unit,
+    val openYolo: () -> Unit = {},
 ) {
     companion object {
         val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
@@ -165,6 +166,7 @@ fun ChatScreen(
                 state, cut, terminalShown, onToggleTerminal = { terminalShown = !terminalShown }, onPause = actions.pause,
                 onToggleCut = actions.toggleCut, onActivity = actions.openActivity, onSettings = actions.openSettings,
                 onNewConversation = { askNew = true }, configured = configured,
+                yoloOn = state.yolo?.active == true, onYolo = actions.openYolo,
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
