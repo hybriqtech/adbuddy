@@ -16,7 +16,8 @@
 - Sin dependencias nuevas ni ficheros binarios de fuentes (R7): monoespaciada = `FontFamily.Monospace`.
 - Todo texto visible en `res/values/strings.xml` (en) **y** `res/values-es/strings.xml` (es), con los mismos marcadores; `NoHardcodedTextTest` y `StringsParityTest` en verde.
 - Ningún test de la lista de §8 de la spec se borra ni se debilita. Si hace falta tocar uno, la tarea se para y lo adjudica el controlador.
-- Todo composable nuevo con acciones llama a `ObscuredTouchGuard()` (o usa `refuseObscuredTouches()`), como exige `TouchGuardSourceTest`.
+- Filtro de toques tapados (spec §8.5): `ObscuredTouchGuard()` solo dentro de diálogos y menús (ventanas propias); en una pantalla, `Modifier.refuseObscuredTouches()` solo en el botón que concede algo (p. ej. el de `ActionCard`). Nunca `ObscuredTouchGuard()` en un composable de pantalla entera (Ajustes, chat vacío): marcaría toda la ventana de la actividad. El escudo de Cortar va **sin** filtro: un corte provocado por un toque tapado es inofensivo; reactivar va por un diálogo con su guarda.
+- Cada test crítico lleva su **mutación**: el cambio de código que debe hacerlo fallar. El implementador la aplica a mano, ve el fallo y la deshace, y lo dice en su informe.
 - Colores solo desde `MaterialTheme.colorScheme` o `AdbuddyTheme.colors` (tarea 5); el único sitio con valores ARGB es `ui/theme/Palette.kt` (y `a11y/OverlayColors.kt`, tarea 4, que no tiene Compose).
 - Nunca se ejecuta nada en el móvil del usuario. Los tests usan JVM/Robolectric; lo instrumentado, el emulador (`android/README.md`), nunca tareas `connected*` de Gradle.
 - Git: identidad local hybriqtech del repo, trailer exacto `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`, sin push.
@@ -70,7 +71,7 @@ El Pixel del usuario (Android 17, app 0.2.0) tiene `adb_enabled=1` y `adb_wifi_e
 
 **Files:**
 - Create: `control/AccessDiag.kt`
-- Modify: `control/CutAccess.kt`
+- Modify: `control/CutAccess.kt`, `android/app/src/test/resources/i18n-exceptions.txt`
 - Test: `control/AccessDiagTest.kt`
 
 **Interfaces:**
@@ -107,7 +108,7 @@ class AccessDiagTest {
         // A raw value is cut to 16 chars and stripped of line breaks: the log is not a place for anything else.
         val line = AccessDiag.line("x", 37, listOf(AccessDiag.Reading("adb_enabled", "1\n" + "9".repeat(40), null)), emptyMap())
         assertFalse(line.contains("\n"))
-        assertEquals("x sdk=37 adb_enabled=raw:1 9999999999999", line)
+        assertEquals("x sdk=37 adb_enabled=raw:1 99999999999999", line)
     }
 }
 ```
@@ -166,7 +167,7 @@ object AccessDiag {
     fun log(context: Context, event: String) {
         try {
             val resolver = context.contentResolver
-            val prefs = context.getSharedPreferences("cut_access", Context.MODE_PRIVATE)
+            val prefs = context.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE)
             val names = listOf(AccessSwitch.ADB_ENABLED, AccessSwitch.ADB_WIFI_ENABLED)
             val saved = names.associateWith { if (prefs.contains(it)) prefs.getInt(it, 0) else null }
             Log.i(TAG, line(event, Build.VERSION.SDK_INT, names.map { read(resolver, it) }, saved))
@@ -177,7 +178,7 @@ object AccessDiag {
 }
 ```
 
-En `control/CutAccess.kt`: dentro de `observe`, en `current()`, primera línea `AccessDiag.log(context, "observe")`; en `cut(context)` y `restore(context)`, registrar antes y después:
+En `control/CutAccess.kt`: añadir `const val PREFS = "cut_access"` (una sola constante; `switch()` pasa a usar `context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)`); dentro de `observe`, en `current()`, primera línea `AccessDiag.log(context, "observe")`; en `cut(context)` y `restore(context)`, registrar antes y después:
 
 ```kotlin
     fun cut(context: Context): Boolean {
@@ -191,7 +192,7 @@ En `control/CutAccess.kt`: dentro de `observe`, en `current()`, primera línea `
     }
 ```
 
-(`"cut.after ok=$it"` es un evento de log, no texto visible: si `NoHardcodedTextTest` lo marca, añadir la línea a `src/test/resources/i18n-exceptions.txt` con el motivo "log de diagnóstico, no se muestra".)
+Los eventos y textos de log (`"cut.before"`, `"cut.after ok=$it"`, `"diagnosis failed: "`, `" sdk="`…) no son texto para una persona: ejecutar `NoHardcodedTextTest` y añadir a `android/app/src/test/resources/i18n-exceptions.txt`, con su formato `fichero (desde tech/hybriq/adbuddy/) | literal | motivo`, **exactamente** los literales que marque, con el motivo "línea de log para adb logcat, no se muestra" (o `control/AccessDiag.kt | * | líneas de log para adb logcat, no se muestran` si marca varios de ese fichero). No añadir líneas que no marque: el test falla si una línea no coincide con nada.
 
 - [ ] **Step 4: comprobar que pasa**
 
@@ -218,16 +219,17 @@ Regla (spec R1-R4 tal como quedan tras el dato del Pixel):
 - **`isCut()` es verdadero solo si hay registro de un corte de ADBuddy** (valores guardados, que solo quedan si el corte se confirmó leyendo) **y las lecturas no lo desmienten.** Desmentir = una lectura **legible** dice que alguno de los dos está a 1 (entonces se olvida el registro: alguien volvió a dar acceso a mano). Una lectura ilegible no desmiente nada y tampoco crea un "cortado".
 - Sin registro **nunca** se dice "cortado", lea lo que lea (cubre el Pixel: si Android 17 da 0 a la app, ya no sale "cortado"). Un corte hecho fuera de ADBuddy se ve como "Buscando tu PC…", cuya tarjeta dice que encienda la depuración inalámbrica.
 - `cut()` guarda los dos valores siempre que no haya registro, escribe los dos a 0 y relee; si no se confirma, **borra lo que guardó en esta llamada** (no deja un registro falso).
-- `restore()` escribe lo guardado tal cual (también `adb_enabled=0`); sin registro, o si lo guardado es "los dos a 0", escribe `adb=1, wifi=0` (nunca la inalámbrica a ciegas).
+- `restore()` escribe lo guardado tal cual (también `adb_enabled=0`). Sin registro: si una lectura legible ya dice que hay acceso, **no escribe nada** (nunca apaga la inalámbrica que estaba encendida); si no, escribe solo `adb_enabled=1` y no toca la inalámbrica (su valor no se conoce o ya es 0). Con un registro de "los dos a 0" (lecturas falsas al cortar, o un corte con todo apagado) **no adivina**: no escribe, conserva el registro y `needsManualRestore()` es verdadero; la pantalla manda a Opciones de desarrollador.
+- Límite conocido (spec, diagnóstico abierto): si Android 17 da lecturas falsas a la app, esta tarea evita el falso "cortado", pero cortar y reactivar no se pueden confirmar de verdad. No se afirma que la tarea sea correcta en ese caso: lo decide V1.
 - La relectura tras escribir no da por bueno un valor ilegible.
 
 **Files:**
-- Modify: `control/AccessSwitch.kt` (entero), `control/CutAccess.kt`, `bridge/BridgeService.kt:73`, `ui/ChatRoot.kt:67-68,121`
-- Test: `control/AccessSwitchTest.kt`
+- Modify: `control/AccessSwitch.kt` (entero), `control/CutAccess.kt`, `bridge/BridgeService.kt:73`, `ui/ChatRoot.kt:67-68,121`, `android/app/src/androidTest/kotlin/tech/hybriq/adbuddy/CutAccessOnEmulatorTest.kt:36,51` (`CutAccess.isCut(resolver)` → `CutAccess.isCut(context)`; `context` ya existe en ese test)
+- Test: `control/AccessSwitchTest.kt`, `control/CutAccessTest.kt` (nuevo, Robolectric)
 
 **Interfaces:**
 - Consumes: `AccessDiag.log` (tarea 1).
-- Produces: `AccessSwitch.Settings.get(name)` **lanza `SecurityException`** cuando no se puede leer (antes devolvía null); `AccessSwitch.isCut(): Boolean`; `CutAccess.isCut(context: Context): Boolean` (sustituye a `isCut(resolver)`); `CutAccess.observe(context): Flow<Boolean>` emite `switch.isCut()`.
+- Produces: `AccessSwitch.Settings.get(name)` **lanza `SecurityException`** cuando no se puede leer (antes devolvía null); `AccessSwitch.isCut(): Boolean`; `AccessSwitch.restore(): Boolean`; `AccessSwitch.needsManualRestore(): Boolean`; `CutAccess.PREFS`; `CutAccess.isCut(context: Context): Boolean` (sustituye a `isCut(resolver)`); `CutAccess.needsManualRestore(context: Context): Boolean`; `CutAccess.observe(context): Flow<Boolean>` emite `switch.isCut()`.
 
 - [ ] **Step 1: tests que fallan.** En `AccessSwitchTest.kt`, añadir a `FakeSettings` un conjunto de ajustes ilegibles y los tests nuevos; cambiar los existentes que asumen la regla vieja como se indica:
 
@@ -310,13 +312,74 @@ Tests nuevos:
         assertEquals(1, saved.values[wifi])
     }
 
-    @Test fun aRecordOfBothOffRestoresAdbOnly() {
+    @Test fun aRecordOfBothOffIsNeverGuessed() {
         val s = FakeSettings(adb to 0, wifi to 0)
         val saved = FakeSaved().apply { values[adb] = 0; values[wifi] = 0 }
-        assertTrue(AccessSwitch(s, saved).restore())
-        assertEquals(1, s.values[adb])
-        assertEquals(0, s.values[wifi])
+        val sw = AccessSwitch(s, saved)
+        assertTrue(sw.needsManualRestore())
+        assertFalse(sw.restore())
+        assertEquals("nothing written", 0, s.values[adb])
+        assertEquals("nothing written", 0, s.values[wifi])
+        assertEquals("the record stays", 0, saved.values[wifi])
     }
+
+    @Test fun restoringTwiceWithOnlyWirelessNeverTurnsItOff() {
+        val s = FakeSettings(adb to 0, wifi to 1)
+        val sw = AccessSwitch(s, FakeSaved())
+        assertTrue(sw.restore())
+        assertTrue(sw.restore())
+        assertEquals("wireless debugging stays on", 1, s.values[wifi])
+        assertEquals("nothing turned on that was off", 0, s.values[adb])
+    }
+
+    @Test fun turningOnlyWirelessBackOnByHandForgetsTheRecord() {
+        val s = FakeSettings(adb to 1, wifi to 1)
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved)
+        assertTrue(sw.cut())
+        s.values[wifi] = 1 // the person turns wireless debugging on in Settings (USB stays off)
+        sw.forgetIfRestored()
+        assertTrue(saved.values.isEmpty())
+        assertFalse(sw.isCut())
+    }
+```
+
+Mutaciones (cada una debe hacer fallar el test indicado; aplicarla, ver el fallo, deshacerla):
+- quitar `hasRecord() &&` de `isCut()` → `withoutACutOfOursNothingIsCut_whateverIsRead`;
+- quitar `forget()` del corte fallido → `aFailedCutLeavesNoRecord`;
+- volver a `saved.get(ADB_ENABLED)?.takeIf { it != 0 } ?: 1` en `restore()` → `cuttingWithOnlyWirelessSavesBothAndRestoresThemAsTheyWere`;
+- quitar `if (readAsOn()) return true` → `restoringTwiceWithOnlyWirelessNeverTurnsItOff`;
+- dejar `CutAccess.isCut` con `getInt(ADB_ENABLED, 1) == 0` → `CutAccessTest`.
+
+`control/CutAccessTest.kt` (Robolectric, sobre el `Settings.Global` y las preferencias reales de la app):
+
+```kotlin
+package tech.hybriq.adbuddy.control
+
+import android.provider.Settings
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+
+@RunWith(RobolectricTestRunner::class)
+class CutAccessTest {
+    private val app get() = RuntimeEnvironment.getApplication()
+
+    @Test fun onlyWirelessOnAndNoRecordIsNotCut_untilACutOfOurs() {
+        Settings.Global.putInt(app.contentResolver, AccessSwitch.ADB_ENABLED, 0)
+        Settings.Global.putInt(app.contentResolver, AccessSwitch.ADB_WIFI_ENABLED, 1)
+        assertFalse(CutAccess.isCut(app))
+        assertFalse("the first emission too", runBlocking { CutAccess.observe(app).first() })
+        assertTrue(CutAccess.cut(app))
+        assertTrue(CutAccess.isCut(app))
+        assertTrue(runBlocking { CutAccess.observe(app).first() })
+    }
+}
 ```
 
 Cambios en tests existentes (la regla vieja ya no vale; ninguno de §8 de la spec pierde aserciones):
@@ -326,7 +389,7 @@ Cambios en tests existentes (la regla vieja ya no vale; ninguno de §8 de la spe
 - [ ] **Step 2: comprobar que fallan**
 
 Run: `gradle :app:testDebugUnitTest --tests '*AccessSwitchTest'`
-Expected: FAIL en `onlyWirelessDebuggingOnIsNotCut`, `withoutACutOfOursNothingIsCut_whateverIsRead`, `unreadableWithoutARecordIsNotCut`, `cuttingWithOnlyWirelessSavesBothAndRestoresThemAsTheyWere`, `aFailedCutLeavesNoRecord`, `aReadBackThatCannotBeReadIsNotDone`, `unreadableAfterOurCutStaysCut_andKeepsTheRecord`, `aRecordOfBothOffRestoresAdbOnly` (al menos uno por cada regla nueva). Copiar la salida al informe.
+Expected: compilación rota por `needsManualRestore` (aún no existe). Para ver los fallos por el motivo esperado, comentar temporalmente `aRecordOfBothOffIsNeverGuessed` y ejecutar: deben fallar `onlyWirelessDebuggingOnIsNotCut`, `withoutACutOfOursNothingIsCut_whateverIsRead`, `unreadableWithoutARecordIsNotCut`, `cuttingWithOnlyWirelessSavesBothAndRestoresThemAsTheyWere`, `aFailedCutLeavesNoRecord`, `aReadBackThatCannotBeReadIsNotDone` (con `SecurityException` sin capturar), `restoringTwiceWithOnlyWirelessNeverTurnsItOff` y `turningOnlyWirelessBackOnByHandForgetsTheRecord`; `unreadableAfterOurCutStaysCut_andKeepsTheRecord` ya pasa con el código viejo (blinda que no se rompa). `CutAccessTest` falla en su primera aserción. Copiar la salida al informe y descomentar.
 
 - [ ] **Step 3: implementación.** `control/AccessSwitch.kt` entero:
 
@@ -383,18 +446,27 @@ class AccessSwitch(private val settings: Settings, private val saved: Saved) {
     }
 
     /**
-     * Puts back what cut() saved, as it was (adb_enabled=0 included). Without a record, or with one of both off (it
-     * would give no access), only adb debugging comes back. A tcpip port that was open comes back too until the host
-     * runs `adb usb` (spec §4.6).
+     * Puts back what cut() saved, as it was (adb_enabled=0 included). Without a record: access already on is left as
+     * it is (wireless debugging is never turned off), otherwise only adb debugging comes back and wireless debugging is
+     * not touched (its value is unknown or already off). A record of both off is never guessed: nothing is written, the
+     * record stays and needsManualRestore() says so (the screen sends the person to Developer options). A tcpip port
+     * that was open comes back too until the host runs `adb usb` (spec §4.6).
      */
     fun restore(): Boolean {
         val savedAdb = saved.get(ADB_ENABLED)
         val savedWifi = saved.get(ADB_WIFI_ENABLED)
-        val (adb, wifi) = if (savedAdb == null || savedWifi == null || (savedAdb == 0 && savedWifi == 0)) 1 to 0 else savedAdb to savedWifi
-        if (!write(ADB_ENABLED to adb, ADB_WIFI_ENABLED to wifi)) return false
+        if (savedAdb == null || savedWifi == null) {
+            if (readAsOn()) return true
+            return write(ADB_ENABLED to 1)
+        }
+        if (savedAdb == 0 && savedWifi == 0) return false
+        if (!write(ADB_ENABLED to savedAdb, ADB_WIFI_ENABLED to savedWifi)) return false
         forget()
         return true
     }
+
+    /** Our record says both were off before the cut (or they were read so): restore() will not guess what to turn on. */
+    fun needsManualRestore(): Boolean = saved.get(ADB_ENABLED) == 0 && saved.get(ADB_WIFI_ENABLED) == 0
 
     /**
      * Forgets the record once a readable setting says access is on again without restore() (the person turned it on
@@ -433,6 +505,9 @@ En `control/CutAccess.kt`:
 ```kotlin
     /** Our cut, not contradicted by a readable setting (AccessSwitch.isCut). */
     fun isCut(context: Context): Boolean = switch(context).isCut()
+
+    /** restore() will not guess (a record of both off): the person turns debugging on in Developer options. */
+    fun needsManualRestore(context: Context): Boolean = switch(context).needsManualRestore()
 ```
 
 - En `observe`, `current()` pasa a `AccessDiag.log(context, "observe"); switch.forgetIfRestored(); return switch.isCut()`. Quitar el import de `ContentResolver` si queda sin uso.
@@ -450,7 +525,7 @@ shows what the app reads and how.
 
 - [ ] **Step 4: comprobar que pasa**
 
-Run: `gradle :app:testDebugUnitTest --tests '*AccessSwitchTest' --tests '*AccessDiagTest' --tests '*ConversationViewTest' --tests '*LinkStatusTest'` y luego `gradle :app:assembleDebug :app:assembleDebugAndroidTest` (`CutAccessOnEmulatorTest` debe compilar; si usa `isCut(resolver)`, cambiarlo a `isCut(context)`).
+Run: `gradle :app:testDebugUnitTest --tests '*AccessSwitchTest' --tests '*CutAccessTest' --tests '*AccessDiagTest' --tests '*ConversationViewTest' --tests '*LinkStatusTest'` y luego `gradle :app:assembleDebug :app:assembleDebugAndroidTest` (compila `CutAccessOnEmulatorTest` ya adaptado). Aplicar y deshacer las cinco mutaciones de arriba.
 Expected: PASS y BUILD SUCCESSFUL.
 
 - [ ] **Step 5: commit**
@@ -548,7 +623,7 @@ Expected: FAIL en `aLiveChannelBeatsCut_itProvesAdbIsUp`, `theStatusNotification
 
 - [ ] **Step 4: comprobar que pasa y regrabar `chat_cut_*`**
 
-Run: `gradle :app:testDebugUnitTest --tests '*LinkStatusTest' --tests '*ConversationViewTest' --tests '*AskNoticeTest'`; luego `gradle :app:testDebugUnitTest --tests '*ChatScreensTest' -Padbuddy.screens=record` y sin la propiedad.
+Run: `gradle :app:testDebugUnitTest --tests '*LinkStatusTest' --tests '*ConversationViewTest' --tests '*AskNoticeTest'` (mutación: poner `cut -> CUT` primero en `LinkStatus.of` → falla `aLiveChannelBeatsCut_itProvesAdbIsUp`); luego `gradle :app:testDebugUnitTest --tests '*ChatScreensTest' -Padbuddy.screens=record` y sin la propiedad.
 Expected: PASS. Mirar `chat_cut_light.png`: la cabecera ya no dice "Ready" con el banner de corte.
 
 - [ ] **Step 5: commit**
@@ -636,7 +711,7 @@ En `Overlay.kt`: `accent()` devuelve `OverlayColors.of(dark)` (renombrar a `colo
 - Test: `ui/theme/PaletteContrastTest.kt` (entero), capturas de todas las pantallas
 
 **Interfaces:**
-- Produces: `Palette.light/dark` con los 36 roles de M3 de la spec §4.1 y `Palette.extraLight/extraDark` (success*, warning*); `AdbuddyColors` (data class con `success, onSuccess, successContainer, onSuccessContainer, warning, onWarning, warningContainer, onWarningContainer: Color`); `AdbuddyTheme.colors: AdbuddyColors` (`@Composable get`); `AdbuddyType.code: TextStyle`, `AdbuddyType.codeSmall: TextStyle` (`@Composable get`); `AdbuddyTheme(dark, dynamic = false, content)`; `BubbleShapes.mine/agent`.
+- Produces: `Palette.light/dark` con los 48 roles de M3 1.4 (los 36 de la spec §4.1 y los 12 `*Fixed`) y `Palette.extraLight/extraDark` (success*, warning*); `AdbuddyColors` (data class con `success, onSuccess, successContainer, onSuccessContainer, warning, onWarning, warningContainer, onWarningContainer: Color`); `AdbuddyTheme.colors: AdbuddyColors` (`@Composable get`); `AdbuddyType.code: TextStyle`, `AdbuddyType.codeSmall: TextStyle` (`@Composable get`); `AdbuddyTheme(dark, dynamic = false, content)`; `BubbleShapes.mine/agent`.
 
 - [ ] **Step 1: test que falla.** `PaletteContrastTest.kt` entero:
 
@@ -657,6 +732,9 @@ class PaletteContrastTest {
         "inverseSurface", "inverseOnSurface", "error", "onError", "errorContainer", "onErrorContainer",
         "outline", "outlineVariant", "scrim", "surfaceBright", "surfaceDim",
         "surfaceContainer", "surfaceContainerHigh", "surfaceContainerHighest", "surfaceContainerLow", "surfaceContainerLowest",
+        "primaryFixed", "primaryFixedDim", "onPrimaryFixed", "onPrimaryFixedVariant",
+        "secondaryFixed", "secondaryFixedDim", "onSecondaryFixed", "onSecondaryFixedVariant",
+        "tertiaryFixed", "tertiaryFixedDim", "onTertiaryFixed", "onTertiaryFixedVariant",
     )
 
     private val surfaces = listOf("surface", "background", "surfaceBright", "surfaceDim", "surfaceContainerLowest", "surfaceContainerLow",
@@ -670,7 +748,10 @@ class PaletteContrastTest {
         "onSurfaceVariant" to "surfaceVariant", "inverseOnSurface" to "inverseSurface", "inversePrimary" to "inverseSurface",
         "onError" to "error", "onErrorContainer" to "errorContainer",
         "primary" to "surface", "error" to "surface", "tertiary" to "surface", "primary" to "surfaceContainerHigh",
-    ) + surfaces.flatMap { listOf("onSurface" to it, "onSurfaceVariant" to it) }
+    ) + surfaces.flatMap { listOf("onSurface" to it, "onSurfaceVariant" to it) } +
+        listOf("Primary", "Secondary", "Tertiary").flatMap { r ->
+            listOf("${r.lowercase()}Fixed", "${r.lowercase()}FixedDim").flatMap { bg -> listOf("on${r}Fixed" to bg, "on${r}FixedVariant" to bg) }
+        }
 
     private val extraPairs = listOf(
         "onSuccess" to "success", "onSuccessContainer" to "successContainer",
@@ -713,7 +794,14 @@ class PaletteContrastTest {
 ```kotlin
     private fun c(v: Long) = v.toInt()
 
-    val light: Map<String, Int> = mapOf(
+    /** The *Fixed roles of Material 3 (1.4): the same in light and dark (all pairs checked: >= 5.4:1). */
+    private val fixed: Map<String, Int> = mapOf(
+        "primaryFixed" to c(0xFFB8F0E4), "primaryFixedDim" to c(0xFF7FD8C6), "onPrimaryFixed" to c(0xFF00201B), "onPrimaryFixedVariant" to c(0xFF004F45),
+        "secondaryFixed" to c(0xFFCDE8E1), "secondaryFixedDim" to c(0xFFB1CCC6), "onSecondaryFixed" to c(0xFF06201C), "onSecondaryFixedVariant" to c(0xFF334B47),
+        "tertiaryFixed" to c(0xFFD6E3FF), "tertiaryFixedDim" to c(0xFFA8C8FF), "onTertiaryFixed" to c(0xFF001B3E), "onTertiaryFixedVariant" to c(0xFF26477A),
+    )
+
+    val light: Map<String, Int> = fixed + mapOf(
         "primary" to c(0xFF00695C), "onPrimary" to c(0xFFFFFFFF), "primaryContainer" to c(0xFFB8F0E4), "onPrimaryContainer" to c(0xFF00201B),
         "inversePrimary" to c(0xFF7FD8C6),
         "secondary" to c(0xFF4A635E), "onSecondary" to c(0xFFFFFFFF), "secondaryContainer" to c(0xFFCDE8E1), "onSecondaryContainer" to c(0xFF06201C),
@@ -728,7 +816,7 @@ class PaletteContrastTest {
         "surfaceContainerHigh" to c(0xFFE4E9E7), "surfaceContainerHighest" to c(0xFFDEE4E1),
     )
 
-    val dark: Map<String, Int> = mapOf(
+    val dark: Map<String, Int> = fixed + mapOf(
         "primary" to c(0xFF7FD8C6), "onPrimary" to c(0xFF00382F), "primaryContainer" to c(0xFF004F45), "onPrimaryContainer" to c(0xFFB8F0E4),
         "inversePrimary" to c(0xFF00695C),
         "secondary" to c(0xFFB1CCC6), "onSecondary" to c(0xFF1C3531), "secondaryContainer" to c(0xFF334B47), "onSecondaryContainer" to c(0xFFCDE8E1),
@@ -855,6 +943,9 @@ private fun scheme(p: Map<String, Int>, dark: Boolean): ColorScheme {
         surfaceBright = p.c("surfaceBright"), surfaceDim = p.c("surfaceDim"),
         surfaceContainer = p.c("surfaceContainer"), surfaceContainerHigh = p.c("surfaceContainerHigh"), surfaceContainerHighest = p.c("surfaceContainerHighest"),
         surfaceContainerLow = p.c("surfaceContainerLow"), surfaceContainerLowest = p.c("surfaceContainerLowest"),
+        primaryFixed = p.c("primaryFixed"), primaryFixedDim = p.c("primaryFixedDim"), onPrimaryFixed = p.c("onPrimaryFixed"), onPrimaryFixedVariant = p.c("onPrimaryFixedVariant"),
+        secondaryFixed = p.c("secondaryFixed"), secondaryFixedDim = p.c("secondaryFixedDim"), onSecondaryFixed = p.c("onSecondaryFixed"), onSecondaryFixedVariant = p.c("onSecondaryFixedVariant"),
+        tertiaryFixed = p.c("tertiaryFixed"), tertiaryFixedDim = p.c("tertiaryFixedDim"), onTertiaryFixed = p.c("onTertiaryFixed"), onTertiaryFixedVariant = p.c("onTertiaryFixedVariant"),
     )
 }
 
@@ -900,7 +991,7 @@ Evidencia: mirar `activity_entries_light.png` y `settings_confirmed_dark.png` (y
 ### Task 6: Icono propio adaptativo y de notificación — revisor adbuddy-reviewer
 
 **Files:**
-- Create: `android/app/src/main/res/drawable/ic_launcher_foreground.xml`, `drawable/ic_launcher_monochrome.xml`, `drawable/ic_stat_adbuddy.xml`, `drawable/ic_stat_shield.xml`, `mipmap-anydpi/ic_launcher.xml`, `mipmap-anydpi/ic_launcher_round.xml`, `values/colors.xml`
+- Create: `android/app/src/main/res/drawable/ic_launcher_foreground.xml`, `drawable/ic_launcher_monochrome.xml`, `drawable/ic_stat_adbuddy.xml`, `drawable/ic_stat_shield.xml`, `drawable/ic_shield.xml`, `drawable/ic_shield_off.xml` (los dos del botón de la cabecera, tarea 8), `mipmap-anydpi/ic_launcher.xml`, `mipmap-anydpi/ic_launcher_round.xml`, `values/colors.xml`
 - Modify: `AndroidManifest.xml:30` (y añadir `android:roundIcon`), `notify/ConversationNotifier.kt:52-130`, `confirm/ConfirmNotifier.kt:109`, cualquier otro `setSmallIcon(android.R.drawable.…)` (`grep -rn "android.R.drawable" app/src/main/kotlin`)
 - Test: `notify/AppIconsTest.kt`
 
@@ -933,7 +1024,7 @@ class AppIconsTest {
 
     @Test fun theNotificationIconsExist() {
         val res = RuntimeEnvironment.getApplication().resources
-        for (id in listOf(R.drawable.ic_stat_adbuddy, R.drawable.ic_stat_shield)) assertTrue(res.getDrawable(id, null) != null)
+        for (id in listOf(R.drawable.ic_stat_adbuddy, R.drawable.ic_stat_shield, R.drawable.ic_shield, R.drawable.ic_shield_off)) assertTrue(res.getDrawable(id, null) != null)
     }
 }
 ```
@@ -1008,6 +1099,25 @@ class AppIconsTest {
 </vector>
 ```
 
+`drawable/ic_shield.xml` (escudo relleno: "Cortar acceso del PC"; Compose lo tiñe) y `drawable/ic_shield_off.xml` (escudo en contorno tachado: "Volver a dar acceso"):
+
+```xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M12,2 L4,5 V11 C4,16 7.4,20.7 12,22 C16.6,20.7 20,16 20,11 V5 Z" />
+</vector>
+```
+
+```xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineJoin="round"
+        android:pathData="M12,3 L5,5.7 V11 C5,15.4 8,19.6 12,20.9 C16,19.6 19,15.4 19,11 V5.7 Z" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="2" android:strokeLineCap="round"
+        android:pathData="M3,3 L21,21" />
+</vector>
+```
+
 Manifiesto: `android:icon="@mipmap/ic_launcher"` y `android:roundIcon="@mipmap/ic_launcher_round"`. Notifiers: todo `android.R.drawable.stat_notify_sync_noanim` → `R.drawable.ic_stat_adbuddy`; `android.R.drawable.ic_dialog_alert` → `R.drawable.ic_stat_shield`; la burbuja (`IconCompat.createWithResource(ctx, android.R.drawable.sym_action_chat)`) → `IconCompat.createWithResource(ctx, R.mipmap.ic_launcher)`. Y en cada `NotificationCompat.Builder` de la conversación y de las 🔴, `.setColor(ContextCompat.getColor(ctx, R.color.ic_launcher_background))` (tinte del icono en la sombra).
 
 - [ ] **Step 4:** `gradle :app:testDebugUnitTest --tests '*AppIconsTest' --tests '*ConfirmNotificationTest' --tests '*BubbleFlowTest'` → PASS; `gradle :app:assembleDebug :app:lintDebug` → BUILD SUCCESSFUL. Evidencia visual: abrir los cuatro XML con la vista previa no es posible sin Android Studio; el implementador renderiza el primer plano con un test Robolectric temporal **no commiteado** o, más simple, confía en el revisor: dejar en el informe que el icono se valida en el emulador (`adb -s <emulador> shell cmd package resolve-activity` no hace falta; basta una captura del lanzador del emulador si hay cupo) y como V3 en el Pixel.
@@ -1026,7 +1136,7 @@ La tarjeta de las preguntas 🔴 cerradas sustituye a `PendingQuestionsBanner`: 
 
 **Interfaces:**
 - Consumes: `AdbuddyTheme.colors` (tarea 5), `LinkStatus` (tarea 3).
-- Produces: `enum class HomeNotice(val hasAction: Boolean) { QUESTIONS, CUT, UPDATE_APP, UPDATE_HOST, NOT_SET_UP, NOTIFICATIONS, PAUSED, WAITING }` con `HomeNotice.of(banner: LinkStatus?, pendingQuestions: Int, notificationsBlocked: Boolean): HomeNotice?`; `@Composable fun ActionCard(notice: HomeNotice, pendingQuestions: Int, onAction: () -> Unit, modifier: Modifier = Modifier)`; `@Composable fun StatusPill(status: LinkStatus, host: String, remote: Boolean, modifier: Modifier = Modifier)`.
+- Produces: `enum class HomeNotice(val hasAction: Boolean) { QUESTIONS, CUT, UPDATE_APP, UPDATE_HOST, NOT_SET_UP, NOTIFICATIONS, PAUSED, WAITING }` (WAITING con botón "Cómo conectar") con `HomeNotice.of(banner: LinkStatus?, pendingQuestions: Int, notificationsBlocked: Boolean): HomeNotice?`; `@Composable fun ActionCard(notice: HomeNotice, pendingQuestions: Int, onAction: () -> Unit, modifier: Modifier = Modifier)`; `@Composable fun StatusPill(status: LinkStatus, host: String, remote: Boolean, modifier: Modifier = Modifier)`.
 
 - [ ] **Step 1: test que falla** (`ui/HomeNoticeTest.kt`):
 
@@ -1064,7 +1174,7 @@ class HomeNoticeTest {
 
     @Test fun onlyTheCardsWithSomethingToTapHaveAButton() {
         assertEquals(
-            setOf(HomeNotice.QUESTIONS, HomeNotice.CUT, HomeNotice.NOTIFICATIONS, HomeNotice.PAUSED),
+            setOf(HomeNotice.QUESTIONS, HomeNotice.CUT, HomeNotice.NOTIFICATIONS, HomeNotice.PAUSED, HomeNotice.WAITING),
             HomeNotice.entries.filter { it.hasAction }.toSet(),
         )
     }
@@ -1084,7 +1194,7 @@ package tech.hybriq.adbuddy.ui
  * banner: the LinkStatus that deserves one (ChatScreen keeps the last one through CONNECTING), or null.
  */
 enum class HomeNotice(val hasAction: Boolean) {
-    QUESTIONS(true), CUT(true), UPDATE_APP(false), UPDATE_HOST(false), NOT_SET_UP(false), NOTIFICATIONS(true), PAUSED(true), WAITING(false);
+    QUESTIONS(true), CUT(true), UPDATE_APP(false), UPDATE_HOST(false), NOT_SET_UP(false), NOTIFICATIONS(true), PAUSED(true), WAITING(true);
 
     companion object {
         fun of(banner: LinkStatus?, pendingQuestions: Int, notificationsBlocked: Boolean): HomeNotice? = when {
@@ -1114,9 +1224,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -1126,6 +1234,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -1150,11 +1261,12 @@ fun ActionCard(notice: HomeNotice, pendingQuestions: Int, onAction: () -> Unit, 
         HomeNotice.NOTIFICATIONS, HomeNotice.PAUSED -> extra.warningContainer to extra.onWarningContainer
         HomeNotice.NOT_SET_UP, HomeNotice.WAITING -> scheme.surfaceContainerHigh to scheme.onSurface
     }
-    val icon = when (notice) {
-        HomeNotice.CUT -> Icons.Default.Lock
-        HomeNotice.NOTIFICATIONS -> Icons.Default.Notifications
-        HomeNotice.NOT_SET_UP, HomeNotice.WAITING -> Icons.Default.Info
-        else -> Icons.Default.Warning
+    // Own shield vectors (task 6) for the security notices; only Info/Notifications come from material-icons-core.
+    val icon: Painter = when (notice) {
+        HomeNotice.CUT -> painterResource(R.drawable.ic_shield_off)
+        HomeNotice.NOTIFICATIONS -> rememberVectorPainter(Icons.Default.Notifications)
+        HomeNotice.NOT_SET_UP, HomeNotice.WAITING -> rememberVectorPainter(Icons.Default.Info)
+        else -> painterResource(R.drawable.ic_shield)
     }
     val title = when (notice) {
         HomeNotice.QUESTIONS -> pluralStringResource(R.plurals.confirm_waiting, pendingQuestions, pendingQuestions)
@@ -1181,10 +1293,10 @@ fun ActionCard(notice: HomeNotice, pendingQuestions: Int, onAction: () -> Unit, 
         HomeNotice.CUT -> R.string.action_restore
         HomeNotice.NOTIFICATIONS -> R.string.notifications_open_settings
         HomeNotice.PAUSED -> R.string.action_resume
+        HomeNotice.WAITING -> R.string.card_waiting_action
         else -> null
     }
     Surface(color = container, contentColor = content, shape = MaterialTheme.shapes.medium, modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        ObscuredTouchGuard()
         Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
             Icon(icon, contentDescription = null, tint = if (neutral) scheme.primary else LocalContentColor.current)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1194,7 +1306,8 @@ fun ActionCard(notice: HomeNotice, pendingQuestions: Int, onAction: () -> Unit, 
                     if (body != null) Text(body, style = MaterialTheme.typography.bodyMedium)
                 }
                 if (action != null) {
-                    FilledTonalButton(onClick = onAction, modifier = Modifier.padding(top = 4.dp)) { Text(stringResource(action)) }
+                    // Only the button refuses covered touches (spec §8.5): no window-wide guard on a screen.
+                    FilledTonalButton(onClick = onAction, modifier = Modifier.padding(top = 4.dp).refuseObscuredTouches()) { Text(stringResource(action)) }
                 }
             }
         }
@@ -1256,14 +1369,14 @@ Cadenas (en / es), en los dos ficheros:
 - `status_short_waiting`: "Looking for your PC…" / "Buscando tu PC…"
 - `status_not_set_up`: "Not paired with your PC yet. On the PC: adbuddy setup" / "Falta emparejar con tu PC. En el PC: adbuddy setup"
 - `status_pill_remote`: "%1$s · Remote" / "%1$s · Remoto"
-- `card_cut_title` "Access cut" / "Acceso cortado"; `card_cut_body` "The PC cannot touch your phone." / "El PC no puede tocar tu móvil."; `card_update_app_title` "Update the app" / "Actualiza la app"; `card_update_host_title` "Update ADBuddy on the PC" / "Actualiza ADBuddy en el PC"; `card_not_set_up_title` "Not paired yet" / "Falta emparejar"; `card_notifications_title` "Notifications are off" / "Las notificaciones están apagadas"; `card_paused_title` "Paused" / "En pausa"; `card_waiting_title` "Looking for your PC…" / "Buscando tu PC…".
+- Títulos de tarjeta que **no repiten** la pastilla (si coinciden, `onNodeWithText` encuentra dos nodos y además no informa): `card_cut_title` "The PC cannot touch your phone" / "El PC no puede tocar tu móvil"; `card_cut_body` "You cut its access. Give it back when you want the agent to work again." / "Le cortaste el acceso. Devuélveselo cuando quieras que el agente vuelva a trabajar."; `card_update_app_title` "Update the app" / "Actualiza la app"; `card_update_host_title` "Update ADBuddy on the PC" / "Actualiza ADBuddy en el PC"; `card_not_set_up_title` "Not paired yet" / "Falta emparejar"; `card_notifications_title` "Notifications are off" / "Las notificaciones están apagadas"; `card_paused_title` "The agent is paused" / "El agente está en pausa"; `card_waiting_title` "Your PC is not answering" / "Tu PC no responde"; `card_waiting_action` "How to connect" / "Cómo conectar"; `setup_guide_url` (`translatable="false"`, solo en `values`) "https://hybriqtech.github.io/adbuddy/setup/".
 - `action_restore`: "Give access back" / "Volver a dar acceso"; `action_cut`: "Cut PC access" / "Cortar acceso del PC" (los usa también el botón de la notificación: mismo texto, a propósito).
 
 `UpdateAppTextTest` no se toca (`status_update_app` no cambia). Si algún test existente compara el texto viejo de `status_waiting` o `status_not_set_up` con un literal, se actualiza a la clave (no al literal).
 
-`screens/ActionCardScreensTest.kt`: parametrizado por `ScreenMode` como `PendingQuestionsBannerScreensTest` (copiar su cabecera: `@RunWith(ParameterizedRobolectricTestRunner::class)`, `@GraphicsMode(GraphicsMode.Mode.NATIVE)`, `@Config(qualifiers = PHONE)`, `RuleChain.outerRule(ScreenModeRule(mode)).around(ComponentActivityRule()).around(compose)`, `companion object` con `screenModes()`). Un test por `HomeNotice` que pinta `AdbuddyTheme { Column { StatusPill(LinkStatus.CONNECTED, "my-pc", remote = false); ActionCard(n, 2, {}) } }`, comprueba que el título se ve y que solo las de `hasAction` tienen botón (`compose.onAllNodes(hasClickAction()).assertCountEquals(if (n.hasAction) 1 else 0)`), y graba `shot("action_card_${n.name.lowercase()}", mode)`. Otro test: `StatusPill(LinkStatus.CONNECTED, "my-pc", remote = true)` muestra `app.getString(R.string.status_pill_remote, app.getString(R.string.status_connected, "my-pc"))`.
+`screens/ActionCardScreensTest.kt`: parametrizado por `ScreenMode` como `PendingQuestionsBannerScreensTest` (copiar su cabecera: `@RunWith(ParameterizedRobolectricTestRunner::class)`, `@GraphicsMode(GraphicsMode.Mode.NATIVE)`, `@Config(qualifiers = PHONE)`, `RuleChain.outerRule(ScreenModeRule(mode)).around(ComponentActivityRule()).around(compose)`, `companion object` con `screenModes()`). Un test por `HomeNotice` que pinta `AdbuddyTheme { Column { StatusPill(LinkStatus.CONNECTED, "my-pc", remote = false); ActionCard(n, 2, {}) } }` (pastilla CONNECTED a propósito: su texto no coincide con ningún título de tarjeta), comprueba que el título se ve y que solo las de `hasAction` tienen botón (`compose.onAllNodes(hasClickAction()).assertCountEquals(if (n.hasAction) 1 else 0)`), y graba `shot("action_card_${n.name.lowercase()}", mode)`. Otro test: `StatusPill(LinkStatus.CONNECTED, "my-pc", remote = true)` muestra `app.getString(R.string.status_pill_remote, app.getString(R.string.status_connected, "my-pc"))`.
 
-- [ ] **Step 4:** `gradle :app:testDebugUnitTest --tests '*HomeNoticeTest' --tests '*StringsParityTest' --tests '*NoHardcodedTextTest' --tests '*TouchGuardSourceTest'`; luego `--tests '*ActionCardScreensTest' -Padbuddy.screens=record` y sin la propiedad. Mirar `action_card_cut_dark.png` y `action_card_update_app_font_200_es.png` (texto entero).
+- [ ] **Step 4:** `gradle :app:testDebugUnitTest --tests '*HomeNoticeTest' --tests '*StringsParityTest' --tests '*NoHardcodedTextTest' --tests '*TouchGuardSourceTest' --tests '*TouchGuardBehaviorTest'` (si `TouchGuardSourceTest` exige la guarda en `ActionCard`, ajustar su lista para aceptar `refuseObscuredTouches()` en el botón, sin quitar ninguna otra exigencia: decisión de la revisión del plan, spec §8.5); luego `--tests '*ActionCardScreensTest' -Padbuddy.screens=record` y sin la propiedad. Mirar `action_card_cut_dark.png` y `action_card_update_app_font_200_es.png` (texto entero).
 
 - [ ] **Step 5: commit** `feat(android): tarjeta de aviso única y pastilla de estado` (con el trailer).
 
@@ -1273,15 +1386,15 @@ Cadenas (en / es), en los dos ficheros:
 
 **Files:**
 - Create: `ui/RestoreAccessDialog.kt`
-- Modify: `ui/ChatParts.kt` (`ChatHeader` entero), `ui/ChatScreen.kt` (`ChatActions`, cuerpo), `ui/ChatRoot.kt` (acciones, sin `RemoteCard`), `res/values*/strings.xml`
+- Modify: `ui/ChatParts.kt` (`ChatHeader` entero y su vista previa `ChatHeaderPreview`, línea ~450, que pasa `onCut = {}, onRestore = {}` en vez de `onToggleCut = {}`), `ui/ChatScreen.kt` (`ChatActions`, cuerpo), `ui/ChatRoot.kt` (acciones, sin `RemoteCard`), `res/values*/strings.xml`, `confirm/ConfirmReopenTest.kt:11,46` (protegido §8.4: cambia solo el composable `PendingQuestionsBanner` → `ActionCard(HomeNotice.QUESTIONS, …)`, ninguna aserción), `ui/ChatScrollTest.kt:54` (quita `remoteCard = {}`)
 - Delete: `ui/LinkBanner.kt`, `ui/PendingQuestionsBanner.kt`, `ui/NotificationsBanner.kt`, `screens/PendingQuestionsBannerScreensTest.kt`, `screens/NotificationsBannerScreensTest.kt` y sus PNG (sus aserciones pasan a `ChatScreensTest` y `QuestionsCardTest`)
 - Test: `screens/ChatScreensTest.kt`, `ui/ChatPendingQuestionsTest.kt`, `ui/PendingQuestionsBannerTest.kt` → `ui/QuestionsCardTest.kt`
 
 **Interfaces:**
-- Consumes: `HomeNotice`, `ActionCard`, `StatusPill` (tarea 7); `CutAccess.cut/restore` (tarea 2).
+- Consumes: `HomeNotice`, `ActionCard`, `StatusPill` (tarea 7); `CutAccess.cut/restore/needsManualRestore` (tarea 2); `R.drawable.ic_shield`, `R.drawable.ic_shield_off` (tarea 6).
 - Produces: `ChatActions` sin `toggleCut`, con `cut: () -> Unit` y `restore: () -> Unit` en su lugar (16 lambdas) y `fun copyWith(cut: () -> Unit = this.cut, restore: () -> Unit = this.restore): ChatActions`; `ChatScreen(...)` **sin** el parámetro `remoteCard`; `ChatHeader(state, cut, terminalShown, onToggleTerminal, onPause, onCut, onRestore, onActivity, onSettings, onNewConversation, configured)`; `RestoreAccessDialog(onRestore, onDismiss)`.
 
-**Por qué dos acciones y no un conmutador (crítico):** el escudo pinta su estado con `LinkStatus` (un canal vivo gana a `cut`) y `toggleCut` decidía leyendo `CutAccess.isCut` al tocar. Con un registro de corte y el canal aún vivo (el segundo que tarda en caer el túnel, o lecturas ilegibles), el escudo diría "Cortar" y el toque **restauraría**. Pulsar el escudo sin cortar **siempre** corta (`AccessSwitch.cut()` con registro conserva los primeros valores y vuelve a escribir 0).
+**Por qué dos acciones y no un conmutador (crítico):** el escudo pinta su estado con `LinkStatus` (un canal vivo gana a `cut`) y `toggleCut` decidía leyendo `CutAccess.isCut` al tocar. Con un registro de corte y el canal aún vivo (el segundo que tarda en caer el túnel, o lecturas ilegibles), el escudo diría "Cortar" y el toque **restauraría**. Pulsar el escudo sin cortar **siempre** corta (`AccessSwitch.cut()` con registro conserva los primeros valores y vuelve a escribir 0). Además el menú ⋮ lleva **siempre** "Cortar acceso del PC", que solo corta (idempotente), aunque la cabecera muestre "Volver a dar acceso". Mutación: volver a un solo conmutador (`onClick = onToggleCut` con la decisión por `CutAccess.isCut`) → falla `theShieldAlwaysCutsWhenItSaysCut_evenWithACutRecordAndALiveChannel`.
 
 - [ ] **Step 1: tests que fallan** (en `ChatScreensTest.kt`; `show()` y `bannerLeavesWhenConnecting()` dejan de pasar `remoteCard = {}`):
 
@@ -1319,6 +1432,39 @@ Cadenas (en / es), en los dos ficheros:
         compose.onNodeWithText(text(R.string.restore_confirm_title)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.restore_confirm_confirm)).performClick()
         assertEquals(1, restores)
+    }
+
+    @Test fun theMenuAlwaysOffersCut_evenWhileCut() {
+        var cuts = 0
+        compose.setContent {
+            AdbuddyTheme {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.WAITING), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = true, terminal = null, snackbar = SnackbarHostState(),
+                    actions = ChatActions.None.copyWith(cut = { cuts++ }),
+                )
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_menu)).performClick()
+        compose.onNodeWithText(text(R.string.action_cut)).performClick()
+        assertEquals(1, cuts)
+    }
+
+    @Test fun theRestoreDialogClosesWhenTheCutEnds() {
+        var cut by mutableStateOf(true)
+        compose.setContent {
+            AdbuddyTheme {
+                ChatScreen(
+                    BridgeState(connection = BridgeState.Connection.WAITING), outgoing = emptyList(), drafts = emptyList(),
+                    downloads = emptyMap(), cut = cut, terminal = null, snackbar = SnackbarHostState(), actions = ChatActions.None,
+                )
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_restore)).performClick()
+        compose.onNodeWithText(text(R.string.restore_confirm_title)).assertIsDisplayed()
+        cut = false // access came back some other way (Settings, the notification)
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.restore_confirm_title)).assertDoesNotExist()
     }
 
     @Test fun oneCardOnly_questionsBeatCutAndBlockedNotifications() {
@@ -1418,9 +1564,10 @@ fun ChatHeader(
         actions = {
             // Always here (spec §5): cutting is the real guarantee and never hides in a menu. Two actions, never a toggle.
             val isCut = status == LinkStatus.CUT
+            // No covered-touch filter here: a cut forced by a covered tap is harmless; restoring goes through a dialog with its guard.
             IconButton(onClick = if (isCut) onRestore else onCut) {
                 Icon(
-                    if (isCut) Icons.Default.Lock else Icons.Default.Warning,
+                    painterResource(if (isCut) R.drawable.ic_shield_off else R.drawable.ic_shield),
                     contentDescription = stringResource(if (isCut) R.string.action_restore else R.string.action_cut),
                     tint = if (isCut) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                 )
@@ -1440,6 +1587,8 @@ fun ChatHeader(
                     PauseButton.of(state)?.let { button ->
                         DropdownMenuItem(text = { Text(stringResource(button.text)) }, onClick = { menu = false; onPause(button == PauseButton.PAUSE) })
                     }
+                    // Always, and it only cuts (cut() is idempotent): the safe way out never changes meaning.
+                    DropdownMenuItem(text = { Text(stringResource(R.string.action_cut)) }, onClick = { menu = false; onCut() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_activity)) }, onClick = { menu = false; onActivity() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_settings)) }, onClick = { menu = false; onSettings() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_new_conversation)) }, onClick = { menu = false; onNewConversation() })
@@ -1450,7 +1599,7 @@ fun ChatHeader(
 }
 ```
 
-(Iconos solo de `material-icons-core`, sin añadir `extended` — restricción global. Imports nuevos: `Arrangement`, `Icons.Default.Lock`, `Icons.Default.Warning`.)
+(El escudo usa los vectores propios de la tarea 6, nada de `Icons.Default.Warning`/`Lock`; no se añade `material-icons-extended`. Imports nuevos: `Arrangement`, `androidx.compose.ui.res.painterResource`.)
 
 `ChatScreen.kt`:
 - `ChatActions`: `val toggleCut` → `val cut: () -> Unit, val restore: () -> Unit` en esa posición; `None` con 16 `{}`; añadir `fun copyWith(cut: () -> Unit = this.cut, restore: () -> Unit = this.restore) = ChatActions(send, retry, discard, pickPhotos, pickFile, capture, removeDraft, retryDraft, attachment, pause, cut, restore, openActivity, openSettings, newConversation, interrupt)`.
@@ -1464,13 +1613,16 @@ fun ChatHeader(
                         HomeNotice.CUT -> askRestore = true
                         HomeNotice.NOTIFICATIONS -> onOpenNotificationSettings()
                         HomeNotice.PAUSED -> actions.pause(false)
+                        HomeNotice.WAITING -> try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, context.getString(R.string.setup_guide_url).toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        } catch (e: ActivityNotFoundException) { /* no browser */ }
                         else -> {}
                     }
                 })
             }
 ```
 
-- `var askRestore by rememberSaveable { mutableStateOf(false) }` junto a `askNew`; la cabecera recibe `onCut = actions.cut, onRestore = { askRestore = true }`; al final, junto a `askNew`: `if (askRestore) RestoreAccessDialog(onRestore = { askRestore = false; actions.restore() }, onDismiss = { askRestore = false })`.
+- `var askRestore by rememberSaveable { mutableStateOf(false) }` junto a `askNew`, y `LaunchedEffect(status) { if (status != LinkStatus.CUT) askRestore = false }` (el diálogo se cierra si el corte termina por otro lado); la cabecera recibe `onCut = actions.cut, onRestore = { askRestore = true }`; al final, junto a `askNew`: `if (askRestore && status == LinkStatus.CUT) RestoreAccessDialog(onRestore = { askRestore = false; actions.restore() }, onDismiss = { askRestore = false })`.
 - `ChatScreenPreview` pierde `remoteCard = {}`.
 
 `ChatRoot.kt`: antes de `val actions`, la función local
@@ -1478,6 +1630,7 @@ fun ChatHeader(
 ```kotlin
     fun report(ok: Boolean, restoring: Boolean) {
         val message = when {
+            !ok && restoring && CutAccess.needsManualRestore(context) -> restoreManual
             !ok && restoring -> restoreFailed
             !ok -> cutFailed
             restoring -> cutRestored
@@ -1491,22 +1644,24 @@ fun ChatHeader(
     }
 ```
 
-y en `ChatActions(...)`, `toggleCut = {...}` se sustituye por `cut = { report(ok = CutAccess.cut(context), restoring = false) }, restore = { report(ok = CutAccess.restore(context), restoring = true) },`. La llamada a `ChatScreen` pierde el bloque final `{ RemoteCard(...) }` (R9). Después: `grep -rn "remoteCard\|toggleCut\|LinkBanner\|PendingQuestionsBanner\|NotificationsBanner" app/src` solo puede encontrar `SettingsContent`/`SettingsScreen` (`remoteCard` sigue en Ajustes).
+(con `val restoreManual = stringResource(R.string.restore_manual)` junto a las demás cadenas de `ChatRoot`) y en `ChatActions(...)`, `toggleCut = {...}` se sustituye por `cut = { report(ok = CutAccess.cut(context), restoring = false) }, restore = { report(ok = CutAccess.restore(context), restoring = true) },`. La llamada a `ChatScreen` pierde el bloque final `{ RemoteCard(...) }` (R9). Después: `grep -rn "remoteCard\|toggleCut\|LinkBanner\|PendingQuestionsBanner\|NotificationsBanner" app/src` solo puede encontrar `SettingsContent`/`SettingsScreen` (`remoteCard` sigue en Ajustes).
 
-Cadenas (en / es): `restore_confirm_title` "Give the PC access again?" / "¿Volver a dar acceso al PC?"; `restore_confirm_body` "This turns debugging back on as it was before the cut. The agent on the PC will be able to use your phone again." / "Vuelve a encender la depuración como estaba antes del corte. El agente del PC podrá volver a usar tu móvil."; `restore_confirm_confirm` "Give access" / "Dar acceso"; `title_agent_state` "%1$s · %2$s" (las dos); `agent_fallback` "The agent" / "El agente"; `cut_done` "Done. The PC can no longer touch your phone." / "Hecho. El PC ya no puede tocar tu móvil."; `cut_restored` "The PC has access again. If you used remote mode, its port stays open until the PC connects or the phone restarts." / "El PC vuelve a tener acceso. Si usabas el modo remoto, su puerto sigue abierto hasta que el PC se conecte o reinicies.".
+Cadenas (en / es): `restore_confirm_title` "Give the PC access again?" / "¿Volver a dar acceso al PC?"; `restore_confirm_body` "ADBuddy turns debugging back on as it was before the cut, and the agent on the PC can use your phone again. If it cannot tell how it was, it takes you to Developer options." / "ADBuddy vuelve a encender la depuración como estaba antes del corte y el agente del PC podrá volver a usar tu móvil. Si no sabe cómo estaba, te lleva a Opciones de desarrollador."; `restore_manual` "ADBuddy cannot tell how debugging was before the cut. Turn on wireless debugging in Developer options." / "ADBuddy no sabe cómo estaba la depuración antes del corte. Enciende la depuración inalámbrica en Opciones de desarrollador."; `restore_confirm_confirm` "Give access" / "Dar acceso"; `title_agent_state` "%1$s · %2$s" (las dos); `agent_fallback` "The agent" / "El agente"; `cut_done` "Done. The PC can no longer touch your phone." / "Hecho. El PC ya no puede tocar tu móvil."; `cut_restored` "The PC has access again. If you used remote mode, its port stays open until the PC connects or the phone restarts." / "El PC vuelve a tener acceso. Si usabas el modo remoto, su puerto sigue abierto hasta que el PC se conecte o reinicies.".
 
-En `ChatScreensTest.check(subtitle, banner, name)`: la "subtitle" pasa a ser el texto de la pastilla (`status.shortText` o "Connected to my-pc") y el "banner" el título de la tarjeta (`card_*_title`); ajustar las llamadas sin quitar ninguna comprobación de que se ve entero ni de que la cabecera cabe.
+En `ChatScreensTest.check(subtitle, banner, name)`: la "subtitle" pasa a ser el texto de la pastilla (`status.shortText` o "Connected to my-pc") y el "banner" el título de la tarjeta (`card_*_title`); ajustar las llamadas sin quitar ninguna comprobación de que se ve entero ni de que la cabecera cabe. `bannerLeavesWhenConnecting` y `cutSaysSoInTheBanner` (que en la tarea 3 usan `status_cut`, ya no visible en el chat) pasan a `text(R.string.card_cut_title)`; `aPausedBannerDoesNotSurviveConnecting` a `card_paused_title`, `anOutdatedAppBannerDoesNotSurviveConnecting` a `card_update_app_title` y los de espera a `card_waiting_title`.
 
-- [ ] **Step 4:** `gradle :app:testDebugUnitTest --tests '*ChatScreensTest' --tests '*QuestionsCardTest' --tests '*ChatPendingQuestionsTest' --tests '*AdbuddyTopBar*' --tests '*TouchGuard*' --tests '*Obscured*' --tests '*StringsParityTest' --tests '*NoHardcodedTextTest'`; regrabar `ChatScreensTest` y los `flows.*` que graban capturas; verificar; batería completa de la CI. Mirar `chat_connected_messages_{light,dark,font_200,font_200_es}.png`, `chat_cut_light.png`, `chat_questions_card_dark.png`.
+- [ ] **Step 4:** `gradle :app:testDebugUnitTest --tests '*ChatScreensTest' --tests '*QuestionsCardTest' --tests '*ChatPendingQuestionsTest' --tests '*ConfirmReopenTest' --tests '*ChatScrollTest' --tests '*AdbuddyTopBar*' --tests '*TouchGuard*' --tests '*Obscured*' --tests '*StringsParityTest' --tests '*NoHardcodedTextTest'`; regrabar `ChatScreensTest` y los `flows.*` que graban capturas; verificar; batería completa de la CI. Mirar `chat_connected_messages_{light,dark,font_200,font_200_es}.png`, `chat_cut_light.png`, `chat_questions_card_dark.png`.
 
 - [ ] **Step 5: commit** `feat(android): cabecera con pastilla y Cortar siempre visible, una sola tarjeta de aviso, modo remoto en Ajustes` (con el trailer).
 
 ---
 
-### Task 9: Estado vacío con sugerencias y burbujas — revisor adbuddy-reviewer
+### Task 9: Terminal más pequeña, estado vacío con sugerencias y burbujas — revisor adbuddy-reviewer
+
+Ruling (spec R15): la terminal empieza **plegada** también en la app (como ya hace la burbuja) y, abierta, ocupa el 35 % (antes 45 %) — por qué: al abrir, la terminal se comía la mitad del chat y es lo menos importante para quien vigila desde el móvil — qué cuesta: un toque en la flecha para verla.
 
 **Files:**
-- Modify: `ui/ChatEmptyState.kt` (entero), `ui/ChatScreen.kt` (condición y llamada), `ui/ChatParts.kt` (`Bubble`, líneas ~218-229), `res/values*/strings.xml`
+- Modify: `ui/ChatEmptyState.kt` (entero), `ui/ChatScreen.kt` (condición y llamada; pesos `0.45f`/`0.55f` → `0.35f`/`0.65f`), `ui/ChatRoot.kt` (`terminalOpenByDefault: Boolean = false`), `ui/ChatParts.kt` (`Bubble`, líneas ~218-229), `res/values*/strings.xml`
 - Test: `screens/ChatScreensTest.kt`
 
 **Interfaces:**
@@ -1541,6 +1696,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
@@ -1557,8 +1714,9 @@ import tech.hybriq.adbuddy.R
 /** An empty conversation: the logo, what to do, and three suggestions that fill the field (they never send by themselves). */
 @Composable
 fun ChatEmptyState(paused: Boolean, onSuggestion: (String) -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
-        ObscuredTouchGuard()
+    // Scrolls: at 200 % text the logo, the line and three chips do not fit a short screen. No covered-touch guard: a
+    // suggestion only fills the field (spec §8.5).
+    Column(modifier.verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
         Image(
             painterResource(R.drawable.ic_launcher_monochrome), contentDescription = null, modifier = Modifier.size(72.dp),
             colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary),
@@ -1581,7 +1739,7 @@ fun ChatEmptyState(paused: Boolean, onSuggestion: (String) -> Unit, modifier: Mo
 
 Cadenas: `chat_empty_ready` "Ask your phone for something. If the agent is about to do something risky, it will ask you first." / "Pídele algo a tu móvil. Si el agente va a hacer algo delicado, te preguntará antes."; `chat_empty_paused` "The agent is paused: it cannot use the phone until you resume." / "El agente está en pausa: no puede usar el móvil hasta que lo reanudes."; `suggestion_battery` "How much battery is left?" / "¿Cuánta batería queda?"; `suggestion_volume` "Turn the volume down" / "Baja el volumen"; `suggestion_screenshot` "Take a screenshot" / "Haz una captura de pantalla".
 
-- [ ] **Step 4:** `--tests '*ChatScreensTest' --tests '*ChatScrollTest' --tests '*InputBarTest' --tests '*StringsParityTest' --tests '*TouchGuardSourceTest'`; regrabar `ChatScreensTest`; verificar. Mirar `chat_connected_empty_suggestions_dark.png` y `chat_connected_messages_light.png`.
+- [ ] **Step 4:** `--tests '*ChatScreensTest' --tests '*ChatScrollTest' --tests '*InputBarTest' --tests '*StringsParityTest' --tests '*TouchGuardSourceTest' --tests 'tech.hybriq.adbuddy.flows.*'` (si un test de `flows` da por abierta la terminal al entrar en la app, se adapta a plegada: es R15); regrabar `ChatScreensTest` y `flows.*`; verificar. Mirar `chat_connected_empty_suggestions_dark.png` y `chat_connected_messages_light.png`.
 
 - [ ] **Step 5: commit** `feat(android): chat vacío con sugerencias y burbujas con forma propia` (con el trailer).
 
@@ -1591,10 +1749,10 @@ Cadenas: `chat_empty_ready` "Ask your phone for something. If the agent is about
 
 **Files:**
 - Modify: `ui/PermissionCard.kt` (firma de `PermissionCards`/`PermissionCard`, título de la línea 127, estilo del detalle), `ui/ChatScreen.kt` (pasa el agente), `res/values*/strings.xml` (`perm_title`, `notif_asking`)
-- Test: `ui/PermissionCardSemanticsTest.kt`, `screens/PermissionCardScreensTest.kt` (nuevo)
+- Test: `ui/PermissionCardSemanticsTest.kt` (incluida la línea 57, que busca `getString(R.string.perm_title)` sin argumento), `flows/OnboardingFlowTest.kt:171` (igual), `screens/PermissionCardScreensTest.kt` (nuevo). Con `%1$s`, `getString(R.string.perm_title)` sin argumento ya no coincide: esas dos líneas pasan a `getString(R.string.perm_title, <agente del BridgeState que monta el test>)` (o `agent_fallback` si el estado no trae agente), sin cambiar qué comprueban.
 
 **Interfaces:**
-- Produces: `PermissionCards(..., agent: String = "")` y `PermissionCard(..., agent: String = "")` (último parámetro, con valor por defecto: las llamadas existentes de los tests siguen compilando).
+- Produces: `PermissionCards(..., agent: String = "")` y `PermissionCard(..., agent: String = "", modifier, onAnswer)`: en `PermissionCard`, `agent` va **justo antes de `modifier`** (la lambda final `onAnswer` debe seguir siendo el último parámetro; al final, la lambda de `PermissionCards.kt:98` se asignaría a `agent`). La llamada de `PermissionCards` pasa a nombrados: `PermissionCard(first, permissions.size - 1, connected, now, first.id in answeringIds, guardLeft, canAnswer, agent = agent, modifier = modifier) { p, d -> … }`; revisar con `grep -rn "PermissionCard(" app/src` las llamadas posicionales de los tests y nombrar `modifier` donde haga falta.
 
 - [ ] **Step 1: tests que fallan** (en `PermissionCardSemanticsTest`, montando la tarjeta igual que sus tests actuales, añadiendo `agent = …`):
 
@@ -1624,11 +1782,11 @@ Cadenas: `chat_empty_ready` "Ask your phone for something. If the agent is about
             )
 ```
 
-El texto del detalle dentro del scroll vigilado pasa a `style = AdbuddyType.codeSmall`. **No** cambian el `scroll`, el `enabled` de los botones, su orden ni `ObscuredTouchGuard`. En `ChatScreen`: `PermissionCards(state.chat.permissions, …, chat, agent = state.sessionState.agent)`.
+El texto del detalle dentro del scroll vigilado pasa a `style = AdbuddyType.codeSmall.copy(textDirection = TextDirection.Ltr)` (explícito, como exige `ConfirmTextDirectionTest`). **No** cambian el `scroll`, el `enabled` de los botones, su orden ni `ObscuredTouchGuard`. En `ChatScreen`: `PermissionCards(state.chat.permissions, …, chat, agent = state.sessionState.agent)`.
 
 Cadenas: `perm_title` "%1$s asks" / "%1$s pregunta"; `notif_asking` "Your agent needs an answer" / "Tu agente necesita una respuesta" (sin argumentos, R10).
 
-- [ ] **Step 4:** `--tests '*PermissionCard*' --tests '*ConversationViewTest' --tests '*AskNoticeTest' --tests '*StringsParityTest'`; regrabar `PermissionCardScreensTest`; verificar. Mirar `permission_card_light.png` (azul tinta) y `permission_card_font_200_es.png`.
+- [ ] **Step 4:** `--tests '*PermissionCard*' --tests '*OnboardingFlowTest' --tests '*ConfirmTextDirectionTest' --tests '*ConversationViewTest' --tests '*AskNoticeTest' --tests '*StringsParityTest'`; regrabar `PermissionCardScreensTest`; verificar. Mirar `permission_card_light.png` (azul tinta) y `permission_card_font_200_es.png`.
 
 - [ ] **Step 5: commit** `feat(android): la tarjeta de pregunta nombra al agente real y muestra el detalle en monoespaciada` (con el trailer).
 
@@ -1642,7 +1800,7 @@ Solo lo visual. Criterio de aceptación: §8.1-8.6 de la spec con sus tests **si
 - Modify: `ui/Screens.kt:196` (el `Text(shown.command, …)`)
 - Test: `screens/ConfirmDialogScreensTest.kt` (nuevo)
 
-- [ ] **Step 1: test.** `screens/ConfirmDialogScreensTest.kt`, parametrizado por `ScreenMode`, monta `ConfirmDialog` como `ConfirmDialogLayoutTest` (copiar su construcción), con un comando de 300 caracteres con comillas y `|` → `shot("confirm_dialog", mode)`; otra variante con el ⚠ especial → `shot("confirm_dialog_special", mode)`. Y una aserción de que el comando está dentro del scroll vigilado: `compose.onNode(hasText(cmd.take(40), substring = true) and hasAnyAncestor(hasScrollAction())).assertExists()`.
+- [ ] **Step 1: test.** `screens/ConfirmDialogScreensTest.kt`, parametrizado por `ScreenMode`, monta `ConfirmDialog` como `ConfirmDialogLayoutTest` (copiar su construcción), con un comando de 300 caracteres con comillas y `|` → `shot("confirm_dialog", mode)`; otra variante con el ⚠ especial → `shot("confirm_dialog_special", mode)`. Y dos aserciones: hay **un solo** nodo con scroll en el diálogo (`compose.onAllNodes(hasScrollAction()).assertCountEquals(1)`) y el comando está dentro de él (`compose.onNode(hasText(cmd.take(40), substring = true) and hasAnyAncestor(hasScrollAction())).assertExists()`). Mutación: dar al bloque del comando un `verticalScroll` propio → falla el recuento.
 
 - [ ] **Step 2:** `gradle :app:testDebugUnitTest --tests '*ConfirmDialogScreensTest'` → FAIL en verify (no hay PNG todavía).
 
@@ -1697,7 +1855,7 @@ class ThemePrefs(context: Context) {
 
 `AdbuddyApp`: `val dynamicColor by lazy { MutableStateFlow(ThemePrefs(this).dynamic) }`. `MainActivity` y `ChatBubbleActivity`: donde llaman a `AdbuddyTheme {`, `val dynamic by app.dynamicColor.collectAsStateWithLifecycle()` y `AdbuddyTheme(dynamic = dynamic) {`. `SettingsScreen` pasa `languageAvailable = LanguageSettings.available()`, `onLanguage = { LanguageSettings.open(context) }`, `dynamicColor = dynamic` (del flujo) y `onDynamicColor = { ThemePrefs(context).dynamic = it; app.dynamicColor.value = it }`.
 
-`SettingsContent`: `ObscuredTouchGuard()` al principio del `Column` si no lo tiene; cabecera de sección
+`SettingsContent` (sin `ObscuredTouchGuard()` de pantalla entera, spec §8.5; el interruptor de colores no concede nada); cabecera de sección
 
 ```kotlin
 @Composable
@@ -1726,7 +1884,7 @@ private fun SectionHeader(@StringRes title: Int) {
 
 `RemoteCard`: en `DISCONNECTED`, contenedor `surfaceContainerHigh` con `onSurfaceVariant` (antes `errorContainer`); `remote_disconnected` "Available when the PC is connected" / "Disponible cuando el PC esté conectado". `RemoteCardSemanticsTest` y `RemoteUiTest` no cambian.
 
-Cadenas: `settings_section_security` "Security" / "Seguridad"; `settings_section_app` "App" / "App"; `settings_dynamic_color` "Use wallpaper colors" / "Usar los colores del fondo de pantalla"; `settings_dynamic_color_hint` "Status colors stay the same" / "Los colores de estado no cambian".
+Cadenas: `settings_section_security` "Security" / "Seguridad"; `settings_section_app` "App" / "App" (misma palabra: añadir a `sameInBoth` de `i18n/StringsParityTest.kt` la entrada `"settings_section_app" to "\"App\" is the same word in both languages"`); `settings_dynamic_color` "Use wallpaper colors" / "Usar los colores del fondo de pantalla"; `settings_dynamic_color_hint` "Status colors stay the same" / "Los colores de estado no cambian".
 
 - [ ] **Step 4:** `--tests '*ThemePrefsTest' --tests '*SettingsScreensTest' --tests '*LanguageSettingsTest' --tests '*RemoteCard*' --tests '*RemoteUiTest' --tests '*StringsParityTest' --tests '*NoHardcodedTextTest' --tests '*TouchGuardSourceTest' --tests '*BubbleFlowTest'`; regrabar y verificar `SettingsScreensTest`. Mirar `settings_confirmed_dark.png` y `_font_200_es`.
 
@@ -1757,7 +1915,8 @@ private fun EntryRow(e: JournalEntry, now: Long) {
         else -> extra.success to stringResource(R.string.level_green)
     }
     ElevatedCard(Modifier.fillMaxWidth()) {
-        Row(Modifier.height(IntrinsicSize.Min)) {
+        // One node for TalkBack: the level's name is read with the entry, not as a lone bar.
+        Row(Modifier.height(IntrinsicSize.Min).semantics(mergeDescendants = true) {}) {
             Box(Modifier.width(4.dp).fillMaxHeight().background(bar).semantics { contentDescription = levelName })
             Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                 // Aquí va, sin cambios, el Column que hoy sigue al Text(levelIcon(e.level)); ese Text desaparece.
@@ -1794,11 +1953,11 @@ private fun EntryRow(e: JournalEntry, now: Long) {
 ## Validaciones manuales pendientes (solo lo que exige el móvil real; siempre con permiso explícito del usuario)
 
 - **V1. Diagnóstico de "cortado".** Dato del 2026-10-18: en el Pixel (Android 17, app 0.2.0) `adb shell` da `adb_enabled=1` y `adb_wifi_enabled=1` y la app decía "cortado", así que la app leía otra cosa. Con la build de la tarea 1 instalada (instalar es un cambio en el móvil: pedir permiso), `adb logcat -d -s ADBuddyAccess` junto a `adb shell settings get global adb_enabled` / `adb_wifi_enabled`. Si la app lee `raw:0` (o un error) con `adb shell` diciendo `1`, Android 17 da a la app un valor falso: la regla de la tarea 2 (registro propio + canal) es la definitiva, y si además la relectura de `restore()` falla siempre en el Pixel, se abre un plan aparte (confirmar con el canal en vez de con la lectura). Si lee `raw:1`, el "cortado" venía de otra parte (p. ej. un registro de corte antiguo en 0.2.0) y las líneas `saved.*` lo dirán. En todos los casos, tras la tarea 2 la app no dice "cortado" sin un corte propio.
-- **V2. Cortar y volver a dar acceso en el Pixel** (modifica el móvil): cortar desde el escudo → el PC pierde la conexión y la app dice "Acceso cortado"; "Volver a dar acceso" → vuelven los ajustes que había (en el Pixel, USB e inalámbrica a 1) y el PC reconecta (el puerto inalámbrico puede cambiar).
+- **V2. Cortar y volver a dar acceso en el Pixel** (modifica el móvil). **Prerrequisito: V1.** Si V1 muestra lecturas falsas, V2 no se hace con esta build (cortar y reactivar no se pueden confirmar) y se abre el plan aparte; si V1 muestra lecturas fiables: cortar desde el escudo → el PC pierde la conexión y la app dice "Acceso cortado"; "Volver a dar acceso" → vuelven los ajustes que había (en el Pixel, USB e inalámbrica a 1) y el PC reconecta (el puerto inalámbrico puede cambiar).
 - **V3. Icono monocromo** con los iconos temáticos del lanzador del Pixel (Android 13+).
 
 ## Autorrevisión
 
 - Cobertura de la spec: R1-R4 y diagnóstico → tareas 1-3; R5 → 8; R6 → 5 y 12; R7 → 5; R8 → 7-8; R9 → 8 y 12; R10 → 10; R12 → 12; R13 → 14; §4.3 → 6; §5 → 7-9; §6 → 4, 10-13; §7 → en cada tarea; §8 → criterios de 7, 8, 10, 11.
 - Cada tarea compila sola con lo anterior: 1 (nuevo); 2 (usa 1); 3 (independiente; las llamadas a `isCut(context)` ya las cambió 2); 4 (usa `Palette.contrast`, que ya existe); 5; 6; 7 (usa 3 y 5); 8 (usa 2 y 7); 9 (usa 5 y 6); 10, 11, 13 (usan 5); 12 (usa 5).
-- Nombres: `AccessDiag.line/read/log`, `CutAccess.isCut(context)`, `ChatActions.cut/restore/copyWith`, `HomeNotice.of`, `ActionCard(notice, pendingQuestions, onAction)`, `StatusPill(status, host, remote)`, `RestoreAccessDialog(onRestore, onDismiss)`, `AdbuddyTheme.colors`, `AdbuddyType.code/codeSmall`, `BubbleShapes.mine/agent`, `ThemePrefs.dynamic`, `AdbuddyApp.dynamicColor`, `OverlayColors.of`.
+- Nombres: `AccessDiag.line/read/log`, `CutAccess.PREFS`, `CutAccess.isCut(context)`, `CutAccess.needsManualRestore(context)`, `AccessSwitch.needsManualRestore()`, `R.drawable.ic_shield/ic_shield_off`, `ChatActions.cut/restore/copyWith`, `HomeNotice.of`, `ActionCard(notice, pendingQuestions, onAction)`, `StatusPill(status, host, remote)`, `RestoreAccessDialog(onRestore, onDismiss)`, `AdbuddyTheme.colors`, `AdbuddyType.code/codeSmall`, `BubbleShapes.mine/agent`, `ThemePrefs.dynamic`, `AdbuddyApp.dynamicColor`, `OverlayColors.of`.
