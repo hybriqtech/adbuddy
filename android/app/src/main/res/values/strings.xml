@@ -196,7 +196,7 @@
     <string name="remote_closing">Closing… the PC is trying to close port 5555</string>
     <string name="remote_pending">Working…</string>
     <string name="remote_unknown">Unknown: the host will tell when it reconnects</string>
-    <string name="remote_disconnected">Not connected to the PC</string>
+    <string name="remote_disconnected">Available when the PC is connected</string>
     <string name="remote_enable_title">Turn on remote mode?</string>
     <string name="remote_enable_body">Port 5555 stays open on any network, including public ones, for up to 12 hours. Your PC\'s key is still required. Turn it off when you are back home.</string>
     <string name="remote_enable_confirm">Turn on</string>
@@ -246,6 +246,10 @@
     <string name="access_restricted_hint">If the switch is greyed out, open ADBuddy\'s App info, tap the three dots and choose \"Allow restricted settings\".</string>
     <string name="access_later_hint">You can turn it on later in ADBuddy\'s Settings, under Notification access.</string>
     <string name="menu_settings">Settings</string>
+    <string name="settings_section_security">Security</string>
+    <string name="settings_section_app">App</string>
+    <string name="settings_dynamic_color">Use wallpaper colors</string>
+    <string name="settings_dynamic_color_hint">Status colors stay the same</string>
     <string name="settings_title">Settings</string>
     <string name="settings_protected_proposed">Proposed list (%1$d). Review it and confirm.</string>
     <string name="settings_protected_confirmed">Confirmed list (%1$d)</string>

@@ -3,6 +3,8 @@ package tech.hybriq.adbuddy.ui
 import androidx.annotation.StringRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Column
@@ -12,11 +14,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -41,6 +47,7 @@ import tech.hybriq.adbuddy.listener.NotificationConsent
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
+import tech.hybriq.adbuddy.ui.theme.ThemePrefs
 
 /**
  * Settings (spec v1 §6): what the user decides about the agent. M5c brings the protected apps and the
@@ -59,6 +66,7 @@ fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit,
     // Null until the system answers: that is "checking", not the system's own "unknown".
     val systemState by remember(context) { NotificationAccessStatus.observe(context) }.collectAsStateWithLifecycle(initialValue = null)
     val markState by remember(consent) { consent.observe() }.collectAsStateWithLifecycle(initialValue = null)
+    val dynamic by app.dynamicColor.collectAsStateWithLifecycle()
     // Until the list is read (or the system and the mark answer) the rows say "checking": nothing is claimed.
     val system = systemState
     val mark = markState
@@ -69,6 +77,10 @@ fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit,
         onOpen = onOpen,
         onBack = onBack,
         remoteCard = { RemoteCard(state, app.bridge, app.clock, onMessage) },
+        languageAvailable = LanguageSettings.available(),
+        onLanguage = { LanguageSettings.open(context) },
+        dynamicColor = dynamic,
+        onDynamicColor = { ThemePrefs(context).dynamic = it; app.dynamicColor.value = it },
     )
 }
 
@@ -81,6 +93,10 @@ fun SettingsContent(
     onOpen: (Route) -> Unit,
     onBack: () -> Unit,
     remoteCard: @Composable () -> Unit,
+    languageAvailable: Boolean = false,
+    onLanguage: () -> Unit = {},
+    dynamicColor: Boolean = false,
+    onDynamicColor: (Boolean) -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -88,6 +104,8 @@ fun SettingsContent(
         },
     ) { inner ->
         Column(Modifier.padding(inner).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // No ObscuredTouchGuard() here (spec section 8.5): it would mark the whole window of the activity, and nothing on this screen grants anything by a tap.
+            SectionHeader(R.string.settings_section_security)
             SettingsRow(
                 icon = { Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
                 title = R.string.protected_title,
@@ -109,8 +127,36 @@ fun SettingsContent(
                 onClick = { onOpen(Route.NOTIFICATION_ACCESS) },
             )
             remoteCard()
+            SectionHeader(R.string.settings_section_app)
+            if (languageAvailable) {
+                SettingsRow(
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                    title = R.string.settings_language,
+                    summary = stringResource(R.string.settings_language_hint),
+                    flagged = false,
+                    onClick = onLanguage,
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().toggleable(value = dynamicColor, role = Role.Switch, onValueChange = onDynamicColor).padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_dynamic_color), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(R.string.settings_dynamic_color_hint), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(checked = dynamicColor, onCheckedChange = null)
+            }
         }
     }
+}
+
+@Composable
+private fun SectionHeader(@StringRes title: Int) {
+    Text(
+        stringResource(title), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp).semantics { heading() },
+    )
 }
 
 @Composable
