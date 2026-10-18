@@ -126,6 +126,10 @@ type question struct {
 	title    string
 	withdraw context.CancelCauseFunc
 	shown    bool // asked on the phone or in the terminal; guarded by askMu
+	// own: asked through AskUser: serve's own questions (`adbuddy remote on`, the person's) and the 🔴 inverse of an undo
+	// (the agent's). liftQuestion keeps the doors closed for both while they wait: it fails closed, and a question
+	// of an undo asked before YOLO was turned on stays the person's to answer.
+	own bool
 }
 
 // blocks is why other commands are refused while q waits, in the shim's
@@ -292,7 +296,7 @@ func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Du
 	}
 	qctx, withdraw := context.WithCancelCause(ctx)
 	defer withdraw(nil)
-	q := &question{title: r.Title, withdraw: withdraw}
+	q := &question{title: r.Title, withdraw: withdraw, own: true}
 	if busy := d.ask(q); busy != "" {
 		return confirm.Deny, fmt.Errorf("%w: %s", ErrAskBusy, busy)
 	}
@@ -435,10 +439,12 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 
 func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	now := d.o.Now().UTC()
-	e := journal.Entry{ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUser, Argv: req.Argv}
+	e := journal.Entry{ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUser, Argv: req.Argv, Yolo: d.o.Yolo.Active()}
 	if req.Env["ADBUDDY_SOURCE"] == journal.SourceAgent {
 		e.Source = journal.SourceAgent
 	}
+	// What YOLO lets through is noted here and told to the agent right before adb runs.
+	ctx, notes := withYoloNotes(ctx)
 
 	// release ends this command's time in flight (see admit).
 	var release func()
@@ -454,18 +460,20 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		p.Level, p.Rule, p.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
 		return d.block(p, s, PausedMessage)
 	}
-	if t := d.waitingFor(); t != "" {
+	if t := d.waitingFor(); t != "" && !d.liftQuestion(ctx, t) {
 		p := e
 		p.Level, p.Rule, p.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
 		return d.block(p, s, t)
 	}
-	if len(g.Forbidden) > 0 {
+	// Options that reach another adb server are never passed on (see classify.SplitGlobal): under YOLO the command runs through ADBuddy's own.
+	if len(g.Forbidden) > 0 && !d.lift(ctx, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed and was dropped: it ran through ADBuddy's own adb server") {
 		return d.block(e, s, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed: ADBuddy only talks to the active phone through its own adb server")
 	}
 	// The phone may be named by this session's serial or by its identity;
-	// either way adb runs with -s Serial (the -s given is not passed on).
+	// either way adb runs with -s Serial (the -s given is not passed on). Under
+	// YOLO another phone named runs on the active one: the host's adb only reaches that.
 	for _, serial := range []string{g.Serial, req.Env["ANDROID_SERIAL"]} {
-		if serial != "" && !d.knownSerial(serial) {
+		if serial != "" && !d.knownSerial(serial) && !d.lift(ctx, "it named "+classify.Printable(serial)+", which is not the active phone ("+d.identity()+"): it ran on the active phone") {
 			return d.block(e, s, "only the active phone can be used ("+d.identity()+")")
 		}
 	}
@@ -482,7 +490,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 
 	if level >= classify.Yellow {
-		if err := d.o.Journal.Writable(); err != nil {
+		if err := d.o.Journal.Writable(); err != nil && !d.lift(ctx, noRecord) {
 			return d.block(e, s, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
@@ -504,7 +512,12 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		e.Backups = prep.Backups
 	}
 
-	if level == classify.Red {
+	redWhy := "this asked for your confirmation (" + classify.Printable(e.Description) + ") and ran without it"
+	if !reason.Empty() {
+		redWhy += "; " + classify.Printable(reason.In(d.o.Lang))
+	}
+	redLifted := level == classify.Red && d.lift(ctx, redWhy)
+	if level == classify.Red && !redLifted {
 		detail := res.Detail(d.o.Lang)
 		if !reason.Empty() {
 			detail = strings.TrimSpace(detail + "\n" + classify.Printable(reason.In(d.o.Lang)))
@@ -602,10 +615,13 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 	// Admitted to adb, unless a question started after this command got
 	// past the door. A 🔴 was admitted with its Allow.
-	if level != classify.Red {
+	if level != classify.Red || redLifted {
 		r, other := d.admit(e.Description, level >= classify.Yellow)
 		if other != "" {
-			return d.block(e, s, other)
+			if !d.liftQuestion(ctx, other) {
+				return d.block(e, s, other)
+			}
+			r = d.flyAnyway(level >= classify.Yellow, e.Description)
 		}
 		release = r
 	}
@@ -617,7 +633,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// The notice of the on-screen frame, before the last pause check (a pause
 	// that arrives meanwhile blocks) and after the guard (no notice for what it refuses).
 	if readsScreen(res) {
-		if why := d.showNotice(ctx); why != "" {
+		if why := d.showNotice(ctx); why != "" && !d.lift(ctx, why) {
 			return d.refuse(ctx, e, s, why)
 		}
 	}
@@ -627,11 +643,12 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if level >= classify.Yellow {
 		running := e
 		running.Status = journal.StatusRunning
-		if err := d.o.Journal.Append(running); err != nil {
+		if err := d.o.Journal.Append(running); err != nil && !d.lift(ctx, noRecord) {
 			return d.block(e, s, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
 
+	notes.tell(s.Stderr())
 	runArgs := append(append([]string{}, g.Pass...), args...)
 	code, err := d.o.ADB.Run(ctx, req.Cwd, runArgs, s.Stdin(), s.Stdout(), s.Stderr())
 	switch {

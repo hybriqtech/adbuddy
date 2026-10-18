@@ -233,6 +233,9 @@ func TestYoloExpiryDoesNotNeedTheTimer(t *testing.T) {
 	y, c, seen := newTestYolo()
 	_ = y.Enable(YoloShort)
 	c.jump(20 * time.Minute) // no timer runs
+	if st := y.State(); st.Active || !st.Until.IsZero() {
+		t.Fatalf("state %+v after its expiry", st)
+	}
 	if y.Active() {
 		t.Fatal("active after its expiry because the timer did not run")
 	}
