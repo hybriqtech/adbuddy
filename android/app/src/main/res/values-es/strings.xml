@@ -67,7 +67,7 @@
     <string name="confirm_expires">Caduca: %1$s</string>
     <string name="confirm_expires_in">Caduca en %1$s</string>
     <string name="confirm_sending">Respondida: esperando al PC</string>
-    <string name="confirm_offline">Disponible cuando el PC esté conectado</string>
+    <string name="confirm_offline">Sin conexión con el PC</string>
     <string name="confirm_expired">Caducada: ya no se puede responder.</string>
     <string name="confirm_open_cut">El comando está recortado: ábrelo en ADBuddy para leerlo entero y responder.</string>
     <string name="confirm_open_special">Abre ADBuddy para leer el aviso y permitirlo.</string>
@@ -193,7 +193,7 @@
     <string name="remote_closing">Cerrando… el PC intenta cerrar el puerto 5555</string>
     <string name="remote_pending">Trabajando…</string>
     <string name="remote_unknown">Desconocido: el host lo dirá al reconectar</string>
-    <string name="remote_disconnected">Sin conexión con el PC</string>
+    <string name="remote_disconnected">Disponible cuando el PC esté conectado</string>
     <string name="remote_enable_title">¿Activar el modo remoto?</string>
     <string name="remote_enable_body">El puerto 5555 queda abierto en cualquier red, también en las públicas, hasta 12 horas. Sigue haciendo falta la clave de tu PC. Desactívalo al volver a casa.</string>
     <string name="remote_enable_confirm">Activar</string>
