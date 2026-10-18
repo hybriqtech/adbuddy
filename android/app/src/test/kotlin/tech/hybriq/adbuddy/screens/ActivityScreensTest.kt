@@ -101,6 +101,13 @@ class ActivityScreensTest(private val mode: ScreenMode) {
         compose.onNodeWithContentDescription(description).assertExists()
     }
 
+    // H1 of T13: bar and texts are ONE node for TalkBack (mergeDescendants on the row), not a lone described bar.
+    @Test fun theLevelAndTheEntryTextAreOneNode() {
+        show(BridgeState(journal = listOf(green)))
+        val level = text(R.string.level_green)
+        compose.onAllNodes(hasContentDescription(level) and hasText(green.description)).assertCountEquals(1)
+    }
+
     @Test fun noEntriesAtAll() {
         show(BridgeState())
         compose.onNodeWithText(text(R.string.home_empty)).assertIsDisplayed()

@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.ui
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,19 @@ import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 
 /**
+ * Own vector of each card (24 dp, tintable); null where a material-icons-core one is used (notifications, info).
+ * Only CUT draws the shield: it is the header's Cut button, so no other card may look like it.
+ */
+@DrawableRes
+internal fun cardIconRes(notice: HomeNotice): Int? = when (notice) {
+    HomeNotice.CUT -> R.drawable.ic_shield_off
+    HomeNotice.QUESTIONS -> R.drawable.ic_card_question
+    HomeNotice.PAUSED -> R.drawable.ic_card_pause
+    HomeNotice.UPDATE_APP, HomeNotice.UPDATE_HOST -> R.drawable.ic_card_update
+    HomeNotice.NOTIFICATIONS, HomeNotice.NOT_SET_UP, HomeNotice.WAITING -> null
+}
+
+/**
  * The card of HomeNotice: icon, title, one line and at most one button. QUESTIONS' button only reopens the closed
  * red questions (their dialog arms and makes you read again): nothing here answers anything (spec §8.4).
  */
@@ -44,13 +58,10 @@ fun ActionCard(notice: HomeNotice, pendingQuestions: Int, onAction: () -> Unit, 
         HomeNotice.NOTIFICATIONS, HomeNotice.PAUSED -> extra.warningContainer to extra.onWarningContainer
         HomeNotice.NOT_SET_UP, HomeNotice.WAITING -> scheme.surfaceContainerHigh to scheme.onSurface
     }
-    // Own shield vectors (task 6) for the security notices; only Info/Notifications come from material-icons-core.
-    val icon: Painter = when (notice) {
-        HomeNotice.CUT -> painterResource(R.drawable.ic_shield_off)
-        HomeNotice.NOTIFICATIONS -> rememberVectorPainter(Icons.Default.Notifications)
-        HomeNotice.NOT_SET_UP, HomeNotice.WAITING -> rememberVectorPainter(Icons.Default.Info)
-        else -> painterResource(R.drawable.ic_shield)
-    }
+    val iconRes = cardIconRes(notice)
+    val icon: Painter = if (iconRes != null) painterResource(iconRes) else rememberVectorPainter(
+        if (notice == HomeNotice.NOTIFICATIONS) Icons.Default.Notifications else Icons.Default.Info,
+    )
     val title = when (notice) {
         HomeNotice.QUESTIONS -> pluralStringResource(R.plurals.confirm_waiting, pendingQuestions, pendingQuestions)
         HomeNotice.CUT -> stringResource(R.string.card_cut_title)

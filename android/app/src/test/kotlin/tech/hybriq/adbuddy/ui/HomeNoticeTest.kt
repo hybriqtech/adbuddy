@@ -1,8 +1,10 @@
 package tech.hybriq.adbuddy.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import tech.hybriq.adbuddy.R
 
 class HomeNoticeTest {
     @Test fun questionsFirst_theyExpire() {
@@ -45,5 +47,23 @@ class HomeNoticeTest {
             setOf(HomeNotice.QUESTIONS, HomeNotice.CUT, HomeNotice.NOTIFICATIONS, HomeNotice.PAUSED, HomeNotice.WAITING),
             HomeNotice.entries.filter { it.hasAction }.toSet(),
         )
+    }
+
+    // Review of T7/T8: the shield is the header's Cut button; only the CUT card may wear it.
+    @Test fun onlyTheCutCardUsesAShield() {
+        for (n in HomeNotice.entries) {
+            val res = cardIconRes(n)
+            if (n == HomeNotice.CUT) assertEquals(R.drawable.ic_shield_off, res) else {
+                assertNotEquals("$n", R.drawable.ic_shield, res)
+                assertNotEquals("$n", R.drawable.ic_shield_off, res)
+            }
+        }
+    }
+
+    @Test fun questionsPausedAndUpdateLookDifferent() {
+        val icons = listOf(HomeNotice.QUESTIONS, HomeNotice.PAUSED, HomeNotice.UPDATE_APP).map { cardIconRes(it) }
+        assertEquals(3, icons.toSet().size)
+        assertEquals(cardIconRes(HomeNotice.UPDATE_APP), cardIconRes(HomeNotice.UPDATE_HOST))
+        assertNotEquals(null, icons.firstOrNull())
     }
 }
