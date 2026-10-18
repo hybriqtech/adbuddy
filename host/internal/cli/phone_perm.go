@@ -3,9 +3,11 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
+	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
 )
 
@@ -38,6 +40,9 @@ type permResult struct {
 // the hook writes: nothing leaves Claude Code's own dialog on the terminal
 // (spec M4 §5.1).
 func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInput) []byte {
+	if y := l.yoloOf(); y != nil && y.Active() {
+		return l.yoloPermission(in)
+	}
 	if l.srv == nil || !l.srv.Connected() {
 		l.holdTerminal() // the person is at the PC; the dialog is still there if the app comes
 		return nil
@@ -266,4 +271,20 @@ func (l *phoneLink) permissionsSnapshot(s *bridge.Snapshot) {
 		}
 	}
 	s.Permissions = out
+}
+
+// yoloPermission answers a permission question of the agent with "allow" while
+// YOLO is on: nothing is asked of the phone (it may not even be connected) and
+// the card is not needed. It is "allow", never "allow_always": that would leave
+// a permanent rule in Claude Code's localSettings, and YOLO is temporary. The
+// app is told what was approved (permission.resolved, by yolo), so the chat can
+// show it, and serve's log says it too.
+func (l *phoneLink) yoloPermission(in claudecode.HookInput) []byte {
+	// The summary is the agent's words: escaped, as for a card (control, bidi and invisible characters).
+	summary := classify.Visible(claudecode.ToolSummaryIn(l.lang, in.ToolName, in.ToolInput))
+	if l.log != nil {
+		fmt.Fprintln(l.log, l.lang.T("phone.yolo_approved", summary))
+	}
+	l.publishEvent(bridge.TypePermResolved, bridge.PermissionResolved{ID: newID("p_"), Decision: "allow", By: "yolo", Summary: summary})
+	return claudecode.PermissionOutput(claudecode.Allow, "")
 }

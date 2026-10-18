@@ -849,3 +849,4 @@ confirm anything, and nothing blocks it except the pause. `off` turns it off and
 "yolocmd.on_until" = "YOLO is on until %[1]s."
 "yolocmd.serve_not_running" = "serve is not running, so YOLO is off."
 "err.yolocmd.usage" = "Use adbuddy yolo off or adbuddy yolo status. YOLO can only be turned on from the phone app."
+"phone.yolo_approved" = "⚠ YOLO approved the agent's own permission question: %[1]s"
