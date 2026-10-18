@@ -20,3 +20,7 @@ Hoja de ruta: §13 de la spec. Pendientes y notas para hitos futuros: `docs/supe
 - **Commits:** identidad local hybriqtech, trailer exacto `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (los implementadores a veces ponen otro: comprobarlo). Push solo de ramas como copia, tras `git grep` de seriales e IPs; nunca `--force`; a `main` integra el usuario.
 - **Clasificador (`host/internal/classify`):** lista blanca (M2.5). El evaluador de shell solo admite lo que lista (construcciones, expansiones, builtins y variables propias en minúsculas); todo lo demás es 🔴 especial. Nada sobre mksh se da por sabido "de memoria": cada afirmación lleva un caso en `testdata/differential.jsonl` o en el generador, grabado contra el mksh del emulador en `testdata/oracle.jsonl` (`scripts/emulator.sh` y `TestRecordOracle`; ver `host/README.md`). Ampliar la lista blanca es añadir el caso al evaluador, sus usos al generador y regrabar. `testdata/habitual.jsonl` es el contrato de lo que no puede subir.
 - **Validaciones en dispositivo:** lo que no se puede probar sin móvil se apunta en la sección "Validaciones manuales pendientes" del plan. Nunca se prueba nada que modifique el móvil del usuario sin su permiso explícito; los tests usan un adb falso y, para Android, un emulador.
+
+## Hooks de git (prek)
+
+Los hooks de commit (gofmt, builtins) y de push (`go vet`, `go test` sin `internal/cli`) están descritos en `docs/hooks.md`. Si un hook para el commit, arregla y repite; no uses `--no-verify`. La CI no cambia.
