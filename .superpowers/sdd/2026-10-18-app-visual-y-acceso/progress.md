@@ -15,3 +15,8 @@ Ledger de UX1 (aspecto visual de la app y estado del acceso), 2026-10-18. Compa�
 ## Tareas
 
 (se rellena al avanzar)
+
+### T1 — 5dc01e77 — CONFORME (opus, 1 ronda)
+Tests: AccessDiagTest 3/3, AccessSwitchTest 10/10, NoHardcodedTextTest 3/3, StringsParityTest 4/4. Mutaciones (take(16), saltos de línea, null->raw:0, "-" por "0", quitar línea de i18n-exceptions) en rojo; el revisor las repitió en copia.
+- Ruling: no endurecer el valor leído a `[0-9-]` (hallazgo menor 1) ni añadir el test de "log nunca lanza" (menor 2) — por qué: quien puede escribir el ajuste con adb ya puede leer el logcat, y `log` solo es diagnóstico (V1) que se quita o se deja al cerrar — qué cuesta si me equivoco: un valor raro de hasta 16 caracteres en logcat; si alguien quita el try/catch de `log` ningún test lo ve (el try/catch está a la vista en el código).
+- Entorno: `gradle` no está en el PATH; se usa `C:\Users\Jose\AppData\Local\Gradle\gradle-9.8.0\bin` y `ANDROID_HOME=C:\Users\Jose\AppData\Local\Android\Sdk` (sin local.properties).
