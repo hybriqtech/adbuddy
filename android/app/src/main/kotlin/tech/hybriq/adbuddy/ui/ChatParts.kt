@@ -29,7 +29,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -107,7 +106,6 @@ private fun ChatHeaderBar(title: @Composable () -> Unit, actions: @Composable Ro
 }
 
 /** Header: the agent (and what it does, only on a live, unpaused link), the link's pill; the shield (always), terminal, menu. */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatHeader(
     state: BridgeState,

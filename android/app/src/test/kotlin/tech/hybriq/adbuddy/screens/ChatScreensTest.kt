@@ -1,5 +1,6 @@
 package tech.hybriq.adbuddy.screens
 
+import android.content.Intent
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -8,25 +9,23 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.assert
-import android.content.Intent
-import org.junit.Assert.assertNotNull
-import org.robolectric.Shadows.shadowOf
-import tech.hybriq.adbuddy.bridge.RemoteState
 import androidx.compose.ui.text.TextLayoutResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.robolectric.ParameterizedRobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import tech.hybriq.adbuddy.AdbuddyApp
@@ -34,6 +33,7 @@ import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.ChatMessage
 import tech.hybriq.adbuddy.bridge.ChatState
+import tech.hybriq.adbuddy.bridge.RemoteState
 import tech.hybriq.adbuddy.bridge.SessionState
 import tech.hybriq.adbuddy.bridge.ToolActivity
 import tech.hybriq.adbuddy.chat.Outgoing
