@@ -30,7 +30,6 @@ class CutAccessOnEmulatorTest {
             Build.HARDWARE == "ranchu" || Build.HARDWARE == "goldfish")
         val after = args.getString("reactivateAfterMs")?.toLongOrNull() ?: 15_000L
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val resolver = context.contentResolver
         log("listening before the cut: ${listening()}")
         val cut = CutAccess.cut(context)
         log("cut=$cut isCut=${CutAccess.isCut(context)}")

@@ -201,6 +201,19 @@ class AccessSwitchTest {
         assertEquals("nothing turned on that was off", 0, s.values[adb])
     }
 
+    @Test fun aStaleRecordIsForgottenBeforeTheNextCut() {
+        val s = FakeSettings(adb to 1, wifi to 1)
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved)
+        assertTrue(sw.cut())
+        s.values[adb] = 1 // the person turns only USB debugging on by hand; forgetIfRestored() has not run
+        assertEquals("record still there", 1, saved.values[wifi])
+        assertTrue(sw.cut())
+        assertTrue(sw.restore())
+        assertEquals(1, s.values[adb])
+        assertEquals("wireless was off just before the second cut", 0, s.values[wifi])
+    }
+
     @Test fun turningOnlyWirelessBackOnByHandForgetsTheRecord() {
         val s = FakeSettings(adb to 1, wifi to 1)
         val saved = FakeSaved()

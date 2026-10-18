@@ -38,6 +38,7 @@ class AccessSwitch(private val settings: Settings, private val saved: Saved) {
 
     /** true once both are read back as off; false without the permission, if a change did not stick or cannot be read back. */
     fun cut(): Boolean {
+        forgetIfRestored() // a record that a readable setting contradicts is stale: do not keep it
         // Cutting again keeps the values of the first cut.
         val savedNow = !hasRecord()
         if (savedNow) {
