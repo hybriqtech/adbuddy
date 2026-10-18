@@ -9,6 +9,17 @@ class HomeNoticeTest {
         assertEquals(HomeNotice.QUESTIONS, HomeNotice.of(LinkStatus.CUT, pendingQuestions = 2, notificationsBlocked = true))
     }
 
+    @Test fun oneQuestionIsEnough() {
+        assertEquals(HomeNotice.QUESTIONS, HomeNotice.of(LinkStatus.CUT, 1, true))
+        assertEquals(HomeNotice.QUESTIONS, HomeNotice.of(null, 1, false))
+    }
+
+    @Test fun blockedNotificationsShowWhateverTheLink() {
+        assertEquals(HomeNotice.NOTIFICATIONS, HomeNotice.of(LinkStatus.CONNECTED, 0, true))
+        assertEquals(HomeNotice.NOTIFICATIONS, HomeNotice.of(null, 0, true))
+        assertEquals(HomeNotice.NOTIFICATIONS, HomeNotice.of(LinkStatus.CONNECTING, 0, true))
+    }
+
     @Test fun thenTheLinkProblems_inOrder() {
         assertEquals(HomeNotice.CUT, HomeNotice.of(LinkStatus.CUT, 0, true))
         assertEquals(HomeNotice.UPDATE_APP, HomeNotice.of(LinkStatus.UPDATE_APP, 0, true))

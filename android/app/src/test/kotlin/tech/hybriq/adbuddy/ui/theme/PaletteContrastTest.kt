@@ -61,10 +61,10 @@ class PaletteContrastTest {
             val c = Palette.contrast(scheme.getValue("outline"), scheme.getValue(bg))
             assertTrue("$name: outline on $bg is $c", c >= 3.0)
         }
-        // The button inside the red card is primary text on errorContainer.
+        // Extra margin, not a current use: ActionCard's button is a FilledTonalButton (onSecondaryContainer on secondaryContainer, in pairs).
         val button = Palette.contrast(scheme.getValue("primary"), scheme.getValue("errorContainer"))
         assertTrue("$name: primary on errorContainer is $button", button >= 4.5)
-        // success and warning are used as text and icons on the neutral cards.
+        // Extra margin too: the neutral cards use primary for the icon and onSurface for text (primary on surfaceContainerHigh is in pairs).
         for (s in listOf("success", "warning")) for (bg in containers) {
             val c = Palette.contrast(extra.getValue(s), scheme.getValue(bg))
             assertTrue("$name: $s on $bg is $c", c >= 4.5)
