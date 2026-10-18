@@ -1,0 +1,56 @@
+# Hooks de git con prek (https://github.com/j178/prek): lo rápido, antes de cada commit y sobre lo que va en él;
+# go vet y los tests, antes de cada push. Ver docs/hooks.md. La CI (.github/workflows) se queda tal cual: cubre
+# Windows, macOS, -race, Gradle y el emulador, y corre internal/cli, que aquí no se pasa.
+minimum_prek_version: '0.5.5'
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
+# En pre-push, los hooks con la misma prioridad corren a la vez. go vet va primero; los tests, solos y después,
+# en una máquina que comparten otros agentes.
+priorities:
+  vet: 0
+  tests: 10
+
+repos:
+  - repo: builtin
+    hooks:
+      # `stages: [pre-commit]` explícito en cada uno: con `default_stages` solo, algunos builtins de prek 0.5.5
+      # traen sus propios stages y correrían también en el push.
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: check-case-conflict
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+      # El mayor fichero versionado (un plan en docs/superpowers/plans) pesa 600 KB; el límite por defecto es 500 KB.
+      - id: check-added-large-files
+        stages: [pre-commit]
+        args: [--maxkb=1024]
+
+  - repo: local
+    hooks:
+      # Solo lista (gofmt -l) y falla si hay algo; no reescribe. Arréglalo con `gofmt -w <fichero>` y vuelve a hacer git add.
+      - id: gofmt
+        name: gofmt -l
+        language: system
+        entry: bash scripts/hook-go.sh gofmt
+        types: [go]
+        stages: [pre-commit]
+
+      - id: go-vet
+        name: go vet ./...
+        language: system
+        entry: bash scripts/hook-go.sh vet
+        stages: [pre-push]
+        files: ^host/
+        pass_filenames: false
+        priority: vet
+      # Todos los paquetes menos internal/cli (143 s; solo corre en la CI), de dos en dos (-p 2).
+      - id: go-test
+        name: go test -p 2 (sin internal/cli)
+        language: system
+        entry: bash scripts/hook-go.sh test
+        stages: [pre-push]
+        files: ^host/
+        pass_filenames: false
+        priority: tests
