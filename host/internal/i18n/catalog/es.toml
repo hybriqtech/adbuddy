@@ -805,3 +805,16 @@ Pulsa Ctrl+C para detenerlo."""
 "journal.label.reason" = "motivo:"
 "journal.label.undo" = "deshacer:"
 "error.interrupted" = "detenido con Ctrl+C"
+
+# yolocmd.go: cobra y textos
+"help.yolo.short" = "Apaga el modo YOLO del agente, o mira si está activado"
+"help.yolo.long" = """
+El modo YOLO se activa desde la app ADBuddy del móvil, durante 15 minutos, 1 hora
+o hasta que acabe la sesión: mientras dura, el agente trabaja sin pedirte que
+confirmes nada y solo lo frena la pausa. `off` lo apaga y `status` dice si está
+activado. No existe `on`: solo el móvil puede activarlo."""
+"yolocmd.off" = "YOLO está apagado."
+"yolocmd.on_session" = "YOLO está activado hasta el fin de la sesión."
+"yolocmd.on_until" = "YOLO está activado hasta las %[1]s."
+"yolocmd.serve_not_running" = "serve no está en marcha, así que YOLO está apagado."
+"err.yolocmd.usage" = "Usa adbuddy yolo off o adbuddy yolo status. YOLO solo se puede activar desde la app del móvil."

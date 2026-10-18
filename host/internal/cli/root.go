@@ -60,13 +60,13 @@ func NewRoot(app *App) *cobra.Command {
 	setup := newSetupCmd(app)
 	root.AddCommand(newVersionCmd(app), newServeCmd(app), newRunCmd(app), newJournalCmd(app), newUndoCmd(app), newEnvCmd(app), newConnectCmd(app), newDoctorCmd(app), setup)
 	root.AddCommand(newAttachCmd(app), newNewCmd(app), newStopCmd(app))
-	root.AddCommand(newSendCmd(app), newRemoteCmd(app))
+	root.AddCommand(newSendCmd(app), newRemoteCmd(app), newYoloCmd(app))
 	root.AddCommand(newHookCmd(app))
 	root.AddCommand(newHelperCmds(app)...)
 	groupOf := map[string]string{
 		"setup": "start", "doctor": "start", "serve": "start",
 		"run": "daily", "attach": "daily", "new": "daily", "stop": "daily", "journal": "daily",
-		"undo": "daily", "connect": "daily", "remote": "daily", "env": "daily", "version": "daily",
+		"undo": "daily", "connect": "daily", "remote": "daily", "yolo": "daily", "env": "daily", "version": "daily",
 		"screen": "agent", "tap": "agent", "type": "agent", "screenshot": "agent",
 		"foreground": "agent", "notifications": "agent", "send": "agent",
 	}

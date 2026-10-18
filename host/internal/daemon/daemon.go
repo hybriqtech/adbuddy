@@ -430,6 +430,8 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 		return d.undo(ctx, req, s)
 	case ipc.KindUI:
 		return d.ui(ctx, req, s)
+	case ipc.KindYolo:
+		return d.yoloCmd(req, s)
 	case ipc.KindPing:
 		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.currentSerial(), Identity: d.identity(), Journal: d.o.Journal.Dir(), Paused: d.paused()})
 		return ipc.Exit{}

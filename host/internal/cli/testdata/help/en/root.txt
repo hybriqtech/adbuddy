@@ -33,6 +33,7 @@ Day to day:
   stop          Stop the agent that adbuddy serve runs (serve keeps running)
   undo          Undo journaled changes by running their inverses
   version       Print the ADBuddy version
+  yolo          Turn the agent's YOLO mode off, or see whether it is on
 
 For the agent:
   foreground    Show the app and activity in the phone's foreground
