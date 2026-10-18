@@ -62,12 +62,6 @@ func (l *phoneLink) yoloArea() area {
 				s.Yolo = toBridgeYolo(y.State())
 			}
 		},
-		// attach runs with the server's lock held: publishing waits for it.
-		attach: func() {
-			if y := l.yoloOf(); y != nil {
-				go func() { _ = l.srv.Publish(bridge.TypeYoloState, toBridgeYolo(y.State())) }()
-			}
-		},
 	}
 }
 

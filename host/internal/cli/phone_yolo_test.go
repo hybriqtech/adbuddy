@@ -8,7 +8,6 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -111,13 +110,68 @@ func TestYoloSetRefusesWhatIsNotAnAcceptedDuration(t *testing.T) {
 	}
 }
 
+// yoloLink is a link with an app connected, its log, and what a second
+// connection needs (port and token).
+type yoloLink struct {
+	l     *phoneLink
+	c     *websocket.Conn
+	log   *syncBuffer
+	port  int
+	token string
+	y     *daemon.Yolo
+}
+
+func newYoloLink(t *testing.T) *yoloLink {
+	t.Helper()
+	e := linkEnv(t)
+	f := &appPhone{}
+	l, errb, err := startLink(t, e, f, &recording{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "a handshake", func() bool { return len(f.handedTokens()) >= 1 })
+	tok := f.handedTokens()[0]
+	c := openApp(t, e.cfg.ChatPort, bridge.Hello{Protocol: bridge.ProtocolVersion, Token: tok, AppVersion: "0.3.0"})
+	if m := readApp(t, c); m.Type != bridge.TypeWelcome {
+		t.Fatalf("first message %q", m.Type)
+	}
+	y := daemon.NewYolo(nil, nil)
+	l.useYolo(y)
+	return &yoloLink{l: l, c: c, log: errb, port: e.cfg.ChatPort, token: tok, y: y}
+}
+
 func TestYoloSetWithNoRidIsLogged(t *testing.T) {
-	r, y := yoloRig(t)
+	r := newYoloLink(t)
 	sendApp(t, r.c, bridge.TypeYoloSet, "", bridge.YoloSet{Session: true})
-	// A request with no rid is dropped, and so it never turns anything on.
-	time.Sleep(200 * time.Millisecond)
-	if y.Active() {
+	// A request with no rid is dropped and logged, and so it never turns anything on.
+	want := r.l.lang.T("phone.yolo_set_without_rid")
+	waitUntil(t, "the log line", func() bool { return strings.Contains(r.log.String(), want) })
+	if r.y.Active() {
 		t.Fatal("a yolo.set with no rid turned YOLO on")
+	}
+}
+
+// The app that connects learns the real state from the snapshot (or from the
+// events it replays), and nothing publishes a second, older yolo.state after
+// it: attach used to publish from a goroutine out of the observers' order.
+// Mutation: publish yolo.state from yoloArea's attach again.
+func TestANewConnectionSeesYoloOnceThroughTheSnapshot(t *testing.T) {
+	r := newYoloLink(t)
+	r.y.EnableSession()
+	// A lastSeq the host never reached forces a snapshot.
+	c := openApp(t, r.port, bridge.Hello{Protocol: bridge.ProtocolVersion, Token: r.token, AppVersion: "0.3.0", LastSeq: 1 << 40})
+	if m := readApp(t, c); m.Type != bridge.TypeWelcome {
+		t.Fatalf("first message %q", m.Type)
+	}
+	m := readApp(t, c)
+	var snap bridge.Snapshot
+	if m.Type != bridge.TypeSnapshot || json.Unmarshal(m.Payload, &snap) != nil || !snap.Yolo.Active || !snap.Yolo.Session {
+		t.Fatalf("snapshot %s %s", m.Type, m.Payload)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	if _, data, err := c.Read(ctx); err == nil {
+		t.Fatalf("a second message after the snapshot: %s", data)
 	}
 }
 
@@ -178,16 +232,12 @@ func TestYoloExpiryIsTold(t *testing.T) {
 	}
 }
 
-func TestTheSnapshotAndTheAttachCarryYolo(t *testing.T) {
+func TestTheSnapshotCarriesYolo(t *testing.T) {
 	r, y := yoloRig(t)
 	y.EnableSession()
 	r.readYolo(t)
 	if s := r.l.snapshot(); !s.Yolo.Active || !s.Yolo.Session || s.Yolo.Until != 0 {
 		t.Fatalf("snapshot %+v", s.Yolo)
-	}
-	r.l.yoloArea().attach()
-	if _, st := r.readYolo(t); !st.Active || !st.Session {
-		t.Fatalf("attach %+v", st)
 	}
 }
 
@@ -228,30 +278,45 @@ func TestServeGivesTheLinkTheYoloState(t *testing.T) {
 }
 
 // Nothing but the phone link turns YOLO on: the day another part of serve does
-// (a command, a hook), this test names it. It looks for the names an activation needs
-// (`EnableSession`, `YoloShort`, `YoloLong`), not `.Enable(`, which the remote mode has too: a
-// call like `y.Enable(15 * time.Minute)` written elsewhere would not be seen (the reviewers
-// look for new callers of daemon.Yolo's Enable). Mutation: add
-// `daemon.YoloShort` to any other non-test file of host/.
+// (a command, a hook), this test names it. It parses every non-test file of
+// host/ (comments do not count) and flags the names an activation needs
+// (`EnableSession`, `YoloShort`, `YoloLong`) and any call to a method named
+// `Enable`/`EnableSession`, which catches `y.Enable(15*time.Minute)` and
+// `y.Enable(time.Hour)` too. Allowed: daemon/yolo.go, the phone link, and the
+// remote mode's `Enable(ctx)` in phone_remote.go. Mutation: a real call
+// `y.Enable(time.Hour)` in any other non-test file of host/.
 func TestYoloIsOnlyTurnedOnByThePhoneLink(t *testing.T) {
+	names := map[string]bool{"EnableSession": true, "YoloShort": true, "YoloLong": true}
 	allowed := map[string]bool{"daemon/yolo.go": true, "cli/phone_yolo.go": true}
-	re := regexp.MustCompile(`\bEnableSession\b|\bYoloShort\b|\bYoloLong\b`)
-	root := filepath.Join("..", "..") // host/
+	enableOK := map[string]bool{"cli/phone_remote.go": true} // remote mode's Enable(ctx)
+	root := filepath.Join("..", "..")                        // host/
+	fset := token.NewFileSet()
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
 		}
 		rel, _ := filepath.Rel(filepath.Join(root, "internal"), path)
-		if allowed[filepath.ToSlash(rel)] {
+		rel = filepath.ToSlash(rel)
+		if allowed[rel] {
 			return nil
 		}
-		b, err := os.ReadFile(path)
+		file, err := parser.ParseFile(fset, path, nil, 0) // no comments
 		if err != nil {
 			return err
 		}
-		if loc := re.FindIndex(b); loc != nil {
-			t.Errorf("%s turns YOLO on (or names its durations): only the phone link may", filepath.ToSlash(rel))
-		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.Ident:
+				if names[n.Name] {
+					t.Errorf("%s names %s: only the phone link may turn YOLO on", rel, n.Name)
+				}
+			case *ast.CallExpr:
+				if sel, ok := n.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "EnableSession" || sel.Sel.Name == "Enable" && !enableOK[rel]) {
+					t.Errorf("%s calls .%s(): only the phone link may turn YOLO on", rel, sel.Sel.Name)
+				}
+			}
+			return true
+		})
 		return nil
 	})
 	if err != nil {
