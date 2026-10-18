@@ -65,7 +65,13 @@ func (d *Daemon) guard(ctx context.Context, res classify.Result, args []string) 
 			}
 			for _, form := range forms {
 				for _, tok := range strings.FieldsFunc(form, notInPackageName) {
-					if d.protected(tok) {
+					if tok == uidump.AppPackage {
+						return protectedReason(tok)
+					}
+					if d.userProtected(tok) {
+						if d.lift(ctx, protectedReason(tok)) {
+							continue
+						}
 						return protectedReason(tok)
 					}
 				}
@@ -334,14 +340,20 @@ func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
 			// Empty on purpose: a way out skips ADBuddy (and only ADBuddy).
 		case pkg == uidump.AppPackage && pkg == f.first():
 			return adbuddyInFrontReason(f.viaApp)
-		case d.protected(pkg):
+		case pkg == uidump.AppPackage:
+			return protectedReason(pkg) // ADBuddy in the other half of a split screen: YOLO does not lift it
+		case d.userProtected(pkg) && !d.lift(ctx, protectedReason(pkg)):
 			return protectedReason(pkg)
 		}
 	}
+	// What the APP marks as protected is never lifted by the host, YOLO or not: with the app connected, ADBuddy in
+	// the other half of a split screen reaches the host only as this flag (inFront gives one package), and a window
+	// the phone cannot read could be anything. It is the app that, under YOLO and with the link up, stops marking
+	// the user's protected apps and the heads-up notifications (task A5); ADBuddy it keeps marking.
 	if f.appProtected && !leaving {
 		return screenProtectedReason(f.first())
 	}
-	if why := d.systemUIReason(ctx, f.viaApp, closesShade(words)); why != "" && !(wakesScreen(words) && d.screenOff(ctx)) {
+	if why := d.systemUIReason(ctx, f.viaApp, closesShade(words)); why != "" && !(wakesScreen(words) && d.screenOff(ctx)) && !d.lift(ctx, why) {
 		return why
 	}
 	return ""
@@ -437,9 +449,16 @@ func screenProtectedReason(pkg string) string {
 	return "something on the screen is protected (a protected app, a notification or a window ADBuddy cannot read" + in + "). A notification that just arrived counts for about 8 seconds: wait 10 seconds and try once more; if it is still blocked, ask the user to do this part"
 }
 
-// protected reports whether pkg is ADBuddy or one of the user's protected apps.
+// protected reports whether pkg is ADBuddy or one of the user's protected
+// apps. Under YOLO the user's list does not apply (ADBuddy still does): it
+// decides what the agent may read of a screen and what the notifications show.
 func (d *Daemon) protected(pkg string) bool {
-	return pkg == uidump.AppPackage || d.o.Protected != nil && d.o.Protected(pkg)
+	return pkg == uidump.AppPackage || !d.o.Yolo.Active() && d.userProtected(pkg)
+}
+
+// userProtected reports whether pkg is in the user's own list, whatever YOLO says.
+func (d *Daemon) userProtected(pkg string) bool {
+	return d.o.Protected != nil && d.o.Protected(pkg)
 }
 
 // front is what is in front: every package with a resumed activity (none:

@@ -113,15 +113,17 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUser,
 		Argv: helperArgv(req.UIOp, req.UIArgs), Level: h.level.String(), Rule: h.rule,
 		Description: strings.ReplaceAll(h.title.In(d.o.Lang), "{target}", target),
+		Yolo:        d.o.Yolo.Active(),
 	}
 	if req.Env["ADBUDDY_SOURCE"] == journal.SourceAgent {
 		e.Source = journal.SourceAgent
 	}
+	ctx, notes := withYoloNotes(ctx)
 	if d.paused() {
 		return d.blockUI(e, PausedMessage)
 	}
 	if h.change {
-		if err := d.o.Journal.Writable(); err != nil {
+		if err := d.o.Journal.Writable(); err != nil && !d.lift(ctx, noRecord) {
 			return d.blockUI(e, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
@@ -129,7 +131,10 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// counts in flight so the next question waits for it.
 	release, other := d.admit(e.Description, h.change)
 	if other != "" {
-		return d.blockUI(e, other)
+		if !d.liftQuestion(ctx, other) {
+			return d.blockUI(e, other)
+		}
+		release = d.flyAnyway(h.change, e.Description)
 	}
 	defer release()
 	// foreground is what the guard asks; notifications do not read the screen
@@ -153,7 +158,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// The notice of the on-screen frame goes before the last pause check, so a
 	// pause that arrives meanwhile blocks (after the guard: no notice for what it refuses).
 	if req.UIOp == OpScreenshot {
-		if why := d.showNotice(ctx); why != "" {
+		if why := d.showNotice(ctx); why != "" && !d.lift(ctx, why) {
 			return d.stopUI(ctx, e, why)
 		}
 	}
@@ -194,11 +199,12 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if h.change {
 		running := e
 		running.Status = journal.StatusRunning
-		if err := d.o.Journal.Append(running); err != nil {
+		if err := d.o.Journal.Append(running); err != nil && !d.lift(ctx, noRecord) {
 			return d.blockUI(e, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
 
+	notes.tell(s.Stderr())
 	var data any
 	var via string
 	var f *uiFailure
