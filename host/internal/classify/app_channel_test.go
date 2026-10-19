@@ -474,6 +474,8 @@ func TestAppChannelMarks(t *testing.T) {
 		`eval "$(cat /sdcard/x)" content://tech.hybriq.adbuddy.bridge`:                                                                                          true,
 		"CLASSPATH=/system/framework/content.jar app_process / com.android.commands.content.Content write --uri content://tech.hybriq.adbuddy.bridge/handshake": true,
 		"echo run-as tech.hybriq.adbuddy id | sh":                                                                                                               true,
+		"echo content://tech.hybriq.adbuddy.bridg%65 | sh":                                                                                                      true,
+		"am start -n tech.hybriq.adbudd%79":                                                                                                                     true,
 		"am start -n $(cat /sdcard/c) -a x":                                                                                                                     true,
 		"am broadcast -a \"$(cat /sdcard/c)\"":                                                                                                                  true,
 		"am force-stop tech.hybriq.adbuddy":                                                                                                                     false,
