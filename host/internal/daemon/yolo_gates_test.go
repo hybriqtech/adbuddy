@@ -322,3 +322,59 @@ func (e *env) yoloOnKeepingQuestion(t *testing.T) {
 	e.d.o.Yolo = NewYolo(nil, nil)
 	e.d.o.Yolo.EnableSession()
 }
+
+// The app's own channel stays closed under YOLO: rewriting the handshake would
+// point the app's link at a server of the agent's, and the phone's Pause and
+// Off would stop reaching the host. Every case is asked without YOLO and, with
+// it, neither asked nor run. Mutation: in exec, drop `!res.AppChannel` from the
+// YOLO check (so these 🔴 are lifted again).
+func TestYoloKeepsTheAppChannelClosed(t *testing.T) {
+	const bridge = "content://tech.hybriq.adbuddy.bridge"
+	for _, argv := range [][]string{
+		{"shell", "content", "write", "--uri", bridge + "/handshake"},
+		{"shell", "content", "call", "--uri", bridge, "--method", "handshake"},
+		{"shell", "content", "read", "--uri", bridge + "/handshake"},
+		{"shell", "content", "query", "--uri", bridge},
+		{"shell", "content", "query", "--uri", "content://tech.hybriq.adbuddy%2ebridge"},
+		{"shell", "content", "query", "--uri", "content://TECH.HYBRIQ.ADBUDDY.bridge"},
+		{"shell", "run-as", "tech.hybriq.adbuddy", "cat", "shared_prefs/bridge.xml"},
+		{"shell", "sh -c 'run-as tech.hybriq.adbuddy ls'"},
+		{"shell", "am", "start", "-n", "tech.hybriq.adbuddy/.MainActivity", "-a", "tech.hybriq.adbuddy.action.SETUP"},
+		{"shell", "am", "start", "-a", "tech.hybriq.adbuddy.action.SETUP"},
+		{"shell", "am", "start", "intent:#Intent;action=tech%2ehybriq%2eadbuddy%2eaction%2eSETUP;end"},
+	} {
+		name := strings.Join(argv[1:], " ")
+		t.Run(name, func(t *testing.T) {
+			off, on := yoloPair(t, func(e *env) { e.conf.decision = confirm.Deny }, argv...)
+			if len(off.e.conf.asked) != 1 || off.exit.Code != ExitDenied {
+				t.Fatalf("without YOLO: %+v asked %d", off.exit, len(off.e.conf.asked))
+			}
+			if on.exit.Code != ExitDenied || len(on.e.conf.asked) != 0 || on.ran(argv[1]) || len(on.e.adb.ran()) != 0 {
+				t.Fatalf("with YOLO: %+v asked %d ran %q", on.exit, len(on.e.conf.asked), on.e.adb.ran())
+			}
+			if !strings.Contains(on.stderr(), YoloAppChannelMessage) {
+				t.Fatalf("stderr %q", on.stderr())
+			}
+			if j := on.e.last(t); j.Status != journal.StatusBlocked {
+				t.Fatalf("journal %+v", j)
+			}
+		})
+	}
+}
+
+// Another special 🔴 that is not the channel still runs under YOLO, with the
+// line saying so (force-stop of ADBuddy is ruling T4).
+func TestYoloStillRunsSpecialsOutsideTheAppChannel(t *testing.T) {
+	for _, argv := range [][]string{
+		{"shell", "am", "force-stop", "tech.hybriq.adbuddy"},
+		{"shell", "reboot"},
+	} {
+		off, on := yoloPair(t, func(e *env) { e.conf.decision = confirm.Deny }, argv...)
+		if len(off.e.conf.asked) != 1 {
+			t.Fatalf("%v without YOLO: asked %d", argv, len(off.e.conf.asked))
+		}
+		if on.exit.Code != 0 || len(on.e.conf.asked) != 0 || !on.ran(argv[1]) || !on.warned("asked for your confirmation") {
+			t.Fatalf("%v with YOLO: %+v asked %d ran %q stderr %q", argv, on.exit, len(on.e.conf.asked), on.e.adb.ran(), on.stderr())
+		}
+	}
+}

@@ -353,7 +353,8 @@ func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
 	if f.appProtected && !leaving {
 		return screenProtectedReason(f.first())
 	}
-	if why := d.systemUIReason(ctx, f.viaApp, closesShade(words)); why != "" && !(wakesScreen(words) && d.screenOff(ctx)) && !d.lift(ctx, why) {
+	// YOLO lifts a shade or a system window that is KNOWN to be there; not knowing what is in front (R1) still blocks.
+	if why, unknown := d.systemUIReason(ctx, f.viaApp, closesShade(words)); why != "" && !(wakesScreen(words) && d.screenOff(ctx)) && (unknown || !d.lift(ctx, why)) {
 		return why
 	}
 	return ""
@@ -363,38 +364,38 @@ func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
 // protects the screen, or "": the notification shade or the quick settings
 // open (a 2FA code can be on them), and, when the app does not tell, a window
 // of systemui that is not a fixed one (a heads-up notification, with no app
-// name here). It fails closed: what it cannot read blocks. The caller lifts
+// name here). It fails closed: what it cannot read blocks, and says so with unknown (YOLO never lifts that). The caller lifts
 // the block only for a wake key with the screen off (the lock screen is the shade then).
-func (d *Daemon) systemUIReason(ctx context.Context, viaApp, closing bool) string {
-	const unknown = "; ADBuddy does not touch or read the screen without knowing"
+func (d *Daemon) systemUIReason(ctx context.Context, viaApp, closing bool) (why string, unknown bool) {
+	const unreadable = "; ADBuddy does not touch or read the screen without knowing"
 	out, code, err := d.o.ADB.Shell(ctx, focusCmd)
 	focus, ok := uidump.ParseFocus(out)
 	if err != nil || code != 0 || !ok {
-		return "could not tell whether the notification shade is open" + unknown
+		return "could not tell whether the notification shade is open" + unreadable, true
 	}
 	if closing {
-		return ""
+		return "", false
 	}
 	for _, title := range focus {
 		if uidump.IsShade(title) {
-			return "the notification shade is open; close it with Back (input keyevent 4) or ask the user to do this part"
+			return "the notification shade is open; close it with Back (input keyevent 4) or ask the user to do this part", false
 		}
 	}
 	if viaApp {
-		return "" // the app's foreground says if a notification is on screen
+		return "", false // the app's foreground says if a notification is on screen
 	}
 	out, code, err = d.o.ADB.Shell(ctx, windowsCmd)
 	windows, ok := uidump.ParseSystemUIWindows(out)
 	if err != nil || code != 0 || !ok {
-		return "could not tell whether a system window is on screen" + unknown
+		return "could not tell whether a system window is on screen" + unreadable, true
 	}
 	if len(windows) > 0 {
 		for i, w := range windows {
 			windows[i] = classify.Printable(w)
 		}
-		return "a system window is on screen (" + strings.Join(windows, ", ") + "), maybe a notification; wait for it to go away or ask the user to do this part"
+		return "a system window is on screen (" + strings.Join(windows, ", ") + "), maybe a notification; wait for it to go away or ask the user to do this part", false
 	}
-	return ""
+	return "", false
 }
 
 // screenOff reports whether dumpsys power says the screen is off.

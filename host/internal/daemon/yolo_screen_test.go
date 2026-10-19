@@ -398,15 +398,21 @@ func TestYoloLiftsTheNoticeRefusalOfAScreenshot(t *testing.T) {
 
 // ADBuddy named in a command (am start, monkey) stays protected under YOLO.
 // Mutation: in guard, make the `tok == uidump.AppPackage` branch `&& !d.lift(...)`.
+// (am start naming the app is also the app's channel: it stops earlier, at the
+// 🔴 gate, with that message; monkey reaches the guard.)
 func TestYoloKeepsADBuddyProtectedWhenNamedInACommand(t *testing.T) {
-	for _, argv := range [][]string{
-		{"shell", "am", "start", "-n", "tech.hybriq.adbuddy/.MainActivity"},
-		{"shell", "monkey", "-p", "tech.hybriq.adbuddy", "-c", "android.intent.category.LAUNCHER", "1"},
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"shell", "am", "start", "-n", "tech.hybriq.adbuddy/.MainActivity"}, YoloAppChannelMessage},
+		{[]string{"shell", "monkey", "-p", "tech.hybriq.adbuddy", "-c", "android.intent.category.LAUNCHER", "1"}, "tech.hybriq.adbuddy is a protected app"},
 	} {
+		argv := tc.argv
 		e := newEnv(t)
 		e.yoloOn(t)
 		s, exit := e.exec(t, argv...)
-		if exit.Code != ExitDenied || !strings.Contains(s.errOut.String(), "tech.hybriq.adbuddy is a protected app") || len(ranOnPhone(e)) != 0 {
+		if exit.Code != ExitDenied || !strings.Contains(s.errOut.String(), tc.want) || len(ranOnPhone(e)) != 0 {
 			t.Errorf("%v: %+v %q ran %q", argv, exit, s.errOut.String(), ranOnPhone(e))
 		}
 	}
@@ -461,5 +467,32 @@ func TestYoloUndoEntryKeepsYoloWhenItExpiresMidway(t *testing.T) {
 	}
 	if u := lastUndo(t, e); u.Rule != "undo-yolo" || !u.Yolo {
 		t.Fatalf("undo entry %+v", u)
+	}
+}
+
+// R1: YOLO lifts the shade and the system windows when the guard KNOWS they are
+// there; "I cannot tell what is in front" still blocks. Mutation: in
+// guard.go, lift whatever systemUIReason returns (ignore its unknown flag).
+func TestYoloKeepsBlockingWhenItCannotTellTheShadeOrTheWindows(t *testing.T) {
+	for name, tc := range map[string]struct {
+		setup func(*env)
+		want  string
+	}{
+		"focus unreadable":   {func(e *env) { e.adb.shell[fixedFocusCmd] = "Unknown command\n" }, "could not tell whether the notification shade is open"},
+		"focus failing":      {func(e *env) { delete(e.adb.shell, fixedFocusCmd) }, "could not tell whether the notification shade is open"},
+		"windows unreadable": {func(e *env) { e.adb.shell[fixedWindowsCmd] = "Segmentation failure\n" }, "could not tell whether a system window is on screen"},
+		"windows empty":      {func(e *env) { e.adb.shell[fixedWindowsCmd] = "" }, "could not tell whether a system window is on screen"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, on := yoloPair(t, func(e *env) { e.adb.shell["dumpsys power"] = powerAwake; tc.setup(e) }, "shell", "input", "tap", "1", "1")
+			if on.exit.Code != ExitDenied || !strings.Contains(on.stderr(), tc.want) || on.ran("input tap") {
+				t.Fatalf("with YOLO: %+v ran %q stderr %q", on.exit, on.e.adb.ran(), on.stderr())
+			}
+		})
+	}
+	// Known: a heads-up window on screen is lifted, and told.
+	off, on := yoloPair(t, func(e *env) { e.adb.shell["dumpsys power"] = powerAwake; e.adb.shell[fixedWindowsCmd] = windowsHeadsUp }, "shell", "input", "tap", "1", "1")
+	if off.exit.Code != ExitDenied || on.exit.Code != 0 || !on.warned("a system window is on screen") {
+		t.Fatalf("known window: off %+v on %+v %q", off.exit, on.exit, on.stderr())
 	}
 }

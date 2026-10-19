@@ -155,6 +155,12 @@ var errWithdrawnYolo = i18n.M("confirm.cause.yolo").Err()
 // did not run: whoever answered it with YOLO off is not who turned YOLO on.
 const YoloWithdrawnMessage = "the confirmation was withdrawn because YOLO was turned on: run it again"
 
+// YoloAppChannelMessage is what the agent is told when a command reaches the
+// ADBuddy app's own channel or private files while YOLO is on: YOLO does not
+// lift it, and it is not asked either (the answer would come from a mode that
+// was meant to skip the question).
+const YoloAppChannelMessage = "this touches the ADBuddy app's own channel or private files; not run under YOLO, and not asked (turn YOLO off from the phone to be asked)"
+
 // flight is a change admitted to adb.
 type flight struct{ title string }
 
@@ -566,6 +572,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	redWhy := "this asked for your confirmation (" + classify.Printable(e.Description) + ") and ran without it"
 	if !reason.Empty() {
 		redWhy += "; " + classify.Printable(reason.In(d.o.Lang))
+	}
+	// The app's own channel is never lifted: rewriting the handshake would point the app's link at a server of the
+	// agent's, and the phone's Pause and Off would stop reaching the host.
+	if level == classify.Red && res.AppChannel && d.o.Yolo.Active() {
+		return d.block(e, s, YoloAppChannelMessage)
 	}
 	redLifted := level == classify.Red && d.lift(ctx, redWhy)
 	if level == classify.Red && !redLifted {
