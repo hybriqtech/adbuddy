@@ -110,6 +110,7 @@
     <string name="suggestion_battery">How much battery is left?</string>
     <string name="suggestion_volume">Turn the volume down</string>
     <string name="suggestion_screenshot">Take a screenshot</string>
+    <string name="cut_still_connected">The PC is still connected: turn off USB debugging in Developer options.</string>
     <string name="cut_done">Done. The PC can no longer touch your phone.</string>
     <string name="cut_restored">The PC has access again. If you used remote mode, its port stays open until the PC connects or the phone restarts.</string>
     <string name="cut_failed">Debugging could not be turned off. Turn off USB debugging and wireless debugging in Developer options.</string>

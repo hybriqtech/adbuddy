@@ -5,10 +5,13 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -21,6 +24,7 @@ import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.control.AccessSwitch
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutConfirm
 import tech.hybriq.adbuddy.screens.ComponentActivityRule
 import tech.hybriq.adbuddy.screens.PHONE
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
@@ -37,6 +41,18 @@ class ChatRootCutWiringTest {
     private val compose = createAndroidComposeRule<ComponentActivity>()
 
     @get:Rule val rules: RuleChain = RuleChain.outerRule(ComponentActivityRule()).around(compose)
+
+    // The PC running the tests may have an emulator on 127.0.0.1:5555: the check after a cut (R22) must not see it.
+    @Before fun noAdbdHere() {
+        CutAccess.probe = { false }
+    }
+
+    @After fun realProbe() {
+        CutAccess.probe = CutConfirm::adbdListening
+        CutAccess.waitMs = CutConfirm.WAIT_MS
+    }
+
+    private fun waitForText(id: Int) = compose.waitUntil(5_000) { compose.onAllNodesWithText(text(id)).fetchSemanticsNodes().isNotEmpty() }
 
     private val app get() = RuntimeEnvironment.getApplication() as AdbuddyApp
     private fun text(id: Int) = app.getString(id)
@@ -73,7 +89,21 @@ class ChatRootCutWiringTest {
         compose.waitForIdle()
         assertEquals(0, setting(AccessSwitch.ADB_ENABLED))
         assertEquals(0, setting(AccessSwitch.ADB_WIFI_ENABLED))
+        waitForText(R.string.cut_done) // after the check of R22, off the main thread
         compose.onNodeWithText(text(R.string.cut_done)).assertIsDisplayed()
+    }
+
+    @Test fun aCutThatLeavesAdbAnsweringSaysSoWithTheWayToDeveloperOptions() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true } // adbd still answers on 5555: USB debugging did not go off
+        CutAccess.waitMs = 50
+        mount()
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        waitForText(R.string.cut_still_connected)
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.action_developer_options)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.cut_done)).assertDoesNotExist()
     }
 
     @Test fun aBothOffRecordAsksFirstThenSaysToDoItByHandAndWritesNothing() {

@@ -107,6 +107,7 @@
     <string name="suggestion_battery">¿Cuánta batería queda?</string>
     <string name="suggestion_volume">Baja el volumen</string>
     <string name="suggestion_screenshot">Haz una captura de pantalla</string>
+    <string name="cut_still_connected">El PC sigue conectado: apaga la depuración USB en Opciones de desarrollador.</string>
     <string name="cut_done">Hecho. El PC ya no puede tocar tu móvil.</string>
     <string name="cut_restored">El PC vuelve a tener acceso. Si usabas el modo remoto, su puerto sigue abierto hasta que el PC se conecte o reinicies.</string>
     <string name="cut_failed">No se ha podido apagar la depuración. Apaga la depuración USB y la depuración inalámbrica en Opciones de desarrollador.</string>

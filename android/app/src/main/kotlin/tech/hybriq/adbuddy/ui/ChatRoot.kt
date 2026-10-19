@@ -43,6 +43,7 @@ import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.chat.Composer
 import tech.hybriq.adbuddy.confirm.ConfirmUi
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutCheck
 import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.DownloadState
 import tech.hybriq.adbuddy.files.FileIntents
@@ -76,6 +77,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val cutRestored = stringResource(R.string.cut_restored)
     val cutDone = stringResource(R.string.cut_done)
     val restoreManual = stringResource(R.string.restore_manual)
+    val cutStillConnected = stringResource(R.string.cut_still_connected)
     val developerOptions = stringResource(R.string.action_developer_options)
 
     // What the host says (notice) and what it refuses (chat, uploads), as the host wrote it.
@@ -101,8 +103,9 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         }
     }
 
-    fun report(ok: Boolean, restoring: Boolean) {
+    fun report(ok: Boolean, restoring: Boolean, stillConnected: Boolean = false) {
         val message = when {
+            stillConnected -> cutStillConnected
             !ok && restoring && CutAccess.needsManualRestore(context) -> restoreManual
             !ok && restoring -> restoreFailed
             !ok -> cutFailed
@@ -111,7 +114,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         }
         scope.launch {
             // Without the permission (or if the change did not stick), the person does it by hand.
-            val r = snackbar.notify(message, actionLabel = if (ok) null else developerOptions)
+            val r = snackbar.notify(message, actionLabel = if (ok && !stillConnected) null else developerOptions)
             if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
         }
     }
@@ -135,7 +138,15 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             pause = app.bridge::pause,
             cut = {
                 val up = CutAccess.channelUp(app.bridge.state.value)
-                report(ok = CutAccess.cut(context, up), restoring = false)
+                if (!CutAccess.cut(context, up)) {
+                    report(ok = false, restoring = false)
+                } else {
+                    scope.launch {
+                        // R22: the channel and port 5555 say whether the cut really closed adb.
+                        val check = CutAccess.confirm(context, up) { CutAccess.channelUp(app.bridge.state.value) }
+                        report(ok = true, restoring = false, stillConnected = check == CutCheck.STILL_CONNECTED)
+                    }
+                }
             },
             restore = { report(ok = CutAccess.restore(context), restoring = true) },
             openActivity = { route = Route.ACTIVITY },

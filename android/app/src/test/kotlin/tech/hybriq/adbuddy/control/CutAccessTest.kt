@@ -14,6 +14,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.SessionState
+import tech.hybriq.adbuddy.listener.CodeScan
 
 @RunWith(RobolectricTestRunner::class)
 class CutAccessTest {
@@ -52,16 +53,20 @@ class CutAccessTest {
     }
 
     // The shield of the screen and Cut in the notification (spec 2026-10-18 R5, §8.7) tell cut() whether the channel is
-    // alive (R20).
-    @Test fun bothCutButtonsPassTheChannel() {
-        val up = Regex("""val up = CutAccess\.channelUp\(app\.bridge\.state\.value\)""")
-        val cut = Regex("""CutAccess\.cut\(\s*(context|this)\s*,\s*up\s*\)""")
-        val withoutChannel = Regex("""CutAccess\.cut\(\s*(context|this)\s*\)""")
+    // alive (R20) and check the cut afterwards (R22). Read as code (no comments, no strings), exactly one call each.
+    @Test fun bothCutButtonsPassTheChannelAndCheckTheCut() {
+        val cutCall = Regex("""CutAccess\.cut\(""")
+        val confirmCall = Regex("""CutAccess\.confirm\(""")
+        // The channel is read at the tap, right before the only cut(), in the same block.
+        val upThenCut = Regex("""val up = CutAccess\.channelUp\(app\.bridge\.state\.value\)\s+if \(!CutAccess\.cut\(\s*(context|this)\s*,\s*up\s*\)\)""")
+        val confirm = Regex("""CutAccess\.confirm\(\s*(context|this@BridgeService)\s*,\s*up\s*\)\s*\{\s*CutAccess\.channelUp\(app\.bridge\.state\.value\)\s*\}""")
         for (path in listOf("ui/ChatRoot.kt", "bridge/BridgeService.kt")) {
-            val src = File("src/main/kotlin/tech/hybriq/adbuddy/$path").readText()
-            assertTrue("$path reads the channel", up.containsMatchIn(src))
-            assertTrue("$path passes it to cut()", cut.containsMatchIn(src))
-            assertFalse("$path cuts without the channel", withoutChannel.containsMatchIn(src))
+            val src = CodeScan.code(File("src/main/kotlin/tech/hybriq/adbuddy/$path").readText())
+            assertEquals("$path has exactly one cut() call", 1, cutCall.findAll(src).count())
+            assertTrue("$path reads the channel at the tap and passes it to that cut()", upThenCut.containsMatchIn(src))
+            assertEquals("$path has exactly one confirm() call", 1, confirmCall.findAll(src).count())
+            assertTrue("$path checks the cut with the channel now", confirm.containsMatchIn(src))
+            assertTrue("$path says when the PC is still connected", src.contains("CutCheck.STILL_CONNECTED"))
         }
     }
 }

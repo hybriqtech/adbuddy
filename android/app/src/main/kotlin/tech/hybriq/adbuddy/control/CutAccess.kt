@@ -5,11 +5,14 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.annotation.VisibleForTesting
 import androidx.core.content.edit
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withContext
 import tech.hybriq.adbuddy.bridge.BridgeState
 
 /**
@@ -53,6 +56,20 @@ object CutAccess {
     fun cut(context: Context, channelUp: Boolean = false): Boolean {
         AccessDiag.log(context, "cut.before", channelUp)
         return switch(context, channelUp).cut().also { AccessDiag.log(context, "cut.after ok=$it") }
+    }
+
+    /** The port check of confirm(); tests on a PC with an emulator on 5555 replace it. */
+    @VisibleForTesting internal var probe: () -> Boolean = CutConfirm::adbdListening
+
+    @VisibleForTesting internal var waitMs: Long = CutConfirm.WAIT_MS
+
+    /**
+     * After a cut() that said true (R22): DONE once the channel that was alive at the tap ([wasUp]) has fallen and
+     * nothing answers on 127.0.0.1:5555; STILL_CONNECTED after waitMs otherwise (the screen says to turn USB debugging
+     * off by hand). [channelUp] reads the bridge now. Runs on the IO dispatcher.
+     */
+    suspend fun confirm(context: Context, wasUp: Boolean, channelUp: () -> Boolean): CutCheck = withContext(Dispatchers.IO) {
+        CutConfirm.check(wasUp, channelUp, probe, waitMs).also { AccessDiag.log(context, "cut.check=$it") }
     }
 
     /** Undoes cut(), with the values from before it. */
