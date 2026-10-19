@@ -80,6 +80,7 @@ Claude Code (recommended), Codex, Gemini CLI and OpenCode. ADBuddy does not inst
 - Red commands wait for your answer, on the phone (it must be unlocked to allow) or in the host's terminal. An unanswered question counts as a no (after 2 minutes by default).
 - With the app installed, banking, payments, password and 2FA apps are protected while they are in front (a proposal from their names that you confirm or edit in the app). Until the app has sent a list, only ADBuddy itself is protected; after that the PC keeps the last list it got.
 - ADBuddy has no telemetry and no server of its own. What the agent reads on your phone goes to the agent's own provider.
+- **YOLO mode is the exception.** If you turn it on in the app, the agent runs even destructive commands without asking, for 15 minutes, 1 hour or until `adbuddy serve` ends. Only the phone turns it on, with a strong fingerprint or face or the screen lock. Pause turns it off. See [YOLO mode](docs/safety.md#yolo-mode).
 - **The shim protects against mistakes and prompt injection. It does not protect against an agent determined to find another adb.** The real guarantee is **Cut access** in the app, which turns debugging off from the phone: with it off, the PC cannot reach the phone.
 
 ADBuddy lowers the risk of letting an agent drive your phone; it does not remove it. Use a phone and accounts you can afford to repair, and read each question before you allow it.
@@ -111,6 +112,7 @@ These are the commands of `adbuddy --help`; `adbuddy <command> --help` shows the
 | `adbuddy undo` | Undo journaled changes by running their inverses |
 | `adbuddy connect <ip:port>` | Connect to the phone by IP address and port |
 | `adbuddy remote` | Open or close adb's network port 5555 (remote mode) |
+| `adbuddy yolo` | Turn the agent's YOLO mode off, or see whether it is on |
 | `adbuddy doctor` | Check everything ADBuddy needs and say how to fix it |
 | `adbuddy env` | Manage the agent environment |
 | `adbuddy screen` | List what is on the phone's screen and where to tap |

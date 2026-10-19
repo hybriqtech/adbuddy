@@ -26,6 +26,7 @@ var HostPayloads = map[string]func() any{
 	TypeTerminalSize:     func() any { return new(TerminalSize) },
 	TypeUIRequest:        func() any { return new(UIRequest) },
 	TypeRemoteState:      func() any { return new(RemoteState) },
+	TypeYoloState:        func() any { return new(YoloState) },
 }
 
 // HostClasses gives the class of each type the host sends (protocol spec
@@ -52,6 +53,7 @@ var HostClasses = map[string]Class{
 	TypeTerminalSize:     ClassStream,
 	TypeUIRequest:        ClassStream,
 	TypeRemoteState:      ClassEvent,
+	TypeYoloState:        ClassEvent,
 }
 
 // AppPayloads maps each message type the app sends to a new value of its
@@ -78,4 +80,5 @@ var AppPayloads = map[string]func() any{
 	TypeUIResponse:      func() any { return new(UIResponse) },
 	TypeDeviceInfo:      func() any { return new(DeviceInfo) },
 	TypeRemoteSet:       func() any { return new(RemoteSet) },
+	TypeYoloSet:         func() any { return new(YoloSet) },
 }

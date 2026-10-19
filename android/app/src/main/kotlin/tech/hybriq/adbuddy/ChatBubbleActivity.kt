@@ -1,7 +1,7 @@
 package tech.hybriq.adbuddy
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
@@ -18,7 +18,7 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
  * agent may read are the confirm button and unticking a protected app (which also shows the agent more), and both
  * are a tap by the person. ADBuddy is a protected app, so the host's guard blocks the agent while ADBuddy is in front.
  */
-class ChatBubbleActivity : ComponentActivity() {
+class ChatBubbleActivity : FragmentActivity() {
     /** Questions whose dialog the person closed: without this, a closed 🔴 dialog would come straight back. */
     private var closed by mutableStateOf(emptySet<String>())
 

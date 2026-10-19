@@ -16,6 +16,8 @@ data class BridgeState(
     val chat: ChatState = ChatState(),
     /** The remote mode (M5): RemoteReducer. null = unknown (never read as off). */
     val remote: RemoteState? = null,
+    /** The YOLO mode (spec 2026-10-18): YoloReducer. null = unknown (never read as off). */
+    val yolo: YoloState? = null,
 ) {
     /** INCOMPATIBLE: the app or the host must be updated; the app stops reconnecting. */
     enum class Connection { WAITING, CONNECTING, CONNECTED, INCOMPATIBLE }
@@ -27,7 +29,7 @@ data class BridgeState(
         const val MAX_JOURNAL = 500
 
         /** Each area's events (protocol spec §10). A type no reducer handles only moves lastSeq. */
-        val REDUCERS: List<Reducer> = listOf(ConfirmReducer, ChatReducer, RemoteReducer)
+        val REDUCERS: List<Reducer> = listOf(ConfirmReducer, ChatReducer, RemoteReducer, YoloReducer)
     }
 
     /** Applies one message from the host. */

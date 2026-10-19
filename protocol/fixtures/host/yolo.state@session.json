@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "seq": 8,
+  "type": "yolo.state",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "active": true,
+    "until": 0,
+    "session": true
+  }
+}

@@ -191,22 +191,27 @@ func SelectUndo(entries []journal.Entry, target, session, identity string) (plan
 // the 🔴 ones: those ask like any 🔴 command. It holds the changes lock, so
 // two undos (or an undo and a change) never race.
 func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
-	if d.o.Paused() {
+	if d.paused() {
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
 	}
-	if t := d.waitingFor(); t != "" {
+	ctx, notes := withYoloNotes(ctx)
+	yoloAtStart := d.o.Yolo.Active()
+	if t := d.waitingFor(); t != "" && !d.liftQuestion(ctx, t) {
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: t}
 	}
 	d.changes.Lock()
 	defer d.changes.Unlock()
-	if d.o.Paused() { // paused while waiting for the lock
+	if d.paused() { // paused while waiting for the lock
 		return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: PausedMessage}
 	}
 	// Admitted as a change in flight: a question waits for the inverses.
 	// A question started while undo waited for the lock stops it here.
 	release, other := d.admit(undoPrefix(d.o.Lang)+req.Target, true)
 	if other != "" {
-		return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: other}
+		if !d.liftQuestion(ctx, other) {
+			return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: other}
+		}
+		release = d.flyAnyway(true, undoPrefix(d.o.Lang)+req.Target)
 	}
 	// release is replaced while a 🔴 inverse is asked (see below).
 	defer func() { release() }()
@@ -249,7 +254,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if ctx.Err() != nil {
 			break // the client left: stop before touching the phone again
 		}
-		if d.o.Paused() {
+		if d.paused() {
 			_ = s.Data(res)
 			return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
 		}
@@ -280,56 +285,71 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		level, rule := "yellow", "undo" // what the journal says: 🔴 only when the user was asked
 		if ires := d.o.Classifier.Classify(e.Inverse.Argv); ires.Level == classify.Red {
 			level, rule = ires.Level.String(), "undo-confirmed"
-			// Not asked while this undo is itself in flight: the question
-			// waits for the changes in flight, this one included.
-			release()
-			release = func() {}
-			// What the person reads comes from the classifier, never from the
-			// journal: the agent can forge its records.
-			detail := d.lang().T("undo.confirm.detail") + "\n" + classify.Printable(ires.Detail(d.o.Lang))
-			decision, askErr := d.AskUser(ctx, confirm.Request{
-				ID: journal.NewID("j_", d.o.Now().UTC()), Title: ires.Description(d.o.Lang), Detail: detail,
-				RawCommand: classify.DisplayCommand(e.Inverse.Argv), Special: ires.Special,
-			}, 0)
-			if errors.Is(askErr, ErrAskPaused) {
-				_ = s.Data(res)
-				return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
-			}
-			if errors.Is(askErr, ErrAskBusy) { // never asked: not a denial
-				_ = s.Data(res)
-				return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: askErr.Error()}
-			}
-			if ctx.Err() != nil {
-				break // the client left, or serve stopped, while asking
-			}
-			// Back in flight, whatever the answer, while the loop goes on.
-			r, other := d.admit(undoPrefix(d.o.Lang)+req.Target, true)
-			if other != "" {
-				_ = s.Data(res)
-				return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: other}
-			}
-			release = r
-			why := ""
-			switch {
-			case askErr != nil:
-				why = "denied: " + askErr.Error()
-			case decision == confirm.Nobody:
-				why = "denied: nobody could confirm"
-			case decision == confirm.Timeout:
-				why = "denied: confirmation expired"
-			case decision != confirm.Allow:
-				why = "denied by user"
-			}
-			if why != "" {
-				item.Error = why
-				res.Skipped = append(res.Skipped, item)
-				denied++
+			// The app's own channel is never lifted (see exec): a forged inverse cannot rewrite the handshake under YOLO.
+			if ires.AppChannel && d.o.Yolo.Active() {
+				item.Error = "refused: " + YoloAppChannelMessage
+				res.Failed = append(res.Failed, item)
+				fmt.Fprintf(s.Stderr(), "✗ %s: %s\n", classify.Printable(e.Description), classify.Printable(item.Error))
 				continue
 			}
-			// Paused while it was asked (an Allow may come after the pause).
-			if d.o.Paused() {
-				_ = s.Data(res)
-				return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
+			if d.lift(ctx, "the inverse of "+classify.Printable(e.Description)+" asked for your confirmation ("+classify.Printable(ires.Description(d.o.Lang))+") and ran without it") {
+				rule = "undo-yolo" // nobody was asked
+			} else {
+				// Not asked while this undo is itself in flight: the question
+				// waits for the changes in flight, this one included.
+				release()
+				release = func() {}
+				// What the person reads comes from the classifier, never from the
+				// journal: the agent can forge its records.
+				detail := d.lang().T("undo.confirm.detail") + "\n" + classify.Printable(ires.Detail(d.o.Lang))
+				decision, askErr := d.AskUser(ctx, confirm.Request{
+					ID: journal.NewID("j_", d.o.Now().UTC()), Title: ires.Description(d.o.Lang), Detail: detail,
+					RawCommand: classify.DisplayCommand(e.Inverse.Argv), Special: ires.Special,
+				}, 0)
+				if errors.Is(askErr, ErrAskPaused) {
+					_ = s.Data(res)
+					return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
+				}
+				if errors.Is(askErr, ErrAskYolo) { // YOLO was turned on while it waited: run undo again, it will not ask
+					_ = s.Data(res)
+					return ipc.Exit{Code: ExitDenied, ErrorCode: "CONFIRMATION_WITHDRAWN", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", YoloWithdrawnMessage, len(res.Undone))}
+				}
+				if errors.Is(askErr, ErrAskBusy) { // never asked: not a denial
+					_ = s.Data(res)
+					return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: askErr.Error()}
+				}
+				if ctx.Err() != nil {
+					break // the client left, or serve stopped, while asking
+				}
+				// Back in flight, whatever the answer, while the loop goes on.
+				r, other := d.admit(undoPrefix(d.o.Lang)+req.Target, true)
+				if other != "" {
+					_ = s.Data(res)
+					return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: other}
+				}
+				release = r
+				why := ""
+				switch {
+				case askErr != nil:
+					why = "denied: " + askErr.Error()
+				case decision == confirm.Nobody:
+					why = "denied: nobody could confirm"
+				case decision == confirm.Timeout:
+					why = "denied: confirmation expired"
+				case decision != confirm.Allow:
+					why = "denied by user"
+				}
+				if why != "" {
+					item.Error = why
+					res.Skipped = append(res.Skipped, item)
+					denied++
+					continue
+				}
+				// Paused while it was asked (an Allow may come after the pause).
+				if d.paused() {
+					_ = s.Data(res)
+					return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
+				}
 			}
 		}
 		if src, ok := moveBackTarget(e.Inverse.Argv); ok {
@@ -353,6 +373,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		u := journal.Entry{
 			ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUndo,
 			Argv: e.Inverse.Argv, Level: level, Rule: rule, Description: undoPrefix(d.o.Lang) + e.Description, Undoes: e.ID,
+			Yolo: yoloAtStart || rule == "undo-yolo", // YOLO could expire between the lift and here
 		}
 		item.UndoID = u.ID
 		// The mark goes first, outside the agent's reach: if the host dies
@@ -370,6 +391,7 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			return ipc.Exit{Code: 1, ErrorCode: "JOURNAL_UNWRITABLE", Error: fmt.Sprintf("the journal cannot be written (%v); undid %d change(s) before stopping", err, len(res.Undone))}
 		}
 		var errb bytes.Buffer
+		notes.tell(s.Stderr()) // right before it runs, not when the undo ends blocked
 		code, runErr := d.o.ADB.Run(ctx, "", e.Inverse.Argv, nil, io.Discard, &errb)
 		if runErr != nil && code == 0 {
 			code = 1

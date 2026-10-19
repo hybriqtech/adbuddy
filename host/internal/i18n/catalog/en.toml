@@ -15,6 +15,7 @@
 "confirm.expired" = "→ expired, denied"
 "confirm.withdrawn" = "→ withdrawn: %[1]s"
 "confirm.cause.paused" = "paused from the phone"
+"confirm.cause.yolo" = "YOLO mode was turned on"
 "confirm.abandoned" = "→ abandoned by the agent"
 # session: what an attached terminal shows (session/attach.go)
 "session.agent_ended" = "The agent ended. Start it again with adbuddy new, or detach with Ctrl+]."
@@ -24,6 +25,13 @@
 "daemon.journal_failed" = "journal write failed for %[1]s: %[2]s"
 "undo.prefix" = "Undo: "
 "undo.confirm.detail" = "Undoing a change from the journal needs a command that asks for confirmation."
+# yolo: what the journal and serve say when YOLO mode changes (daemon/yolo.go)
+"yolo.event.on_until" = "YOLO mode on until %[1]s: nothing asks for confirmation and no fixed block applies, except the pause"
+"yolo.event.on_session" = "YOLO mode on until the session ends: nothing asks for confirmation and no fixed block applies, except the pause"
+"yolo.event.off_app" = "YOLO mode off (turned off from the phone)"
+"yolo.event.off_cli" = "YOLO mode off (adbuddy yolo off)"
+"yolo.event.off_expired" = "YOLO mode off (its time is up)"
+"yolo.event.off_pause" = "YOLO mode off (the agent was paused from the phone)"
 # remote: the question of `adbuddy remote on` (cli/remotecmd.go)
 "remote.confirm.title" = "Open adb's network port 5555 for 12 hours"
 "remote.confirm.detail" = "adb will listen on port 5555 on any network until you close it with `adbuddy remote off` or 12 hours pass."
@@ -814,6 +822,7 @@ Press Ctrl+C to stop."""
 "remote.off.usb_failed" = "adb usb failed (%[1]s)"
 "phone.chat_port_unavailable" = "Could not choose a port for the phone app's channel (%[1]s); set chat_port in %[2]s"
 "phone.chat_port_in_use" = "Port %[1]d for the phone app's channel is in use (%[2]s); change chat_port in %[3]s to a free port between 1024 and 65535 and start adbuddy serve again"
+"phone.yolo_set_without_rid" = "The phone app sent a YOLO request with no id, so it was ignored."
 "phone_watch.warn" = "⚠ %[1]s"
 "phone_watch.not_listed" = "The phone is not listed and its identity cannot be checked (%[1]s): waiting for it to come back as %[2]s."
 "phone_watch.not_reachable_none" = "The phone is not reachable (no other address known): waiting for it."
@@ -828,3 +837,17 @@ Press Ctrl+C to stop."""
 "journal.label.reason" = "reason:"
 "journal.label.undo" = "undo:"
 "error.interrupted" = "stopped with Ctrl+C"
+
+# yolocmd.go: cobra and texts
+"help.yolo.short" = "Turn the agent's YOLO mode off, or see whether it is on"
+"help.yolo.long" = """
+YOLO mode is turned on from the ADBuddy app on the phone, for 15 minutes, 1 hour
+or until the session ends: while it is on, the agent works without asking you to
+confirm anything, and nothing blocks it except the pause. `off` turns it off and
+`status` says whether it is on. There is no `on`: only the phone can turn it on."""
+"yolocmd.off" = "YOLO is off."
+"yolocmd.on_session" = "YOLO is on until the session ends."
+"yolocmd.on_until" = "YOLO is on until %[1]s."
+"yolocmd.serve_not_running" = "serve is not running, so YOLO is off."
+"err.yolocmd.usage" = "Use adbuddy yolo off or adbuddy yolo status. YOLO can only be turned on from the phone app."
+"phone.yolo_approved" = "⚠ YOLO approved the agent's own permission question: %[1]s"

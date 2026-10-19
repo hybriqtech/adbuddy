@@ -15,7 +15,7 @@ func TestHelpGroupsRoot(t *testing.T) {
 		commands []string
 	}{
 		{map[i18n.Lang]string{i18n.EN: "Getting started:", i18n.ES: "Primeros pasos:"}, []string{"doctor", "serve", "setup"}},
-		{map[i18n.Lang]string{i18n.EN: "Day to day:", i18n.ES: "Día a día:"}, []string{"attach", "connect", "env", "journal", "new", "remote", "run", "stop", "undo", "version"}},
+		{map[i18n.Lang]string{i18n.EN: "Day to day:", i18n.ES: "Día a día:"}, []string{"attach", "connect", "env", "journal", "new", "remote", "run", "stop", "undo", "version", "yolo"}},
 		{map[i18n.Lang]string{i18n.EN: "For the agent:", i18n.ES: "Para el agente:"}, []string{"foreground", "notifications", "screen", "screenshot", "send", "tap", "type"}},
 	}
 	for _, lang := range []i18n.Lang{i18n.EN, i18n.ES} {

@@ -30,6 +30,7 @@ object Registry {
         Protocol.TERMINAL_SIZE to TerminalSize.serializer(),
         Protocol.UI_REQUEST to UiRequest.serializer(),
         Protocol.REMOTE_STATE to RemoteState.serializer(),
+        Protocol.YOLO_STATE to YoloState.serializer(),
     )
 
     /** What the app sends. */
@@ -55,5 +56,6 @@ object Registry {
         Protocol.UI_RESPONSE to UiResponse.serializer(),
         Protocol.DEVICE_INFO to DeviceInfo.serializer(),
         Protocol.REMOTE_SET to RemoteSet.serializer(),
+        Protocol.YOLO_SET to YoloSet.serializer(),
     )
 }

@@ -22,7 +22,7 @@ What adb lets it read: the apps installed, settings, files in shared storage, th
 
 ## Can it delete my photos?
 
-Deleting is a red command (`rm`), so it waits for your answer, and you can say no. If you allow it, it is done: ADBuddy cannot undo a delete. Moving a photo to a new path is yellow: it runs and is journaled with its undo; moving it into a folder that already exists asks for confirmation. The agent can also delete through an app's screen with taps, and taps are not confirmed. Keep a backup of what matters, and read each red question before you allow it. See [Safety](safety.md#the-three-levels) and [Confirmations](safety.md#confirmations).
+Deleting is a red command (`rm`), so it waits for your answer, and you can say no. If you allow it, it is done: ADBuddy cannot undo a delete. Moving a photo to a new path is yellow: it runs and is journaled with its undo; moving it into a folder that already exists asks for confirmation. The agent can also delete through an app's screen with taps, and taps are not confirmed. Keep a backup of what matters, and read each red question before you allow it. See [Safety](safety.md#the-three-levels) and [Confirmations](safety.md#confirmations). With [YOLO mode](safety.md#yolo-mode) on, red commands are not asked at all.
 
 ## How do I undo something?
 

@@ -1,6 +1,6 @@
 [versions]
 agp = "9.4.1"
-kotlin = "2.4.20"
+kotlin = "2.4.21"
 composeBom = "2026.09.00"
 activityCompose = "1.13.0"
 coreKtx = "1.19.1"
@@ -11,6 +11,8 @@ junit = "4.13.2"
 androidxTestRunner = "1.7.0"
 androidxTestExt = "1.3.0"
 webkit = "1.14.0"
+biometric = "1.1.0"
+fragment = "1.8.9"
 # Tests of the screens in the JVM (plan tests-ui-jvm). robolectricAndroidAll is the Android 14 jar that this Robolectric
 # runs (SDK 34, src/test/resources/robolectric.properties): it changes with robolectric.
 robolectric = "4.17"
@@ -23,6 +25,8 @@ androidx-activity-compose = { module = "androidx.activity:activity-compose", ver
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-lifecycle-service = { module = "androidx.lifecycle:lifecycle-service", version.ref = "lifecycle" }
 androidx-webkit = { module = "androidx.webkit:webkit", version.ref = "webkit" }
+androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "fragment" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
 compose-material-icons-core = { module = "androidx.compose.material:material-icons-core" }

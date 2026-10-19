@@ -51,11 +51,11 @@ import tech.hybriq.adbuddy.ui.theme.ThemePrefs
 
 /**
  * Settings (spec v1 §6): what the user decides about the agent. M5c brings the protected apps and the
- * access to notifications, and the remote-mode switch moves here too (it stays in the chat as well).
+ * access to notifications, and the remote-mode switch lives here too.
  * Language, keeping debugging on and About belong to later milestones.
  */
 @Composable
-fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit, onBack: () -> Unit, onMessage: (String) -> Unit) {
+fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit, onBack: () -> Unit, onMessage: (String) -> Unit, onYolo: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val consent = remember(context) { NotificationConsent.of(context) }
     // Read off the main thread; null until read. The system's state and the mark start unknown: nothing is
@@ -77,6 +77,7 @@ fun SettingsScreen(app: AdbuddyApp, state: BridgeState, onOpen: (Route) -> Unit,
         onOpen = onOpen,
         onBack = onBack,
         remoteCard = { RemoteCard(state, app.bridge, app.clock, onMessage) },
+        yoloCard = { YoloCard(state, app.clock, onTurnOn = { onYolo(true) }, onTurnOff = { onYolo(false) }) },
         languageAvailable = LanguageSettings.available(),
         onLanguage = { LanguageSettings.open(context) },
         dynamicColor = dynamic,
@@ -93,6 +94,7 @@ fun SettingsContent(
     onOpen: (Route) -> Unit,
     onBack: () -> Unit,
     remoteCard: @Composable () -> Unit,
+    yoloCard: @Composable () -> Unit = {},
     languageAvailable: Boolean = false,
     onLanguage: () -> Unit = {},
     dynamicColor: Boolean = false,
@@ -127,6 +129,7 @@ fun SettingsContent(
                 onClick = { onOpen(Route.NOTIFICATION_ACCESS) },
             )
             remoteCard()
+            yoloCard()
             SectionHeader(R.string.settings_section_app)
             if (languageAvailable) {
                 SettingsRow(

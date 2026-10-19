@@ -91,6 +91,9 @@ private fun EntryRow(e: JournalEntry, now: Long) {
             Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(e.description, style = MaterialTheme.typography.bodyLarge)
+                    if (e.yolo) {
+                        Text(stringResource(R.string.yolo_entry_mark), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                    }
                     Text(
                         stringResource(R.string.activity_entry, statusText(e.status), e.argv.joinToString(" ")),
                         style = AdbuddyType.codeSmall,

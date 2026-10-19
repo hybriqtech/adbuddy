@@ -385,6 +385,10 @@ func (l *phoneLink) confirmRemoteOn(ctx context.Context, d *daemon.Daemon) ipc.E
 		return remoteExit(1, "REMOTE_BUSY", "%s", classify.Printable(err.Error()))
 	case errors.Is(err, daemon.ErrAskPaused) || err != nil && l.Paused():
 		return denied("the agent was paused from the phone")
+	case errors.Is(err, daemon.ErrAskYolo):
+		// YOLO was turned on while it waited: the question was withdrawn (nothing
+		// answered after that counts) and the remote mode stays off; ask again.
+		return denied(daemon.YoloWithdrawnMessage)
 	case err != nil:
 		return denied("the question was abandoned before it was asked")
 	}

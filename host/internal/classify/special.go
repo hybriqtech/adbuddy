@@ -266,9 +266,32 @@ func applySpecial(scope string, ws []Word, f *Finding) {
 		f.Level = Red
 		f.Special = true
 		f.Op = nil
+		f.AppChannel = f.AppChannel || touchesAppChannel(scope, ws)
 		setIdentity(scope, ws, f)
 		f.Reason = Join(why, f.Reason)
 	}
+}
+
+// touchesAppChannel reports whether a special command reaches the app's own
+// channel or private files: content on its authority (or one only known on the
+// phone), and am (start, broadcast…) naming the app. run-as is marked in
+// wrappers.go. Not the channel: killing, disabling or uninstalling the app,
+// which the host may lift under YOLO (they do not change where the app links to).
+func touchesAppChannel(scope string, ws []Word) bool {
+	if scope == "adb" || len(ws) == 0 {
+		return false
+	}
+	v := values(ws)
+	switch v[0] {
+	case "content":
+		all := strings.ToLower(percentDecode(strings.Join(v, " ")))
+		return strings.Contains(all, ADBuddyPackage) || hasDynamic(ws[1:])
+	case "am":
+		sub, _ := subAt(ws)
+		// A dynamic argument (am start -n $(cat f)) may name the app too.
+		return (mentionsADBuddy(v) || hasDynamic(ws[1:])) && sub != "force-stop" && sub != "kill"
+	}
+	return false
 }
 
 // specialIdentity names the commands that have no rule of their own because

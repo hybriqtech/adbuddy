@@ -14,6 +14,7 @@
 "confirm.expired" = "→ caducó, denegado"
 "confirm.withdrawn" = "→ retirado: %[1]s"
 "confirm.cause.paused" = "pausado desde el móvil"
+"confirm.cause.yolo" = "se activó el modo YOLO"
 "confirm.abandoned" = "→ abandonado por el agente"
 # session: lo que enseña una terminal conectada (session/attach.go)
 "session.agent_ended" = "El agente terminó. Vuelve a arrancarlo con adbuddy new, o desconéctate con Ctrl+]."
@@ -23,6 +24,13 @@
 "daemon.journal_failed" = "falló la escritura en el diario para %[1]s: %[2]s"
 "undo.prefix" = "Deshacer: "
 "undo.confirm.detail" = "Para deshacer un cambio del diario hace falta un comando que pide confirmación."
+# yolo: lo que el diario y serve dicen cuando cambia el modo YOLO (daemon/yolo.go)
+"yolo.event.on_until" = "Modo YOLO activado hasta las %[1]s: nada pide confirmación y no hay bloqueos fijos, salvo la pausa"
+"yolo.event.on_session" = "Modo YOLO activado hasta el fin de la sesión: nada pide confirmación y no hay bloqueos fijos, salvo la pausa"
+"yolo.event.off_app" = "Modo YOLO apagado (desde el móvil)"
+"yolo.event.off_cli" = "Modo YOLO apagado (adbuddy yolo off)"
+"yolo.event.off_expired" = "Modo YOLO apagado (se acabó el tiempo)"
+"yolo.event.off_pause" = "Modo YOLO apagado (el agente se pausó desde el móvil)"
 # remote: la pregunta de `adbuddy remote on` (cli/remotecmd.go)
 "remote.confirm.title" = "Abrir el puerto de red 5555 de adb durante 12 horas"
 "remote.confirm.detail" = "adb escuchará en el puerto 5555 de cualquier red hasta que lo cierres con `adbuddy remote off` o pasen 12 horas."
@@ -784,6 +792,7 @@ Pulsa Ctrl+C para detenerlo."""
 "remote.off.usb_failed" = "adb usb falló (%[1]s)"
 "phone.chat_port_unavailable" = "No se pudo elegir un puerto para el canal de la app del móvil (%[1]s); fija chat_port en %[2]s"
 "phone.chat_port_in_use" = "El puerto %[1]d del canal de la app del móvil está en uso (%[2]s); cambia chat_port en %[3]s por un puerto libre entre 1024 y 65535 y vuelve a arrancar adbuddy serve"
+"phone.yolo_set_without_rid" = "La app del móvil mandó una petición de YOLO sin identificador y se ha ignorado."
 "phone_watch.warn" = "⚠ %[1]s"
 "phone_watch.not_listed" = "El móvil no aparece en la lista y no se puede comprobar su identidad (%[1]s): se espera a que vuelva como %[2]s."
 "phone_watch.not_reachable_none" = "El móvil no está accesible (no se conoce ninguna otra dirección): se espera a que vuelva."
@@ -798,3 +807,17 @@ Pulsa Ctrl+C para detenerlo."""
 "journal.label.reason" = "motivo:"
 "journal.label.undo" = "deshacer:"
 "error.interrupted" = "detenido con Ctrl+C"
+
+# yolocmd.go: cobra y textos
+"help.yolo.short" = "Apaga el modo YOLO del agente, o mira si está activado"
+"help.yolo.long" = """
+El modo YOLO se activa desde la app ADBuddy del móvil, durante 15 minutos, 1 hora
+o hasta que acabe la sesión: mientras dura, el agente trabaja sin pedirte que
+confirmes nada y solo lo frena la pausa. `off` lo apaga y `status` dice si está
+activado. No existe `on`: solo el móvil puede activarlo."""
+"yolocmd.off" = "YOLO está apagado."
+"yolocmd.on_session" = "YOLO está activado hasta el fin de la sesión."
+"yolocmd.on_until" = "YOLO está activado hasta las %[1]s."
+"yolocmd.serve_not_running" = "serve no está en marcha, así que YOLO está apagado."
+"err.yolocmd.usage" = "Usa adbuddy yolo off o adbuddy yolo status. YOLO solo se puede activar desde la app del móvil."
+"phone.yolo_approved" = "⚠ YOLO aprobó una pregunta de permiso del propio agente: %[1]s"

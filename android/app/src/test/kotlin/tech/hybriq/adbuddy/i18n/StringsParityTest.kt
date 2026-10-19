@@ -65,6 +65,7 @@ object StringsCheck {
         "perm_deny" to "\"No\" is the same word in both languages",
         "activity_entry" to "a status and an adb command line: the command is not translated",
         "activity_inverse" to "an adb command line: not translated",
+        "yolo_entry_mark" to "the name of the mode, in capitals, in both languages",
         "settings_section_app" to "\"App\" is the same word in both languages",
     )
 

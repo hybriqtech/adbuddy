@@ -152,6 +152,7 @@ class FixturesTest {
         val s = Protocol.payload<Snapshot>(m)!!
         assertEquals(emptyList<JsonElement>(), s.chat)
         assertNull(s.remote)
+        assertNull(s.yolo)
         assertEquals(JsonObject(emptyMap()), Protocol.decode(File(dir, "app/pause.json").readText())!!.payload)
     }
 }
