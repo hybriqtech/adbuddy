@@ -107,7 +107,8 @@ class AccessSwitch(private val settings: Settings, private val saved: Saved) {
 
     /** Writes in order and reads back; false as soon as Android refuses one (an exception, or put() saying false: R18). */
     private fun write(vararg changes: Pair<String, Int>, doubted: Boolean = false): Boolean = try {
-        changes.all { (name, value) -> settings.put(name, value) } &&
+        val puts = changes.map { (name, value) -> settings.put(name, value) }
+        puts.all { it } &&
             changes.all { (name, value) -> readsBackAs(name, value, doubted) }
     } catch (e: SecurityException) {
         false

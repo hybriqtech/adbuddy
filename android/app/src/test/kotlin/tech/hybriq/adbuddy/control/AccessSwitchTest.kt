@@ -333,4 +333,14 @@ class AccessSwitchTest {
             assertTrue(saved.values.isEmpty())
         }
     }
+
+    // Round 1 review: a put() that says false must not stop the other writes: cutting still tries to turn USB off.
+    @Test fun aRefusedWirelessWriteStillTriesToCutUsb() {
+        val s = FakeSettings(adb to 1, wifi to 1).apply { refuses = setOf(wifi) }
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved)
+        assertFalse(sw.cut())
+        assertEquals("USB was still tried", 0, s.values[adb])
+        assertTrue("a failed cut leaves no record", saved.values.isEmpty())
+    }
 }
