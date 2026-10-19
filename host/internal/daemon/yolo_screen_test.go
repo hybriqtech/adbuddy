@@ -496,3 +496,38 @@ func TestYoloKeepsBlockingWhenItCannotTellTheShadeOrTheWindows(t *testing.T) {
 		t.Fatalf("known window: off %+v on %+v %q", off.exit, on.exit, on.stderr())
 	}
 }
+
+// When the app answers that it cannot draw its notice and YOLO lifts it, the
+// line the agent gets does not say the read is refused. Without YOLO the block
+// message is the same as ever.
+// Mutation: in liftNotice, pass `why` on unchanged (or use d.lift in ui / daemon).
+func TestYoloLineForAnUndrawableNoticeDoesNotContradictItself(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(e *env) (*stream, ipc.Exit)
+	}{
+		{"screenshot", func(e *env) (*stream, ipc.Exit) {
+			e.adb.out["exec-out screencap -p"] = pngBytes(t)
+			return e.helper(t, OpScreenshot, helperArgs(OpScreenshot), "adbuddy", "screenshot")
+		}},
+		{"raw screencap", func(e *env) (*stream, ipc.Exit) { return e.exec(t, "shell", "screencap", "-p") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			off := newEnv(t)
+			off.withApp().errs[bridge.UIOpNotice] = &UIError{Code: bridge.CodeFailed, Text: "no overlay"}
+			so, exo := tc.run(off)
+			if exo.Code == 0 || !strings.Contains(so.errOut.String()+exo.Error, "won't read the screen") {
+				t.Fatalf("without YOLO: %+v %q", exo, so.errOut.String())
+			}
+			on := newEnv(t)
+			on.withApp().errs[bridge.UIOpNotice] = &UIError{Code: bridge.CodeFailed, Text: "no overlay"}
+			on.yoloOn(t)
+			s, exit := tc.run(on)
+			got := s.errOut.String()
+			if exit.Code != 0 || !strings.Contains(got, "⚠ YOLO: the on-screen notice could not be shown") ||
+				strings.Contains(got+exit.Error, "won't read") || strings.Contains(got+exit.Error, "ask the user") {
+				t.Fatalf("with YOLO: %+v %q", exit, got)
+			}
+		})
+	}
+}

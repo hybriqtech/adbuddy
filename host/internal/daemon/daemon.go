@@ -712,7 +712,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// The notice of the on-screen frame, before the last pause check (a pause
 	// that arrives meanwhile blocks) and after the guard (no notice for what it refuses).
 	if readsScreen(res) {
-		if why := d.showNotice(ctx); why != "" && !d.lift(ctx, why) {
+		if why := d.showNotice(ctx); why != "" && !d.liftNotice(ctx, why) {
 			return d.refuse(ctx, e, s, why)
 		}
 	}

@@ -158,7 +158,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// The notice of the on-screen frame goes before the last pause check, so a
 	// pause that arrives meanwhile blocks (after the guard: no notice for what it refuses).
 	if req.UIOp == OpScreenshot {
-		if why := d.showNotice(ctx); why != "" && !d.lift(ctx, why) {
+		if why := d.showNotice(ctx); why != "" && !d.liftNotice(ctx, why) {
 			return d.stopUI(ctx, e, why)
 		}
 	}
