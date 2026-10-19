@@ -173,22 +173,31 @@ class YoloProtectionTest {
         for ((k, v) in kv) put(k, if (v is Int) kotlinx.serialization.json.JsonPrimitive(v) else kotlinx.serialization.json.JsonPrimitive(v as String))
     }
 
+    // The ops that act or read by themselves (dump, click by coordinates, click by text, setText), then NOTICE apart.
     private fun fourOps(tag: String) = listOf(
         UiRequest("${tag}_d", UiOp.DUMP, JsonObject(emptyMap()), "2026-10-01T10:00:10Z"),
         UiRequest("${tag}_c", UiOp.CLICK, obj("x" to 540, "y" to 1200), "2026-10-01T10:00:10Z"),
+        UiRequest("${tag}_x", UiOp.CLICK, obj("text" to "Network & internet"), "2026-10-01T10:00:10Z"),
         UiRequest("${tag}_t", UiOp.SET_TEXT, obj("text" to "hi"), "2026-10-01T10:00:10Z"),
-        UiRequest("${tag}_n", UiOp.NOTICE, JsonObject(emptyMap()), "2026-10-01T10:00:10Z"),
     ).map { code(noticeX.run(it)) }
+
+    private fun noticeOp(tag: String) = code(noticeX.run(UiRequest("${tag}_n", UiOp.NOTICE, JsonObject(emptyMap()), "2026-10-01T10:00:10Z")))
 
     // Mutation: noticeOptional ignores the state (always true).
     @Test fun withoutYoloAnUndrawableNoticeStillStopsEveryOp() {
         live = BridgeState(connection = connected, yolo = YoloState())
         assertEquals(List(4) { ErrorCode.FAILED }, fourOps("a"))
+        assertEquals(ErrorCode.FAILED, noticeOp("a"))
     }
 
-    // Mutation: remove the check from notice (use s.acting(null) alone), or from any op.
-    @Test fun underYoloAnUndrawableNoticeDoesNotStopDumpClickSetTextOrNotice() {
+    // Mutation: remove the check from any of the four ops (use s.acting alone), e.g. UiExecutor click by id/text (m.bounds).
+    @Test fun underYoloAnUndrawableNoticeDoesNotStopDumpClickSetText() {
         assertEquals(List(4) { "ok" }, fourOps("b"))
+    }
+
+    // Mutation: apply acted() in UiExecutor.notice. The host lifts it with its own YOLO state and tells the agent; the app must say FAILED.
+    @Test fun underYoloTheNoticeOpStillFailsWhenTheNoticeCannotBeDrawn() {
+        assertEquals(ErrorCode.FAILED, noticeOp("y"))
     }
 
     @Test fun theNoticeIsStillAskedForUnderYolo() {
@@ -196,7 +205,7 @@ class YoloProtectionTest {
         val s = object : Screen by mute { override fun acting(mark: Box?): Boolean { asked++; return false } }
         val p = YoloProtection.predicates({ live }, hostClock, { false }, { false })
         val e = UiExecutor({ s }, { sent += it }, { now }, p.isProtected, { false }, { false }, p.notificationOnScreen, { it.run() }, noticeOptional = p.noticeOptional)
-        assertEquals("ok", code(e.run(UiRequest("n1", UiOp.NOTICE, JsonObject(emptyMap()), "2026-10-01T10:00:10Z"))))
+        assertEquals(ErrorCode.FAILED, code(e.run(UiRequest("n1", UiOp.NOTICE, JsonObject(emptyMap()), "2026-10-01T10:00:10Z"))))
         assertEquals(1, asked)
     }
 

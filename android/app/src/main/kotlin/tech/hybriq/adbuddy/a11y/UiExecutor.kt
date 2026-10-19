@@ -160,7 +160,9 @@ class UiExecutor(
     /** The host is about to read the screen by adb (screencap, uiautomator): show the notice first. It reads nothing, so no heads-up check; the pause does count. */
     private fun notice(r: UiRequest, s: Screen): UiResponse = when {
         paused() -> pausedNow(r) // acting() is true without drawing while paused: the host must not read then
-        acted(s, null) -> ok(r, Empty, Empty.serializer())
+        // Not acted(): the host, not the app, reads the screen after this. If the notice cannot be drawn the app says so (FAILED) and the host lifts it
+        // with its own YOLO state, telling the agent (`⚠ YOLO: …`). The other ops have no way to tell the host, so they use acted().
+        s.acting(null) -> ok(r, Empty, Empty.serializer())
         else -> noNoticeToRead(r)
     }
 
