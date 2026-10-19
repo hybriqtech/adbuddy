@@ -42,6 +42,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
@@ -55,6 +56,7 @@ import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.chat.Composer
 import tech.hybriq.adbuddy.confirm.ConfirmUi
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutCheck
 import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.DownloadState
 import tech.hybriq.adbuddy.files.FileIntents
@@ -146,6 +148,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val cutRestored = stringResource(R.string.cut_restored)
     val cutDone = stringResource(R.string.cut_done)
     val restoreManual = stringResource(R.string.restore_manual)
+    val cutStillConnected = stringResource(R.string.cut_still_connected)
     val developerOptions = stringResource(R.string.action_developer_options)
 
     // What the host says (notice) and what it refuses (chat, uploads), as the host wrote it.
@@ -171,18 +174,35 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         }
     }
 
+    fun noticeFor(ok: Boolean, restoring: Boolean, stillConnected: Boolean): String = when {
+        stillConnected -> cutStillConnected
+        !ok && restoring && CutAccess.needsManualRestore(context) -> restoreManual
+        !ok && restoring -> restoreFailed
+        !ok -> cutFailed
+        restoring -> cutRestored
+        else -> cutDone
+    }
+
+    // Suspends until the notice is closed. Without the permission (or if the change did not stick), the person does it by hand.
+    suspend fun show(message: String, withWayOut: Boolean) {
+        val r = snackbar.notify(message, actionLabel = if (withWayOut) developerOptions else null)
+        if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
+    }
+
     fun report(ok: Boolean, restoring: Boolean) {
-        val message = when {
-            !ok && restoring && CutAccess.needsManualRestore(context) -> restoreManual
-            !ok && restoring -> restoreFailed
-            !ok -> cutFailed
-            restoring -> cutRestored
-            else -> cutDone
-        }
-        scope.launch {
-            // Without the permission (or if the change did not stick), the person does it by hand.
-            val r = snackbar.notify(message, actionLabel = if (ok) null else developerOptions)
-            if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
+        scope.launch { show(noticeFor(ok, restoring, stillConnected = false), withWayOut = !ok) }
+    }
+
+    // The result of the check after a cut (R22) lives in the app, so it reaches the screen even if it was recreated meanwhile.
+    // It is consumed only once shown: if the screen is recreated with the notice up, this effect is cancelled before
+    // cutCheckShown() and the next ChatRoot shows it again.
+    LaunchedEffect(app) {
+        // collectLatest: giving access back (null) closes an old notice that is up, and a new result replaces it. The initial null shows nothing.
+        app.cutCheck.collectLatest { r ->
+            if (r == null) return@collectLatest
+            val stillConnected = r == CutCheck.STILL_CONNECTED
+            show(noticeFor(ok = true, restoring = false, stillConnected = stillConnected), withWayOut = stillConnected)
+            app.cutCheckShown()
         }
     }
 
@@ -203,8 +223,19 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             retryDraft = app.drafts::retry,
             attachment = { a -> onAttachment(context, app, a) },
             pause = app.bridge::pause,
-            cut = { report(ok = CutAccess.cut(context), restoring = false) },
-            restore = { report(ok = CutAccess.restore(context), restoring = true) },
+            cut = {
+                val up = CutAccess.channelUp(app.bridge.state.value)
+                if (!CutAccess.cut(context, up)) {
+                    report(ok = false, restoring = false)
+                } else {
+                    // R22: the app (not this screen) checks that the channel and port 5555 went quiet, so turning the phone does not lose the notice.
+                    app.confirmCut(up)
+                }
+            },
+            restore = {
+                app.cutCheckShown() // an old result of a cut must not appear after giving access back
+                report(ok = CutAccess.restore(context), restoring = true)
+            },
             openActivity = { route = Route.ACTIVITY },
             openYolo = openYolo,
             openSettings = { route = Route.SETTINGS },

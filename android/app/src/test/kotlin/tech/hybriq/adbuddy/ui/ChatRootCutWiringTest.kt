@@ -3,12 +3,19 @@ package tech.hybriq.adbuddy.ui
 import android.content.Context
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -21,6 +28,8 @@ import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.control.AccessSwitch
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutCheck
+import tech.hybriq.adbuddy.control.CutConfirm
 import tech.hybriq.adbuddy.screens.ComponentActivityRule
 import tech.hybriq.adbuddy.screens.PHONE
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
@@ -37,6 +46,18 @@ class ChatRootCutWiringTest {
     private val compose = createAndroidComposeRule<ComponentActivity>()
 
     @get:Rule val rules: RuleChain = RuleChain.outerRule(ComponentActivityRule()).around(compose)
+
+    // The PC running the tests may have an emulator on 127.0.0.1:5555: the check after a cut (R22) must not see it.
+    @Before fun noAdbdHere() {
+        CutAccess.probe = { false }
+    }
+
+    @After fun realProbe() {
+        CutAccess.probe = CutConfirm::adbdListening
+        CutAccess.waitMs = CutConfirm.WAIT_MS
+    }
+
+    private fun waitForText(id: Int) = compose.waitUntil(5_000) { compose.onAllNodesWithText(text(id)).fetchSemanticsNodes().isNotEmpty() }
 
     private val app get() = RuntimeEnvironment.getApplication() as AdbuddyApp
     private fun text(id: Int) = app.getString(id)
@@ -73,7 +94,109 @@ class ChatRootCutWiringTest {
         compose.waitForIdle()
         assertEquals(0, setting(AccessSwitch.ADB_ENABLED))
         assertEquals(0, setting(AccessSwitch.ADB_WIFI_ENABLED))
+        waitForText(R.string.cut_done) // after the check of R22, off the main thread
         compose.onNodeWithText(text(R.string.cut_done)).assertIsDisplayed()
+    }
+
+    @Test fun aCutThatLeavesAdbAnsweringSaysSoWithTheWayToDeveloperOptions() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true } // adbd still answers on 5555: USB debugging did not go off
+        CutAccess.waitMs = 50
+        mount()
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        waitForText(R.string.cut_still_connected)
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.action_developer_options)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.cut_done)).assertDoesNotExist()
+    }
+
+    // R22: the check outlives the screen. Leaving the composition (turning the phone, going back) within the wait must not
+    // lose the notice: it shows in the next composition.
+    @Test fun theNoticeSurvivesTheScreenBeingRecreatedDuringTheCheck() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true }
+        CutAccess.waitMs = 1_500
+        var show by mutableStateOf(true)
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                if (show) ChatRoot(app, focusConfirm = null, closed = emptySet(), firstRun = false, askForNotifications = false, onClose = {})
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        compose.waitForIdle()
+        show = false // the screen goes away while the check still waits
+        compose.waitForIdle()
+        show = true
+        waitForText(R.string.cut_still_connected)
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.cut_done)).assertDoesNotExist()
+    }
+
+    // Giving access back while the check still waits cancels it: no late "done" or "still connected" appears.
+    @Test fun givingAccessBackDuringTheCheckLeavesNoResult() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true }
+        CutAccess.waitMs = 1_000
+        mount()
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription(text(R.string.action_restore)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.restore_confirm_confirm)).performClick()
+        compose.waitForIdle()
+        Thread.sleep(2_500) // longer than the wait of the check
+        compose.waitForIdle()
+        assertEquals("the cancelled check published nothing", null, app.cutCheck.value)
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.cut_done)).assertDoesNotExist()
+    }
+
+    // R22: the notice is consumed once shown. One still up when the screen is recreated comes back in the new one.
+    @Test fun aStillConnectedNoticeStillUpComesBackWhenTheScreenIsRecreated() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true }
+        CutAccess.waitMs = 300
+        var show by mutableStateOf(true)
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                if (show) ChatRoot(app, focusConfirm = null, closed = emptySet(), firstRun = false, askForNotifications = false, onClose = {})
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        waitForText(R.string.cut_still_connected) // up, not closed
+        show = false
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertDoesNotExist()
+        assertEquals("not consumed: nobody closed it", CutCheck.STILL_CONNECTED, app.cutCheck.value)
+        show = true
+        waitForText(R.string.cut_still_connected)
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
+    }
+
+    // A new result must show even while the old notice (endless, with its button) is still up: giving access back closes
+    // it, and the cut that follows brings its own.
+    @Test fun aNewStillConnectedShowsEvenIfTheOldOneWasStillUp() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true }
+        CutAccess.waitMs = 300
+        mount()
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        waitForText(R.string.cut_still_connected) // up, endless: nobody closes it
+        compose.onNodeWithContentDescription(text(R.string.action_restore)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.restore_confirm_confirm)).performClick()
+        waitForText(R.string.cut_restored) // the old notice no longer blocks the queue
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertDoesNotExist()
+        compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription(text(R.string.action_cut)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        // The short "restored" notice may still be up in front of it in the queue.
+        compose.waitUntil(30_000) { compose.onAllNodesWithText(text(R.string.cut_still_connected)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
     }
 
     @Test fun aBothOffRecordAsksFirstThenSaysToDoItByHandAndWritesNothing() {

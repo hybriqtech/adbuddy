@@ -17,7 +17,11 @@ object AccessDiag {
     /** raw: Settings.Global.getString as is (null = never written); error: the exception's class name when it threw. */
     data class Reading(val name: String, val raw: String?, val error: String?)
 
-    fun line(event: String, sdk: Int, readings: List<Reading>, saved: Map<String, Int?>): String = buildString {
+    /**
+     * [channelUp]: whether a channel with the PC was alive (null when not known: only cut.before says it). The line ends
+     * with `doubtful=adb_enabled(<why>)` when the adb_enabled read is a 0 the rest contradicts (addendum R21).
+     */
+    fun line(event: String, sdk: Int, readings: List<Reading>, saved: Map<String, Int?>, channelUp: Boolean? = null): String = buildString {
         append(event).append(" sdk=").append(sdk)
         for (r in readings) {
             append(' ').append(r.name).append('=')
@@ -30,6 +34,17 @@ object AccessDiag {
             )
         }
         for ((name, value) in saved) append(" saved.").append(name).append('=').append(value?.toString() ?: "-")
+        if (channelUp != null) append(" channel=").append(if (channelUp) "up" else "down")
+        doubt(readings, channelUp == true)?.let { append(" doubtful=adb_enabled(").append(it).append(')') }
+    }
+
+    /** Why a 0 read for adb_enabled is not believed (AccessSwitch.adbZeroIsDoubtful): "wifi", "channel", "wifi+channel"; null when it is. */
+    fun doubt(readings: List<Reading>, channelUp: Boolean): String? {
+        fun value(name: String) = readings.firstOrNull { it.name == name && it.error == null }?.raw?.trim()?.toIntOrNull()
+        val adb = value(AccessSwitch.ADB_ENABLED)
+        val wifi = value(AccessSwitch.ADB_WIFI_ENABLED)
+        if (!AccessSwitch.adbZeroIsDoubtful(adb, wifi, channelUp)) return null
+        return listOfNotNull("wifi".takeIf { wifi == 1 }, "channel".takeIf { channelUp }).joinToString("+")
     }
 
     fun read(resolver: ContentResolver, name: String): Reading = try {
@@ -39,13 +54,13 @@ object AccessDiag {
     }
 
     /** Logs one line; never throws (a diagnosis must not break the screen or the service). */
-    fun log(context: Context, event: String) {
+    fun log(context: Context, event: String, channelUp: Boolean? = null) {
         try {
             val resolver = context.contentResolver
             val prefs = context.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE)
             val names = listOf(AccessSwitch.ADB_ENABLED, AccessSwitch.ADB_WIFI_ENABLED)
-            val saved = names.associateWith { if (prefs.contains(it)) prefs.getInt(it, 0) else null }
-            Log.i(TAG, line(event, Build.VERSION.SDK_INT, names.map { read(resolver, it) }, saved))
+            val saved = (names + AccessSwitch.ADB_DOUBTED).associateWith { if (prefs.contains(it)) prefs.getInt(it, 0) else null }
+            Log.i(TAG, line(event, Build.VERSION.SDK_INT, names.map { read(resolver, it) }, saved, channelUp))
         } catch (e: RuntimeException) {
             Log.w(TAG, "diagnosis failed: " + e.javaClass.simpleName)
         }

@@ -29,6 +29,7 @@ import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.confirm.ConfirmNotifier
 import tech.hybriq.adbuddy.confirm.UnlockWait
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutCheck
 import tech.hybriq.adbuddy.notify.AskNotice
 import tech.hybriq.adbuddy.notify.ConversationNotifier
 import tech.hybriq.adbuddy.notify.ConversationView
@@ -163,7 +164,18 @@ class BridgeService : LifecycleService() {
                 }
             }
             // Cutting needs no unlock: it only narrows what the agent can do.
-            ACTION_CUT -> if (!CutAccess.cut(this)) toast(R.string.notif_cut_failed)
+            ACTION_CUT -> {
+                val up = CutAccess.channelUp(app.bridge.state.value)
+                if (!CutAccess.cut(this, up)) {
+                    toast(R.string.notif_cut_failed)
+                } else {
+                    lifecycleScope.launch {
+                        // R22: the channel and port 5555 say whether the cut really closed adb.
+                        val check = CutAccess.confirm(this@BridgeService, up) { CutAccess.channelUp(app.bridge.state.value) }
+                        if (check == CutCheck.STILL_CONNECTED) toast(R.string.cut_still_connected)
+                    }
+                }
+            }
             // Bridge.start is idempotent: the same link again (the app reopened, the
             // screen rotated) keeps the connection; a new one reconnects.
             else -> BridgePrefs(this).link?.let { app.bridge.start(it) } ?: stopSelf()
