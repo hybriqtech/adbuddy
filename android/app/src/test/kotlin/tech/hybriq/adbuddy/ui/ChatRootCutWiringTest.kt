@@ -3,6 +3,9 @@ package tech.hybriq.adbuddy.ui
 import android.content.Context
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -103,6 +106,29 @@ class ChatRootCutWiringTest {
         waitForText(R.string.cut_still_connected)
         compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.action_developer_options)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.cut_done)).assertDoesNotExist()
+    }
+
+    // R22: the check outlives the screen. Leaving the composition (turning the phone, going back) within the wait must not
+    // lose the notice: it shows in the next composition.
+    @Test fun theNoticeSurvivesTheScreenBeingRecreatedDuringTheCheck() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true }
+        CutAccess.waitMs = 1_500
+        var show by mutableStateOf(true)
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                if (show) ChatRoot(app, focusConfirm = null, closed = emptySet(), firstRun = false, askForNotifications = false, onClose = {})
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        compose.waitForIdle()
+        show = false // the screen goes away while the check still waits
+        compose.waitForIdle()
+        show = true
+        waitForText(R.string.cut_still_connected)
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.cut_done)).assertDoesNotExist()
     }
 

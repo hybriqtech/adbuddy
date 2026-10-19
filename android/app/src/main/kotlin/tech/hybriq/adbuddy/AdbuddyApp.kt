@@ -30,6 +30,8 @@ import tech.hybriq.adbuddy.bridge.Notice
 import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.chat.ChatController
 import tech.hybriq.adbuddy.confirm.HostClock
+import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutCheck
 import tech.hybriq.adbuddy.files.Captures
 import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.Drafts
@@ -76,6 +78,25 @@ class AdbuddyApp : Application() {
 
     /** The text of each `notice` of the host (spec M2 section 4), for a snackbar: it is shown as the host wrote it. */
     val notices: SharedFlow<String> = _notices.asSharedFlow()
+
+    private val _cutCheck = MutableStateFlow<CutCheck?>(null)
+
+    /**
+     * What the check after a cut found (R22), kept here and not in the screen: turning the phone or going back within
+     * the wait must not lose the "the PC is still connected" notice. The screen clears it once shown.
+     */
+    val cutCheck: StateFlow<CutCheck?> = _cutCheck.asStateFlow()
+
+    /** Checks the cut that was just made (R22); [wasUp]: the channel was alive at the tap. */
+    fun confirmCut(wasUp: Boolean) {
+        scope.launch {
+            _cutCheck.value = CutAccess.confirm(this@AdbuddyApp, wasUp) { CutAccess.channelUp(bridge.state.value) }
+        }
+    }
+
+    fun cutCheckShown() {
+        _cutCheck.value = null
+    }
 
     /** The host's clock, which the questions' expiry is written in. */
     val clock = HostClock()

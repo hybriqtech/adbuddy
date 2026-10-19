@@ -54,19 +54,39 @@ class CutAccessTest {
 
     // The shield of the screen and Cut in the notification (spec 2026-10-18 R5, §8.7) tell cut() whether the channel is
     // alive (R20) and check the cut afterwards (R22). Read as code (no comments, no strings), exactly one call each.
+    // The screen hands the check to the app (it must outlive a rotation); the service runs its own.
     @Test fun bothCutButtonsPassTheChannelAndCheckTheCut() {
+        fun code(path: String) = CodeScan.code(File("src/main/kotlin/tech/hybriq/adbuddy/$path").readText())
         val cutCall = Regex("""CutAccess\.cut\(""")
         val confirmCall = Regex("""CutAccess\.confirm\(""")
         // The channel is read at the tap, right before the only cut(), in the same block.
-        val upThenCut = Regex("""val up = CutAccess\.channelUp\(app\.bridge\.state\.value\)\s+if \(!CutAccess\.cut\(\s*(context|this)\s*,\s*up\s*\)\)""")
-        val confirm = Regex("""CutAccess\.confirm\(\s*(context|this@BridgeService)\s*,\s*up\s*\)\s*\{\s*CutAccess\.channelUp\(app\.bridge\.state\.value\)\s*\}""")
-        for (path in listOf("ui/ChatRoot.kt", "bridge/BridgeService.kt")) {
-            val src = CodeScan.code(File("src/main/kotlin/tech/hybriq/adbuddy/$path").readText())
-            assertEquals("$path has exactly one cut() call", 1, cutCall.findAll(src).count())
-            assertTrue("$path reads the channel at the tap and passes it to that cut()", upThenCut.containsMatchIn(src))
-            assertEquals("$path has exactly one confirm() call", 1, confirmCall.findAll(src).count())
-            assertTrue("$path checks the cut with the channel now", confirm.containsMatchIn(src))
-            assertTrue("$path says when the PC is still connected", src.contains("CutCheck.STILL_CONNECTED"))
-        }
+        fun upThenCut(who: String) = Regex("""val up = CutAccess\.channelUp\(app\.bridge\.state\.value\)\s+if \(!CutAccess\.cut\(\s*$who\s*,\s*up\s*\)\)""")
+
+        val screen = code("ui/ChatRoot.kt")
+        assertEquals("ChatRoot has exactly one cut() call", 1, cutCall.findAll(screen).count())
+        assertTrue(
+            "ChatRoot reads the channel at the tap, passes it to that cut() and hands the check to the app in its else branch",
+            Regex(upThenCut("context").pattern + """\s*\{[^{}]*\}\s*else\s*\{\s*app\.confirmCut\(up\)\s*\}""").containsMatchIn(screen),
+        )
+        assertEquals("ChatRoot hands over exactly one check", 1, Regex("""app\.confirmCut\(""").findAll(screen).count())
+        assertEquals("the check does not run in the screen", 0, confirmCall.findAll(screen).count())
+        assertTrue("ChatRoot says when the PC is still connected", screen.contains("CutCheck.STILL_CONNECTED"))
+
+        val app = code("AdbuddyApp.kt")
+        assertEquals("the app runs exactly one check", 1, confirmCall.findAll(app).count())
+        assertTrue(
+            "the app checks with the channel now",
+            Regex("""CutAccess\.confirm\(\s*this@AdbuddyApp\s*,\s*wasUp\s*\)\s*\{\s*CutAccess\.channelUp\(bridge\.state\.value\)\s*\}""").containsMatchIn(app),
+        )
+
+        val service = code("bridge/BridgeService.kt")
+        assertEquals("BridgeService has exactly one cut() call", 1, cutCall.findAll(service).count())
+        assertTrue("BridgeService reads the channel at the tap and passes it to that cut()", upThenCut("this").containsMatchIn(service))
+        assertEquals("BridgeService has exactly one confirm() call", 1, confirmCall.findAll(service).count())
+        assertTrue(
+            "BridgeService checks the cut with the channel now",
+            Regex("""CutAccess\.confirm\(\s*this@BridgeService\s*,\s*up\s*\)\s*\{\s*CutAccess\.channelUp\(app\.bridge\.state\.value\)\s*\}""").containsMatchIn(service),
+        )
+        assertTrue("BridgeService says when the PC is still connected", service.contains("CutCheck.STILL_CONNECTED"))
     }
 }

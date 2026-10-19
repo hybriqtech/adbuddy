@@ -32,6 +32,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.AdbuddyApp
@@ -119,6 +120,14 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         }
     }
 
+    // The result of the check after a cut (R22) lives in the app, so it reaches the screen even if it was recreated meanwhile.
+    LaunchedEffect(app) {
+        app.cutCheck.filterNotNull().collect {
+            report(ok = true, restoring = false, stillConnected = it == CutCheck.STILL_CONNECTED)
+            app.cutCheckShown()
+        }
+    }
+
     val actions = remember(app) {
         ChatActions(
             send = { text ->
@@ -141,14 +150,14 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
                 if (!CutAccess.cut(context, up)) {
                     report(ok = false, restoring = false)
                 } else {
-                    scope.launch {
-                        // R22: the channel and port 5555 say whether the cut really closed adb.
-                        val check = CutAccess.confirm(context, up) { CutAccess.channelUp(app.bridge.state.value) }
-                        report(ok = true, restoring = false, stillConnected = check == CutCheck.STILL_CONNECTED)
-                    }
+                    // R22: the app (not this screen) checks that the channel and port 5555 went quiet, so turning the phone does not lose the notice.
+                    app.confirmCut(up)
                 }
             },
-            restore = { report(ok = CutAccess.restore(context), restoring = true) },
+            restore = {
+                app.cutCheckShown() // an old result of a cut must not appear after giving access back
+                report(ok = CutAccess.restore(context), restoring = true)
+            },
             openActivity = { route = Route.ACTIVITY },
             openSettings = { route = Route.SETTINGS },
             newConversation = app.chat::newConversation,
