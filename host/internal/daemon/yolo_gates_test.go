@@ -312,9 +312,11 @@ func TestYoloOffBringsTheDoorsBack(t *testing.T) {
 }
 
 // yoloOnKeepingQuestion turns YOLO on with a question of the agent still
-// waiting. Turning YOLO on withdraws that question (yoloWithdraw), so this uses
-// a YOLO with no observers: it is the state the doors see when a question
-// registers right after YOLO began, which is what these tests are about.
+// waiting. Turning YOLO on withdraws that question (yoloWithdraw), and a question
+// registered after it is withdrawn by exec itself (see
+// TestYoloTurnedOnBetweenTheLiftAndTheQuestionWithdrawsIt), so with the real Yolo
+// this state does not last. It uses a YOLO with no observers to test liftQuestion
+// on its own: defence in depth, should a question ever be pending with YOLO on.
 func (e *env) yoloOnKeepingQuestion(t *testing.T) {
 	t.Helper()
 	e.d.o.Yolo = NewYolo(nil, nil)

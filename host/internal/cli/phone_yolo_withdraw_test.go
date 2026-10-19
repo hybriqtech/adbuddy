@@ -118,6 +118,10 @@ func TestEveryWayYoloEndsDropsThePermitsMadeSinceItBegan(t *testing.T) {
 			var fire func()
 			y := daemon.NewYolo(func() time.Time { return now }, func(d time.Duration, f func()) func() { fire = f; return func() {} })
 			r.l.useYolo(y)
+			// The Confirmer reads YOLO under its own lock, so a grant is made only in the
+			// gap between YOLO's state and its observer (YoloStarted). The table forces
+			// that gap by answering "off" until the end: it is the only way to get a permit
+			// numbered above the mark.
 			r.l.conf.SetYoloActive(func() bool { return false })
 			if err := y.Enable(daemon.YoloShort); err != nil {
 				t.Fatal(err)

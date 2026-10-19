@@ -119,6 +119,9 @@ type Daemon struct {
 
 	// beforeRun, in tests, runs right before a command is admitted to adb.
 	beforeRun func(argv []string)
+
+	// beforeAsk, in tests, runs between the YOLO lift of a 🔴 and the registration of its question.
+	beforeAsk func()
 }
 
 // question is a 🔴 confirmation in progress.
@@ -585,8 +588,19 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		qctx, withdraw := context.WithCancelCause(ctx)
 		defer withdraw(nil)
 		q := &question{title: e.Description, withdraw: withdraw}
+		if d.beforeAsk != nil {
+			d.beforeAsk()
+		}
 		if busy := d.ask(q); busy != "" {
 			return d.block(e, s, busy)
+		}
+		// YOLO turned on after the lift looked, and before this question was
+		// registered: yoloWithdraw did not see it. Withdraw it here, like the
+		// pause below, or it would wait on the phone with YOLO on (and an
+		// allow_session could outlive YOLO). The command can be repeated.
+		if d.o.Yolo.Active() {
+			d.answered(q, false)
+			return d.block(e, s, YoloWithdrawnMessage)
 		}
 		// A pause that came before the question was registered did not
 		// withdraw it: look again now that it is.

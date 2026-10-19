@@ -3,6 +3,7 @@ package daemon
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -210,7 +211,9 @@ func TestYoloOnOffWithAQuestionPendingDoesNotDeadlock(t *testing.T) {
 	var paused atomic.Bool
 	e.d.o.Paused = paused.Load
 	for i := range 25 {
-		res := e.execAsync("shell", "rm", redRm)
+		// A different path each round: an allow_session answered with YOLO off is a
+		// legitimate permit for its key, and would skip the question of the next round.
+		res := e.execAsync("shell", "rm", redRm+"-"+strconv.Itoa(i))
 		q := app.next(t)
 		var wg sync.WaitGroup
 		wg.Add(5)
@@ -236,5 +239,30 @@ func TestYoloOnOffWithAQuestionPendingDoesNotDeadlock(t *testing.T) {
 		}
 		waitResult(t, res)
 		e.d.Yolo().Off(YoloOffApp)
+	}
+}
+
+// The race the observer cannot see: the exec read YOLO off in lift, YOLO is
+// turned on, and only then is the question registered. It must not wait on the
+// phone with YOLO on: it is withdrawn at once and the command can be repeated.
+// Mutation: remove the `d.o.Yolo.Active()` check after beforeAsk in exec.
+func TestYoloTurnedOnBetweenTheLiftAndTheQuestionWithdrawsIt(t *testing.T) {
+	e := newEnv(t)
+	c, app := e.phoneConfirmer(t)
+	e.d.beforeAsk = func() { e.d.Yolo().EnableSession() } // the observer runs before the question exists
+	r := waitResult(t, e.execAsync("shell", "rm", redRm))
+	if r.exit.Code != ExitDenied || e.ranContains("rm "+redRm) || !strings.Contains(r.s.errOut.String(), YoloWithdrawnMessage) {
+		t.Fatalf("%+v ran %q stderr %q", r.exit, e.adb.ran(), r.s.errOut.String())
+	}
+	app.notAsked(t)
+	if p := c.Pending(); len(p) != 0 {
+		t.Fatalf("pending: %+v", p)
+	}
+	if j := lastAgentEntry(t, e); j.Status != journal.StatusBlocked || j.Reason != YoloWithdrawnMessage {
+		t.Fatalf("journal %+v", j)
+	}
+	e.d.beforeAsk = nil
+	if r := waitResult(t, e.execAsync("shell", "rm", redRm)); r.exit.Code != 0 || !e.ranContains("rm "+redRm) {
+		t.Fatalf("repeated under YOLO: %+v", r.exit)
 	}
 }
