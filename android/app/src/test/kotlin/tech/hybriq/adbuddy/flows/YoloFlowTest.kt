@@ -65,6 +65,14 @@ class YoloFlowTest {
         compose.onNodeWithTag(YOLO_BAND_TAG).assertIsDisplayed()
     }
 
+    // The band sits above the new header (Cut pill, menu): stacked, not overlapped. Mutation: draw the band over the chat screen in a Box.
+    @Test fun theBandDoesNotCoverTheHeader() {
+        host(YoloState(active = true, session = true))
+        val band = compose.onNodeWithTag(YOLO_BAND_TAG).fetchSemanticsNode().boundsInRoot
+        val menu = compose.onNodeWithContentDescription(text(R.string.action_menu)).fetchSemanticsNode().boundsInRoot
+        assertTrue("band $band, menu $menu", band.bottom <= menu.top + 0.5f)
+    }
+
     @Test fun theBandOutlivesTheLinkAndGoesWhenTheHostSaysOff() {
         host(YoloState(active = true, session = true), connected = false)
         compose.onNodeWithTag(YOLO_BAND_TAG).assertIsDisplayed()
