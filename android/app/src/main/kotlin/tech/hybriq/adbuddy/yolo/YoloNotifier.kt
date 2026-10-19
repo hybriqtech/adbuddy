@@ -39,7 +39,9 @@ object YoloNotifier {
     /** The Turn off could not be sent: the same notification, saying so. The next change of the mode puts the normal one back. */
     @Synchronized
     fun offFailed(context: Context, state: BridgeState, clock: HostClock) {
-        // A cold process (the old notification outlived it) has shown == null: it still must say so; the marker makes the next sync replace or cancel it.
+        // The mode is known to be off and nothing is up: a late reply must not bring the ongoing notification back.
+        if (shown == null && state.yolo?.active == false) return
+        // A cold process (the old notification outlived it, yolo == null) has shown == null: it still must say so; the marker makes the next sync replace or cancel it.
         if (shown == null) shown = OFF_FAILED
         context.getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, build(context, state, clock, offFailed = true))
     }

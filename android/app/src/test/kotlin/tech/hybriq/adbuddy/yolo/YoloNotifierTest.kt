@@ -2,6 +2,7 @@ package tech.hybriq.adbuddy.yolo
 
 import android.app.Notification
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import java.time.format.FormatStyle
 import org.junit.Assert.assertEquals
@@ -54,15 +55,54 @@ class YoloNotifierTest {
     }
 
     // Turning it off needs no unlock and no question: the action is a plain broadcast to the receiver.
+    // Mutation: Intent(ctx, YoloReceiver::class.java) becomes Intent(); FLAG_IMMUTABLE becomes FLAG_MUTABLE; .setLocalOnly(true) removed.
     @Test fun theOffButtonIsOneActionToTheReceiver() {
         YoloNotifier.clear(app)
         YoloNotifier.sync(app, session, app.clock)
-        val action = posted()!!.actions.single()
+        val n = posted()!!
+        assertEquals(AdbuddyApp.CHANNEL_YOLO, n.channelId)
+        assertTrue("it stays on this phone", n.flags and Notification.FLAG_LOCAL_ONLY != 0)
+        val action = n.actions.single()
         assertEquals(app.getString(R.string.yolo_notif_off), action.title.toString())
         val shadow = shadowOf(action.actionIntent)
-        assertTrue(shadow.isBroadcastIntent)
+        assertTrue(shadow.isBroadcast)
         assertEquals(YoloReceiver.ACTION_OFF, shadow.savedIntent.action)
+        assertEquals(YoloReceiver::class.java.name, shadow.savedIntent.component?.className)
+        assertTrue("nobody can rewrite the intent", shadow.isImmutable && shadow.flags and PendingIntent.FLAG_IMMUTABLE != 0)
         assertEquals(false, action.isAuthenticationRequired)
+    }
+
+    // Mutation: the condition `shown == null && state.yolo?.active == false` is removed from offFailed.
+    @Test fun aLateFailureAfterTheModeWentOffPostsNothing() {
+        YoloNotifier.clear(app)
+        YoloNotifier.sync(app, session, app.clock)
+        val off = BridgeState(yolo = YoloState())
+        YoloNotifier.sync(app, off, app.clock)
+        YoloNotifier.offFailed(app, off, app.clock)
+        assertNull(posted())
+    }
+
+    // Mutation: sync returns when both keys are non-null (`if (key != null && shown != null) return`).
+    @Test fun renewingTheModeRepaintsTheText() {
+        val wall = 1_700_000_000_000L
+        val clock = HostClock(wall = { wall }, elapsed = { 0 })
+        clock.observe(Protocol.decode("""{"v":1,"seq":1,"type":"welcome","ts":"${java.time.Instant.ofEpochMilli(wall)}","payload":{}}""")!!)
+        fun until(ms: Long) = BridgeState(yolo = YoloState(active = true, until = wall + ms))
+        YoloNotifier.clear(app)
+        YoloNotifier.sync(app, until(15 * 60_000L), clock)
+        val first = body(posted()!!)
+        YoloNotifier.sync(app, until(60 * 60_000L), clock)
+        assertEquals(app.getString(R.string.yolo_notif_until, Formats.time(wall + 60 * 60_000L, FormatStyle.SHORT)), body(posted()!!))
+        assertTrue(first != body(posted()!!))
+    }
+
+    // Mutation: clear cancels only when shown != null.
+    @Test fun clearInAColdProcessCancelsWhatIsUp() {
+        YoloNotifier.clear(app) // shown == null
+        nm.notify(YoloNotifier.NOTIFICATION_ID, Notification.Builder(app, AdbuddyApp.CHANNEL_YOLO).setSmallIcon(R.drawable.ic_stat_adbuddy).build())
+        assertNotNull(posted())
+        YoloNotifier.clear(app)
+        assertNull(posted())
     }
 
     @Test fun anOffThatCannotBeSentSaysSoAndNamesThePcCommand() {
