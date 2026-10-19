@@ -133,7 +133,10 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             retryDraft = app.drafts::retry,
             attachment = { a -> onAttachment(context, app, a) },
             pause = app.bridge::pause,
-            cut = { report(ok = CutAccess.cut(context), restoring = false) },
+            cut = {
+                val up = CutAccess.channelUp(app.bridge.state.value)
+                report(ok = CutAccess.cut(context, up), restoring = false)
+            },
             restore = { report(ok = CutAccess.restore(context), restoring = true) },
             openActivity = { route = Route.ACTIVITY },
             openSettings = { route = Route.SETTINGS },

@@ -16,7 +16,7 @@ package tech.hybriq.adbuddy.control
  * So on Android 17 cut() is confirmed by put() and by wireless debugging reading 0, not by adb_enabled: the screen
  * checks the cut afterwards (CutConfirm, R22) and V2 of the addendum measures it from the shell.
  */
-class AccessSwitch(private val settings: Settings, private val saved: Saved) {
+class AccessSwitch(private val settings: Settings, private val saved: Saved, private val channelUp: Boolean = false) {
     /** Settings.Global: get is null for a setting never written and THROWS SecurityException when it cannot be read; put throws without WRITE_SECURE_SETTINGS and returns false when the write failed (Settings.Global.putInt). */
     interface Settings {
         fun get(name: String): Int?
@@ -51,9 +51,9 @@ class AccessSwitch(private val settings: Settings, private val saved: Saved) {
         if (savedNow) {
             val adb = read(ADB_ENABLED, missing = 1)
             val wifi = read(ADB_WIFI_ENABLED, missing = 0)
-            // A 0 that wireless debugging contradicts is Android 17's false reading, not the setting (R16);
+            // A 0 that wireless debugging or a live channel contradicts is Android 17's false reading, not the setting (R16);
             // the record says so, for restore() to read back past it (R19).
-            val doubted = adb != null && adbZeroIsDoubtful(adb, wifi)
+            val doubted = adb != null && adbZeroIsDoubtful(adb, wifi, channelUp)
             saved.put(ADB_ENABLED, if (adb == null || doubted) 1 else adb)
             saved.put(ADB_WIFI_ENABLED, wifi ?: 0)
             saved.put(ADB_DOUBTED, if (doubted) 1 else null)
@@ -105,7 +105,7 @@ class AccessSwitch(private val settings: Settings, private val saved: Saved) {
         saved.put(ADB_DOUBTED, null)
     }
 
-    /** Writes in order and reads back; false as soon as Android refuses one (an exception, or put() saying false: R18). */
+    /** Tries every write in order, then reads back; false if any fails (an exception, or put() saying false: R18). */
     private fun write(vararg changes: Pair<String, Int>, doubted: Boolean = false): Boolean = try {
         val puts = changes.map { (name, value) -> settings.put(name, value) }
         puts.all { it } &&

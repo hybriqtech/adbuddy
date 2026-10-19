@@ -343,4 +343,46 @@ class AccessSwitchTest {
         assertEquals("USB was still tried", 0, s.values[adb])
         assertTrue("a failed cut leaves no record", saved.values.isEmpty())
     }
+
+    // --- Addendum 2026-10-19 R16/R20: a live channel with the PC goes through adbd. ---
+
+    @Test fun aLiveChannelSavesUsbAsOnEvenIfItReadsOff() {
+        val s = FakeSettings(adb to 1, wifi to 0).apply { readsZero = setOf(adb) } // USB only, Android 17, channel alive
+        val saved = FakeSaved()
+        assertTrue(AccessSwitch(s, saved, channelUp = true).cut())
+        assertEquals(1, saved.values[adb])
+        assertEquals("wireless debugging is saved as read", 0, saved.values[wifi])
+    }
+
+    @Test fun aDoubtRecordedAtTheCutLetsTheRestorePass() {
+        // R19: restoring is only possible once cut (the channel is gone by then), so the doubt travels in the record.
+        val s = FakeSettings(adb to 1, wifi to 0).apply { readsZero = setOf(adb) } // USB only, Android 17
+        val saved = FakeSaved()
+        assertTrue(AccessSwitch(s, saved, channelUp = true).cut())
+        assertEquals(1, saved.values[AccessSwitch.ADB_DOUBTED])
+        assertTrue(AccessSwitch(s, saved).restore())
+        assertEquals(1, s.values[adb])
+        assertEquals(0, s.values[wifi])
+        assertTrue("the doubt goes with the record", saved.values.isEmpty())
+    }
+
+    @Test fun aZeroNobodyDoubtedLeavesNoMark() {
+        val s = FakeSettings(adb to 1, wifi to 1)
+        val saved = FakeSaved()
+        assertTrue(AccessSwitch(s, saved, channelUp = true).cut())
+        assertEquals("a 1 read is not a doubt", null, saved.values[AccessSwitch.ADB_DOUBTED])
+        s.ignoreWrites = setOf(adb) // and a USB write that does not stick is still seen when the reading is right
+        assertFalse(AccessSwitch(s, saved).restore())
+    }
+
+    @Test fun aLiveChannelNeverUndoesACut() {
+        // In the second the tunnel takes to fall after a cut the channel still says CONNECTED: the record stays.
+        val s = FakeSettings(adb to 1, wifi to 1).apply { readsZero = setOf(adb) }
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved, channelUp = true)
+        assertTrue(sw.cut())
+        sw.forgetIfRestored()
+        assertTrue(sw.isCut())
+        assertEquals(1, saved.values[wifi])
+    }
 }

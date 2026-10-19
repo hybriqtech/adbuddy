@@ -158,7 +158,10 @@ class BridgeService : LifecycleService() {
                 }
             }
             // Cutting needs no unlock: it only narrows what the agent can do.
-            ACTION_CUT -> if (!CutAccess.cut(this)) toast(R.string.notif_cut_failed)
+            ACTION_CUT -> {
+                val up = CutAccess.channelUp(app.bridge.state.value)
+                if (!CutAccess.cut(this, up)) toast(R.string.notif_cut_failed)
+            }
             // Bridge.start is idempotent: the same link again (the app reopened, the
             // screen rotated) keeps the connection; a new one reconnects.
             else -> BridgePrefs(this).link?.let { app.bridge.start(it) } ?: stopSelf()

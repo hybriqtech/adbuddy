@@ -10,6 +10,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import tech.hybriq.adbuddy.bridge.BridgeState
 
 /**
  * "Cut access" (spec §4.6): turns off wireless debugging and then USB/adb
@@ -20,7 +21,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 object CutAccess {
     const val PREFS = "cut_access"
 
-    private fun switch(context: Context): AccessSwitch {
+    private fun switch(context: Context, channelUp: Boolean = false): AccessSwitch {
         val resolver = context.contentResolver
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return AccessSwitch(
@@ -35,13 +36,23 @@ object CutAccess {
                     if (value == null) remove(name) else putInt(name, value)
                 }
             },
+            channelUp,
         )
     }
 
-    /** Returns false when the permission is missing or the change did not stick. */
-    fun cut(context: Context): Boolean {
+    /**
+     * A live channel with the PC (addendum 2026-10-19, R20): the host welcomed the app through adb, paused included.
+     * INCOMPATIBLE is left out on purpose: the app stopped reconnecting there and the socket may be gone.
+     */
+    fun channelUp(state: BridgeState): Boolean = state.connection == BridgeState.Connection.CONNECTED
+
+    /**
+     * Returns false when the permission is missing or the change did not stick. [channelUp] is channelUp() of the
+     * bridge at the tap: a live channel proves adb_enabled=1 when it reads 0 (R16), and nothing else (R20).
+     */
+    fun cut(context: Context, channelUp: Boolean = false): Boolean {
         AccessDiag.log(context, "cut.before")
-        return switch(context).cut().also { AccessDiag.log(context, "cut.after ok=$it") }
+        return switch(context, channelUp).cut().also { AccessDiag.log(context, "cut.after ok=$it") }
     }
 
     /** Undoes cut(), with the values from before it. */
