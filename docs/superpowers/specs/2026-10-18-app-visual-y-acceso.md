@@ -166,7 +166,7 @@ Cada tarea de UI las lista en su criterio de aceptación; ningún test de esta l
 Solo con permiso explícito del usuario (no se toca su móvil sin él):
 
 1. **Diagnóstico abierto**: con la build que registra `ADBuddyAccess` instalada en el Pixel (instalar exige permiso), `adb logcat -d -s ADBuddyAccess` frente a `adb shell settings get global adb_enabled` / `adb_wifi_enabled` (hoy `1` y `1`). Dice si la app recibe un valor distinto (Android 17) o si el "cortado" venía de otra parte (p. ej. un registro de corte antiguo). Y que la app ya no dice "cortado" con el chat funcionando.
-2. **Cortar y reactivar en el Pixel con solo la inalámbrica** (modifica el móvil: pedir permiso). **Prerrequisito: V1**; si V1 muestra lecturas falsas, no se hace con esta build. Cortar desde la cabecera → el PC pierde la conexión y la app dice "Acceso cortado"; "Volver a dar acceso" → vuelven los ajustes que había (y no la USB si no estaba), el PC reconecta (el puerto puede cambiar).
+2. **Cortar y reactivar en el Pixel con solo la inalámbrica** (modifica el móvil: pedir permiso). **Prerrequisito: V1**; si V1 muestra lecturas falsas, no se hace con esta build. Cortar desde la cabecera → el PC pierde la conexión y la app dice "Acceso cortado"; "Volver a dar acceso" → vuelven los ajustes que había (y no la USB si no estaba), el PC reconecta (el puerto puede cambiar). **Sustituida (2026-10-19)** por la V2 de `2026-10-19-acceso-lecturas-falsas.md` §5: V1 mostró lecturas falsas (`adb_enabled=raw:0` frente a `1` del shell).
 3. **Icono monocromo** con los iconos temáticos de Android 13+ del Pixel (el emulador lo muestra, pero el lanzador de Pixel es el que usa el usuario).
 
 Todo lo demás (Overlay en API 30, capturas, contraste) se valida con tests JVM o en emulador.
