@@ -136,7 +136,7 @@ agents keep the terminal view.
   the host says `permission.resolved`) and only the host removes it. A command the
   card cannot show whole is left to the terminal by the host.
 - **Notice:** with a request pending and the app in the background, a generic
-  notice ("Claude Code needs an answer") opens the chat. It has no command, no
+  notice ("Your agent needs an answer") opens the chat. It has no command, no
   text and no buttons except Cut access, and it is silent (same channel as the
   conversation). It is not shown while the link is paused or disconnected. The
   "Done" notice shows the first words of the agent's last message, cleaned of

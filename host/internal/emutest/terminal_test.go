@@ -19,8 +19,9 @@ import (
 // Phase 1, no network. wifi and data are turned off, and the test first
 // checks that the network is off for real ("Active default network: none" and
 // an nc that fails; ping is no proof: it fails with the network on too) and,
-// as a control, that the same nc reached the PC before. Then the terminal
-// paints the snapshot and the output, resize reaches the host and a quick key
+// as a control, that the same nc reached the PC before. The chat opens with
+// the terminal folded (R15) and watches nothing until the test shows it with
+// the header's arrow. Then the terminal paints the snapshot and the output, resize reaches the host and a quick key
 // (Enter) arrives as terminal.input.
 //
 // Phase 2, nothing asks for a network.
@@ -77,6 +78,12 @@ func TestTerminalWorksOffline(t *testing.T) {
 
 	l.openChat(t)
 	pid := e.pidOf(t)
+	// The app opens with the terminal folded (R15): no view, so no
+	// terminal.watch until the person shows it.
+	if m, ok := l.take(bridge.TypeTerminalWatch, 3*time.Second); ok {
+		t.Errorf("the app sent terminal.watch with the terminal folded: %s", m.Payload)
+	}
+	l.showTerminal(t)
 	watch := payload[bridge.TerminalWatch](t, l.waitFor(t, bridge.TypeTerminalWatch, 60*time.Second))
 	if watch.Epoch != "" || watch.Offset != 0 {
 		t.Errorf("the first terminal.watch is %+v, want the empty epoch and offset 0 of an app with nothing", watch)
@@ -197,6 +204,21 @@ func TestTerminalWorksOffline(t *testing.T) {
 	if more := e.readNetstats(t, uid); more.Tx-after.Tx < sent {
 		t.Errorf("control: the app's uid sent %d bytes and netstats moved tx by %d: the reading sees nothing", sent, more.Tx-after.Tx)
 	}
+}
+
+// The chat header's terminal arrow (chat_terminal_show / chat_terminal_hide).
+const (
+	txtShowTerminal = "Show the terminal"
+	txtHideTerminal = "Hide the terminal"
+)
+
+// showTerminal unfolds the terminal with the chat header's arrow (the app
+// opens with it folded, R15) and waits until the arrow says it is shown.
+func (l *link) showTerminal(t *testing.T) {
+	t.Helper()
+	e := l.e
+	e.tap(t, e.waitNode(t, txtShowTerminal, 15*time.Second, func(n uiNode) bool { return n.Desc == txtShowTerminal }))
+	e.waitNode(t, txtHideTerminal, 15*time.Second, func(n uiNode) bool { return n.Desc == txtHideTerminal })
 }
 
 // termFeed is the host's side of the terminal: one epoch and the next offset

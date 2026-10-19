@@ -36,7 +36,7 @@ const (
 	txtScroll       = "Scroll to the end to allow it"
 	txtTooLong      = "The command is too long to show whole: it can only be denied."
 	txtExpires      = "Expires at "
-	txtAsking       = "Claude Code needs an answer"
+	txtAsking       = "Your agent needs an answer" // notif_asking: generic, without the agent's name (R10)
 	txtCapture      = "Send screenshot"
 )
 
