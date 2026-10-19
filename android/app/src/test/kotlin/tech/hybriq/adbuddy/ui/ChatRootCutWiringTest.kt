@@ -27,6 +27,7 @@ import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.control.AccessSwitch
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutCheck
 import tech.hybriq.adbuddy.control.CutConfirm
 import tech.hybriq.adbuddy.screens.ComponentActivityRule
 import tech.hybriq.adbuddy.screens.PHONE
@@ -130,6 +131,49 @@ class ChatRootCutWiringTest {
         waitForText(R.string.cut_still_connected)
         compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.cut_done)).assertDoesNotExist()
+    }
+
+    // Giving access back while the check still waits cancels it: no late "done" or "still connected" appears.
+    @Test fun givingAccessBackDuringTheCheckLeavesNoResult() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true }
+        CutAccess.waitMs = 1_000
+        mount()
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription(text(R.string.action_restore)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.restore_confirm_confirm)).performClick()
+        compose.waitForIdle()
+        Thread.sleep(2_500) // longer than the wait of the check
+        compose.waitForIdle()
+        assertEquals("the cancelled check published nothing", null, app.cutCheck.value)
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertDoesNotExist()
+        compose.onNodeWithText(text(R.string.cut_done)).assertDoesNotExist()
+    }
+
+    // R22: the notice is consumed once shown. One still up when the screen is recreated comes back in the new one.
+    @Test fun aStillConnectedNoticeStillUpComesBackWhenTheScreenIsRecreated() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true }
+        CutAccess.waitMs = 300
+        var show by mutableStateOf(true)
+        compose.setContent {
+            AdbuddyTheme(dynamic = false) {
+                if (show) ChatRoot(app, focusConfirm = null, closed = emptySet(), firstRun = false, askForNotifications = false, onClose = {})
+            }
+        }
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        waitForText(R.string.cut_still_connected) // up, not closed
+        show = false
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertDoesNotExist()
+        assertEquals("not consumed: nobody closed it", CutCheck.STILL_CONNECTED, app.cutCheck.value)
+        show = true
+        waitForText(R.string.cut_still_connected)
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
     }
 
     @Test fun aBothOffRecordAsksFirstThenSaysToDoItByHandAndWritesNothing() {

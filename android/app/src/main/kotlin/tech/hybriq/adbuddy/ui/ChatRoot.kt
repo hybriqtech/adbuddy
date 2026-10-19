@@ -104,26 +104,32 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         }
     }
 
-    fun report(ok: Boolean, restoring: Boolean, stillConnected: Boolean = false) {
-        val message = when {
-            stillConnected -> cutStillConnected
-            !ok && restoring && CutAccess.needsManualRestore(context) -> restoreManual
-            !ok && restoring -> restoreFailed
-            !ok -> cutFailed
-            restoring -> cutRestored
-            else -> cutDone
-        }
-        scope.launch {
-            // Without the permission (or if the change did not stick), the person does it by hand.
-            val r = snackbar.notify(message, actionLabel = if (ok && !stillConnected) null else developerOptions)
-            if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
-        }
+    fun noticeFor(ok: Boolean, restoring: Boolean, stillConnected: Boolean): String = when {
+        stillConnected -> cutStillConnected
+        !ok && restoring && CutAccess.needsManualRestore(context) -> restoreManual
+        !ok && restoring -> restoreFailed
+        !ok -> cutFailed
+        restoring -> cutRestored
+        else -> cutDone
+    }
+
+    // Suspends until the notice is closed. Without the permission (or if the change did not stick), the person does it by hand.
+    suspend fun show(message: String, withWayOut: Boolean) {
+        val r = snackbar.notify(message, actionLabel = if (withWayOut) developerOptions else null)
+        if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
+    }
+
+    fun report(ok: Boolean, restoring: Boolean) {
+        scope.launch { show(noticeFor(ok, restoring, stillConnected = false), withWayOut = !ok) }
     }
 
     // The result of the check after a cut (R22) lives in the app, so it reaches the screen even if it was recreated meanwhile.
+    // It is consumed only once shown: if the screen is recreated with the notice up, this effect is cancelled before
+    // cutCheckShown() and the next ChatRoot shows it again.
     LaunchedEffect(app) {
         app.cutCheck.filterNotNull().collect {
-            report(ok = true, restoring = false, stillConnected = it == CutCheck.STILL_CONNECTED)
+            val stillConnected = it == CutCheck.STILL_CONNECTED
+            show(noticeFor(ok = true, restoring = false, stillConnected = stillConnected), withWayOut = stillConnected)
             app.cutCheckShown()
         }
     }
