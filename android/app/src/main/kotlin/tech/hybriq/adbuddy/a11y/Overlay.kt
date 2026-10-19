@@ -3,7 +3,6 @@ package tech.hybriq.adbuddy.a11y
 import android.accessibilityservice.AccessibilityService
 import android.content.res.Configuration
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
@@ -160,14 +159,14 @@ class Overlay(
 
     private fun dp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, service.resources.displayMetrics)
 
-    private fun accent(): Int {
+    private fun colors(): OverlayColors.Pair {
         val dark = service.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-        return service.getColor(if (dark) android.R.color.system_accent1_200 else android.R.color.system_accent1_600)
+        return OverlayColors.of(dark)
     }
 
     private fun add() {
-        val color = accent()
-        val f = FrameView(color, dp(3f), dp(24f))
+        val colors = colors()
+        val f = FrameView(colors.background, dp(3f), dp(24f))
         val frameParams =
             WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
@@ -178,13 +177,13 @@ class Overlay(
             )
         val p = TextView(service).apply {
             text = service.getString(R.string.overlay_pill)
-            setTextColor(Color.WHITE)
+            setTextColor(colors.text)
             textSize = 14f
             val pad = dp(12f).toInt()
             setPadding(pad, pad / 2, pad, pad / 2)
             background = GradientDrawable().apply {
                 cornerRadius = dp(20f)
-                setColor(color)
+                setColor(colors.background)
             }
             contentDescription = service.getString(R.string.overlay_pill)
             setOnClickListener {

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -81,7 +82,9 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
 
     val on = view.kind == Kind.ON || view.kind == Kind.PENDING || view.kind == Kind.CLOSING
 
-    ElevatedCard(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+    // Not connected is neutral, not an alarm: the card is dimmed, never red (spec R9).
+    val colors = if (view.kind == Kind.DISCONNECTED) CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) else CardDefaults.elevatedCardColors()
+    ElevatedCard(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), colors = colors) {
         Row(
             Modifier
                 .then(
@@ -99,7 +102,7 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(stringResource(R.string.remote_title), style = MaterialTheme.typography.titleMedium)
-                val problem = view.kind == Kind.CLOSING || view.kind == Kind.UNKNOWN || view.kind == Kind.DISCONNECTED
+                val problem = view.kind == Kind.CLOSING || view.kind == Kind.UNKNOWN
                 Text(
                     detail(view, clock),
                     style = MaterialTheme.typography.bodySmall,

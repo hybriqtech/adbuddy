@@ -39,6 +39,7 @@ import tech.hybriq.adbuddy.files.Uploader
 import tech.hybriq.adbuddy.files.UriSource
 import tech.hybriq.adbuddy.net.DeviceInfoSender
 import tech.hybriq.adbuddy.term.TerminalFeed
+import tech.hybriq.adbuddy.ui.theme.ThemePrefs
 
 class AdbuddyApp : Application() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -81,6 +82,9 @@ class AdbuddyApp : Application() {
 
     /** What the person reads of a refusal of the host: the app's own text for its code, in the language in force (ErrorText). */
     val errorTexts: ErrorTexts = { ErrorText.text({ id -> getString(id) }, it) }
+
+    /** Settings, "Use wallpaper colors": read once, then the activities follow it. */
+    val dynamicColor by lazy { MutableStateFlow(ThemePrefs(this).dynamic) }
 
     private val started = AtomicInteger(0)
     private val _foreground = MutableStateFlow(false)

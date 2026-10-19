@@ -67,7 +67,8 @@ class ChatActions(
     val retryDraft: (String) -> Unit,
     val attachment: (Attachment) -> Unit,
     val pause: (Boolean) -> Unit,
-    val toggleCut: () -> Unit,
+    val cut: () -> Unit,
+    val restore: () -> Unit,
     val openActivity: () -> Unit,
     val openSettings: () -> Unit,
     val newConversation: () -> Unit,
@@ -75,8 +76,12 @@ class ChatActions(
     val openYolo: () -> Unit = {},
 ) {
     companion object {
-        val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+        val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
     }
+
+    /** Test seam: the same actions with another cut / restore. */
+    fun copyWith(cut: () -> Unit = this.cut, restore: () -> Unit = this.restore) =
+        ChatActions(send, retry, discard, pickPhotos, pickFile, capture, removeDraft, retryDraft, attachment, pause, cut, restore, openActivity, openSettings, newConversation, interrupt)
 }
 
 /** The conversation, the agent's terminal folded above it, and the input (spec M3 section 7.2). */
@@ -95,7 +100,7 @@ fun ChatScreen(
     hostNow: () -> Long = { 0L },
     /** The host has handed this phone a link: without it (and without a channel) the banner says to run adbuddy setup. */
     configured: Boolean = true,
-    /** False in the chat bubble (about 600 dp tall): the terminal starts folded and opens with the arrow. */
+    /** False in the app (R15) and in the bubble; the default stays true for direct callers and previews. The terminal starts folded and opens with the arrow. */
     terminalOpenByDefault: Boolean = true,
     /** Notifications off or the confirm/ask channel silenced: the banner says so and opens the system settings. */
     notificationsBlocked: Boolean = false,
@@ -103,14 +108,15 @@ fun ChatScreen(
     /** Red questions the person closed and that can still be answered: the notice says so and "Show" reopens them. */
     pendingQuestions: Int = 0,
     onShowQuestions: () -> Unit = {},
-    /** The remote-mode switch (RemoteCard), shown above the conversation; a preview passes an empty one. */
-    remoteCard: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    // Read in composition (lint: configuration-aware), used by the "How to connect" button.
+    val guideUrl = stringResource(R.string.setup_guide_url)
     var terminalShown by rememberSaveable { mutableStateOf(terminalOpenByDefault) }
     var text by rememberSaveable { mutableStateOf("") }
     var link by remember { mutableStateOf<Pair<String, String>?>(null) }
     var askNew by rememberSaveable { mutableStateOf(false) }
+    var askRestore by rememberSaveable { mutableStateOf(false) }
     val items = Timeline.of(state.chat, state.sessionState.conversation, outgoing)
     val tools = ToolStrip.of(state.chat, state.sessionState.state)
     val approvals = state.chat.yoloApprovals
@@ -148,6 +154,8 @@ fun ChatScreen(
     LaunchedEffect(listState) { snapshotFlow { !listState.canScrollForward }.collect { if (it) unseen = false } }
     val terminalOn = terminalShown && terminal != null
     val status = LinkStatus.of(state, cut, configured)
+    // The dialog only exists while the state is CUT: if the cut ends elsewhere (Settings, the notification) it closes.
+    LaunchedEffect(status) { if (status != LinkStatus.CUT) askRestore = false }
     // Reconnecting flips WAITING -> CONNECTING -> WAITING every retry: the banner keeps the last state that had one during
     // CONNECTING, so it neither leaves and returns (the list jumping, TalkBack announcing it again) nor shows on a cold start.
     var lastBanner by remember { mutableStateOf<LinkStatus?>(null) }
@@ -165,7 +173,7 @@ fun ChatScreen(
         topBar = {
             ChatHeader(
                 state, cut, terminalShown, onToggleTerminal = { terminalShown = !terminalShown }, onPause = actions.pause,
-                onToggleCut = actions.toggleCut, onActivity = actions.openActivity, onSettings = actions.openSettings,
+                onCut = actions.cut, onRestore = { askRestore = true }, onActivity = actions.openActivity, onSettings = actions.openSettings,
                 onNewConversation = { askNew = true }, configured = configured,
                 yoloOn = state.yolo?.active == true, onYolo = actions.openYolo,
             )
@@ -173,19 +181,29 @@ fun ChatScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { inner ->
         Column(Modifier.padding(inner).consumeWindowInsets(inner).imePadding().fillMaxSize()) {
-            if (bannerStatus != null) LinkBanner(bannerStatus)
-            if (pendingQuestions > 0) PendingQuestionsBanner(pendingQuestions, onShowQuestions)
-            if (notificationsBlocked) NotificationsBanner(onOpenNotificationSettings)
-            remoteCard()
+            HomeNotice.of(bannerStatus, pendingQuestions, notificationsBlocked)?.let { notice ->
+                ActionCard(notice, pendingQuestions, onAction = {
+                    when (notice) {
+                        HomeNotice.QUESTIONS -> onShowQuestions()
+                        HomeNotice.CUT -> askRestore = true
+                        HomeNotice.NOTIFICATIONS -> onOpenNotificationSettings()
+                        HomeNotice.PAUSED -> actions.pause(false)
+                        HomeNotice.WAITING -> try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, guideUrl.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        } catch (e: ActivityNotFoundException) { /* no browser */ }
+                        else -> {}
+                    }
+                })
+            }
             if (terminalOn) {
-                Box(Modifier.weight(0.45f).fillMaxSize()) {
+                Box(Modifier.weight(0.35f).fillMaxSize()) {
                     TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.fillMaxSize())
                     if (!connected) TerminalOfflineNotice(Modifier.align(Alignment.TopCenter))
                 }
             }
-            val weight = if (terminalOn) 0.55f else 1f
-            if (items.isEmpty() && tools.isEmpty() && approvals.isEmpty() && status == LinkStatus.CONNECTED) {
-                ChatEmptyState(Modifier.weight(weight).fillMaxSize())
+            val weight = if (terminalOn) 0.65f else 1f
+            if (items.isEmpty() && tools.isEmpty() && approvals.isEmpty() && (status == LinkStatus.CONNECTED || status == LinkStatus.PAUSED)) {
+                ChatEmptyState(paused = status == LinkStatus.PAUSED, onSuggestion = { text = it }, modifier = Modifier.weight(weight).fillMaxSize())
             } else {
                 Box(Modifier.weight(weight).fillMaxSize()) {
                     LazyColumn(
@@ -214,7 +232,7 @@ fun ChatScreen(
             }
             if (terminalOn) QuickKeysRow(enabled = connected) { terminal!!.input(it.bytes) }
             if (chat != null) {
-                PermissionCards(state.chat.permissions, state.connection == BridgeState.Connection.CONNECTED, hostNow, chat)
+                PermissionCards(state.chat.permissions, state.connection == BridgeState.Connection.CONNECTED, hostNow, chat, agent = state.sessionState.agent)
             }
             DraftChips(drafts, actions.removeDraft, actions.retryDraft)
             InputBar(
@@ -236,6 +254,7 @@ fun ChatScreen(
             onDismiss = { link = null },
         )
     }
+    if (askRestore && status == LinkStatus.CUT) RestoreAccessDialog(onRestore = { askRestore = false; actions.restore() }, onDismiss = { askRestore = false })
     if (askNew) {
         AlertDialog(
             onDismissRequest = { askNew = false },
@@ -267,7 +286,6 @@ private fun ChatScreenPreview() {
             ),
             outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
             snackbar = remember { SnackbarHostState() }, actions = ChatActions.None,
-            remoteCard = {},
         )
     }
 }

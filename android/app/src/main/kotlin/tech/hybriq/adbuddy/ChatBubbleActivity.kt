@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tech.hybriq.adbuddy.ui.ChatRoot
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 
@@ -27,7 +28,10 @@ class ChatBubbleActivity : FragmentActivity() {
         // A rotation keeps the questions the person closed (MainActivity does the same).
         closed = savedInstanceState?.getStringArrayList(STATE_CLOSED)?.toSet() ?: emptySet()
         val app = application as AdbuddyApp
-        setContent { AdbuddyTheme { ChatRoot(app, focusConfirm = null, closed = closed, firstRun = false, terminalOpenByDefault = false, askForNotifications = false, onReopen = { closed = closed - it }, onClose = { closed = closed + it }) } }
+        setContent {
+            val dynamic by app.dynamicColor.collectAsStateWithLifecycle()
+            AdbuddyTheme(dynamic = dynamic) { ChatRoot(app, focusConfirm = null, closed = closed, firstRun = false, terminalOpenByDefault = false, askForNotifications = false, onReopen = { closed = closed - it }, onClose = { closed = closed + it }) }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

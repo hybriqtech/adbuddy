@@ -71,7 +71,7 @@ import tech.hybriq.adbuddy.yolo.YoloUi
  * the notification access under it), and the red questions over all of them.
  */
 @Composable
-fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = true, askForNotifications: Boolean = true, onReopen: (String) -> Unit = {}, onClose: (String) -> Unit) {
+fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = false, askForNotifications: Boolean = true, onReopen: (String) -> Unit = {}, onClose: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by app.bridge.state.collectAsStateWithLifecycle()
@@ -80,7 +80,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val downloads by app.downloads.states.collectAsStateWithLifecycle()
     // Follows both settings, whoever changes them (this screen, the Settings app, adb).
     val cut by remember(context) { CutAccess.observe(context) }
-        .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context.contentResolver))
+        .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context))
     val snackbar = remember { SnackbarHostState() }
     val onboarding = remember(context) { Onboarding.of(context) }
     var step by rememberSaveable { mutableStateOf<OnboardingStep?>(OnboardingStep.initial(firstRun, onboarding.done())) }
@@ -145,6 +145,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val restoreFailed = stringResource(R.string.restore_failed)
     val cutRestored = stringResource(R.string.cut_restored)
     val cutDone = stringResource(R.string.cut_done)
+    val restoreManual = stringResource(R.string.restore_manual)
     val developerOptions = stringResource(R.string.action_developer_options)
 
     // What the host says (notice) and what it refuses (chat, uploads), as the host wrote it.
@@ -170,6 +171,21 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         }
     }
 
+    fun report(ok: Boolean, restoring: Boolean) {
+        val message = when {
+            !ok && restoring && CutAccess.needsManualRestore(context) -> restoreManual
+            !ok && restoring -> restoreFailed
+            !ok -> cutFailed
+            restoring -> cutRestored
+            else -> cutDone
+        }
+        scope.launch {
+            // Without the permission (or if the change did not stick), the person does it by hand.
+            val r = snackbar.notify(message, actionLabel = if (ok) null else developerOptions)
+            if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
+        }
+    }
+
     val actions = remember(app) {
         ChatActions(
             send = { text ->
@@ -187,21 +203,8 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             retryDraft = app.drafts::retry,
             attachment = { a -> onAttachment(context, app, a) },
             pause = app.bridge::pause,
-            toggleCut = {
-                val wasCut = CutAccess.isCut(context.contentResolver)
-                val ok = if (wasCut) CutAccess.restore(context) else CutAccess.cut(context)
-                val message = when {
-                    !ok && wasCut -> restoreFailed
-                    !ok -> cutFailed
-                    wasCut -> cutRestored
-                    else -> cutDone
-                }
-                scope.launch {
-                    // Without the permission (or if the change did not stick), the person does it by hand.
-                    val r = snackbar.notify(message, actionLabel = if (ok) null else developerOptions)
-                    if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
-                }
-            },
+            cut = { report(ok = CutAccess.cut(context), restoring = false) },
+            restore = { report(ok = CutAccess.restore(context), restoring = true) },
             openActivity = { route = Route.ACTIVITY },
             openYolo = openYolo,
             openSettings = { route = Route.SETTINGS },
@@ -253,9 +256,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
                             notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) },
                             pendingQuestions = waiting,
                             // The clock of the tap, not of the composition: a question that has just expired is not reopened.
-                            onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } }) {
-                            RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
-                        }
+                            onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } })
                     }
                     Route.ACTIVITY -> {
                         BackHandler(onBack = back)

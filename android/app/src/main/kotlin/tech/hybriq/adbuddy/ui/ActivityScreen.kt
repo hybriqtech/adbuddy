@@ -1,6 +1,12 @@
 package tech.hybriq.adbuddy.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -22,6 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
@@ -29,6 +37,7 @@ import tech.hybriq.adbuddy.bridge.Inverse
 import tech.hybriq.adbuddy.bridge.JournalEntry
 import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
+import tech.hybriq.adbuddy.ui.theme.AdbuddyType
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -68,36 +77,46 @@ fun ActivityScreen(state: BridgeState, onBack: () -> Unit, now: () -> Long = { S
 
 @Composable
 private fun EntryRow(e: JournalEntry, now: Long) {
+    val extra = AdbuddyTheme.colors
+    val scheme = MaterialTheme.colorScheme
+    val (bar, levelName) = when (e.level) {
+        "red" -> scheme.error to stringResource(R.string.level_red)
+        "yellow" -> extra.warning to stringResource(R.string.level_yellow)
+        else -> extra.success to stringResource(R.string.level_green)
+    }
     ElevatedCard(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-            Text(levelIcon(e.level), style = MaterialTheme.typography.titleMedium)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(e.description, style = MaterialTheme.typography.bodyLarge)
-                if (e.yolo) {
-                    Text(stringResource(R.string.yolo_entry_mark), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
-                }
-                Text(
-                    stringResource(R.string.activity_entry, statusText(e.status), e.argv.joinToString(" ")),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                entryTime(e.ts, now)?.let {
-                    Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                e.inverse?.takeIf { e.undoneBy == null }?.let {
+        // One node for TalkBack: the level's name is read with the entry, not as a lone bar.
+        Row(Modifier.height(IntrinsicSize.Min).semantics(mergeDescendants = true) {}) {
+            Box(Modifier.width(4.dp).fillMaxHeight().background(bar).semantics { contentDescription = levelName })
+            Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(e.description, style = MaterialTheme.typography.bodyLarge)
+                    if (e.yolo) {
+                        Text(stringResource(R.string.yolo_entry_mark), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                    }
                     Text(
-                        stringResource(R.string.activity_inverse, it.argv.joinToString(" ")),
-                        style = MaterialTheme.typography.labelMedium,
+                        stringResource(R.string.activity_entry, statusText(e.status), e.argv.joinToString(" ")),
+                        style = AdbuddyType.codeSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // Without the id, `adbuddy undo` undoes the LAST entry, not this one. The id may carry text the agent
-                    // influences: only the shape the host gives is drawn.
-                    if (e.status == "ok" && JOURNAL_ID.matches(e.id)) {
+                    entryTime(e.ts, now)?.let {
+                        Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    e.inverse?.takeIf { e.undoneBy == null }?.let {
                         Text(
-                            stringResource(R.string.activity_undo_hint, e.id),
+                            stringResource(R.string.activity_inverse, it.argv.joinToString(" ")),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        // Without the id, `adbuddy undo` undoes the LAST entry, not this one. The id may carry text the agent
+                        // influences: only the shape the host gives is drawn.
+                        if (e.status == "ok" && JOURNAL_ID.matches(e.id)) {
+                            Text(
+                                stringResource(R.string.activity_undo_hint, e.id),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

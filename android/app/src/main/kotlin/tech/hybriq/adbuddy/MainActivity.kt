@@ -10,6 +10,7 @@ import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tech.hybriq.adbuddy.bridge.BridgePrefs
 import tech.hybriq.adbuddy.bridge.BridgeService
 import tech.hybriq.adbuddy.ui.ConsentScreen
@@ -41,7 +42,8 @@ class MainActivity : FragmentActivity() {
         // Bridge.start ignores the same link, so the connection is kept.
         if (prefs.link != null) BridgeService.start(this)
         setContent {
-            AdbuddyTheme {
+            val dynamic by app.dynamicColor.collectAsStateWithLifecycle()
+            AdbuddyTheme(dynamic = dynamic) {
                 if (showConsent) {
                     ConsentScreen(
                         host = prefs.consentHost,

@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import tech.hybriq.adbuddy.bridge.Inverse
 import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
+import tech.hybriq.adbuddy.ui.theme.AdbuddyType
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -193,7 +194,11 @@ fun ConfirmDialog(
                     for (line in shown.detail) {
                         Text(line, style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr))
                     }
-                    Text(shown.command, style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr))
+                    // The command is what will run: monospaced, on a block of its own, INSIDE the same watched scroll
+                    // (no scroll of its own: "read to the end" must cover it, spec §8.2).
+                    Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                        Text(shown.command, style = AdbuddyType.code.copy(textDirection = TextDirection.Ltr), modifier = Modifier.padding(12.dp))
+                    }
                     if (shown.hidden > 0) {
                         // H3: what is not shown cannot have been read: only Deny (ConfirmUi.decisions), and it says so.
                         Text(

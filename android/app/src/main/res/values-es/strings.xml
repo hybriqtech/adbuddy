@@ -26,19 +26,29 @@
     <string name="channel_confirm_description">Preguntas sobre comandos delicados, con Permitir y Rechazar.</string>
     <string name="status_connected">Conectado a %1$s</string>
     <string name="status_connecting">Conectando con el PC…</string>
-    <string name="status_waiting">Esperando al PC (ejecuta adbuddy serve)</string>
+    <string name="status_waiting">Buscando tu PC… En el PC, ejecuta adbuddy serve con la depuración inalámbrica encendida.</string>
     <string name="status_paused">En pausa: el agente no puede usar el móvil</string>
     <string name="status_update_app">Esta app es demasiado antigua para el ADBuddy de tu PC: instala una compilación más reciente con adbuddy setup --apk &lt;fichero&gt; en el PC (setup a secas no reemplaza una app instalada)</string>
     <string name="status_update_host">El ADBuddy de tu PC es demasiado antiguo para esta app: actualízalo en el PC</string>
-    <string name="status_cut">Acceso adb cortado</string>
-    <string name="status_not_set_up">Este móvil aún no está configurado: en el PC, ejecuta adbuddy setup</string>
+    <string name="status_cut">Acceso cortado: el PC no puede tocar tu móvil</string>
+    <string name="status_not_set_up">Falta emparejar con tu PC. En el PC: adbuddy setup</string>
     <string name="status_short_cut">Acceso cortado</string>
     <string name="status_short_update">Hay que actualizar</string>
     <string name="status_short_connecting">Conectando…</string>
-    <string name="status_short_waiting">Esperando al PC</string>
+    <string name="status_short_waiting">Buscando tu PC…</string>
     <string name="status_short_paused">En pausa</string>
     <string name="status_short_not_set_up">Sin configurar</string>
     <string name="status_short_connected">Conectado</string>
+    <string name="status_pill_remote">%1$s · Remoto</string>
+    <string name="card_cut_title">El PC no puede tocar tu móvil</string>
+    <string name="card_cut_body">Le cortaste el acceso. Devuélveselo cuando quieras que el agente vuelva a trabajar.</string>
+    <string name="card_update_app_title">Actualiza la app</string>
+    <string name="card_update_host_title">Actualiza ADBuddy en el PC</string>
+    <string name="card_not_set_up_title">Falta emparejar</string>
+    <string name="card_notifications_title">Las notificaciones están apagadas</string>
+    <string name="card_paused_title">El agente está en pausa</string>
+    <string name="card_waiting_title">Tu PC no responde</string>
+    <string name="card_waiting_action">Cómo conectar</string>
     <string name="notifications_blocked">Las notificaciones de ADBuddy están desactivadas o silenciadas: no se te avisará cuando el agente te pregunte algo. Actívalas en los ajustes del sistema.</string>
     <string name="notifications_open_settings">Ajustes</string>
 
@@ -47,8 +57,8 @@
     <string name="action_allow_session">Permitir este mismo comando durante la sesión</string>
     <string name="action_pause">Pausar</string>
     <string name="action_resume">Reanudar</string>
-    <string name="action_cut">Cortar acceso</string>
-    <string name="action_restore">Reactivar acceso</string>
+    <string name="action_cut">Cortar acceso del PC</string>
+    <string name="action_restore">Volver a dar acceso</string>
     <string name="action_developer_options">Abrir Opciones de desarrollador</string>
     <string name="action_close">Cerrar</string>
 
@@ -92,10 +102,19 @@
 
     <string name="home_activity">Actividad</string>
     <string name="home_empty">Nada todavía. Aquí aparecerá cada comando adb del agente.</string>
-    <string name="chat_empty_ready">Escribe al agente aquí abajo. Los comandos delicados piden tu confirmación.</string>
-    <string name="cut_done">La depuración está apagada: el PC no puede llegar al móvil.</string>
-    <string name="cut_restored">La depuración vuelve a estar activa. Si el modo remoto estaba activo, su puerto de red sigue abierto hasta que el PC se conecte o reinicies el móvil.</string>
+    <string name="chat_empty_ready">Pídele algo a tu móvil. Si el agente va a hacer algo delicado, te preguntará antes.</string>
+    <string name="chat_empty_paused">El agente está en pausa: no puede usar el móvil hasta que lo reanudes.</string>
+    <string name="suggestion_battery">¿Cuánta batería queda?</string>
+    <string name="suggestion_volume">Baja el volumen</string>
+    <string name="suggestion_screenshot">Haz una captura de pantalla</string>
+    <string name="cut_done">Hecho. El PC ya no puede tocar tu móvil.</string>
+    <string name="cut_restored">El PC vuelve a tener acceso. Si usabas el modo remoto, su puerto sigue abierto hasta que el PC se conecte o reinicies.</string>
     <string name="cut_failed">No se ha podido apagar la depuración. Apaga la depuración USB y la depuración inalámbrica en Opciones de desarrollador.</string>
+    <string name="restore_confirm_title">¿Volver a dar acceso al PC?</string>
+    <string name="restore_confirm_body">ADBuddy vuelve a encender la depuración como estaba antes del corte y el agente del PC podrá volver a usar tu móvil. Si no sabe cómo estaba, te dice cómo hacerlo.</string>
+    <string name="restore_confirm_confirm">Dar acceso</string>
+    <string name="restore_manual">ADBuddy no sabe cómo estaba la depuración antes del corte. Enciende la depuración inalámbrica en Opciones de desarrollador.</string>
+    <string name="title_agent_state">%1$s · %2$s</string>
     <string name="restore_failed">No se ha podido volver a activar la depuración. Actívala en Opciones de desarrollador.</string>
     <string name="filter_all">Todo</string>
     <string name="level_green">Seguro</string>
@@ -104,7 +123,7 @@
     <string name="level_chip">%1$s %2$s</string>
     <string name="activity_filter_empty">Nada de este nivel todavía.</string>
     <string name="activity_undo_hint">Para deshacerlo, en el PC: adbuddy undo %1$s</string>
-    <string name="overlay_pill">Agente usando la pantalla · Pausar</string>
+    <string name="overlay_pill">Agente usando la pantalla · ⏸ Pausar</string>
 
     <string name="action_cancel">Cancelar</string>
     <string name="action_back">Atrás</string>
@@ -123,7 +142,8 @@
     <string name="chat_terminal_show">Mostrar la terminal</string>
     <string name="chat_terminal_hide">Ocultar la terminal</string>
     <string name="terminal_offline">Sin conexión con el PC: las teclas no se envían</string>
-    <string name="perm_title">Claude Code pregunta</string>
+    <string name="perm_title">%1$s pregunta</string>
+    <string name="agent_fallback">El agente</string>
     <string name="perm_summary">Descripción del agente: %1$s</string>
     <string name="perm_allow">Sí</string>
     <string name="perm_always">Sí, siempre</string>
@@ -140,7 +160,7 @@
     <string name="tool_done">hecho</string>
     <string name="tool_error">falló</string>
     <string name="confirm_label">ADBuddy: acción delicada</string>
-    <string name="notif_asking">Claude Code necesita una respuesta</string>
+    <string name="notif_asking">Tu agente necesita una respuesta</string>
     <string name="notif_ask_title">El agente necesita una respuesta</string>
     <string name="notif_ask_text">Abre ADBuddy para contestar.</string>
     <string name="chat_retry">Reintentar</string>
@@ -173,7 +193,7 @@
     <string name="remote_closing">Cerrando… el PC intenta cerrar el puerto 5555</string>
     <string name="remote_pending">Trabajando…</string>
     <string name="remote_unknown">Desconocido: el host lo dirá al reconectar</string>
-    <string name="remote_disconnected">Sin conexión con el PC</string>
+    <string name="remote_disconnected">Disponible cuando el PC esté conectado</string>
     <string name="remote_enable_title">¿Activar el modo remoto?</string>
     <string name="remote_enable_body">El puerto 5555 queda abierto en cualquier red, también en las públicas, hasta 12 horas. Sigue haciendo falta la clave de tu PC. Desactívalo al volver a casa.</string>
     <string name="remote_enable_confirm">Activar</string>
@@ -254,6 +274,10 @@
     <string name="access_restricted_hint">Si el interruptor sale en gris, abre la Información de la app de ADBuddy, toca los tres puntos y elige \"Permitir ajustes restringidos\".</string>
     <string name="access_later_hint">Podrás activarlo luego en Ajustes de ADBuddy, en Acceso a las notificaciones.</string>
     <string name="menu_settings">Ajustes</string>
+    <string name="settings_section_security">Seguridad</string>
+    <string name="settings_section_app">App</string>
+    <string name="settings_dynamic_color">Usar los colores del fondo de pantalla</string>
+    <string name="settings_dynamic_color_hint">Los colores de estado no cambian</string>
     <string name="settings_title">Ajustes</string>
     <string name="settings_protected_proposed">Lista propuesta (%1$d). Revísala y confírmala.</string>
     <string name="settings_protected_confirmed">Lista confirmada (%1$d)</string>
