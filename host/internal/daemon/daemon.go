@@ -144,6 +144,14 @@ func (q *question) blocks() string {
 // errWithdrawn is why a question is withdrawn when the agent is paused.
 var errWithdrawn = i18n.M("confirm.cause.paused").Err()
 
+// errWithdrawnYolo is why a question is withdrawn when YOLO is turned on.
+var errWithdrawnYolo = i18n.M("confirm.cause.yolo").Err()
+
+// YoloWithdrawnMessage is what the agent is told when the 🔴 question of its
+// command was withdrawn because YOLO was turned on while it waited. The command
+// did not run: whoever answered it with YOLO off is not who turned YOLO on.
+const YoloWithdrawnMessage = "the confirmation was withdrawn because YOLO was turned on: run it again"
+
 // flight is a change admitted to adb.
 type flight struct{ title string }
 
@@ -264,11 +272,32 @@ func (d *Daemon) waitingFor() string {
 // Call it after the person pauses from the phone (once Paused reports true):
 // the command then ends blocked as paused at once, instead of when the
 // question expires.
-func (d *Daemon) CancelConfirmations() {
+func (d *Daemon) CancelConfirmations() { d.withdrawAsking(errWithdrawn) }
+
+// withdrawAsking withdraws the question waiting for an answer, if any, for
+// cause (the question's context is cancelled with it: the Confirmer takes the
+// card away and the command ends blocked for that cause).
+//
+// Lock order: Yolo.notifyMu comes first and this runs under it (as a YOLO
+// observer, yoloWithdraw), so it takes askMu and nothing else. Nothing holds
+// askMu while it calls Yolo.Enable, EnableSession or Off (which would take
+// notifyMu the other way): paused() is never called under askMu. Cancelling a
+// context takes no lock of ours.
+func (d *Daemon) withdrawAsking(cause error) {
 	d.askMu.Lock()
 	defer d.askMu.Unlock()
 	if d.asking != nil {
-		d.asking.withdraw(errWithdrawn)
+		d.asking.withdraw(cause)
+	}
+}
+
+// yoloWithdraw is a YOLO observer: turning YOLO on takes away the question
+// that was waiting for an answer. A tap injected on its card, after YOLO began,
+// must not approve it (nor leave a permit: bridge.Confirmer). It runs without
+// the Yolo's mu and never turns YOLO on or off.
+func (d *Daemon) yoloWithdraw(c YoloChange) {
+	if c.State.Active {
+		d.withdrawAsking(errWithdrawnYolo)
 	}
 }
 
@@ -280,6 +309,10 @@ var ErrAskBusy = errors.New("another question is open")
 // before the question or while it was asked: whatever the answer, it counts
 // for nothing.
 var ErrAskPaused = errors.New(PausedMessage)
+
+// ErrAskYolo is AskUser's error when YOLO was turned on while the question
+// waited: it was withdrawn, whatever the answer, and counts for nothing.
+var ErrAskYolo = errors.New(YoloWithdrawnMessage)
 
 // AskUser asks the user a question of serve's own (`adbuddy remote on`)
 // through the same door as a 🔴 one: while it waits for its answer, and
@@ -311,6 +344,9 @@ func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Du
 		if d.paused() || withdrawnByPause(qctx) {
 			return confirm.Deny, ErrAskPaused
 		}
+		if withdrawnByYolo(qctx) {
+			return confirm.Deny, ErrAskYolo
+		}
 		return confirm.Deny, err
 	}
 	d.show(q)
@@ -324,6 +360,9 @@ func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Du
 	if d.paused() || withdrawnByPause(qctx) {
 		return confirm.Deny, ErrAskPaused
 	}
+	if withdrawnByYolo(qctx) {
+		return confirm.Deny, ErrAskYolo
+	}
 	return decision, nil
 }
 
@@ -331,6 +370,12 @@ func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Du
 // (see CancelConfirmations).
 func withdrawnByPause(qctx context.Context) bool {
 	return errors.Is(context.Cause(qctx), errWithdrawn)
+}
+
+// withdrawnByYolo reports whether turning YOLO on withdrew the question of qctx
+// (see yoloWithdraw).
+func withdrawnByYolo(qctx context.Context) bool {
+	return errors.Is(context.Cause(qctx), errWithdrawnYolo)
 }
 
 // abandoned picks the journal's reason for a 🔴 that ends because its
@@ -368,6 +413,7 @@ func New(o Options) *Daemon {
 	}
 	d := &Daemon{o: o}
 	o.Yolo.Subscribe(d.yoloEvent)
+	o.Yolo.Subscribe(d.yoloWithdraw)
 	return d
 }
 
@@ -556,6 +602,9 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			if d.paused() || withdrawnByPause(qctx) {
 				return d.block(e, s, PausedMessage)
 			}
+			if withdrawnByYolo(qctx) {
+				return d.block(e, s, YoloWithdrawnMessage)
+			}
 			code := ExitDenied
 			e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it was asked", "abandoned: ADBuddy stopped before asking"), &code
 			d.record(e)
@@ -576,6 +625,9 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		// pause withdrew it, even if it was resumed since), it ends blocked.
 		if d.paused() || withdrawnByPause(qctx) {
 			return d.block(e, s, PausedMessage)
+		}
+		if withdrawnByYolo(qctx) {
+			return d.block(e, s, YoloWithdrawnMessage)
 		}
 		if decision != confirm.Allow {
 			e.Status, e.Reason = journal.StatusDenied, "denied by user"

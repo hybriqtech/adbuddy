@@ -129,6 +129,10 @@ func TestSpanishWithdrawnAndAbandoned(t *testing.T) {
 	if got := run(func(cancel context.CancelCauseFunc) { cancel(i18n.M("confirm.cause.paused").Err()) }); !strings.Contains(got, "→ retirado: pausado desde el móvil") {
 		t.Errorf("a withdrawal reason of ours is not in Spanish:\n%s", got)
 	}
+	// And the one YOLO withdraws a question with (daemon.errWithdrawnYolo).
+	if got := run(func(cancel context.CancelCauseFunc) { cancel(i18n.M("confirm.cause.yolo").Err()) }); !strings.Contains(got, "→ retirado: se activó el modo YOLO") {
+		t.Errorf("the YOLO withdrawal reason is not in Spanish:\n%s", got)
+	}
 	if got := run(func(cancel context.CancelCauseFunc) { cancel(nil) }); !strings.Contains(got, "→ abandonado por el agente") {
 		t.Errorf("no Spanish abandonment:\n%s", got)
 	}

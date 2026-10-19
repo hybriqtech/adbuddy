@@ -22,6 +22,9 @@ func (l *phoneLink) useYolo(y *daemon.Yolo) {
 	l.mu.Lock()
 	l.yolo = y
 	l.mu.Unlock()
+	if l.conf != nil {
+		l.conf.SetYoloActive(y.Active)
+	}
 	y.Subscribe(l.yoloChanged)
 }
 
@@ -50,6 +53,20 @@ func (l *phoneLink) yoloChanged(c daemon.YoloChange) {
 	}
 	if l.srv != nil {
 		_ = l.srv.Publish(bridge.TypeYoloState, toBridgeYolo(c.State))
+	}
+	// Turning YOLO on: what was granted from here on is dropped when it ends, and
+	// the cards pending are approved by YOLO itself (phone_perm.go). The daemon's
+	// own observer (daemon.New, subscribed before this one) has already withdrawn the
+	// pending 🔴 question.
+	// Lock order: all under Yolo.notifyMu; Confirmer.mu and adapter.mu are taken
+	// one at a time and never while calling Enable, EnableSession or Off.
+	if c.State.Active {
+		if l.conf != nil {
+			l.conf.YoloStarted()
+		}
+		l.yoloResolvePerms()
+	} else if l.conf != nil {
+		l.conf.YoloEnded()
 	}
 }
 

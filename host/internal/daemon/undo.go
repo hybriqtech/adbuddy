@@ -303,6 +303,10 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 					_ = s.Data(res)
 					return ipc.Exit{Code: ExitDenied, ErrorCode: "PAUSED", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", PausedMessage, len(res.Undone))}
 				}
+				if errors.Is(askErr, ErrAskYolo) { // YOLO was turned on while it waited: run undo again, it will not ask
+					_ = s.Data(res)
+					return ipc.Exit{Code: ExitDenied, ErrorCode: "CONFIRMATION_WITHDRAWN", Error: fmt.Sprintf("%s; undid %d change(s) before stopping", YoloWithdrawnMessage, len(res.Undone))}
+				}
 				if errors.Is(askErr, ErrAskBusy) { // never asked: not a denial
 					_ = s.Data(res)
 					return ipc.Exit{Code: ExitDenied, ErrorCode: "WAITING_FOR_ANSWER", Error: askErr.Error()}

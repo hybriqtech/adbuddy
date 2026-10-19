@@ -84,6 +84,11 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	a.attention = now.Add(attentionTTL)
 	a.mu.Unlock()
 	l.publishEvent(bridge.TypePermRequest, req)
+	// YOLO may have begun between the check above and the card being pending:
+	// the observer did not see it. Nothing waits for a card under YOLO.
+	if y := l.yoloOf(); y != nil && y.Active() {
+		l.resolvePermWith(req.ID, claudecode.Allow, "yolo", "")
+	}
 
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -102,6 +107,12 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 // resolvePerm ends a pending permission with the decision and tells the app.
 // It reports whether it was still pending: of two answers at once, one wins.
 func (l *phoneLink) resolvePerm(id string, d claudecode.Decision, by string) bool {
+	return l.resolvePermWith(id, d, by, "")
+}
+
+// resolvePermWith is resolvePerm with the summary the app is told when YOLO
+// approved it (by "yolo": escaped, and with no rule, whatever the card offered).
+func (l *phoneLink) resolvePermWith(id string, d claudecode.Decision, by, summary string) bool {
 	a := &l.adapter
 	a.mu.Lock()
 	p := a.perms[id]
@@ -110,6 +121,11 @@ func (l *phoneLink) resolvePerm(id string, d claudecode.Decision, by string) boo
 		return false
 	}
 	delete(a.perms, id)
+	rule := p.rule
+	if by == "yolo" {
+		rule = "" // YOLO is temporary: never a permanent rule in localSettings
+		summary = classify.Visible(p.req.Summary)
+	}
 	if by == "timeout" {
 		a.held = true // nobody answered: Claude Code's dialog stays on the terminal (V05)
 	}
@@ -127,8 +143,8 @@ func (l *phoneLink) resolvePerm(id string, d claudecode.Decision, by string) boo
 	case claudecode.AllowAlways:
 		decision = "allow_always"
 	}
-	p.done <- permResult{d, p.rule}
-	l.publishEvent(bridge.TypePermResolved, bridge.PermissionResolved{ID: id, Decision: decision, By: by})
+	p.done <- permResult{d, rule}
+	l.publishEvent(bridge.TypePermResolved, bridge.PermissionResolved{ID: id, Decision: decision, By: by, Summary: summary})
 	return true
 }
 
@@ -217,6 +233,17 @@ func (l *phoneLink) toolEnded(id string) {
 	}
 }
 
+// resolveAllPermsAs ends every pending permission with d.
+func (l *phoneLink) resolveAllPermsAs(d claudecode.Decision, by string) {
+	a := &l.adapter
+	a.mu.Lock()
+	ids := append([]string(nil), a.order...)
+	a.mu.Unlock()
+	for _, id := range ids {
+		l.resolvePermWith(id, d, by, "")
+	}
+}
+
 // resolveAllPerms ends every pending permission with no decision.
 func (l *phoneLink) resolveAllPerms(by string) {
 	a := &l.adapter
@@ -246,10 +273,17 @@ func (l *phoneLink) onPermReply(m bridge.Message) {
 	default:
 		return
 	}
+	// While YOLO is on, "yes, always" is only a "yes": a tap injected on a card
+	// that was pending when YOLO began must not leave a permanent rule. Read
+	// before adapter.mu is taken (Yolo.mu is a leaf; the order stays simple).
+	yoloOn := false
+	if y := l.yoloOf(); y != nil {
+		yoloOn = y.Active()
+	}
 	a := &l.adapter
 	a.mu.Lock()
 	p := a.perms[rep.ID]
-	if p != nil && d == claudecode.AllowAlways && (!p.req.AllowAlways || p.rule == "") {
+	if p != nil && d == claudecode.AllowAlways && (!p.req.AllowAlways || p.rule == "" || yoloOn) {
 		d = claudecode.Allow
 	}
 	a.mu.Unlock()
@@ -271,6 +305,14 @@ func (l *phoneLink) permissionsSnapshot(s *bridge.Snapshot) {
 		}
 	}
 	s.Permissions = out
+}
+
+// yoloResolvePerms approves, as "allow" by yolo, the cards that were pending
+// when YOLO was turned on (a YOLO observer: adapter.mu is taken one card at a
+// time, and nothing here turns YOLO on or off). Left pending, a tap injected on
+// one could answer "always" and leave a rule that outlives YOLO.
+func (l *phoneLink) yoloResolvePerms() {
+	l.resolveAllPermsAs(claudecode.Allow, "yolo")
 }
 
 // yoloPermission answers a permission question of the agent with "allow" while

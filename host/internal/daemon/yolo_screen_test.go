@@ -260,7 +260,7 @@ func TestYoloHelpersRunWithAQuestionWaitingAndNoJournal(t *testing.T) {
 	if _, exit := e.helper(t, bridge.UIOpClick, xy(1, 1), "adbuddy", "tap", "--xy", "1", "1"); exit.Code != ExitDenied {
 		t.Fatalf("without YOLO the tap went through a waiting question: %+v", exit)
 	}
-	e.yoloOn(t)
+	e.yoloOnKeepingQuestion(t)
 	breakJournal(t)(e)
 	s, exit := e.helper(t, bridge.UIOpClick, xy(1, 1), "adbuddy", "tap", "--xy", "1", "1")
 	if exit.Code != 0 || !strings.Contains(s.errOut.String(), "a question was waiting") || !strings.Contains(s.errOut.String(), "without a record") {
@@ -422,7 +422,7 @@ func TestYoloUndoTellsNothingWhenItRunsNothing(t *testing.T) {
 	e.d.o.Confirmer = held
 	red := e.execAsync("shell", "reboot")
 	asked(t, held)
-	e.yoloOn(t)
+	e.yoloOnKeepingQuestion(t)
 	res, exit, s := e.undoLast(t)
 	if len(res.Undone) != 0 || e.ranContains("rm -rf") {
 		t.Fatalf("it ran: %+v ran %q", res, e.adb.ran())

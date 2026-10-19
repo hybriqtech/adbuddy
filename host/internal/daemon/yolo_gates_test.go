@@ -118,7 +118,7 @@ func TestYoloDoesNotWaitForAnotherQuestion(t *testing.T) {
 				red := e.execAsync("shell", "reboot") // asks, and waits for the answer
 				asked(t, held)
 				if yolo {
-					e.yoloOn(t)
+					e.yoloOnKeepingQuestion(t)
 				}
 				s, exit := e.exec(t, tc.argv...)
 				out := s.errOut.String()
@@ -309,4 +309,14 @@ func TestYoloOffBringsTheDoorsBack(t *testing.T) {
 	if _, exit := e.exec(t, "shell", "rm", "/sdcard/y"); exit.Code != ExitDenied || len(e.conf.asked) != 1 {
 		t.Fatalf("after off: %+v asked %d", exit, len(e.conf.asked))
 	}
+}
+
+// yoloOnKeepingQuestion turns YOLO on with a question of the agent still
+// waiting. Turning YOLO on withdraws that question (yoloWithdraw), so this uses
+// a YOLO with no observers: it is the state the doors see when a question
+// registers right after YOLO began, which is what these tests are about.
+func (e *env) yoloOnKeepingQuestion(t *testing.T) {
+	t.Helper()
+	e.d.o.Yolo = NewYolo(nil, nil)
+	e.d.o.Yolo.EnableSession()
 }

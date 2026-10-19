@@ -14,6 +14,7 @@
 "confirm.expired" = "→ caducó, denegado"
 "confirm.withdrawn" = "→ retirado: %[1]s"
 "confirm.cause.paused" = "pausado desde el móvil"
+"confirm.cause.yolo" = "se activó el modo YOLO"
 "confirm.abandoned" = "→ abandonado por el agente"
 # session: lo que enseña una terminal conectada (session/attach.go)
 "session.agent_ended" = "El agente terminó. Vuelve a arrancarlo con adbuddy new, o desconéctate con Ctrl+]."

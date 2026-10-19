@@ -15,6 +15,7 @@
 "confirm.expired" = "→ expired, denied"
 "confirm.withdrawn" = "→ withdrawn: %[1]s"
 "confirm.cause.paused" = "paused from the phone"
+"confirm.cause.yolo" = "YOLO mode was turned on"
 "confirm.abandoned" = "→ abandoned by the agent"
 # session: what an attached terminal shows (session/attach.go)
 "session.agent_ended" = "The agent ended. Start it again with adbuddy new, or detach with Ctrl+]."
