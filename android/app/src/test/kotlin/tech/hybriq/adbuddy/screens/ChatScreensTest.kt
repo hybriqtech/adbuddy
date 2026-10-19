@@ -58,7 +58,7 @@ class ChatScreensTest(private val mode: ScreenMode) {
 
     private fun text(id: Int, vararg args: Any): String = app.getString(id, *args)
 
-    private fun show(state: BridgeState, cut: Boolean = false, configured: Boolean = true, outgoing: List<Outgoing> = emptyList(), terminalOpenByDefault: Boolean = true, notificationsBlocked: Boolean = false) {
+    private fun show(state: BridgeState, cut: Boolean = false, configured: Boolean = true, outgoing: List<Outgoing> = emptyList(), terminalOpenByDefault: Boolean = false, notificationsBlocked: Boolean = false) {
         compose.setContent {
             AdbuddyTheme(dynamic = false) {
                 ChatScreen(
@@ -137,7 +137,7 @@ class ChatScreensTest(private val mode: ScreenMode) {
     private val connected = BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc")
 
     @Test fun theTerminalStartsOpenByDefault() {
-        show(connected)
+        show(connected, terminalOpenByDefault = true)
         compose.onNodeWithContentDescription(text(R.string.chat_terminal_hide)).assertIsDisplayed()
         compose.onNodeWithContentDescription(text(R.string.chat_terminal_show)).assertDoesNotExist()
     }

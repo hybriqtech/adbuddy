@@ -814,11 +814,23 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
   - (b) Si la partida se leyó por `uiautomator`, cuenta como «con ventana de app». Si después la app devuelve una lectura sin ventana (un juego), el toque espera el tope de 3 s. Muy raro.
 - **Límite aceptado:** el volcado no distingue una ventana de app con el árbol vacío (juego, cámara) del fotograma de una transición. Al navegar de una pantalla normal a una sin contenido accesible, el primer `--screen` tarda 3 s con `settled=false`. Acotarlo del todo pide un campo de protocolo («hay ventana de app»).
 
-## Modo YOLO (spec 2026-10-18; plan `2026-10-18-modo-yolo.md`)
+## Aspecto visual y estado del acceso (UX1; rama `ux/visual`, PR #96, 2026-10-19; plan `2026-10-18-app-visual-y-acceso.md`)
 
-- **Fuera de la v1 de YOLO (decidido):**
-  - Activar YOLO desde el PC: solo se activa desde la app (con biometría fuerte o el bloqueo de pantalla), para que el agente no pueda hacerlo.
-  - YOLO persistente: vive en la memoria de `adbuddy serve` y no sobrevive a reiniciarlo; las duraciones son 15 min, 1 h o `session`.
-  - YOLO parcial (levantar solo algunas puertas): es todo salvo la pausa.
-- **Límite conocido de R1, por si la persona quiere cambiarlo:** con YOLO activo y la app conectada, una app protegida del usuario no se protege (la app deja de marcarla y el host deja de aplicar su lista); ADBuddy sí sigue protegida, igual que las ventanas que el móvil no deja leer. Cambiarlo es decidir qué marca la app (A5) y qué levanta `d.lift` en `appProtected`.
-- **Límites de la activación (R20/R22) y otros** están en `docs/safety.md#yolo-mode` y en «Validaciones manuales pendientes» del plan: PIN observable sin biometría fuerte, sin bloqueo de pantalla un toque inyectado puede terminar la activación, botón «Confirmar» del sistema con cara fuerte, `force-stop`/`pm clear` de ADBuddy bajo YOLO, y la tarjeta de una pregunta 🔴 pendiente al activar.
+- **Hecho:** P4 (icono de la app: adaptativo y monocromo, con iconos propios por tipo de tarjeta). Filas UX1-1 a UX1-6 del inventario de validaciones.
+- **Pendiente:**
+
+| Id | Qué | Nota |
+|---|---|---|
+| Bug 17 | `Toast` del consentimiento | Aparcado por R13. |
+| UX-a | El nivel de cada entrada del diario solo se distingue por color en la barra (más su nombre para TalkBack) | En modo claro rojo/ámbar/verde tienen casi la misma luminancia. Mejora posible: texto o icono de nivel visible, o ancho de barra distinto. |
+| UX-b | Sanear `SessionState.agent` (caracteres bidi/control, longitud) | Se pinta en el título de la tarjeta y en la cabecera. |
+| UX-c | El bloque del comando del diálogo 🔴 en modo claro apenas se distingue del fondo (`surfaceContainerHighest`) | Subir contraste o añadir borde. |
+| UX-d | Falta captura de un error largo del host en los chips de borrador | |
+| UX-e | El recuento de `ConfirmDialogScreensTest` no detecta un bloque recortado sin scroll | Lo cubren `ConfirmDialogScrollTest`, `ConfirmDialogLayoutTest` y `ConfirmDialogButtonsTest`. |
+
+- **Inventario (ficheros nuevos principales):**
+  - `control/AccessDiag` (diagnóstico `ADBuddyAccess`), `a11y/OverlayColors` (colores fijos de la superposición).
+  - `ui/theme/`: `Palette`, `Theme`, `AdbuddyColors`, `Type`, `Shapes`, `ThemePrefs`.
+  - `ui/`: `HomeNotice`, `ActionCard` (+ `cardIconRes`), `StatusPill`, `RestoreAccessDialog`, `ChatHeaderBar` (en `ChatParts.kt`).
+  - Iconos: `ic_shield`, `ic_shield_off`, `ic_card_question`, `ic_card_pause`, `ic_card_update`, `ic_launcher_foreground`, `ic_launcher_monochrome`, `ic_stat_adbuddy`, `ic_stat_shield`.
+  - Capturas en `android/app/src/test/screenshots/` (`-Padbuddy.screens=record|verify`).
