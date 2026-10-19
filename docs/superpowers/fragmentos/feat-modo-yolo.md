@@ -23,6 +23,8 @@ Cierre del plan `2026-10-18-modo-yolo.md` (spec `2026-10-18-adbuddy-modo-yolo-de
 | Y-c | Tras un `offFailed` en caliente el texto de fallo de la notificación se queda hasta el siguiente cambio de modo | El consejo (`adbuddy yolo off`) sigue siendo cierto. |
 | Y-d | En un proceso en frío el `Bridge` no está conectado: el Apagar de una notificación que sobrevivió a su proceso dice «usa `adbuddy yolo off`» | Arrancar el servicio desde el receptor sería la mejora. |
 | Y-e | `setSocketForTest` interno en `Bridge` en lugar de inyectar el socket por reflexión en un test de A3 | Opcional. |
+| Y-f | Test sensible a la carga: `TestServeRefusesTheAgentsTreeWhateverItDeclares` (`host/internal/cli`, `agentpeer_test.go`) | Con la máquina cargada falló una vez en el merge de main (60 s de espera sin las 4 respuestas, 63 s); suelto pasa en 4 s y la segunda corrida completa salió verde. Subir o hacer adaptable el plazo de 60 s. |
+| Y-g | Test sensible a la carga: `TestDisconnectCancelsHandlerThatIgnoresStdin` (`host/internal/ipc`) | Falló una vez en el mismo merge con la máquina cargada; suelto pasa en 0,7 s. Revisar el plazo o la sincronización. |
 
 ## Inventario (ficheros nuevos y clave)
 
