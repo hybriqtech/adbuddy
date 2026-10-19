@@ -52,6 +52,9 @@ object YoloUi {
     /** The switch turns the mode on only from a known off with the PC connected. Turning it off is never limited. */
     fun canTurnOn(view: View, connected: Boolean): Boolean = view.kind == Kind.OFF && connected
 
+    /** What the persistent notification says it is about, or null when it must not be up: it changes only when the mode or its expiry does. */
+    fun notificationKey(state: BridgeState): String? = state.yolo?.takeIf { it.active }?.let { if (it.session) "session" else "until:${it.until}" }
+
     /**
      * Whether the button of the activation dialog may send: a duration was chosen (there is no default), the PC is
      * connected, the phone is unlocked now (read again at the tap: the dialog could have been left open) and the button

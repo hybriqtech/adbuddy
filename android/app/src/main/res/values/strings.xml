@@ -22,6 +22,12 @@
     <string name="channel_confirm">Confirmations</string>
     <string name="channel_ask">Agent questions</string>
     <string name="channel_ask_description">Tells you when the agent asks your permission, so you can answer in time.</string>
+    <string name="channel_yolo">YOLO mode</string>
+    <string name="channel_yolo_description">A notice while YOLO mode is on, with a button to turn it off.</string>
+    <string name="yolo_notif_title">YOLO mode is on</string>
+    <string name="yolo_notif_until">Until %1$s</string>
+    <string name="yolo_notif_session">Until the session ends</string>
+    <string name="yolo_notif_off">Turn off</string>
     <string name="channel_conversation_description">The ongoing notification with the conversation and its buttons.</string>
     <string name="channel_done_description">Tells you when the agent has finished.</string>
     <string name="channel_confirm_description">Questions about risky commands, with Allow and Deny.</string>

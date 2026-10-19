@@ -34,6 +34,7 @@ import tech.hybriq.adbuddy.notify.ConversationNotifier
 import tech.hybriq.adbuddy.notify.ConversationView
 import tech.hybriq.adbuddy.notify.DoneDetector
 import tech.hybriq.adbuddy.notify.Notify
+import tech.hybriq.adbuddy.yolo.YoloNotifier
 
 /**
  * Keeps the channel with the host open (spec §6: foreground service of type
@@ -80,12 +81,16 @@ class BridgeService : LifecycleService() {
         // Questions left by an earlier process: nobody can answer them now; the host sends them again.
         ConfirmNotifier.clear(this)
         ConversationNotifier.cancelAsk(this)
+        YoloNotifier.clear(this)
         // While the service lives (it posts the questions): a system broadcast, nobody else's to send.
         ContextCompat.registerReceiver(this, screenOn, IntentFilter(Intent.ACTION_SCREEN_ON), ContextCompat.RECEIVER_NOT_EXPORTED)
         listening = true
         val app = application as AdbuddyApp
         lifecycleScope.launch {
             app.bridge.state.collect { s -> ConfirmNotifier.sync(this@BridgeService, s) }
+        }
+        lifecycleScope.launch {
+            app.bridge.state.collect { s -> YoloNotifier.sync(this@BridgeService, s, app.clock) }
         }
         lifecycleScope.launch {
             var announced = emptySet<String>()

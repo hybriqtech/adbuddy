@@ -93,6 +93,10 @@
             android:name=".confirm.ConfirmReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".yolo.YoloReceiver"
+            android:exported="false" />
+
         <service
             android:name=".a11y.AgentAccessibilityService"
             android:exported="false"

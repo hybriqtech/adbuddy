@@ -152,6 +152,9 @@ class AdbuddyApp : Application() {
             description = getString(R.string.channel_ask_description)
             setShowBadge(false)
         })
+        nm.createNotificationChannel(NotificationChannel(CHANNEL_YOLO, getString(R.string.channel_yolo), NotificationManager.IMPORTANCE_LOW).apply {
+            description = getString(R.string.channel_yolo_description)
+        })
     }
 
     override fun onTerminate() {
@@ -187,6 +190,7 @@ class AdbuddyApp : Application() {
         const val CHANNEL_DONE = "done"
         const val CHANNEL_CONFIRM = "confirm"
         const val CHANNEL_ASK = "ask"
+        const val CHANNEL_YOLO = "yolo"
         private const val LEGACY_STATUS = "status"
     }
 }

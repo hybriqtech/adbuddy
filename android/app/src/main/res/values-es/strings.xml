@@ -21,6 +21,12 @@
     <string name="channel_confirm">Confirmaciones</string>
     <string name="channel_ask">Preguntas del agente</string>
     <string name="channel_ask_description">Te avisa cuando el agente pide tu permiso, para que puedas contestar a tiempo.</string>
+    <string name="channel_yolo">Modo YOLO</string>
+    <string name="channel_yolo_description">Un aviso mientras el modo YOLO está activado, con un botón para apagarlo.</string>
+    <string name="yolo_notif_title">El modo YOLO está activado</string>
+    <string name="yolo_notif_until">Hasta las %1$s</string>
+    <string name="yolo_notif_session">Hasta el fin de la sesión</string>
+    <string name="yolo_notif_off">Apagar</string>
     <string name="channel_conversation_description">La notificación fija con la conversación y sus botones.</string>
     <string name="channel_done_description">Te avisa cuando el agente ha terminado.</string>
     <string name="channel_confirm_description">Preguntas sobre comandos delicados, con Permitir y Rechazar.</string>
