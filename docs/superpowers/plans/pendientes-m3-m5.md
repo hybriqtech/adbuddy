@@ -813,3 +813,12 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
   - (a) Con `screen --settle`, si la primera lectura quedó bloqueada y se adopta, `protectBare` se calculó con la partida desconocida. Se cierra recalculándolo al adoptar la partida (una línea).
   - (b) Si la partida se leyó por `uiautomator`, cuenta como «con ventana de app». Si después la app devuelve una lectura sin ventana (un juego), el toque espera el tope de 3 s. Muy raro.
 - **Límite aceptado:** el volcado no distingue una ventana de app con el árbol vacío (juego, cámara) del fotograma de una transición. Al navegar de una pantalla normal a una sin contenido accesible, el primer `--screen` tarda 3 s con `settled=false`. Acotarlo del todo pide un campo de protocolo («hay ventana de app»).
+
+## Modo YOLO (spec 2026-10-18; plan `2026-10-18-modo-yolo.md`)
+
+- **Fuera de la v1 de YOLO (decidido):**
+  - Activar YOLO desde el PC: solo se activa desde la app (con biometría fuerte o el bloqueo de pantalla), para que el agente no pueda hacerlo.
+  - YOLO persistente: vive en la memoria de `adbuddy serve` y no sobrevive a reiniciarlo; las duraciones son 15 min, 1 h o `session`.
+  - YOLO parcial (levantar solo algunas puertas): es todo salvo la pausa.
+- **Límite conocido de R1, por si la persona quiere cambiarlo:** con YOLO activo y la app conectada, una app protegida del usuario no se protege (la app deja de marcarla y el host deja de aplicar su lista); ADBuddy sí sigue protegida, igual que las ventanas que el móvil no deja leer. Cambiarlo es decidir qué marca la app (A5) y qué levanta `d.lift` en `appProtected`.
+- **Límites de la activación (R20/R22) y otros** están en `docs/safety.md#yolo-mode` y en «Validaciones manuales pendientes» del plan: PIN observable sin biometría fuerte, sin bloqueo de pantalla un toque inyectado puede terminar la activación, botón «Confirmar» del sistema con cara fuerte, `force-stop`/`pm clear` de ADBuddy bajo YOLO, y la tarjeta de una pregunta 🔴 pendiente al activar.

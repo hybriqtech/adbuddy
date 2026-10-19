@@ -80,6 +80,7 @@ Claude Code (recomendado), Codex, Gemini CLI y OpenCode. ADBuddy no instala agen
 - Los comandos rojos esperan tu respuesta, en el móvil (para permitir, debe estar desbloqueado) o en la terminal del host. Una pregunta sin respuesta cuenta como un no (a los 2 minutos por defecto).
 - Con la app instalada, las apps de banca, pagos, contraseñas y 2FA están protegidas mientras están en primer plano (una propuesta a partir de sus nombres que confirmas o editas en la app). Sin la app, solo está protegido ADBuddy.
 - ADBuddy no tiene telemetría ni servidor propio. Lo que el agente lee en tu móvil va al proveedor del propio agente.
+- **El modo YOLO es la excepción.** Si lo activas en la app, el agente ejecuta incluso comandos destructivos sin preguntar, durante 15 minutos, 1 hora o hasta que acabe `adbuddy serve`. Solo lo activa el móvil, con huella o cara de clase fuerte o con el bloqueo de pantalla. Pausar lo apaga. Véase [Modo YOLO](docs/safety.md#yolo-mode) (en inglés).
 - **El shim protege contra errores e inyecciones de prompts. No protege contra un agente empeñado en buscar otro adb.** La garantía real es **Cortar acceso** en la app, que apaga la depuración desde el móvil: con ella apagada, el PC no puede alcanzar el móvil.
 
 ADBuddy reduce el riesgo de dejar que un agente maneje tu móvil; no lo elimina. Usa un móvil y unas cuentas que puedas permitirte reparar, y lee cada pregunta antes de permitir.
@@ -111,6 +112,7 @@ Son los comandos de `adbuddy --help` (el programa los describe en inglés; aquí
 | `adbuddy undo` | Deshace los cambios del diario ejecutando sus inversos |
 | `adbuddy connect <ip:port>` | Conecta con el móvil por dirección IP y puerto |
 | `adbuddy remote` | Abre o cierra el puerto de red 5555 de adb (modo remoto) |
+| `adbuddy yolo` | Apaga el modo YOLO del agente, o mira si está activado |
 | `adbuddy doctor` | Comprueba lo que ADBuddy necesita y explica cómo arreglarlo |
 | `adbuddy env` | Gestiona el entorno del agente |
 | `adbuddy screen` | Lista lo que hay en la pantalla del móvil y dónde tocar |

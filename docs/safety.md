@@ -101,6 +101,30 @@ While the agent uses the screen, the phone shows a frame and a pill, **Agent usi
 
 **Notifications.** `adbuddy notifications` reads them through a listener you allow in the system's own screen and then confirm in ADBuddy; the agent cannot press that confirm button (ADBuddy is protected), and revoking the access in the system takes your confirmation away. So does every new start of the listener: after a reboot, an update of ADBuddy or the system killing it, you confirm again in ADBuddy before the agent can read. The title and text of protected apps, of ADBuddy, of other users or work profiles, and of notifications marked secret never leave the phone. There is no adb fallback. Limit: a notification forwarder you install (a smartwatch companion, KDE Connect) can pass the content of a protected app on under its own name.
 
+## YOLO mode
+
+YOLO mode lets the agent work on your phone without asking you. **With YOLO on, a destructive command (a factory reset, an uninstall, deleting files) runs without asking, and nothing waits for your answer.** Use it only when you are watching, or when you accept that risk.
+
+- **Only you turn it on, and only from the app.** The agent cannot: nothing in the agent's path (the shim, the other commands of `adbuddy`) has an "on". The command line has only `adbuddy yolo off` and `adbuddy yolo status`, and any other request for it is refused with `YOLO_ONLY_FROM_THE_PHONE`. In the app the notice lists what YOLO skips, you must choose how long it lasts (15 minutes, 1 hour or until `adbuddy serve` ends), and its button stays disabled for a moment so a stray tap cannot confirm it. The last step is to prove it is you:
+  - **Strong fingerprint or face.** If the phone has them, the app asks for one (no PIN fallback). Nobody can inject that with a tap.
+  - **The screen lock.** If the phone has no strong biometrics, the app asks for the PIN, pattern or password. **Known risk:** with YOLO already on, a script left running by the agent could watch you type a PIN (`getevent`, `screenrecord`) and use it to turn YOLO on again after it expires. Strong biometrics avoid this; if you do not have them, you accept it.
+  - **No secure screen lock.** If the phone has none, the app shows a specific warning and, after its own short wait, turns YOLO on. You accept that a tap injected by the agent could finish the activation.
+- **What it skips:** every confirmation (red commands, `adbuddy undo`, other devices and adb options), the journal if it cannot be written (the command runs without a record and cannot be undone), the protected-apps list you set and the notification shade or other system windows that would block the screen, and the permission questions of Claude Code (they are answered `allow`, never `allow_always`).
+- **What it does not skip:**
+  - **Pause.** Pausing the agent from the phone stops it and also turns YOLO off.
+  - **The ADBuddy app itself.** While ADBuddy is in front, or half of a split screen, nothing touches or reads the screen, so the agent cannot reach the YOLO switch or Pause. The rules that stop `am start` and `monkey` from opening around it stay. A command that touches or reads the screen still runs alone, and "I cannot tell what is in front" still blocks.
+  - **What the app marks as protected.** While YOLO is on and the app is connected, the app stops marking your protected apps, so they are **not protected** for that time; ADBuddy and a window the phone does not let ADBuddy read stay blocked.
+  - **Your question about remote mode.** The question that `adbuddy remote on` asks is yours: while it waits, YOLO does not open the other doors, or the agent could press Allow on the phone.
+- **The agent is told.** Each command that ran only because of YOLO prints a line `⚠ YOLO: <what was skipped>` on the agent's stderr, once per command and reason.
+- **Turning it off:** the Off button of the band in the app, the Off button of its notification, `adbuddy yolo off` on the PC, the end of its time, Pause, or stopping `adbuddy serve`. YOLO does not survive a restart of `serve`.
+- **The journal.** Every entry written while YOLO is on carries a YOLO mark (`yolo: true` in `adbuddy journal --json`).
+- **Known limits:**
+  - The time is measured with the PC's wall clock: someone who can set the PC's clock back (an administrator, for example) can make a running YOLO last longer, but that person already controls the host.
+  - Any result other than success when the app checks for strong biometrics (hardware unavailable, a security update required, a lockout) counts as "no strong biometrics", so the app asks for the screen lock instead: that is the PIN case above.
+  - With a strong face unlock and the system's "confirm" button on, that button belongs to the system, not to ADBuddy: a script could press it with `input tap` if the face is recognised while you do nothing. The app cannot prevent this.
+  - Under YOLO, `am force-stop`, `pm disable-user` and `pm clear` of the ADBuddy app do run. ADBuddy's rules protect its screen, not its process. If the agent did that you would lose the app you pause from, but `adbuddy yolo off` and the end of the time still work.
+  - If you turn YOLO on while a red question of the agent is waiting, an `input tap` on the card shown outside ADBuddy could press "allow for this session"; that permission survives turning YOLO off, only for the same rule, folder and arguments.
+
 ## Pause and Cut access
 
 Two buttons in the phone's app. **Cut access** works on the phone itself, without the PC; **Pause** asks the host to stop, so it only works while the app is connected to it.
