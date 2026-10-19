@@ -260,7 +260,7 @@ Only a running `adbuddy serve` closes the port when the 12 hours end. With serve
 
 YOLO mode lets the agent run without asking you for a time. **With it on, destructive commands run without asking.** Read [YOLO mode](safety.md#yolo-mode) before using it.
 
-- You turn it on only in the ADBuddy app (Settings), choosing 15 minutes, 1 hour or until `adbuddy serve` ends, and proving it is you with a strong fingerprint or face, or with the screen lock. There is no `adbuddy yolo on`, and the agent cannot turn it on.
+- You turn it on only in the ADBuddy app (in Settings, or in the ⋮ menu of the chat header), choosing 15 minutes, 1 hour or until `adbuddy serve` ends, and proving it is you with a strong fingerprint or face, or with the screen lock. There is no `adbuddy yolo on`, and the agent cannot turn it on.
 - `adbuddy yolo status` says whether it is on and until when. `adbuddy yolo off` turns it off; it works with the host running (with `adbuddy serve` stopped YOLO is off anyway).
 - While it is on, the app shows a band with the time left and an Off button, and a notification with Off. Pause turns it off too.
 - A command that ran only because of YOLO prints `⚠ YOLO: …` on the agent's stderr, and its journal entry has `yolo: true`.
