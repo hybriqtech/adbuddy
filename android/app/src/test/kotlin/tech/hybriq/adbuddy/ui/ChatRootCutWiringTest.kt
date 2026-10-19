@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -173,6 +174,28 @@ class ChatRootCutWiringTest {
         assertEquals("not consumed: nobody closed it", CutCheck.STILL_CONNECTED, app.cutCheck.value)
         show = true
         waitForText(R.string.cut_still_connected)
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
+    }
+
+    // A new result must show even while the old notice (endless, with its button) is still up: giving access back closes
+    // it, and the cut that follows brings its own.
+    @Test fun aNewStillConnectedShowsEvenIfTheOldOneWasStillUp() {
+        app.getSharedPreferences(CutAccess.PREFS, Context.MODE_PRIVATE).edit().clear().commit()
+        put(1, 1)
+        CutAccess.probe = { true }
+        CutAccess.waitMs = 300
+        mount()
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        waitForText(R.string.cut_still_connected) // up, endless: nobody closes it
+        compose.onNodeWithContentDescription(text(R.string.action_restore)).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText(text(R.string.restore_confirm_confirm)).performClick()
+        waitForText(R.string.cut_restored) // the old notice no longer blocks the queue
+        compose.onNodeWithText(text(R.string.cut_still_connected)).assertDoesNotExist()
+        compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription(text(R.string.action_cut)).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription(text(R.string.action_cut)).performClick()
+        // The short "restored" notice may still be up in front of it in the queue.
+        compose.waitUntil(30_000) { compose.onAllNodesWithText(text(R.string.cut_still_connected)).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText(text(R.string.cut_still_connected)).assertIsDisplayed()
     }
 

@@ -32,7 +32,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.AdbuddyApp
@@ -127,8 +127,10 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     // It is consumed only once shown: if the screen is recreated with the notice up, this effect is cancelled before
     // cutCheckShown() and the next ChatRoot shows it again.
     LaunchedEffect(app) {
-        app.cutCheck.filterNotNull().collect {
-            val stillConnected = it == CutCheck.STILL_CONNECTED
+        // collectLatest: giving access back (null) closes an old notice that is up, and a new result replaces it. The initial null shows nothing.
+        app.cutCheck.collectLatest { r ->
+            if (r == null) return@collectLatest
+            val stillConnected = r == CutCheck.STILL_CONNECTED
             show(noticeFor(ok = true, restoring = false, stillConnected = stillConnected), withWayOut = stillConnected)
             app.cutCheckShown()
         }
