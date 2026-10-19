@@ -12,13 +12,18 @@ class AccessSwitchTest {
         var allowed = true
         var ignoreWrites = emptySet<String>() // written without error, but the value does not change
         var unreadable = emptySet<String>() // reading throws, as Android 12+ may do for a hidden setting
+        var readsZero = emptySet<String>() // reads 0 whatever the value, as Android 17 does for adb_enabled (addendum 2026-10-19)
+        var refuses = emptySet<String>() // put() says false and nothing changes (Settings.Global.putInt failing)
         override fun get(name: String): Int? {
             if (name in unreadable) throw SecurityException("cannot read $name")
+            if (name in readsZero) return 0
             return values[name]
         }
-        override fun put(name: String, value: Int) {
+        override fun put(name: String, value: Int): Boolean {
             if (!allowed) throw SecurityException("no WRITE_SECURE_SETTINGS")
+            if (name in refuses) return false
             if (name !in ignoreWrites) values[name] = value
+            return true
         }
     }
 
@@ -138,16 +143,18 @@ class AccessSwitchTest {
         assertFalse(AccessSwitch(s, FakeSaved()).isCut())
     }
 
-    @Test fun cuttingWithOnlyWirelessSavesBothAndRestoresThemAsTheyWere() {
+    // Addendum 2026-10-19 R16: a 0 for adb_enabled with wireless debugging at 1 is not believed. Before, this test saved
+    // adb_enabled=0 and restored it as 0; on Android 17 that 0 is false and restoring it would turn USB debugging off.
+    @Test fun cuttingWithOnlyWirelessReadSavesUsbAsOn_andRestoresBoth() {
         val s = FakeSettings(adb to 0, wifi to 1)
         val saved = FakeSaved()
         val sw = AccessSwitch(s, saved)
         assertTrue(sw.cut())
-        assertEquals(0, saved.values[adb])
+        assertEquals("a 0 that wireless debugging contradicts is saved as 1", 1, saved.values[adb])
         assertEquals(1, saved.values[wifi])
         assertTrue(sw.isCut())
         assertTrue(sw.restore())
-        assertEquals("USB debugging was off: it stays off", 0, s.values[adb])
+        assertEquals(1, s.values[adb])
         assertEquals("wireless debugging comes back", 1, s.values[wifi])
         assertFalse(sw.isCut())
     }
@@ -223,5 +230,107 @@ class AccessSwitchTest {
         sw.forgetIfRestored()
         assertTrue(saved.values.isEmpty())
         assertFalse(sw.isCut())
+    }
+
+    // --- Addendum 2026-10-19: Android 17 reads adb_enabled=0 for apps; adb_wifi_enabled reads right. ---
+
+    @Test fun android17_cuttingSavesUsbAsOnAndCuts() {
+        val s = FakeSettings(adb to 1, wifi to 1).apply { readsZero = setOf(adb) }
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved)
+        assertTrue(sw.cut())
+        assertEquals("the false 0 is not saved", 1, saved.values[adb])
+        assertEquals(1, saved.values[wifi])
+        assertEquals(0, s.values[adb])
+        assertEquals(0, s.values[wifi])
+        assertTrue(sw.isCut())
+    }
+
+    @Test fun android17_restoringBringsBothBackAndIsDone() {
+        val s = FakeSettings(adb to 1, wifi to 1).apply { readsZero = setOf(adb) }
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved)
+        assertTrue(sw.cut())
+        assertTrue("adb_enabled reads 0 after writing 1, but wireless reads 1: the 0 is the doubtful one", sw.restore())
+        assertEquals(1, s.values[adb])
+        assertEquals(1, s.values[wifi])
+        assertTrue("forgotten once restored", saved.values.isEmpty())
+        assertFalse(sw.isCut())
+    }
+
+    @Test fun aWirelessThatDoesNotComeBackFailsTheRestore() {
+        for (android17 in listOf(false, true)) {
+            val s = FakeSettings(adb to 1, wifi to 1).apply { if (android17) readsZero = setOf(adb) }
+            val saved = FakeSaved()
+            val sw = AccessSwitch(s, saved)
+            assertTrue(sw.cut())
+            s.ignoreWrites = setOf(wifi)
+            assertFalse("android17=$android17", sw.restore())
+            assertEquals("the record stays", 1, saved.values[adb])
+            assertEquals("the record stays", 1, saved.values[wifi])
+            assertEquals("still cut only while nothing reads 1 (USB came back where it reads right)", android17, sw.isCut())
+        }
+    }
+
+    @Test fun aZeroWithNothingAgainstItIsBelieved() {
+        val s = FakeSettings(adb to 0, wifi to 0)
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved)
+        assertTrue(sw.cut())
+        assertEquals(0, saved.values[adb])
+        assertEquals(0, saved.values[wifi])
+        assertTrue("R4: a record of both off is not guessed", sw.needsManualRestore())
+    }
+
+    @Test fun withoutAContradictionAZeroAfterRestoringIsBelieved() {
+        // Known cost (addendum R19): USB only on Android 17. Writing 1 and reading 0 with wireless at 0 is not done.
+        val s = FakeSettings(adb to 0, wifi to 0).apply { readsZero = setOf(adb) }
+        val saved = FakeSaved().apply { values[adb] = 1; values[wifi] = 0 }
+        val sw = AccessSwitch(s, saved)
+        assertFalse(sw.restore())
+        assertEquals("the record stays", 1, saved.values[adb])
+    }
+
+    @Test fun onlyAContradictedZeroIsDoubted() {
+        assertTrue(AccessSwitch.adbZeroIsDoubtful(0, 1))
+        assertTrue(AccessSwitch.adbZeroIsDoubtful(0, 0, channelUp = true))
+        assertFalse(AccessSwitch.adbZeroIsDoubtful(0, 0))
+        assertFalse(AccessSwitch.adbZeroIsDoubtful(0, null))
+        assertFalse(AccessSwitch.adbZeroIsDoubtful(1, 1, channelUp = true))
+        assertFalse(AccessSwitch.adbZeroIsDoubtful(null, 1, channelUp = true))
+    }
+
+    // --- Addendum 2026-10-19 R18: put() saying false is a failed write, even when the reading cannot see it. ---
+
+    @Test fun android17_aWriteAndroidRefusesIsNotDone() {
+        val s = FakeSettings(adb to 1, wifi to 1).apply { readsZero = setOf(adb); refuses = setOf(adb) }
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved)
+        assertFalse("adb_enabled reads 0 anyway: only put() can tell", sw.cut())
+        assertTrue(saved.values.isEmpty())
+        assertFalse(sw.isCut())
+    }
+
+    @Test fun android17_aRefusedRestoreKeepsTheRecord() {
+        val s = FakeSettings(adb to 1, wifi to 1).apply { readsZero = setOf(adb) }
+        val saved = FakeSaved()
+        val sw = AccessSwitch(s, saved)
+        assertTrue(sw.cut())
+        s.refuses = setOf(adb)
+        assertFalse(sw.restore())
+        assertEquals(1, saved.values[adb])
+    }
+
+    // --- Addendum 2026-10-19 R23: a record of only wireless debugging comes from the build before the addendum. ---
+
+    @Test fun anOldRecordOfOnlyWirelessRestoresUsbToo() {
+        for (android17 in listOf(false, true)) {
+            val s = FakeSettings(adb to 0, wifi to 0).apply { if (android17) readsZero = setOf(adb) }
+            val saved = FakeSaved().apply { values[adb] = 0; values[wifi] = 1 }
+            assertTrue("android17=$android17", AccessSwitch(s, saved).restore())
+            assertEquals("android17=$android17", 1, s.values[adb])
+            assertEquals(1, s.values[wifi])
+            assertTrue(saved.values.isEmpty())
+        }
     }
 }

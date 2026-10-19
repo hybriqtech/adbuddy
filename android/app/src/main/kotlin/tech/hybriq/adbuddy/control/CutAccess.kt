@@ -27,9 +27,7 @@ object CutAccess {
             object : AccessSwitch.Settings {
                 // Throws SecurityException when Android refuses the read: AccessSwitch treats it as unknown.
                 override fun get(name: String): Int? = Settings.Global.getString(resolver, name)?.toIntOrNull()
-                override fun put(name: String, value: Int) {
-                    Settings.Global.putInt(resolver, name, value)
-                }
+                override fun put(name: String, value: Int): Boolean = Settings.Global.putInt(resolver, name, value)
             },
             object : AccessSwitch.Saved {
                 override fun get(name: String): Int? = if (prefs.contains(name)) prefs.getInt(name, 0) else null
