@@ -817,6 +817,7 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 ## Aspecto visual y estado del acceso (UX1; rama `ux/visual`, PR #96, 2026-10-19; plan `2026-10-18-app-visual-y-acceso.md`)
 
 - **Hecho:** P4 (icono de la app: adaptativo y monocromo, con iconos propios por tipo de tarjeta). Filas UX1-1 a UX1-6 del inventario de validaciones.
+- **Hecho (2026-10-19, Pixel 9 Pro XL, Android 17):** V1 / UX1-1 (diagnóstico): la app leía `adb_enabled=raw:0` con el valor real 1 (shell); `adb_wifi_enabled` se lee bien. V2 rehecha / UX1-2 (cortar y reactivar, build de `ux/acceso-a17`): cortar, el PC perdió la conexión al instante, `cut.check=DONE` y la app dijo "Hecho"; reactivar, el teléfono volvió en 2 s con `adb_enabled=1` y `adb_wifi_enabled=1` reales. Observado: Android 17 mantiene la depuración inalámbrica con `adb_enabled=0` real, y reactivar enciende también la USB (coste aceptado en R16). Sigue pendiente V3 (UX1-3, icono monocromo).
 - **Pendiente:**
 
 | Id | Qué | Nota |
@@ -827,10 +828,18 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 | UX-c | El bloque del comando del diálogo 🔴 en modo claro apenas se distingue del fondo (`surfaceContainerHighest`) | Subir contraste o añadir borde. |
 | UX-d | Falta captura de un error largo del host en los chips de borrador | |
 | UX-e | El recuento de `ConfirmDialogScreensTest` no detecta un bloque recortado sin scroll | Lo cubren `ConfirmDialogScrollTest`, `ConfirmDialogLayoutTest` y `ConfirmDialogButtonsTest`. |
+| UX-f | En Android 17 la lectura no confirma que `adb_enabled=0/1` se aplique | Adenda 2026-10-19 R18-R19 y R22 (comprobación por canal y 5555, que no ve una USB encendida sin modo tcpip). Observado en V2 (2026-10-19): Android 17 mantiene la depuración inalámbrica con `adb_enabled=0` real, y reactivar enciende también la USB (coste aceptado en R16). |
+| UX-g | Minors de `AccessDiag`: `doubt` hace `trim()` y el switch no; sin test unitario de `AccessDiag.log`; sin test de lectura con error | Una lectura con error no debería contar para la duda: falta test. |
+| UX-h | `CutConfirm.check`: `waited` no cuenta el tiempo del sondeo (hasta ~15 s en un caso patológico) y "Hecho" se decide con la primera muestra buena, sin estabilizar | Falla hacia avisar tarde. El "Hecho" sale con la primera muestra con el canal caído y 5555 cerrado; si el canal rebota (USB encendida sin aplicarse el 0, host que reconecta) puede reconectar después: caso (a) de R22. |
+| UX-j | El test estático `bothCutButtonsPassTheChannelAndCheckTheCut` no exige que la comprobación esté dentro de la rama de éxito | |
+| UX-k | `AccessSwitch`: el registro (3 commits de `SharedPreferences`) no es atómico | Falla seguro. |
+| UX-l | Minor de T1: ninguna mutación detecta que `cut()` con duda deje de borrar `ADB_DOUBTED` (`forget()` siempre la borra) | Falta un test que lo distinga. |
+| UX-m | Minor de T1: el `assertFalse(sw.isCut())` de `android17_aWriteAndroidRefusesIsNotDone` es vacuo | No falla con ninguna mutación. |
 
 - **Inventario (ficheros nuevos principales):**
   - `control/AccessDiag` (diagnóstico `ADBuddyAccess`), `a11y/OverlayColors` (colores fijos de la superposición).
   - `ui/theme/`: `Palette`, `Theme`, `AdbuddyColors`, `Type`, `Shapes`, `ThemePrefs`.
+  - `control/CutConfirm.kt` (+ `CutCheck`): comprobación posterior al corte. `control/CutAccess`: `confirm`, `probe`, `waitMs`, `channelUp`. `AdbuddyApp`: `confirmCut`, `cutCheck`, `cutCheckShown`. `AccessSwitch`: `adbZeroIsDoubtful`, `ADB_DOUBTED`. `AccessDiag.doubt`. String `cut_still_connected` (rama `ux/acceso-a17`, plan `2026-10-19-acceso-lecturas-falsas`).
   - `ui/`: `HomeNotice`, `ActionCard` (+ `cardIconRes`), `StatusPill`, `RestoreAccessDialog`, `ChatHeaderBar` (en `ChatParts.kt`).
   - Iconos: `ic_shield`, `ic_shield_off`, `ic_card_question`, `ic_card_pause`, `ic_card_update`, `ic_launcher_foreground`, `ic_launcher_monochrome`, `ic_stat_adbuddy`, `ic_stat_shield`.
   - Capturas en `android/app/src/test/screenshots/` (`-Padbuddy.screens=record|verify`).
