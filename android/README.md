@@ -107,6 +107,13 @@ once the cache has it; the tests never download anything.
 cut from what it reads alone: on Android 17 an app may read `adb_enabled=0` while adb works. `adb logcat -s ADBuddyAccess`
 shows what the app reads and how.
 
+**False readings (Android 17).** An app reads `adb_enabled=0` there while adb works; `adb_wifi_enabled` reads right.
+ADBuddy believes a 1 always and a 0 only when nothing contradicts it: with wireless debugging at 1 or a live channel
+with the PC, it saves USB debugging as on before a cut (marked `adb_enabled_doubted` in the record) and restores it so.
+A cut is confirmed by `putInt` and by wireless debugging reading 0, and then checked: the channel must fall and nothing
+may answer on 127.0.0.1:5555 within 5 s, or the app says the PC is still connected (the check survives rotating or
+leaving the screen). The log line ends with `doubtful=adb_enabled(…)` when a 0 was not believed.
+
 ## Claude Code (M4)
 
 When the agent is Claude Code, the host reads its transcript and hooks and sends
