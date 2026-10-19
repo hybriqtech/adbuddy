@@ -121,3 +121,6 @@ Task 6: ronda 1 (revisión opus: cumplimiento OK; 4 menores). Arreglos: 1 (attac
 Task 6: complete (commits acf4e7a4, 177d48b2; re-revisión sonnet: 3 puntos resueltos, sin hallazgos nuevos)
 Task 7: complete (commit ff491455; revisión opus: cumplimiento OK, calidad aprobada, 2 menores)
 Ruling: menores de T7 aplazados: (1) los tests ...WithNoAppConnected y ...WhatTheCardCouldNotShow no contrastan el caso sin YOLO (lo cubren TestYoloOffBringsTheCardsBack y los tests de M4); (2) yoloPermission no mira l.Paused() — la pausa apaga YOLO en el acto y handleYoloSet no lo enciende en pausa, no hay hueco — si me equivoco, una regresión futura en ese orden aprobaría permisos con el agente pausado (lo vería la revisión final).
+Task 8: complete (commits ea32fe41, df08e25c, ad0ecc86; revisión sonnet + 2 re-revisiones)
+Ruling: los docs de T8 (safety.md, usage.md) describen la notificación persistente con Apagar (A4) y que la app deja de marcar las apps protegidas del usuario (A5) como ya hechas — la cadena android está parada tras A3 — la rama NO se integra en main sin A4 y A5 (o hay que acotar esas frases) — si me equivoco, docs que prometen algo que la app aún no hace.
+Cadena host (T1-T8) completa; cadena android parada en A3 (orden del líder, UX1). Pendientes: A4, A5, T9 (turno de emulador del líder), revisión final de rama con opus.
