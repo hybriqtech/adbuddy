@@ -12,14 +12,14 @@ Cierre del plan `2026-10-18-app-visual-y-acceso.md`. Las filas de aquí las inte
 | UX-b | Sanear `SessionState.agent` (caracteres bidi/control, longitud) | Se pinta en el título de la tarjeta y en la cabecera. |
 | UX-c | El bloque del comando del diálogo 🔴 en modo claro apenas se distingue del fondo (`surfaceContainerHighest`) | Subir contraste o añadir borde. |
 | UX-d | Falta captura de un error largo del host en los chips de borrador | |
-| UX-e | El recuento de `ConfirmDialogScreensTest` no detecta un bloque recortado sin scroll | Lo cubren los tests protegidos (`TouchGuard*`, `ConfirmReopenTest`, `ConfirmDialogButtonsSourceTest`). |
+| UX-e | El recuento de `ConfirmDialogScreensTest` no detecta un bloque recortado sin scroll | Lo cubren `ConfirmDialogScrollTest`, `ConfirmDialogLayoutTest` y `ConfirmDialogButtonsTest`. |
 
 ## Inventario (ficheros nuevos principales)
 
 - `control/AccessDiag` (diagnóstico `ADBuddyAccess`), `a11y/OverlayColors` (colores fijos de la superposición).
 - `ui/theme/`: `Palette`, `Theme`, `AdbuddyColors`, `Type`, `Shapes`, `ThemePrefs`.
 - `ui/`: `HomeNotice`, `ActionCard` (+ `cardIconRes`), `StatusPill`, `RestoreAccessDialog`, `ChatHeaderBar` (en `ChatParts.kt`).
-- Iconos: `ic_shield`, `ic_shield_off`, `ic_card_question`, `ic_card_pause`, `ic_card_update`, `ic_launcher_foreground`, `ic_launcher_monochrome`.
+- Iconos: `ic_shield`, `ic_shield_off`, `ic_card_question`, `ic_card_pause`, `ic_card_update`, `ic_launcher_foreground`, `ic_launcher_monochrome`, `ic_stat_adbuddy`, `ic_stat_shield`.
 - Capturas en `android/app/src/test/screenshots/` (`-Padbuddy.screens=record|verify`).
 
 ## Validaciones manuales (exigen el móvil real; con permiso explícito del usuario)
