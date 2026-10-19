@@ -51,7 +51,7 @@ object CutAccess {
      * bridge at the tap: a live channel proves adb_enabled=1 when it reads 0 (R16), and nothing else (R20).
      */
     fun cut(context: Context, channelUp: Boolean = false): Boolean {
-        AccessDiag.log(context, "cut.before")
+        AccessDiag.log(context, "cut.before", channelUp)
         return switch(context, channelUp).cut().also { AccessDiag.log(context, "cut.after ok=$it") }
     }
 
