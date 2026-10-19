@@ -61,7 +61,7 @@ object YoloNotifier {
         )
         val open = PendingIntent.getActivity(ctx, 9, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_YOLO)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setSmallIcon(R.drawable.ic_stat_adbuddy)
             .setContentTitle(ctx.getString(R.string.yolo_notif_title))
             .setContentText(text)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
