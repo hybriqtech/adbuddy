@@ -57,6 +57,7 @@ object UiHelpers {
             questionWaiting = { app.bridge.state.value.pending.isNotEmpty() },
             paused = { app.bridge.state.value.sessionState.paused },
             notificationOnScreen = yolo.notificationOnScreen,
+            noticeOptional = yolo.noticeOptional,
             executor = work,
             notifications = {
                 NotificationGate.read(consent::confirmed, { NotificationAccessStatus.listed(app) }, consent::revoke, AgentNotificationListener::read)

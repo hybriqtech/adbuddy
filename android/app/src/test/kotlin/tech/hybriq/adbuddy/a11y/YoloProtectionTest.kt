@@ -70,9 +70,11 @@ class YoloProtectionTest {
         override fun foreground() = fg to "$fg.Main"
         override fun click(node: UiNode) = true
         override fun tap(x: Int, y: Int) = true
-        override fun focusedInput(): UiNode? = null
+        var focused: UiNode? = null
+        var canShow = true
+        override fun focusedInput(): UiNode? = focused
         override fun setText(node: UiNode, text: String) = true
-        override fun acting(mark: Box?) = true
+        override fun acting(mark: Box?) = canShow
         override fun hideNotice(ms: Long) = true
     }
 
@@ -154,5 +156,73 @@ class YoloProtectionTest {
         assertEquals(ErrorCode.PROTECTED, code(x.run(req(UiOp.DUMP, "u_1"))))
         yolo = true
         assertEquals("ok", code(x.run(req(UiOp.DUMP, "u_2"))))
+    }
+
+    // The app's own notice: under YOLO it is not required (R1 extended), the rest of the guards stay.
+    private var live = BridgeState(connection = connected, yolo = YoloState(active = true, session = true))
+    private var paused = false
+    private val mute = FakeScreen("com.android.settings").also {
+        it.canShow = false
+        it.focused = UiNode(pkg = "com.android.settings", cls = "android.widget.EditText", bounds = Box(0, 0, 10, 10), editable = true, focused = true)
+    }
+    private val noticeX: UiExecutor = YoloProtection.predicates({ live }, hostClock, { it in userList }, { false }).let { p ->
+        UiExecutor({ mute }, { sent += it }, { now }, p.isProtected, { false }, { paused }, p.notificationOnScreen, { it.run() }, noticeOptional = p.noticeOptional)
+    }
+
+    private fun obj(vararg kv: Pair<String, Any>) = kotlinx.serialization.json.buildJsonObject {
+        for ((k, v) in kv) put(k, if (v is Int) kotlinx.serialization.json.JsonPrimitive(v) else kotlinx.serialization.json.JsonPrimitive(v as String))
+    }
+
+    private fun fourOps(tag: String) = listOf(
+        UiRequest("${tag}_d", UiOp.DUMP, JsonObject(emptyMap()), "2026-10-01T10:00:10Z"),
+        UiRequest("${tag}_c", UiOp.CLICK, obj("x" to 540, "y" to 1200), "2026-10-01T10:00:10Z"),
+        UiRequest("${tag}_t", UiOp.SET_TEXT, obj("text" to "hi"), "2026-10-01T10:00:10Z"),
+        UiRequest("${tag}_n", UiOp.NOTICE, JsonObject(emptyMap()), "2026-10-01T10:00:10Z"),
+    ).map { code(noticeX.run(it)) }
+
+    // Mutation: noticeOptional ignores the state (always true).
+    @Test fun withoutYoloAnUndrawableNoticeStillStopsEveryOp() {
+        live = BridgeState(connection = connected, yolo = YoloState())
+        assertEquals(List(4) { ErrorCode.FAILED }, fourOps("a"))
+    }
+
+    // Mutation: remove the check from notice (use s.acting(null) alone), or from any op.
+    @Test fun underYoloAnUndrawableNoticeDoesNotStopDumpClickSetTextOrNotice() {
+        assertEquals(List(4) { "ok" }, fourOps("b"))
+    }
+
+    @Test fun theNoticeIsStillAskedForUnderYolo() {
+        var asked = 0
+        val s = object : Screen by mute { override fun acting(mark: Box?): Boolean { asked++; return false } }
+        val p = YoloProtection.predicates({ live }, hostClock, { false }, { false })
+        val e = UiExecutor({ s }, { sent += it }, { now }, p.isProtected, { false }, { false }, p.notificationOnScreen, { it.run() }, noticeOptional = p.noticeOptional)
+        assertEquals("ok", code(e.run(UiRequest("n1", UiOp.NOTICE, JsonObject(emptyMap()), "2026-10-01T10:00:10Z"))))
+        assertEquals(1, asked)
+    }
+
+    @Test fun pauseStillWinsUnderYolo() {
+        paused = true
+        assertEquals(List(4) { ErrorCode.PROTECTED }, fourOps("p"))
+    }
+
+    // Mutation: noticeOptional ignores the connection.
+    @Test fun withTheLinkDownOrTheModeExpiredTheNoticeIsRequiredAgain() {
+        live = BridgeState(connection = BridgeState.Connection.WAITING, yolo = YoloState(active = true, session = true))
+        assertEquals(List(4) { ErrorCode.FAILED }, fourOps("l"))
+        live = BridgeState(connection = connected, yolo = YoloState(active = true, until = hostNow - 1))
+        assertEquals(List(4) { ErrorCode.FAILED }, fourOps("e"))
+    }
+
+    @Test fun adbuddyInFrontIsStillProtectedUnderYolo() {
+        mute.fg = Packages.ADBUDDY
+        val r = fourOps("z")
+        assertEquals(listOf(ErrorCode.PROTECTED, ErrorCode.PROTECTED, ErrorCode.PROTECTED), r.take(3))
+    }
+
+    @Test fun thePredicatesNoticeOptionalReadsTheLiveState() {
+        val p = YoloProtection.predicates({ live }, hostClock, { false }, { false })
+        assertTrue(p.noticeOptional())
+        live = BridgeState(connection = connected, yolo = YoloState())
+        assertFalse(p.noticeOptional())
     }
 }
