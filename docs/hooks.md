@@ -10,12 +10,12 @@ Una vez por máquina:
 
 ```bash
 uv tool install prek==0.5.5   # deja prek.exe en ~/.local/bin, que está en el PATH
-prek install                  # desde cualquier worktree
+prek install --allow-missing-config   # desde cualquier worktree; siempre con esta opción
 ```
 
 prek se instala fuera del repo, y no como dependencia, a propósito. Los hooks viven en el `.git/hooks` común a todos los worktrees y guardan la ruta del `prek` con el que se instalaron. Si fuera el de un worktree, al borrar ese worktree los hooks de todos los demás dejarían de funcionar.
 
-- Un worktree en una rama sin `.pre-commit-config.yaml` no ejecuta nada: el hook lo detecta y se lo salta.
+- `--allow-missing-config` es obligatorio. El `.git/hooks` es común a todos los worktrees, y sin la opción el hook falla («No `prek.toml` or `.pre-commit-config.yaml` found») en cualquier commit de una rama sin configuración, incluidos los de otros agentes. Con la opción, esos commits no ejecutan nada: el hook lo detecta y se lo salta.
 - Si ya había un hook propio (aquí, el `pre-push` local que bloquea IPs privadas y pushes que no son fast-forward), prek lo mueve a `pre-push.legacy` y lo sigue ejecutando, junto a los suyos. El `commit-msg` local (identidad y trailer) no se toca.
 - Hace falta `bash` y `go` en el PATH (Git Bash en Windows). Los hooks de Go llaman a `scripts/hook-go.sh`.
 
