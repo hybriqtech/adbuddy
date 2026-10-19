@@ -22,6 +22,7 @@ import tech.hybriq.adbuddy.ui.Formats
  */
 object YoloNotifier {
     const val NOTIFICATION_ID = 8
+    private const val OFF_FAILED = "off-failed"
 
     /** The key of what is up (YoloUi.notificationKey), null when nothing is. */
     private var shown: String? = null
@@ -38,7 +39,8 @@ object YoloNotifier {
     /** The Turn off could not be sent: the same notification, saying so. The next change of the mode puts the normal one back. */
     @Synchronized
     fun offFailed(context: Context, state: BridgeState, clock: HostClock) {
-        if (shown == null) return
+        // A cold process (the old notification outlived it) has shown == null: it still must say so; the marker makes the next sync replace or cancel it.
+        if (shown == null) shown = OFF_FAILED
         context.getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, build(context, state, clock, offFailed = true))
     }
 

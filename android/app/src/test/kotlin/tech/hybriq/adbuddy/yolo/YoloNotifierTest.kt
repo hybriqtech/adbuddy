@@ -3,6 +3,7 @@ package tech.hybriq.adbuddy.yolo
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Intent
+import java.time.format.FormatStyle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -15,7 +16,11 @@ import org.robolectric.Shadows.shadowOf
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
+import tech.hybriq.adbuddy.bridge.Message
+import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.bridge.YoloState
+import tech.hybriq.adbuddy.confirm.HostClock
+import tech.hybriq.adbuddy.ui.Formats
 
 @RunWith(RobolectricTestRunner::class)
 class YoloNotifierTest {
@@ -78,6 +83,57 @@ class YoloNotifierTest {
     @Test fun clearRemovesWhatAnEarlierProcessLeft() {
         YoloNotifier.sync(app, session, app.clock)
         YoloNotifier.clear(app)
+        assertNull(posted())
+    }
+
+    // Mutation: offFailed returns when nothing is shown (a cold process, the old notification still up).
+    @Test fun aColdProcessStillSaysTheOffFailed() {
+        YoloNotifier.clear(app)
+        YoloNotifier.offFailed(app, BridgeState(), app.clock)
+        assertEquals(app.getString(R.string.yolo_off_failed), body(posted()!!))
+        // and the next change of the mode replaces it (here: off takes it down)
+        YoloNotifier.sync(app, BridgeState(yolo = YoloState()), app.clock)
+        assertNull(posted())
+    }
+
+    private fun reply(type: String) = Protocol.decode("""{"v":1,"seq":1,"type":"$type","ts":"2026-10-19T10:00:00Z","payload":{}}""")!!
+
+    private fun offWith(answer: (((Message?) -> Unit)) -> String?) {
+        YoloNotifier.clear(app)
+        YoloNotifier.sync(app, session, app.clock)
+        YoloReceiver.turnOff(app) { _, cb -> answer(cb) }
+    }
+
+    // Mutation: the callback ignores the reply.
+    @Test fun aRefusedOrUnansweredOffSaysSoButAnAcceptedOneDoesNot() {
+        offWith { cb -> cb(null); "r1" }
+        assertEquals(app.getString(R.string.yolo_off_failed), body(posted()!!))
+        offWith { cb -> cb(reply(Protocol.ERROR)); "r1" }
+        assertEquals(app.getString(R.string.yolo_off_failed), body(posted()!!))
+        offWith { cb -> cb(reply(Protocol.YOLO_STATE)); "r1" }
+        assertEquals(app.getString(R.string.yolo_notif_session), body(posted()!!))
+        offWith { _ -> null }
+        assertEquals(app.getString(R.string.yolo_off_failed), body(posted()!!))
+    }
+
+    // Mutation: the text uses the expiry as is, without the host-to-phone clock.
+    @Test fun aTimedModeSaysUntilWhenInThePhonesClock() {
+        val wall = 1_700_000_000_000L
+        val clock = HostClock(wall = { wall }, elapsed = { 0 })
+        val hostNow = wall + 2 * 3_600_000L // the host runs two hours ahead
+        clock.observe(Protocol.decode("""{"v":1,"seq":1,"type":"welcome","ts":"${java.time.Instant.ofEpochMilli(hostNow)}","payload":{}}""")!!)
+        val until = hostNow + 30 * 60_000L
+        YoloNotifier.clear(app)
+        YoloNotifier.sync(app, BridgeState(yolo = YoloState(active = true, until = until)), clock)
+        assertEquals(app.getString(R.string.yolo_notif_until, Formats.time(wall + 30 * 60_000L, FormatStyle.SHORT)), body(posted()!!))
+    }
+
+    // Mutation: sync does not compare with the key it showed.
+    @Test fun theSameKeyDoesNotPostAgain() {
+        YoloNotifier.clear(app)
+        YoloNotifier.sync(app, session, app.clock)
+        nm.cancel(YoloNotifier.NOTIFICATION_ID)
+        YoloNotifier.sync(app, session, app.clock)
         assertNull(posted())
     }
 }
