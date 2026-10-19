@@ -51,7 +51,7 @@ import tech.hybriq.adbuddy.ui.theme.ThemePrefs
 
 /**
  * Settings (spec v1 §6): what the user decides about the agent. M5c brings the protected apps and the
- * access to notifications, and the remote-mode switch moves here too (it stays in the chat as well).
+ * access to notifications, and the remote-mode switch lives here too.
  * Language, keeping debugging on and About belong to later milestones.
  */
 @Composable

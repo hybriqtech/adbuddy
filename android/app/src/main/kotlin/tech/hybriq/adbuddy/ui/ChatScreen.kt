@@ -81,7 +81,7 @@ class ChatActions(
 
     /** Test seam: the same actions with another cut / restore. */
     fun copyWith(cut: () -> Unit = this.cut, restore: () -> Unit = this.restore) =
-        ChatActions(send, retry, discard, pickPhotos, pickFile, capture, removeDraft, retryDraft, attachment, pause, cut, restore, openActivity, openSettings, newConversation, interrupt)
+        ChatActions(send, retry, discard, pickPhotos, pickFile, capture, removeDraft, retryDraft, attachment, pause, cut, restore, openActivity, openSettings, newConversation, interrupt, openYolo)
 }
 
 /** The conversation, the agent's terminal folded above it, and the input (spec M3 section 7.2). */

@@ -7,6 +7,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import okhttp3.Request
 import okhttp3.WebSocket
 import okio.ByteString
@@ -29,7 +30,9 @@ import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.bridge.YoloState
 import tech.hybriq.adbuddy.screens.PHONE
+import tech.hybriq.adbuddy.ui.TOP_BAR_TAG
 import tech.hybriq.adbuddy.ui.YOLO_BAND_TAG
+import tech.hybriq.adbuddy.ui.YOLO_CARD_TAG
 
 /**
  * The band is on every screen while YOLO is on, with the link up or down, and goes when the host says it is off.
@@ -65,12 +68,21 @@ class YoloFlowTest {
         compose.onNodeWithTag(YOLO_BAND_TAG).assertIsDisplayed()
     }
 
-    // The band sits above the new header (Cut pill, menu): stacked, not overlapped. Mutation: draw the band over the chat screen in a Box.
+    // The band sits above the whole header (its top edge), stacked and not overlapped. Mutations: put the band in a Box over the screen; drop it above the header.
     @Test fun theBandDoesNotCoverTheHeader() {
         host(YoloState(active = true, session = true))
         val band = compose.onNodeWithTag(YOLO_BAND_TAG).fetchSemanticsNode().boundsInRoot
-        val menu = compose.onNodeWithContentDescription(text(R.string.action_menu)).fetchSemanticsNode().boundsInRoot
-        assertTrue("band $band, menu $menu", band.bottom <= menu.top + 0.5f)
+        val bar = compose.onNodeWithTag(TOP_BAR_TAG).fetchSemanticsNode().boundsInRoot
+        assertTrue("band $band, bar $bar", band.height > 0f && band.bottom <= bar.top + 0.5f)
+    }
+
+    // Same entry as the chat menu. Mutation: disconnect the card's onTurnOn in SettingsScreen.
+    @Test fun theSettingsCardOpensTheActivationDialog() {
+        host(YoloState())
+        compose.onNodeWithContentDescription(text(R.string.action_menu)).performClick()
+        compose.onNodeWithText(text(R.string.menu_settings)).performClick()
+        compose.onNodeWithTag(YOLO_CARD_TAG).performScrollTo().performClick()
+        compose.onNodeWithText(text(R.string.yolo_dialog_title)).assertIsDisplayed()
     }
 
     @Test fun theBandOutlivesTheLinkAndGoesWhenTheHostSaysOff() {
