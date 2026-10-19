@@ -16,7 +16,7 @@ prek install --allow-missing-config   # desde cualquier worktree; siempre con es
 prek se instala fuera del repo, y no como dependencia, a propósito. Los hooks viven en el `.git/hooks` común a todos los worktrees y guardan la ruta del `prek` con el que se instalaron. Si fuera el de un worktree, al borrar ese worktree los hooks de todos los demás dejarían de funcionar.
 
 - `--allow-missing-config` es obligatorio. El `.git/hooks` es común a todos los worktrees, y sin la opción el hook falla («No `prek.toml` or `.pre-commit-config.yaml` found») en cualquier commit de una rama sin configuración, incluidos los de otros agentes. Con la opción, esos commits no ejecutan nada: el hook lo detecta y se lo salta.
-- Si ya había un hook propio (aquí, el `pre-push` local que bloquea IPs privadas y pushes que no son fast-forward), prek lo mueve a `pre-push.legacy` y lo sigue ejecutando, junto a los suyos. El `commit-msg` local (identidad y trailer) no se toca.
+- Si ya había un hook propio (aquí, el `pre-push` local que bloquea IPs privadas y pushes que no son fast-forward), prek lo mueve a `pre-push.legacy` y lo sigue ejecutando, junto a los suyos. El `commit-msg` local (identidad y trailer) no se toca. Ninguno de los dos está versionado: en un clon nuevo no existen, y `prek install` no los crea.
 - Hace falta `bash` y `go` en el PATH (Git Bash en Windows). Los hooks de Go llaman a `scripts/hook-go.sh`.
 
 ## Qué corre
@@ -29,7 +29,7 @@ prek se instala fuera del repo, y no como dependencia, a propósito. Los hooks v
 **Antes de cada push**, en dos tandas, y solo si el push toca `host/`:
 
 1. `go vet ./...` en `host/` (unos 9 s).
-2. `go test -p 2` de todos los paquetes de `host/` **menos `internal/cli`**, solos y después de `go vet`. Con la máquina cargada, el `go test ./...` entero tarda 150-300 s y la caché de resultados no sirve; `internal/cli` son 143 s, así que solo corre en la CI. Un fallo de `internal/cli` se ve en el PR, no antes del push.
+2. `go test -p 2` de todos los paquetes de `host/` **menos `internal/cli`**, solos y después de `go vet`. Con la máquina cargada, el `go test ./...` entero tarda 150-300 s y la caché de resultados no sirve; `internal/cli` son 143 s, así que solo corre en la CI. Un fallo de `internal/cli` se ve en el PR, no antes del push. Sin `internal/cli`, el hook tarda unos 75 s sin caché y 10-40 s con ella (la caché sí sirve para el resto de paquetes).
 
 `-p 2` y las tandas (`priorities:` en la configuración) limitan la CPU: la máquina la comparten otros agentes.
 
