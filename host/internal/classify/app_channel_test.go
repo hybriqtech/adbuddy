@@ -462,3 +462,35 @@ func TestAppChannelIsMarkedOnTheChannelOnly(t *testing.T) {
 		}
 	}
 }
+
+// AppChannel is the part of the above that YOLO never lifts. It is set by the
+// literal text of the line, whatever rule made it 🔴; killing, disabling or
+// uninstalling the app is not the channel (ruling T4). Opaque scripts are not
+// seen: a known limit, documented in docs/safety.md.
+func TestAppChannelMarks(t *testing.T) {
+	c := mustNew(t, "")
+	for line, want := range map[string]bool{
+		"echo 'content write --uri content://tech.hybriq.adbuddy.bridge/handshake' | sh":                                                                        true,
+		`eval "$(cat /sdcard/x)" content://tech.hybriq.adbuddy.bridge`:                                                                                          true,
+		"CLASSPATH=/system/framework/content.jar app_process / com.android.commands.content.Content write --uri content://tech.hybriq.adbuddy.bridge/handshake": true,
+		"echo run-as tech.hybriq.adbuddy id | sh":                                                                                                               true,
+		"am start -n $(cat /sdcard/c) -a x":                                                                                                                     true,
+		"am broadcast -a \"$(cat /sdcard/c)\"":                                                                                                                  true,
+		"am force-stop tech.hybriq.adbuddy":                                                                                                                     false,
+		"am kill tech.hybriq.adbuddy":                                                                                                                           false,
+		"pm clear tech.hybriq.adbuddy":                                                                                                                          false,
+		"pm disable-user tech.hybriq.adbuddy":                                                                                                                   false,
+		"appops set tech.hybriq.adbuddy RUN_IN_BACKGROUND ignore":                                                                                               false,
+		"echo tech.hybriq.adbuddy | sh":                                                                                                                         false,
+		"sh /data/local/tmp/x.sh":                                                                                                                               false,
+		`eval "$(cat /sdcard/x)"`:                                                                                                                               false,
+	} {
+		r := c.Classify(sh(line))
+		if r.Level != Red {
+			t.Errorf("%q: %v, want red", line, r.Level)
+		}
+		if r.AppChannel != want {
+			t.Errorf("%q: AppChannel=%v, want %v", line, r.AppChannel, want)
+		}
+	}
+}

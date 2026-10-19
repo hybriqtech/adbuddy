@@ -326,7 +326,7 @@ func (e *env) yoloOnKeepingQuestion(t *testing.T) {
 // The app's own channel stays closed under YOLO: rewriting the handshake would
 // point the app's link at a server of the agent's, and the phone's Pause and
 // Off would stop reaching the host. Every case is asked without YOLO and, with
-// it, neither asked nor run. Mutation: in exec, drop `!res.AppChannel` from the
+// it, neither asked nor run. Mutation: in exec, drop `res.AppChannel &&` from the
 // YOLO check (so these 🔴 are lifted again).
 func TestYoloKeepsTheAppChannelClosed(t *testing.T) {
 	const bridge = "content://tech.hybriq.adbuddy.bridge"
@@ -375,6 +375,78 @@ func TestYoloStillRunsSpecialsOutsideTheAppChannel(t *testing.T) {
 		}
 		if on.exit.Code != 0 || len(on.e.conf.asked) != 0 || !on.ran(argv[1]) || !on.warned("asked for your confirmation") {
 			t.Fatalf("%v with YOLO: %+v asked %d ran %q stderr %q", argv, on.exit, len(on.e.conf.asked), on.e.adb.ran(), on.stderr())
+		}
+	}
+}
+
+// A 🔴 special for another rule (pipe into sh, eval, an assignment before
+// app_process, am with a dynamic argument) that names the channel in its literal
+// text is the channel too. Mutation: drop namesTheChannel in classify.Classify
+// (or `|| hasDynamic(ws[1:])` in the `am` case of touchesAppChannel).
+func TestYoloKeepsTheAppChannelClosedFromOtherSpecials(t *testing.T) {
+	for _, argv := range [][]string{
+		{"shell", "echo 'content write --uri content://tech.hybriq.adbuddy.bridge/handshake' | sh"},
+		{"shell", `eval "$(cat /sdcard/x)" content://tech.hybriq.adbuddy.bridge/handshake`},
+		{"shell", "CLASSPATH=/system/framework/content.jar app_process / com.android.commands.content.Content write --uri content://tech.hybriq.adbuddy.bridge/handshake"},
+		{"shell", "am", "start", "-n", "$(cat /sdcard/c)", "-a", "android.intent.action.VIEW"},
+		{"shell", "am", "broadcast", "-a", "$(cat /sdcard/c)"},
+	} {
+		name := strings.Join(argv[1:], " ")
+		t.Run(name, func(t *testing.T) {
+			off, on := yoloPair(t, func(e *env) { e.conf.decision = confirm.Deny }, argv...)
+			if len(off.e.conf.asked) != 1 {
+				t.Fatalf("without YOLO: %+v asked %d", off.exit, len(off.e.conf.asked))
+			}
+			if on.exit.Code != ExitDenied || len(on.e.conf.asked) != 0 || len(on.e.adb.ran()) != 0 {
+				t.Fatalf("with YOLO: %+v asked %d ran %q", on.exit, len(on.e.conf.asked), on.e.adb.ran())
+			}
+			if !strings.Contains(on.stderr(), YoloAppChannelMessage) {
+				t.Fatalf("stderr %q", on.stderr())
+			}
+		})
+	}
+}
+
+// KNOWN LIMIT, documented in docs/safety.md and pending the user's decision: a
+// script that does not carry the channel's literal text is opaque to the host
+// and runs under YOLO ("absolutely everything" is the mode's promise). Do not
+// "fix" this by blocking every sh/eval: it would break YOLO.
+func TestYoloRunsOpaqueScriptsKnownLimit(t *testing.T) {
+	for _, argv := range [][]string{
+		{"shell", "sh /data/local/tmp/x.sh"},
+		{"shell", `eval "$(cat /sdcard/x)"`},
+	} {
+		off, on := yoloPair(t, func(e *env) { e.conf.decision = confirm.Deny }, argv...)
+		if len(off.e.conf.asked) != 1 {
+			t.Fatalf("%v without YOLO: asked %d", argv, len(off.e.conf.asked))
+		}
+		if on.exit.Code != 0 || len(on.e.conf.asked) != 0 || !on.ran(argv[1]) {
+			t.Fatalf("%v with YOLO: %+v asked %d ran %q", argv, on.exit, len(on.e.conf.asked), on.e.adb.ran())
+		}
+	}
+}
+
+// The inverse of an undo gets the same block: a forged record whose inverse
+// names the channel does not run under YOLO (and is asked without it).
+// Mutation: drop the `ires.AppChannel && ...Active()` check in undo.go.
+func TestYoloUndoDoesNotRunAnInverseThatNamesTheAppChannel(t *testing.T) {
+	inv := []string{"shell", "settings", "put", "global", "a", "content://tech.hybriq.adbuddy.bridge"}
+	for _, yolo := range []bool{false, true} {
+		e := newEnv(t)
+		e.conf.decision = confirm.Deny
+		e.forge(t, "j_f1", putArgv, inv...)
+		if yolo {
+			e.yoloOn(t)
+		}
+		res, _, _ := e.undoLast(t)
+		if len(e.adb.ran()) != 0 && e.ranContains("tech.hybriq.adbuddy") {
+			t.Fatalf("yolo=%v: the inverse ran: %q", yolo, e.adb.ran())
+		}
+		if yolo && (len(e.conf.asked) != 0 || len(res.Failed) != 1 || len(res.Undone) != 0) {
+			t.Fatalf("with YOLO: asked %d %+v", len(e.conf.asked), res)
+		}
+		if !yolo && len(e.conf.asked) != 1 {
+			t.Fatalf("without YOLO: asked %d", len(e.conf.asked))
 		}
 	}
 }

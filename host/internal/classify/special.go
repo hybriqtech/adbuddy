@@ -288,7 +288,8 @@ func touchesAppChannel(scope string, ws []Word) bool {
 		return strings.Contains(all, ADBuddyPackage) || hasDynamic(ws[1:])
 	case "am":
 		sub, _ := subAt(ws)
-		return mentionsADBuddy(v) && sub != "force-stop" && sub != "kill"
+		// A dynamic argument (am start -n $(cat f)) may name the app too.
+		return (mentionsADBuddy(v) || hasDynamic(ws[1:])) && sub != "force-stop" && sub != "kill"
 	}
 	return false
 }

@@ -285,6 +285,13 @@ func (d *Daemon) undo(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		level, rule := "yellow", "undo" // what the journal says: 🔴 only when the user was asked
 		if ires := d.o.Classifier.Classify(e.Inverse.Argv); ires.Level == classify.Red {
 			level, rule = ires.Level.String(), "undo-confirmed"
+			// The app's own channel is never lifted (see exec): a forged inverse cannot rewrite the handshake under YOLO.
+			if ires.AppChannel && d.o.Yolo.Active() {
+				item.Error = "refused: " + YoloAppChannelMessage
+				res.Failed = append(res.Failed, item)
+				fmt.Fprintf(s.Stderr(), "✗ %s: %s\n", classify.Printable(e.Description), classify.Printable(item.Error))
+				continue
+			}
 			if d.lift(ctx, "the inverse of "+classify.Printable(e.Description)+" asked for your confirmation ("+classify.Printable(ires.Description(d.o.Lang))+") and ran without it") {
 				rule = "undo-yolo" // nobody was asked
 			} else {

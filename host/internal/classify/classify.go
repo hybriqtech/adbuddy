@@ -103,7 +103,46 @@ func (c *Classifier) UserRuleCount() int { return len(c.rules.user) }
 // Classify classifies adb arguments with the global options already removed
 // (see SplitGlobal).
 func (c *Classifier) Classify(argv []string) Result {
-	return namesTheApp(aggregate(c.classifyAdb(argv)), argv)
+	return namesTheChannel(namesTheApp(aggregate(c.classifyAdb(argv)), argv), argv)
+}
+
+// appAuthority, appProviderClass: the app's ContentProvider (handshake and token).
+const (
+	appAuthority     = "tech.hybriq.adbuddy.bridge"
+	appProviderClass = "tokenprovider"
+)
+
+var channelVerb = regexp.MustCompile(`(^|[^a-z0-9_])(content|run-as)([^a-z0-9_]|$)`)
+
+// namesTheChannel marks AppChannel on a 🔴 that is already special for another
+// rule (a pipe into sh, eval, an assignment before app_process…) when the line
+// itself, as a literal string, names the app's channel: its authority, its
+// ContentProvider class, or the package together with content or run-as. Only
+// the literal chain is seen: an opaque script (a file on the phone, eval of
+// "$(cat …)") is not, and that limit is documented (docs/safety.md). It never
+// changes the level and not the findings, and does not mark force-stop or kill
+// of the package (ruling T4).
+func namesTheChannel(r Result, argv []string) Result {
+	if r.Level != Red || r.AppChannel {
+		return r
+	}
+	s := strings.ToLower(strings.Join(argv, " "))
+	unquote := strings.NewReplacer(`'`, "", `"`, "", `\`, "")
+	for range 4 {
+		for _, t := range []string{s, unquote.Replace(s)} {
+			if strings.Contains(t, appAuthority) || strings.Contains(t, appProviderClass) ||
+				(strings.Contains(t, ADBuddyPackage) && channelVerb.MatchString(t)) {
+				r.AppChannel = true
+				return r
+			}
+		}
+		d := strings.ToLower(percentDecode(s))
+		if d == s {
+			break
+		}
+		s = d
+	}
+	return r
 }
 
 // namesTheApp is a defence in depth: a 🔴 that is not special but names the
