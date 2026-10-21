@@ -39,10 +39,6 @@ func newHelperCmds(app *App) []*cobra.Command {
 	return []*cobra.Command{newScreenCmd(app), newTapCmd(app), newTypeCmd(app), newForegroundCmd(app), newScreenshotCmd(app), newNotificationsCmd(app)}
 }
 
-// callHelper runs a helper on the serve that runs and returns its data.
-// stdout gets what the helper streams (the screenshot's bytes). The daemon
-// writes the journal's command itself, from op and args. screen asks the
-// daemon for the settled screen too (tap, type) or to wait for it (screen).
 // callHelperInto is callHelper plus the decoding of the daemon's answer as a T.
 func callHelperInto[T any](cmd *cobra.Command, app *App, op string, args any, screen bool, stdout io.Writer) (T, error) {
 	var v T
@@ -56,6 +52,10 @@ func callHelperInto[T any](cmd *cobra.Command, app *App, op string, args any, sc
 	return v, nil
 }
 
+// callHelper runs a helper on the serve that runs and returns its data.
+// stdout gets what the helper streams (the screenshot's bytes). The daemon
+// writes the journal's command itself, from op and args. screen asks the
+// daemon for the settled screen too (tap, type) or to wait for it (screen).
 func callHelper(cmd *cobra.Command, app *App, op string, args any, screen bool, stdout io.Writer) ([]byte, error) {
 	e, err := loadEnv(app)
 	if err != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/precheck"
+	"github.com/hybriqtech/adbuddy/host/internal/shq"
 )
 
 // UndoItem is one entry in an undo result.
@@ -461,10 +462,10 @@ func moveBackTarget(argv []string) (string, bool) {
 	if len(argv) != 4 || argv[0] != "shell" {
 		return "", false
 	}
-	if w, ok := unquote(argv[1]); !ok || w != "mv" {
+	if w, ok := shq.Unquote(argv[1]); !ok || w != "mv" {
 		return "", false
 	}
-	return unquote(argv[3])
+	return shq.Unquote(argv[3])
 }
 
 func undoPrefix(lang string) string { return i18n.Lang(lang).T("undo.prefix") }

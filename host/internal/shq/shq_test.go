@@ -74,3 +74,18 @@ func TestJoinAndArgs(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// FuzzQuoteUnquote: whatever Quote writes, Unquote reads back unchanged.
+// (The converse is false by design: Unquote also accepts words Quote would
+// never write, like 'a' for a.)
+func FuzzQuoteUnquote(f *testing.F) {
+	for _, s := range []string{"", "a", "a b", "it's", "'", "''", `\'`, "$(x);y", "é", "a\x00b", "/sdcard/x y"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		got, ok := Unquote(Quote(s))
+		if !ok || got != s {
+			t.Fatalf("Unquote(Quote(%q)) = %q, %v", s, got, ok)
+		}
+	})
+}
