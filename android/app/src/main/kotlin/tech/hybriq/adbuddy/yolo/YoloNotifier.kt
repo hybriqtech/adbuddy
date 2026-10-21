@@ -10,10 +10,10 @@ import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.confirm.HostClock
-import tech.hybriq.adbuddy.ui.Formats
-import tech.hybriq.adbuddy.notify.openAppIntent
-import tech.hybriq.adbuddy.notify.notificationManager
 import tech.hybriq.adbuddy.notify.baseBuilder
+import tech.hybriq.adbuddy.notify.notificationManager
+import tech.hybriq.adbuddy.notify.openAppIntent
+import tech.hybriq.adbuddy.ui.Formats
 
 /**
  * The persistent notification of the YOLO mode (spec 2026-10-18): up while it is on, with the link up or down (the mode

@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import tech.hybriq.adbuddy.notify.startFirst
 
 /**
  * Opens the system's page for this app's language (Android 13 and later: Settings, Apps, ADBuddy, Language; the

@@ -13,8 +13,8 @@ import tech.hybriq.adbuddy.MainActivity
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.Decision
-import tech.hybriq.adbuddy.ui.Formats
 import tech.hybriq.adbuddy.notify.notificationManager
+import tech.hybriq.adbuddy.ui.Formats
 
 /**
  * Shows each pending 🔴 question as a high-priority notification (spec §4.5)
