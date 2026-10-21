@@ -18,3 +18,4 @@ Ruling: quedan fuera los refactors de las puertas de exec/ui/undo, la tabla de i
 - A2 remate 0525440f: CONFORME (rereviewer; BubbleFlowTest 5/5 y suite 1432/0; el fallo intermitente 'performMeasureAndLayout' no se atribuye a A2, se vigila en la CI).
 - H4 remate fd8d1ec2: test de 256 bytes, mutación en rojo.
 - Revisión final opus: INTEGRABLE (host 34 paquetes ok, GOOS=windows vet limpio; android 1432/0, lint y androidTest compilan; sin IPs ni seriales). Diferidos menores: startFirst en ui/ usado por notify/ y listener/ (moverlo a util), TextLinkStyles sin remember en MarkdownText.kt:52. Pendiente: PR + CI con emulador.
+- 31d925ec: diferidos menores hechos (startFirst a util/, TextLinkStyles con remember(primary)); android 1432/0.
