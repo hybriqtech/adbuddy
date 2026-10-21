@@ -249,7 +249,7 @@ func (vr *Verifier) check(ctx context.Context, a ADB, trust Trust, path, sk stri
 	if err != nil {
 		return Verified{}, fmt.Errorf("%w: %w", ErrNoTrustedApp, fmt.Errorf("%w (%v)", ErrSigner, err))
 	}
-	digest := digestOf(data)
+	digest := DigestOf(data)
 	dev := false
 	if err := CheckSigner(data, trust.Release); err != nil {
 		if trust.DevAPK == "" || digest != trust.DevAPK {
@@ -354,7 +354,8 @@ func versionCodeOf(dump string) (int, error) {
 	return strconv.Atoi(m[1])
 }
 
-func digestOf(b []byte) string {
+// DigestOf is the lowercase hex SHA-256 of b.
+func DigestOf(b []byte) string {
 	s := sha256.Sum256(b)
 	return hex.EncodeToString(s[:])
 }

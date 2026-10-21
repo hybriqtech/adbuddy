@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
@@ -47,7 +48,8 @@ func BinDir(dir string) string { return filepath.Join(dir, ".adbuddy", "bin") }
 // JournalDir holds the journal.
 func JournalDir(dir string) string { return filepath.Join(dir, "journal") }
 
-func exe(name string) string {
+// Exe is name with the platform's executable suffix.
+func Exe(name string) string {
 	if runtime.GOOS == "windows" {
 		return name + ".exe"
 	}
@@ -99,7 +101,7 @@ func Init(o Options) (Result, error) {
 	if err := installSkills(o.Dir, o.Force, &res); err != nil {
 		return res, err
 	}
-	changed, created, err := mergeClaudeSettings(filepath.Join(o.Dir, ".claude", "settings.json"), filepath.Join(BinDir(o.Dir), exe("adbuddy")))
+	changed, created, err := mergeClaudeSettings(filepath.Join(o.Dir, ".claude", "settings.json"), filepath.Join(BinDir(o.Dir), Exe("adbuddy")))
 	if err != nil {
 		return res, err
 	}
@@ -110,7 +112,7 @@ func Init(o Options) (Result, error) {
 	}
 	res.note(filepath.Join(".gemini", "settings.json"), changed, created)
 
-	for _, name := range []string{exe("adb"), exe("adbuddy")} {
+	for _, name := range []string{Exe("adb"), Exe("adbuddy")} {
 		changed, created, err := copyIfDifferent(o.Exe, filepath.Join(BinDir(o.Dir), name))
 		if err != nil {
 			return res, err
@@ -283,13 +285,7 @@ func mergeClaudeSettings(path, hookExe string) (changed, created bool, err error
 		}
 	}
 	for _, rule := range AllowRules {
-		found := false
-		for _, a := range allow {
-			if a == rule {
-				found = true
-			}
-		}
-		if !found {
+		if !slices.Contains(allow, any(rule)) {
 			allow = append(allow, rule)
 			changed = true
 		}
@@ -403,7 +399,7 @@ func mergeGeminiSettings(path string) (changed, created bool, err error) {
 }
 
 // copyIfDifferent copies src to dst unless dst already has the same content.
-// dst is only read if it is a regular file (openRegular) and only up to the
+// dst is only read if it is a regular file (safeio.OpenRegular) and only up to the
 // size of src: a FIFO, or a link to /dev/zero, planted there is replaced.
 func copyIfDifferent(src, dst string) (changed, created bool, err error) {
 	in, err := os.Open(src)
@@ -449,10 +445,10 @@ func copyIfDifferent(src, dst string) (changed, created bool, err error) {
 	return true, created, nil
 }
 
-// sameContent reports whether path is a regular file (openRegular) of size
+// sameContent reports whether path is a regular file (safeio.OpenRegular) of size
 // bytes whose hash is want. The error says why not, when it is not readable.
 func sameContent(path string, size int64, want [32]byte) (bool, error) {
-	f, st, err := openRegular(path)
+	f, st, err := safeio.OpenRegular(path)
 	if err != nil {
 		return false, err
 	}

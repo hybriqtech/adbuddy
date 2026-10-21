@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,13 @@ type check struct {
 
 	detail, guidance i18n.Msg
 }
+
+// The checks a doctor that cannot go on reports as skipped, in report order.
+var (
+	skipPhone      = []string{"phone", "identity", "network port", "phone app"}
+	skipAfterPhone = skipPhone[1:]
+	skipNoConfig   = slices.Concat([]string{"adb", "adb server", "serve"}, skipPhone, []string{"environment"})
+)
 
 // mk is a check whose detail is a message.
 func mk(name, status string, detail i18n.Msg) check {
@@ -304,7 +312,7 @@ func runDoctor(ctx context.Context, app *App, onCheck func(check)) (rep doctorRe
 			}
 		}
 		add(mk("config", checkFail, detail).withGuide(fix))
-		skip(i18n.M("doctor.skip.no_config"), "adb", "adb server", "serve", "phone", "identity", "network port", "phone app", "environment")
+		skip(i18n.M("doctor.skip.no_config"), skipNoConfig...)
 		return rep
 	}
 	configured := e.cfg.Serial != "" || e.cfg.Address != ""
@@ -326,7 +334,7 @@ func runDoctor(ctx context.Context, app *App, onCheck func(check)) (rep doctorRe
 		paused := i18n.M("doctor.skip.paused")
 		skip(paused, "adb", "adb server")
 		add(checkServe(running, ping, perr, e.dirs.Data))
-		skip(paused, "phone", "identity", "network port", "phone app")
+		skip(paused, skipPhone...)
 		addPCChecks(add, e, running, ping)
 		return rep
 	}
@@ -358,16 +366,16 @@ func runDoctor(ctx context.Context, app *App, onCheck func(check)) (rep doctorRe
 
 	switch active, guid := findConfiguredPhone(online, e.cfg.Serial, e.cfg.Address); {
 	case !serverUp:
-		skip(i18n.M("doctor.skip.server_down"), "phone", "identity", "network port", "phone app")
+		skip(i18n.M("doctor.skip.server_down"), skipPhone...)
 	case !configured:
-		skip(i18n.M("doctor.skip.no_phone"), "phone", "identity", "network port", "phone app")
+		skip(i18n.M("doctor.skip.no_phone"), skipPhone...)
 	case active == "":
 		how := i18n.M("doctor.phone.how_wifi")
 		if e.cfg.Address != "" {
 			how = i18n.M("doctor.phone.how_tailscale")
 		}
 		add(mk("phone", checkFail, i18n.M("doctor.phone.not_connected")).withGuide(how))
-		skip(i18n.M("doctor.skip.not_connected"), "identity", "network port", "phone app")
+		skip(i18n.M("doctor.skip.not_connected"), skipAfterPhone...)
 	default:
 		add(mk("phone", checkOK, i18n.M("doctor.plain", active)))
 		phone := runner
@@ -665,7 +673,7 @@ func batteryExempt(whitelist, pkg string) bool {
 
 func checkWorkspace(ws string) check {
 	var missing []string
-	for _, f := range []string{"AGENTS.md", filepath.Join(".adbuddy", "bin", exeName("adb"))} {
+	for _, f := range []string{"AGENTS.md", filepath.Join(".adbuddy", "bin", workspace.Exe("adb"))} {
 		if _, err := os.Stat(filepath.Join(ws, f)); err != nil {
 			missing = append(missing, f)
 		}
@@ -799,13 +807,6 @@ func isPersonOnly(run string) bool {
 		}
 	}
 	return false
-}
-
-func exeName(name string) string {
-	if runtime.GOOS == "windows" {
-		return name + ".exe"
-	}
-	return name
 }
 
 // quoteArg quotes a path for the Run: line when it has spaces.

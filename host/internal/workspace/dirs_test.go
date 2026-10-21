@@ -117,7 +117,7 @@ func checkInitThroughLink(t *testing.T, env, realDir string) {
 	if _, err := Init(Options{Dir: env, Exe: fakeExe(t, "v1")}); err != nil {
 		t.Fatal(err)
 	}
-	if read(t, filepath.Join(BinDir(realDir), exe("adb"))) != "v1" {
+	if read(t, filepath.Join(BinDir(realDir), Exe("adb"))) != "v1" {
 		t.Fatal("the shim is not in the environment")
 	}
 	if st, err := os.Lstat(JournalDir(realDir)); err != nil || !st.IsDir() {

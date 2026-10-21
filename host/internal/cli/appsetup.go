@@ -2,8 +2,6 @@ package cli
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -109,8 +107,7 @@ func chooseAPK(e *env, apk string) (copyPath, devDigest string, err error) {
 	if releaseCert != "" && phoneapp.CheckSigner(data, releaseCert) == nil {
 		return copyPath, "", nil
 	}
-	sum := sha256.Sum256(data)
-	return copyPath, hex.EncodeToString(sum[:]), nil
+	return copyPath, phoneapp.DigestOf(data), nil
 }
 
 // forgetDevBuild stops trusting the development build and removes its copy.

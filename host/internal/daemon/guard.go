@@ -505,7 +505,7 @@ func (d *Daemon) inFront(ctx context.Context) (front, error) {
 		if len(f.packages) == 0 {
 			f.activity = a.Name
 		}
-		if !contains(f.packages, a.Package) {
+		if !slices.Contains(f.packages, a.Package) {
 			f.packages = append(f.packages, a.Package)
 		}
 	}
@@ -517,15 +517,6 @@ func (d *Daemon) inFront(ctx context.Context) (front, error) {
 		return front{}, errNothingResumed
 	}
 	return f, nil
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 // Why inFront could not tell.

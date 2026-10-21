@@ -9,6 +9,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
+	"github.com/hybriqtech/adbuddy/host/internal/session"
 )
 
 // The agent's own permission questions (spec M4 §5): Claude Code's
@@ -58,7 +59,7 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	now := time.Now()
 	timeout := permTimeout // read once: tests restore it when they end
 	req := bridge.PermissionRequest{
-		ID:          newID("p_"),
+		ID:          session.NewID("p_"),
 		Tool:        in.ToolName,
 		Summary:     claudecode.ToolSummaryIn(l.lang, in.ToolName, in.ToolInput),
 		Detail:      claudecode.ToolDetail(in.ToolName, in.ToolInput),
@@ -324,6 +325,6 @@ func (l *phoneLink) yoloPermission(in claudecode.HookInput) []byte {
 	if l.log != nil {
 		fmt.Fprintln(l.log, l.lang.T("phone.yolo_approved", summary))
 	}
-	l.publishEvent(bridge.TypePermResolved, bridge.PermissionResolved{ID: newID("p_"), Decision: "allow", By: "yolo", Summary: summary})
+	l.publishEvent(bridge.TypePermResolved, bridge.PermissionResolved{ID: session.NewID("p_"), Decision: "allow", By: "yolo", Summary: summary})
 	return claudecode.PermissionOutput(claudecode.Allow, "")
 }

@@ -1,6 +1,7 @@
 package classify
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -155,7 +156,7 @@ var grantServices = map[string]string{
 // subcommand only known on the phone counts.
 func grantReason(cmd string, sub Word) Text {
 	g, ok := grants[cmd]
-	if ok && (sub.Dynamic || contains(g.subs, strings.ToLower(sub.Value))) {
+	if ok && (sub.Dynamic || slices.Contains(g.subs, strings.ToLower(sub.Value))) {
 		return g.why
 	}
 	return Text{}
@@ -184,7 +185,7 @@ func grantsProjectMedia(ws []Word) bool {
 		if i+1 >= len(ws) || ws[i+1].Dynamic {
 			return true
 		}
-		if !contains([]string{"ignore", "deny", "default", "1", "2", "3"}, ws[i+1].Value) {
+		if !slices.Contains([]string{"ignore", "deny", "default", "1", "2", "3"}, ws[i+1].Value) {
 			return true
 		}
 	}
@@ -423,7 +424,7 @@ func specialReason(scope string, ws []Word, level Level) Text {
 		if len(v) > 1 && (v[1] == "wifi" || v[1] == "connectivity") && level != Green {
 			return reason("may cut the Wi-Fi connection")
 		}
-		if len(v) > 2 && v[1] == "netpolicy" && (ws[2].Dynamic || !contains([]string{"get", "list", "help"}, v[2])) {
+		if len(v) > 2 && v[1] == "netpolicy" && (ws[2].Dynamic || !slices.Contains([]string{"get", "list", "help"}, v[2])) {
 			// Its commands take UIDs (ADBuddy's is not known here) or mark
 			// networks as metered.
 			return reason("network policy on a UID or a network could cut ADBuddy's or the phone's connection")

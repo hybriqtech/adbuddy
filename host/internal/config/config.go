@@ -100,7 +100,7 @@ func (c Config) Validate() error {
 	if c.ConfirmTimeout.Duration <= 0 || c.ConfirmTimeout.Duration > time.Hour {
 		return fmt.Errorf("confirm_timeout must be between 1s and 1h, got %s", c.ConfirmTimeout)
 	}
-	if c.Address != "" && !validAddress(c.Address) {
+	if c.Address != "" && !ValidAddress(c.Address) {
 		return fmt.Errorf("address must be an IP address and port (e.g. 100.64.0.5:41234), got %q", c.Address)
 	}
 	if c.ChatPort != 0 && (c.ChatPort < 1024 || c.ChatPort > 65535) {
@@ -181,8 +181,8 @@ func ReadLanguage(path string) string {
 	return ""
 }
 
-// validAddress accepts only IP:port with a port in 1-65535.
-func validAddress(addr string) bool {
+// ValidAddress accepts only IP:port with a port in 1-65535.
+func ValidAddress(addr string) bool {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false

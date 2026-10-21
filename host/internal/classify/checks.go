@@ -2,6 +2,7 @@ package classify
 
 import (
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -60,7 +61,7 @@ func positional(ws []Word, skip int, allowed ...string) (pos []string, user stri
 			user = ws[i+1].Value
 			i++
 		case strings.HasPrefix(v, "-"):
-			if !contains(allowed, v) {
+			if !slices.Contains(allowed, v) {
 				return nil, "", false
 			}
 		default:
@@ -68,15 +69,6 @@ func positional(ws []Word, skip int, allowed ...string) (pos []string, user stri
 		}
 	}
 	return pos, user, true
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 // getoptSpec describes the options of a command that parses its arguments
@@ -283,12 +275,7 @@ func SafeLocalTarget(p string) bool {
 }
 
 func hasExt(name string, exts []string) bool {
-	for _, ext := range exts {
-		if strings.HasSuffix(name, ext) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(exts, func(ext string) bool { return strings.HasSuffix(name, ext) })
 }
 
 // remoteBase is the name a pulled file or folder gets on the PC. A remote

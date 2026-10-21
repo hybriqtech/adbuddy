@@ -161,7 +161,8 @@ func New(o Options) *Manager {
 	return &Manager{o: o, info: Info{State: StateStopped}, subs: map[int]func(Output){}}
 }
 
-func newID(prefix string) string {
+// NewID is prefix plus 8 random bytes in hex.
+func NewID(prefix string) string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return prefix + hex.EncodeToString(b)
@@ -202,12 +203,12 @@ func (m *Manager) startLocked(agent string, resume bool) error {
 	}
 	pr := &proc{p: p, agent: agent, resumed: resumed, started: time.Now(), grace: readGrace, gap: pasteGap, gen: m.gen, done: make(chan struct{}),
 		q: make(chan *writeJob, writeQueue), stopped: make(chan struct{}), wdone: make(chan struct{})}
-	pr.screen = term.New(newID("e_"), cols, rows)
+	pr.screen = term.New(NewID("e_"), cols, rows)
 	pr.quiet = time.AfterFunc(time.Hour, func() { m.quietFor(pr) })
 	pr.quiet.Stop()
 	m.mu.Lock()
 	m.cur = pr
-	m.info = Info{Agent: agent, State: StateIdle, Conversation: newID("c_"), Epoch: pr.screen.Epoch(), PCAttached: len(m.pcs) > 0}
+	m.info = Info{Agent: agent, State: StateIdle, Conversation: NewID("c_"), Epoch: pr.screen.Epoch(), PCAttached: len(m.pcs) > 0}
 	m.applyLocked() // a terminal may have changed the size meanwhile
 	m.publish(Output{Epoch: pr.screen.Epoch()})
 	m.emitInfo()
@@ -414,12 +415,9 @@ func (m *Manager) current() *proc {
 	return m.cur
 }
 
-// Clean is the cleaning Paste applies to its text: what is left of text when
-// the control characters go.
-func Clean(s string) string { return clean(s) }
-
-// clean keeps text, new lines and tabs; any other control character goes.
-func clean(s string) string {
+// Clean is the cleaning Paste applies to its text: it keeps text, new lines
+// and tabs; any other control character goes.
+func Clean(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	return strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\t' {

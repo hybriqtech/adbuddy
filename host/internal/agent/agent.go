@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -24,12 +25,7 @@ func IsKnown(name string) bool {
 	if name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
 		return false
 	}
-	for _, k := range Known {
-		if name == k {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Known, name)
 }
 
 // InstallHint tells how to install a known agent.

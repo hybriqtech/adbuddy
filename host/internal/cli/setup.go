@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -94,7 +94,7 @@ func newSetupCmd(app *App) *cobra.Command {
 				if apkFlag != "" && noApp {
 					return UsageErrorT("err.setup.usage_apk_and_no_app_contradict")
 				}
-				if connectFlag != "" && !validPairAddr(connectFlag) {
+				if connectFlag != "" && !config.ValidAddress(connectFlag) {
 					return UsageErrorT("err.setup.usage_connect_is_not_an_ip", classify.Printable(connectFlag))
 				}
 				e, err := loadEnv(app)
@@ -240,7 +240,7 @@ func newSetupCmd(app *App) *cobra.Command {
 							if addr, err = ask(app.T("setup.prompt.connection_address")); err != nil {
 								return err
 							}
-							if !validPairAddr(addr) {
+							if !config.ValidAddress(addr) {
 								return UsageErrorT("err.setup.usage_is_not_an_ip_address", classify.Printable(addr))
 							}
 						}
@@ -396,7 +396,7 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode, vt bool, as
 		if err != nil {
 			return "", err
 		}
-		if !validPairAddr(addr) {
+		if !config.ValidAddress(addr) {
 			return "", UsageErrorT("err.setup.usage_is_not_an_ip_address_2", classify.Printable(addr))
 		}
 		code, err := ask(app.T("setup.prompt.pairing_code"))
@@ -484,12 +484,7 @@ func chooseAgent(app *App, flag, current string, yes bool, ask func(string) (str
 }
 
 func containsAgent(found []agent.Found, name string) bool {
-	for _, f := range found {
-		if f.Name == name {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(found, func(f agent.Found) bool { return f.Name == name })
 }
 
 // stableSerial is the serial to save for the phone: its mDNS name
@@ -529,19 +524,6 @@ func isAddress(serial string) bool {
 	}
 	_, err = netip.ParseAddr(host)
 	return err == nil
-}
-
-// validPairAddr accepts only IP:port with a port in 1-65535.
-func validPairAddr(addr string) bool {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
-	}
-	if _, err := netip.ParseAddr(host); err != nil {
-		return false
-	}
-	p, err := strconv.ParseUint(port, 10, 16)
-	return err == nil && p >= 1
 }
 
 // startServer starts ADBuddy's adb server, waiting at most startServerWait.
