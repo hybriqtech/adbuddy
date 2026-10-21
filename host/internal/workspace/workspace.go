@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 )
 
 //go:embed templates/AGENTS.md templates/CLAUDE.md templates/NOTES.md
@@ -171,23 +172,7 @@ func writeFile(path string, data []byte, overwrite bool) (changed, created bool,
 
 // replaceFile writes data to path atomically, readable only by the user.
 func replaceFile(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".write-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return safeio.WriteFileAtomic(path, data, safeio.AtomicOpts{Pattern: ".write-*", Perm: 0o600})
 }
 
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
@@ -361,23 +346,7 @@ func saveSettings(path string, settings map[string]any) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".settings-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(append(out, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return safeio.WriteFileAtomic(path, append(out, '\n'), safeio.AtomicOpts{Pattern: ".settings-*", Perm: 0o600})
 }
 
 // mergeGeminiSettings makes Gemini CLI read AGENTS.md (spec M6b §3.4): it adds

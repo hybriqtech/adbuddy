@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 	"github.com/hybriqtech/adbuddy/host/internal/shq"
 )
 
@@ -105,24 +106,7 @@ func TrustDevAPK(dataDir, digest string) (string, error) {
 // WritePrivate writes data to p (0600) through a new temporary file renamed
 // over it, so it never writes through a link someone left at p.
 func WritePrivate(p string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(p), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	defer os.Remove(tmp)
-	if err := f.Chmod(0o600); err != nil && runtime.GOOS != "windows" {
-		f.Close()
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, p)
+	return safeio.WriteFileAtomic(p, data, safeio.AtomicOpts{Pattern: ".tmp-*", Perm: 0o600, TolerateChmod: true})
 }
 
 // ForgetDevAPK stops trusting the development APK; removed says whether
