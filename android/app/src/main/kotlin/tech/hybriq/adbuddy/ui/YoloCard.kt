@@ -53,7 +53,7 @@ fun rememberYoloView(state: BridgeState, clock: HostClock): YoloUi.View {
 @Composable
 fun YoloCard(state: BridgeState, clock: HostClock, onTurnOn: () -> Unit, onTurnOff: () -> Unit, modifier: Modifier = Modifier) {
     val view = rememberYoloView(state, clock)
-    val connected = state.connection == BridgeState.Connection.CONNECTED
+    val connected = state.isConnected
     // Off stays available whatever the link says (the request may fail: the caller says so); on needs a known off and the PC.
     val enabled = view.active || YoloUi.canTurnOn(view, connected)
     ElevatedCard(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).testTag(YOLO_CARD_TAG)) {

@@ -108,7 +108,7 @@ class BridgeService : LifecycleService() {
         lifecycleScope.launch {
             val detector = DoneDetector()
             app.bridge.state.collect { s ->
-                if (s.connection != BridgeState.Connection.CONNECTED) {
+                if (!s.isConnected) {
                     detector.reset()
                 } else if (Notify.shouldAnnounceDone(s, detector.onState(s.sessionState, SystemClock.elapsedRealtime()))) {
                     ConversationNotifier.done(this@BridgeService, Notify.doneLine(s.chat, s.sessionState.conversation))

@@ -33,8 +33,8 @@ enum class LinkStatus(@param:StringRes val text: Int, @param:StringRes val short
         fun of(state: BridgeState, cut: Boolean, configured: Boolean = true): LinkStatus = when {
             state.connection == BridgeState.Connection.INCOMPATIBLE && state.outdated == BridgeState.Outdated.APP -> UPDATE_APP
             state.connection == BridgeState.Connection.INCOMPATIBLE -> UPDATE_HOST
-            state.connection == BridgeState.Connection.CONNECTED && state.sessionState.paused -> PAUSED
-            state.connection == BridgeState.Connection.CONNECTED -> CONNECTED
+            state.isConnected && state.sessionState.paused -> PAUSED
+            state.isConnected -> CONNECTED
             cut -> CUT
             state.connection == BridgeState.Connection.CONNECTING -> CONNECTING
             !configured -> NOT_SET_UP
@@ -51,7 +51,7 @@ enum class PauseButton(@param:StringRes val text: Int) {
 
     companion object {
         fun of(state: BridgeState): PauseButton? = when {
-            state.connection != BridgeState.Connection.CONNECTED -> null
+            !state.isConnected -> null
             state.sessionState.paused -> RESUME
             else -> PAUSE
         }

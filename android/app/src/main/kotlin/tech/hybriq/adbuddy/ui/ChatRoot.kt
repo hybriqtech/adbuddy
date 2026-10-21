@@ -49,7 +49,6 @@ import kotlinx.serialization.json.JsonElement
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Attachment
-import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.BridgePrefs
 import tech.hybriq.adbuddy.bridge.Empty
 import tech.hybriq.adbuddy.bridge.Protocol
@@ -321,7 +320,7 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     if (yoloAsk) {
         YoloActivationDialog(
             // An unknown YOLO state (the PC has not said) is not a known off: nothing is turned on over it.
-            connected = state.connection == BridgeState.Connection.CONNECTED && state.yolo != null,
+            connected = state.isConnected && state.yolo != null,
             // A reading that fails counts as locked.
             isLocked = { try { keyguard.isDeviceLocked } catch (e: RuntimeException) { true } },
             // The dialog is not the last step: the phone's own lock is (YoloAuth), and only its OK sends yolo.set.

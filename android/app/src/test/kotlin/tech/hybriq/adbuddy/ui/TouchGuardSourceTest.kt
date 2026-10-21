@@ -98,7 +98,7 @@ class TouchGuardSourceTest {
     }
 
     /** Dialogs go through GuardedAlertDialog, which puts the guard first: a bare AlertDialog( anywhere else is a way around it. */
-    private fun bareAlertDialogs(src: String) = Regex("""\bAlertDialog\(""").findAll(CodeScan.code(src)).count()
+    private fun bareAlertDialogs(src: String) = Regex("""\bAlertDialog\(|::AlertDialog\b""").findAll(CodeScan.code(src)).count()
 
     @Test fun onlyGuardedAlertDialogCallsAlertDialog() {
         for (f in mainSources()) {
@@ -110,6 +110,7 @@ class TouchGuardSourceTest {
         assertTrue("GuardedAlertDialog has no callers: the scanner is looking in the wrong place", users >= 9)
         assertEquals(1, bareAlertDialogs("AlertDialog(onDismissRequest = {})"))
         assertEquals(0, bareAlertDialogs("GuardedAlertDialog(onDismissRequest = {})"))
+        assertEquals(1, bareAlertDialogs("val d = ::AlertDialog"))
     }
 
     @Test fun noWindowContainerIsImportedUnderAnAlias() {
