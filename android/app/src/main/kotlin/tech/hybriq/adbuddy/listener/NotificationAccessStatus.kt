@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
-import tech.hybriq.adbuddy.ui.startFirst
+import tech.hybriq.adbuddy.util.startFirst
 
 /**
  * Binds NotificationAccess to the system: reads the list of enabled

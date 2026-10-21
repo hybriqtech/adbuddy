@@ -1,4 +1,4 @@
-package tech.hybriq.adbuddy.ui
+package tech.hybriq.adbuddy.util
 
 import android.content.ActivityNotFoundException
 import android.content.Context

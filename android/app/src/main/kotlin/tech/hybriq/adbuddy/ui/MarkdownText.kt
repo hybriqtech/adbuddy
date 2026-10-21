@@ -46,7 +46,8 @@ import tech.hybriq.adbuddy.chat.Markdown
 @Composable
 fun MarkdownText(text: String, onLink: (String) -> Unit, modifier: Modifier = Modifier) {
     val blocks = remember(text) { Markdown.parse(text) }
-    val link = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline))
+    val primary = MaterialTheme.colorScheme.primary
+    val link = remember(primary) { TextLinkStyles(SpanStyle(color = primary, textDecoration = TextDecoration.Underline)) }
     val codeBg = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
     // Built once per (blocks, onLink, styles): a new onLink rebuilds them, so a link never calls an old callback.
     val texts = remember(blocks, onLink, link, codeBg) { blocks.map { b -> annotate(inlinesOf(b), onLink, link, codeBg) } }

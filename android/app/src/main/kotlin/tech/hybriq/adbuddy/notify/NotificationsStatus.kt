@@ -6,7 +6,7 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import tech.hybriq.adbuddy.AdbuddyApp
-import tech.hybriq.adbuddy.ui.startFirst
+import tech.hybriq.adbuddy.util.startFirst
 
 /** Whether ADBuddy can tell the user something is waiting: notifications on, and the confirm and ask channels not silenced. */
 object NotificationsStatus {
