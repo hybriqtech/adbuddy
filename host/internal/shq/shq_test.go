@@ -89,3 +89,26 @@ func FuzzQuoteUnquote(f *testing.F) {
 		}
 	})
 }
+
+func TestUnquoteAcceptsOnlyAlphabetBytes(t *testing.T) {
+	const alphabet = "_@%+=:,./-"
+	for i := 0; i < 256; i++ {
+		c := byte(i)
+		want := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte(alphabet, c) >= 0
+		got, ok := Unquote(string([]byte{c}))
+		if ok != want {
+			t.Errorf("Unquote(%q) ok = %v, want %v", string([]byte{c}), ok, want)
+		}
+		if ok && got != string([]byte{c}) {
+			t.Errorf("Unquote(%q) = %q", string([]byte{c}), got)
+		}
+	}
+}
+
+func TestUnquoteRejects(t *testing.T) {
+	for _, tok := range []string{"a$b", "'a'b c", "'abc", `a\b`, "a b", "a\nb", "a`b`", "a|b", "a;b"} {
+		if got, ok := Unquote(tok); ok {
+			t.Errorf("Unquote(%q) = %q, true; want refused", tok, got)
+		}
+	}
+}
