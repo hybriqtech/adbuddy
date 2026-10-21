@@ -14,6 +14,7 @@ import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.Decision
 import tech.hybriq.adbuddy.ui.Formats
+import tech.hybriq.adbuddy.notify.notificationManager
 
 /**
  * Shows each pending 🔴 question as a high-priority notification (spec §4.5)
@@ -35,7 +36,7 @@ object ConfirmNotifier {
 
     @Synchronized
     fun sync(context: Context, state: BridgeState) {
-        val nm = context.getSystemService(NotificationManager::class.java)
+        val nm = context.notificationManager
         val clock = (context.applicationContext as AdbuddyApp).clock
         val plan = ConfirmUi.plan(shown, state, clock.now())
         post(context, nm, plan, state, clock)
@@ -48,7 +49,7 @@ object ConfirmNotifier {
      */
     @Synchronized
     fun repaint(context: Context, state: BridgeState) {
-        val nm = context.getSystemService(NotificationManager::class.java)
+        val nm = context.notificationManager
         val clock = (context.applicationContext as AdbuddyApp).clock
         val plan = ConfirmUi.repaint(shown, state, clock.now())
         post(context, nm, plan, state, clock)
@@ -71,7 +72,7 @@ object ConfirmNotifier {
      */
     @Synchronized
     fun clear(context: Context) {
-        val nm = context.getSystemService(NotificationManager::class.java)
+        val nm = context.notificationManager
         for (n in nm.activeNotifications) if (n.id == NOTIFICATION_ID) nm.cancel(n.tag, n.id)
         shown = emptyMap()
         arming.clear()

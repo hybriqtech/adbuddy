@@ -1,18 +1,19 @@
 package tech.hybriq.adbuddy.yolo
 
 import android.app.Notification
-import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import java.time.format.FormatStyle
 import tech.hybriq.adbuddy.AdbuddyApp
-import tech.hybriq.adbuddy.MainActivity
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.confirm.HostClock
 import tech.hybriq.adbuddy.ui.Formats
+import tech.hybriq.adbuddy.notify.openAppIntent
+import tech.hybriq.adbuddy.notify.notificationManager
+import tech.hybriq.adbuddy.notify.baseBuilder
 
 /**
  * The persistent notification of the YOLO mode (spec 2026-10-18): up while it is on, with the link up or down (the mode
@@ -29,7 +30,7 @@ object YoloNotifier {
 
     @Synchronized
     fun sync(context: Context, state: BridgeState, clock: HostClock) {
-        val nm = context.getSystemService(NotificationManager::class.java)
+        val nm = context.notificationManager
         val key = YoloUi.notificationKey(state)
         if (key == shown) return
         shown = key
@@ -43,13 +44,13 @@ object YoloNotifier {
         if (shown == null && state.yolo?.active == false) return
         // A cold process (the old notification outlived it, yolo == null) has shown == null: it still must say so; the marker makes the next sync replace or cancel it.
         if (shown == null) shown = OFF_FAILED
-        context.getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, build(context, state, clock, offFailed = true))
+        context.notificationManager.notify(NOTIFICATION_ID, build(context, state, clock, offFailed = true))
     }
 
     /** Takes down what an earlier process left: nobody can say if the mode is still on until the host does. */
     @Synchronized
     fun clear(context: Context) {
-        context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        context.notificationManager.cancel(NOTIFICATION_ID)
         shown = null
     }
 
@@ -63,9 +64,8 @@ object YoloNotifier {
         val off = PendingIntent.getBroadcast(
             ctx, 8, Intent(ctx, YoloReceiver::class.java).setAction(YoloReceiver.ACTION_OFF), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val open = PendingIntent.getActivity(ctx, 9, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_YOLO)
-            .setSmallIcon(R.drawable.ic_stat_adbuddy)
+        val open = openAppIntent(ctx, 9)
+        return baseBuilder(ctx, AdbuddyApp.CHANNEL_YOLO, color = false)
             .setContentTitle(ctx.getString(R.string.yolo_notif_title))
             .setContentText(text)
             .setCategory(NotificationCompat.CATEGORY_STATUS)

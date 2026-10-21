@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import tech.hybriq.adbuddy.notify.startFirst
 
 /**
  * Opens the system's page for this app's language (Android 13 and later: Settings, Apps, ADBuddy, Language; the
@@ -17,13 +18,6 @@ object LanguageSettings {
     /** True when the page was opened. */
     fun open(context: Context): Boolean {
         if (!available()) return false
-        val intent = Intent(Settings.ACTION_APP_LOCALE_SETTINGS, Uri.fromParts("package", context.packageName, null))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return try {
-            context.startActivity(intent)
-            true
-        } catch (e: android.content.ActivityNotFoundException) {
-            false
-        }
+        return context.startFirst(Intent(Settings.ACTION_APP_LOCALE_SETTINGS, Uri.fromParts("package", context.packageName, null)))
     }
 }

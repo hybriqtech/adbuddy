@@ -162,7 +162,7 @@ class Downloads(
             val buf = ByteArray(64 * 1024)
             while (true) { val n = i.read(buf); if (n < 0) break; d.update(buf, 0, n) }
         }
-        return d.digest().joinToString("") { "%02x".format(it) }
+        return d.digest().toHexString()
     }
 
     companion object {
