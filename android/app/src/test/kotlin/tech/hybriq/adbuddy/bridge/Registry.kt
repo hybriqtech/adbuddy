@@ -4,7 +4,7 @@ import kotlinx.serialization.KSerializer
 
 /**
  * Each message type with its payload, by direction. Mirrors HostPayloads and
- * AppPayloads in host/internal/bridge/registry.go; FixturesTest checks both
+ * AppPayloads in host/internal/bridge/fixtures_test.go; FixturesTest checks both
  * against protocol/fixtures/.
  */
 object Registry {

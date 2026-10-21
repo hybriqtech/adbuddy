@@ -1,7 +1,6 @@
 package tech.hybriq.adbuddy.ui
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,11 +28,10 @@ fun NotificationsRationaleContent(modifier: Modifier = Modifier) {
 /** Why the app wants to notify, before the system asks. Back is "Not now"; a tap outside does nothing. */
 @Composable
 fun NotificationsRationaleDialog(onContinue: () -> Unit, onSkip: () -> Unit) {
-    AlertDialog(
+    GuardedAlertDialog(
         onDismissRequest = onSkip,
         title = { Text(stringResource(R.string.notifications_rationale_title)) },
         text = {
-            ObscuredTouchGuard()
             NotificationsRationaleBody()
         },
         confirmButton = { TextButton(onClick = onContinue) { Text(stringResource(R.string.notifications_rationale_continue)) } },

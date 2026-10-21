@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -448,11 +447,10 @@ fun TerminalOfflineNotice(modifier: Modifier = Modifier) {
 /** "Open <domain>?": the domain in bold and the full URL under it, Open and Cancel. */
 @Composable
 fun LinkDialog(url: String, domain: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
+    GuardedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.link_open_title, domain), fontWeight = FontWeight.Bold) },
         text = {
-            ObscuredTouchGuard()
             Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis)
         },
         confirmButton = { TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open)) } },

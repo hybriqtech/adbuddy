@@ -4,7 +4,6 @@ import android.os.SystemClock
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,11 +40,10 @@ fun YoloNoLockDialog(onConfirm: () -> Unit, onDismiss: () -> Unit, elapsed: () -
         tick++
     }
     val armed = ConfirmUi.armed(shownAt, elapsed() + tick * 0L)
-    AlertDialog(
+    GuardedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.yolo_nolock_title)) },
         text = {
-            ObscuredTouchGuard()
             Column(Modifier.verticalScroll(rememberScrollState())) { Text(stringResource(R.string.yolo_nolock_body)) }
         },
         confirmButton = {

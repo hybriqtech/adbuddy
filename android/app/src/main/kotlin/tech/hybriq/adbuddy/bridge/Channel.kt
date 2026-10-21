@@ -37,7 +37,7 @@ class BridgeChannel(private val bridge: Bridge, scope: CoroutineScope) : Channel
     override fun listen(type: String, listener: (Message) -> Unit) = bridge.listen(type, listener)
     override fun listenFrames(listener: (Chunk) -> Unit) = bridge.listenFrames(listener)
     override val connected: StateFlow<Boolean> =
-        bridge.state.map { it.connection == BridgeState.Connection.CONNECTED }.stateIn(scope, SharingStarted.Eagerly, false)
+        bridge.state.map { it.isConnected }.stateIn(scope, SharingStarted.Eagerly, false)
     override val permissions: StateFlow<List<PermissionRequest>> =
         bridge.state.map { it.chat.permissions }.distinctUntilChanged().stateIn(scope, SharingStarted.Eagerly, bridge.state.value.chat.permissions)
 }

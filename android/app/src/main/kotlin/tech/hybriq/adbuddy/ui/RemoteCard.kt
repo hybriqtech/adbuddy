@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
@@ -120,11 +119,10 @@ fun RemoteCard(state: BridgeState, bridge: Bridge, clock: HostClock, onMessage: 
     }
 
     ask?.let { enable ->
-        AlertDialog(
+        GuardedAlertDialog(
             onDismissRequest = { ask = null },
             title = { Text(stringResource(if (enable) R.string.remote_enable_title else R.string.remote_disable_title)) },
             text = {
-                ObscuredTouchGuard()
                 Text(stringResource(if (enable) R.string.remote_enable_body else R.string.remote_disable_body))
             },
             confirmButton = {

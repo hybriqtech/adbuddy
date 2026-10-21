@@ -19,6 +19,9 @@ data class BridgeState(
     /** The YOLO mode (spec 2026-10-18): YoloReducer. null = unknown (never read as off). */
     val yolo: YoloState? = null,
 ) {
+    /** True only once the host's welcome has come (the other states are not a live link). */
+    val isConnected: Boolean get() = connection == Connection.CONNECTED
+
     /** INCOMPATIBLE: the app or the host must be updated; the app stops reconnecting. */
     enum class Connection { WAITING, CONNECTING, CONNECTED, INCOMPATIBLE }
 
