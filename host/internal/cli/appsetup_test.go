@@ -451,7 +451,7 @@ func TestFmtApp(t *testing.T) {
 		{appResult{Installed: true, Version: "0.2.0", Consent: "granted", Permission: true, Battery: true}, "app 0.2.0 (granted, accessibility off)"},
 		{appResult{Installed: true, Version: "0.2.0", Consent: "granted", Accessibility: true}, "app 0.2.0 (granted, permission off, battery off)"},
 	} {
-		if got := fmtApp(c.r); got != c.want {
+		if got := fmtAppMsg(c.r).String(); got != c.want {
 			t.Errorf("%q, want %q", got, c.want)
 		}
 	}

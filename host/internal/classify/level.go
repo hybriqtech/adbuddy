@@ -23,18 +23,6 @@ func (l Level) String() string {
 	return levelNames[l]
 }
 
-// Emoji is the traffic-light symbol used in human output.
-func (l Level) Emoji() string {
-	switch l {
-	case Green:
-		return "🟢"
-	case Yellow:
-		return "🟡"
-	default:
-		return "🔴"
-	}
-}
-
 func (l Level) MarshalText() ([]byte, error) { return []byte(l.String()), nil }
 
 func (l *Level) UnmarshalText(b []byte) error {
@@ -54,11 +42,4 @@ func ParseLevel(s string) (Level, error) {
 		}
 	}
 	return Red, fmt.Errorf("unknown level %q (want green, yellow or red)", s)
-}
-
-func maxLevel(a, b Level) Level {
-	if a > b {
-		return a
-	}
-	return b
 }

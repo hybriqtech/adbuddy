@@ -41,9 +41,6 @@ func oneLine(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// ToolSummary is ToolSummaryIn in English.
-func ToolSummary(tool string, raw json.RawMessage) string { return ToolSummaryIn(i18n.EN, tool, raw) }
-
 // ToolSummaryIn is the one line the phone shows of a tool use (spec M4 §4.2):
 // the verb, in the language of the PC, and what it works on, which is the
 // agent's and is never translated; never the whole input, never a path with

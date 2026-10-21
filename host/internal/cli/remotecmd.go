@@ -132,10 +132,7 @@ func newRemoteCmd(app *App) *cobra.Command {
 	}
 }
 
-// remoteText is what the person reads, in English.
-func remoteText(op string, i remoteInfo) string { return remoteTextIn(i18n.EN, op, i) }
-
-// remoteTextIn is remoteText in lang. A sentence that follows "serve is not
+// remoteTextIn is what the person reads, in lang. A sentence that follows "serve is not
 // running; " keeps its first letter as the catalog has it (lower case); alone,
 // it starts with a capital.
 func remoteTextIn(lang i18n.Lang, op string, i remoteInfo) string {

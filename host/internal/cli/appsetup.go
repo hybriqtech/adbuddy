@@ -300,9 +300,6 @@ func waitText(d time.Duration) i18n.Msg {
 	return i18n.M("appsetup.wait.duration", d.Round(time.Millisecond).String())
 }
 
-// fmtApp is the human summary of the app, in English (what the tests read).
-func fmtApp(r appResult) string { return fmtAppMsg(r).String() }
-
 // consentWord is the state of the consent as a person reads it; the value of
 // the JSON (appResult.Consent) stays as it is.
 func consentWord(c string) any {

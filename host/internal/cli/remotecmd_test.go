@@ -14,6 +14,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
 	"github.com/hybriqtech/adbuddy/host/internal/device"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
 )
@@ -862,16 +863,16 @@ func TestRemoteOffWithoutServePersistUnreadable(t *testing.T) {
 func TestRemoteTextWithPersist(t *testing.T) {
 	persist := remoteInfo{Serve: true, PersistPort: "5555"}
 	const warning = "But adb's network port is not closed for good: persist.adb.tcp.port is 5555 (ADBuddy did not set it), and adb listens on that port again every time the phone restarts. `adbuddy doctor` says how to remove it."
-	if got := remoteText("off", persist); got != "Remote mode is off. "+warning {
+	if got := remoteTextIn(i18n.EN, "off", persist); got != "Remote mode is off. "+warning {
 		t.Errorf("off: %q", got)
 	}
-	if got := remoteText("status", persist); got != "Remote mode: off. "+warning {
+	if got := remoteTextIn(i18n.EN, "status", persist); got != "Remote mode: off. "+warning {
 		t.Errorf("status: %q", got)
 	}
-	if got := remoteText("status", remoteInfo{PersistPort: "5555"}); got != "serve is not running; remote mode: off. "+warning {
+	if got := remoteTextIn(i18n.EN, "status", remoteInfo{PersistPort: "5555"}); got != "serve is not running; remote mode: off. "+warning {
 		t.Errorf("status without serve: %q", got)
 	}
-	if got := remoteText("off", remoteInfo{Serve: true, PersistUnknown: true}); got != "Remote mode is off. But persist.adb.tcp.port could not be read: adb's network port may open again when the phone restarts. Run `adbuddy doctor` to check." {
+	if got := remoteTextIn(i18n.EN, "off", remoteInfo{Serve: true, PersistUnknown: true}); got != "Remote mode is off. But persist.adb.tcp.port could not be read: adb's network port may open again when the phone restarts. Run `adbuddy doctor` to check." {
 		t.Errorf("off, unknown: %q", got)
 	}
 }

@@ -47,11 +47,8 @@ var (
 	qrHintDelay         = 10 * time.Second // when to say that no phone is visible while a QR code waits
 )
 
-// phoneGuide is the phone preparation text in English; step 3 depends on how
+// phoneGuideIn is the phone preparation text in lang; step 3 depends on how
 // it is paired.
-func phoneGuide(useCode bool) string { return phoneGuideIn(i18n.EN, useCode) }
-
-// phoneGuideIn is phoneGuide in lang.
 func phoneGuideIn(lang i18n.Lang, useCode bool) string {
 	network := lang.T("setup.guide.network")
 	if useCode {
@@ -639,10 +636,7 @@ func qrHint(ctx context.Context, runner adb.Runner, say func(string, ...any)) (s
 	return func() { cancel(); <-done }
 }
 
-// workspaceHint is the guidance for a workspace.Init failure, in English.
-func workspaceHint(err error, ws string) string { return workspaceHintMsg(err, ws).String() }
-
-// workspaceHintMsg is workspaceHint as a message of its own, to be the fix of
+// workspaceHintMsg is the guidance for a workspace.Init failure, to be the fix of
 // an error: NewErrorT(code, "error.cause", "error.hint", cause, workspaceHintMsg(err, ws)).
 // An unsafe path is not a permissions problem.
 func workspaceHintMsg(err error, ws string) i18n.Msg {

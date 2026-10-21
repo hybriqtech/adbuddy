@@ -17,6 +17,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/pairing"
 	"github.com/hybriqtech/adbuddy/host/internal/remote"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
@@ -859,7 +860,7 @@ func TestWatchRemoteThatCannotCloseWarnsOnceAndBacksOff(t *testing.T) {
 
 func TestStillOnNotice(t *testing.T) {
 	at := time.Date(2026, 10, 1, 21, 30, 0, 0, time.Local)
-	got := stillOnNotice(remote.State{Enabled: true, ExpiresAt: at})
+	got := stillOnNoticeIn(i18n.EN, remote.State{Enabled: true, ExpiresAt: at})
 	for _, want := range []string{"Remote mode is still on", "21:30", "adbuddy remote off", "start serve again"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("%q does not say %q", got, want)
@@ -1075,14 +1076,14 @@ func TestRemoteSetFullQueueAnswersUnavailable(t *testing.T) {
 func TestRemoteNoticesForAClosingMode(t *testing.T) {
 	at := time.Date(2026, 10, 1, 21, 30, 0, 0, time.Local)
 	for name, got := range map[string]string{
-		"serve start": remoteOnNotice(remote.State{Enabled: true, Closing: true, ExpiresAt: at}),
-		"serve stop":  stillOnNotice(remote.State{Enabled: true, Closing: true, ExpiresAt: at}),
+		"serve start": remoteOnNoticeIn(i18n.EN, remote.State{Enabled: true, Closing: true, ExpiresAt: at}),
+		"serve stop":  stillOnNoticeIn(i18n.EN, remote.State{Enabled: true, Closing: true, ExpiresAt: at}),
 	} {
 		if !strings.Contains(got, "Remote mode expired but port 5555 could not be closed yet") || strings.Contains(got, "21:30") {
 			t.Errorf("%s: %q", name, got)
 		}
 	}
-	if got := remoteOnNotice(remote.State{Enabled: true, ExpiresAt: at}); !strings.Contains(got, "Remote mode is on until 21:30") {
+	if got := remoteOnNoticeIn(i18n.EN, remote.State{Enabled: true, ExpiresAt: at}); !strings.Contains(got, "Remote mode is on until 21:30") {
 		t.Errorf("%q", got)
 	}
 }

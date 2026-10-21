@@ -79,16 +79,6 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// indexOf returns the index of the first word equal to s, or -1.
-func indexOf(ws []Word, s string) int {
-	for i, w := range ws {
-		if w.Value == s {
-			return i
-		}
-	}
-	return -1
-}
-
 // getoptSpec describes the options of a command that parses its arguments
 // with getopt, so that a check reads them the way the command does.
 //

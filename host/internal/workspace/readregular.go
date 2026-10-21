@@ -19,9 +19,6 @@ var (
 	errTooLarge   = errors.New("larger than 1 MiB")
 )
 
-// openFlags opens without blocking on Unix (safeio.ReadFlags).
-const openFlags = safeio.ReadFlags
-
 // openRegular opens path for reading only if it is a regular file, and the
 // same one Lstat saw (safeio.OpenRegular): a FIFO, a device or a link to one
 // is an error that wraps errNotRegular, never a read that hangs.
