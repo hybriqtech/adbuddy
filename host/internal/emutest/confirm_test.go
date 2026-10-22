@@ -404,6 +404,39 @@ func (e *emu) noLock(ctx context.Context) (bool, string) {
 	return err == nil && strings.Contains(s, "verified successfully"), s
 }
 
+// pinMinBudget is what a test with a PIN needs before the test timeout: the
+// cleanup takes up to 2 min and the test itself some minutes.
+const pinMinBudget = 4 * time.Minute
+
+type pinVerdict int
+
+const (
+	pinOK    pinVerdict = iota // enough time (or no deadline): set the PIN
+	pinSkip                    // too little time, locally: skip, so the emulator is not left with a PIN
+	pinFatal                   // too little time, in CI: fail, a skip there would leave the job green without the test
+)
+
+// pinBudget decides what lockWithPIN does with the time left before the test
+// timeout (left, meaningful only when hasDeadline). ci is isCI().
+func pinBudget(left time.Duration, hasDeadline, ci bool) pinVerdict {
+	switch {
+	case !hasDeadline || left >= pinMinBudget:
+		return pinOK
+	case ci:
+		return pinFatal
+	default:
+		return pinSkip
+	}
+}
+
+func pinBudgetMsg(left time.Duration) string {
+	return fmt.Sprintf("only %s left before the test timeout and a test with a PIN needs at least %s (not setting a PIN that the cleanup might not get to clear); raise -timeout or split the suite", left.Round(time.Second), pinMinBudget)
+}
+
+// isCI reports whether the tests run in CI: GitHub Actions exports CI=true to
+// every step, so no workflow has to remember to set a variable of its own.
+func isCI() bool { return os.Getenv("CI") == "true" }
+
 // lockWithPIN sets testPIN and locks the screen. The PIN is cleared at
 // cleanup even when the test fails, with a context of its own, and checked:
 // an emulator left with a PIN would lock every later test out.
@@ -416,9 +449,13 @@ func (e *emu) lockWithPIN(t *testing.T) {
 			t.Fatalf("the emulator already has a lock credential (%s) that is not the test's PIN: clear it by hand before these tests", out)
 		}
 	}
-	// The cleanup needs up to 2 min and the test itself some minutes.
-	if d, ok := t.Deadline(); ok && time.Until(d) < 4*time.Minute {
-		t.Skipf("only %s left before the test timeout: not setting a PIN that the cleanup might not get to clear", time.Until(d).Round(time.Second))
+	d, hasDeadline := t.Deadline()
+	left := time.Until(d)
+	switch pinBudget(left, hasDeadline, isCI()) {
+	case pinSkip:
+		t.Skipf("%s", pinBudgetMsg(left))
+	case pinFatal:
+		t.Fatalf("%s", pinBudgetMsg(left))
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(e.ctx), 2*time.Minute)
