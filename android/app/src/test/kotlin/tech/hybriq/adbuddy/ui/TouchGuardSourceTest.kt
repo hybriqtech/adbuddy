@@ -93,7 +93,24 @@ class TouchGuardSourceTest {
             seen += windowsOf(CodeScan.code(src)).size
             assertEquals("${f.path}: a dialog, menu or popup without $guard", emptyList<String>(), windowsWithoutGuard(src))
         }
-        assertTrue("no window container found: the scanner is looking in the wrong place", seen >= 7)
+        // The AlertDialog inside GuardedAlertDialog plus the menus and popups that remain.
+        assertTrue("no window container found: the scanner is looking in the wrong place", seen >= 3)
+    }
+
+    /** Dialogs go through GuardedAlertDialog, which puts the guard first: a bare AlertDialog( anywhere else is a way around it. */
+    private fun bareAlertDialogs(src: String) = Regex("""\bAlertDialog\(|::AlertDialog\b""").findAll(CodeScan.code(src)).count()
+
+    @Test fun onlyGuardedAlertDialogCallsAlertDialog() {
+        for (f in mainSources()) {
+            if (f.name == "GuardedAlertDialog.kt") continue
+            assertEquals("${f.path} calls AlertDialog( itself: use GuardedAlertDialog", 0, bareAlertDialogs(f.readText()))
+        }
+        assertEquals(1, bareAlertDialogs(File(uiDir, "GuardedAlertDialog.kt").readText()))
+        val users = mainSources().sumOf { Regex("""(?<!fun )\bGuardedAlertDialog\(""").findAll(CodeScan.code(it.readText())).count() }
+        assertTrue("GuardedAlertDialog has no callers: the scanner is looking in the wrong place", users >= 9)
+        assertEquals(1, bareAlertDialogs("AlertDialog(onDismissRequest = {})"))
+        assertEquals(0, bareAlertDialogs("GuardedAlertDialog(onDismissRequest = {})"))
+        assertEquals(1, bareAlertDialogs("val d = ::AlertDialog"))
     }
 
     @Test fun noWindowContainerIsImportedUnderAnAlias() {

@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"os"
 
 	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 )
@@ -19,18 +17,10 @@ var (
 	errTooLarge   = errors.New("larger than 1 MiB")
 )
 
-// openFlags opens without blocking on Unix (safeio.ReadFlags).
-const openFlags = safeio.ReadFlags
-
-// openRegular opens path for reading only if it is a regular file, and the
-// same one Lstat saw (safeio.OpenRegular): a FIFO, a device or a link to one
-// is an error that wraps errNotRegular, never a read that hangs.
-func openRegular(path string) (*os.File, fs.FileInfo, error) { return safeio.OpenRegular(path) }
-
-// readRegular reads the regular file at path (see openRegular) up to maxRead
+// readRegular reads the regular file at path (see safeio.OpenRegular) up to maxRead
 // bytes. A longer one returns its first maxRead bytes and errTooLarge.
 func readRegular(path string) ([]byte, error) {
-	f, _, err := openRegular(path)
+	f, _, err := safeio.OpenRegular(path)
 	if err != nil {
 		return nil, err
 	}

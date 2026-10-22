@@ -47,7 +47,7 @@ object ConfirmUi {
         if (r.id in state.answering) return Status.SENDING
         val expires = expiry(r) ?: return Status.EXPIRED
         if (now >= expires) return Status.EXPIRED
-        if (state.connection != BridgeState.Connection.CONNECTED) return Status.OFFLINE
+        if (!state.isConnected) return Status.OFFLINE
         return Status.OPEN
     }
 

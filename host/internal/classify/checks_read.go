@@ -1,6 +1,9 @@
 package classify
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // Checks for read-only commands: they stay 🟢 unless their arguments make
 // them write files, run commands or change state.
@@ -289,7 +292,7 @@ func checkDumpsys(ws []Word) checkResult {
 		return red(reason("dumpsys of every service includes the notifications, with the start of each ticker"))
 	case dumpsysSeveral(v):
 		return red(reason("dumpsys of several services may show the text of notifications, codes included"))
-	case contains(v[1:], ""):
+	case slices.Contains(v[1:], ""):
 		// dumpsys takes an empty word where the service goes as a service:
 		// not the list, the usage or a known read.
 		return red(reason("dumpsys with an empty word is not a known way of reading"))
@@ -358,7 +361,7 @@ loop:
 	case info && !dump:
 		return false
 	case skip:
-		if contains(rest, "notification") {
+		if slices.Contains(rest, "notification") {
 			return false
 		}
 	case len(rest) > 0:
@@ -494,7 +497,7 @@ var dumpsysReads = map[string]func(args []string) bool{
 func wordsOrNames(words ...string) func([]string) bool {
 	return func(args []string) bool {
 		for _, a := range args {
-			if !contains(words, a) && !dumpsysName(a) {
+			if !slices.Contains(words, a) && !dumpsysName(a) {
 				return false
 			}
 		}
@@ -546,7 +549,7 @@ func dumpsysActivity(args []string) bool {
 				return false
 			}
 			i++
-		case !contains(activitySections, a) && !dumpsysName(a):
+		case !slices.Contains(activitySections, a) && !dumpsysName(a):
 			return false
 		}
 	}
@@ -615,7 +618,7 @@ var ipReadVerbs = []string{"show", "list", "get"}
 func checkIP(ws []Word) checkResult {
 	i := 1
 	for ; i < len(ws) && strings.HasPrefix(ws[i].Value, "-"); i++ {
-		if !contains(ipOptions, ws[i].Value) {
+		if !slices.Contains(ipOptions, ws[i].Value) {
 			return red(reason("ip option {v} is not a known way of reading the network", "v", ws[i].Value))
 		}
 	}
@@ -626,7 +629,7 @@ func checkIP(ws []Word) checkResult {
 		return red(reason("ip {v} is not a known way of reading the network", "v", ws[i].Value))
 	}
 	i++
-	if i == len(ws) || contains(ipReadVerbs, ws[i].Value) {
+	if i == len(ws) || slices.Contains(ipReadVerbs, ws[i].Value) {
 		return ok()
 	}
 	return red(reason("ip command that changes the network"))
@@ -653,7 +656,7 @@ func checkIfconfig(ws []Word) checkResult {
 
 func checkHostname(ws []Word) checkResult {
 	for _, w := range ws[1:] {
-		if !contains([]string{"-s", "-d", "-f", "-i", "-I"}, w.Value) {
+		if !slices.Contains([]string{"-s", "-d", "-f", "-i", "-I"}, w.Value) {
 			return red(reason("hostname changing the name"))
 		}
 	}

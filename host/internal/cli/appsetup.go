@@ -2,8 +2,6 @@ package cli
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -109,8 +107,7 @@ func chooseAPK(e *env, apk string) (copyPath, devDigest string, err error) {
 	if releaseCert != "" && phoneapp.CheckSigner(data, releaseCert) == nil {
 		return copyPath, "", nil
 	}
-	sum := sha256.Sum256(data)
-	return copyPath, hex.EncodeToString(sum[:]), nil
+	return copyPath, phoneapp.DigestOf(data), nil
 }
 
 // forgetDevBuild stops trusting the development build and removes its copy.
@@ -299,9 +296,6 @@ func waitText(d time.Duration) i18n.Msg {
 	}
 	return i18n.M("appsetup.wait.duration", d.Round(time.Millisecond).String())
 }
-
-// fmtApp is the human summary of the app, in English (what the tests read).
-func fmtApp(r appResult) string { return fmtAppMsg(r).String() }
 
 // consentWord is the state of the consent as a person reads it; the value of
 // the JSON (appResult.Consent) stays as it is.

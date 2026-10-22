@@ -47,7 +47,7 @@ object CutAccess {
      * A live channel with the PC (addendum 2026-10-19, R20): the host welcomed the app through adb, paused included.
      * INCOMPATIBLE is left out on purpose: the app stopped reconnecting there and the socket may be gone.
      */
-    fun channelUp(state: BridgeState): Boolean = state.connection == BridgeState.Connection.CONNECTED
+    fun channelUp(state: BridgeState): Boolean = state.isConnected
 
     /**
      * Returns false when the permission is missing or the change did not stick. [channelUp] is channelUp() of the

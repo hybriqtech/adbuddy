@@ -40,7 +40,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -170,7 +169,7 @@ fun ConfirmDialog(
     // The scroll state starts "can scroll forward" until the text is measured: Allow stays off until it is known there is no more to read.
     val scroll = key(r.id, r.detail, r.rawCommand) { rememberScrollState() }
     val unread = scroll.canScrollForward
-    AlertDialog(
+    GuardedAlertDialog(
         onDismissRequest = onClose,
         // Back closes it; a tap outside does not (the chat's notice reopens it, but a stray tap hides nothing).
         properties = DialogProperties(dismissOnClickOutside = false),
@@ -183,7 +182,6 @@ fun ConfirmDialog(
             }
         },
         text = {
-            ObscuredTouchGuard()
             Column {
                 Column(Modifier.weight(1f, fill = false).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (shown.warning) {

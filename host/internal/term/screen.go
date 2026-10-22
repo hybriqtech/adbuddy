@@ -156,15 +156,6 @@ func (s *Screen) Since(epoch string, offset int64) (data []byte, ok bool) {
 	return append([]byte(nil), s.tail[offset-start:]...), true
 }
 
-// Modes are the terminal modes the program set, each one on or off, as the
-// sequences that set them in a terminal: the alternate screen, the cursor's
-// visibility and bracketed paste.
-func (s *Screen) Modes() []byte {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return []byte(s.altMode() + s.inputModes())
-}
-
 func (s *Screen) altMode() string {
 	if s.em.IsAltScreen() {
 		return "\x1b[?1049h"

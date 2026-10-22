@@ -61,12 +61,12 @@ func NewErrorT(code, key, fixKey string, args ...any) *Error {
 	return errorT(ExitFailure, false, code, key, fixKey, args)
 }
 
-// TransientErrorT is TransientError with catalog keys (exit code 75).
+// TransientErrorT builds a failure that may resolve by retrying, with catalog keys (exit code 75).
 func TransientErrorT(code, key, fixKey string, args ...any) *Error {
 	return errorT(ExitTransient, true, code, key, fixKey, args)
 }
 
-// ConfigErrorT is ConfigError with catalog keys (exit code 78).
+// ConfigErrorT builds a configuration failure, with catalog keys (exit code 78).
 func ConfigErrorT(code, key, fixKey string, args ...any) *Error {
 	return errorT(ExitConfig, false, code, key, fixKey, args)
 }
@@ -115,16 +115,6 @@ func (e *Error) Error() string { return e.Code + ": " + e.Message }
 // NewError builds a domain failure (exit code 1).
 func NewError(code, message, fix string) *Error {
 	return &Error{Code: code, Message: message, Fix: fix, exit: ExitFailure}
-}
-
-// TransientError builds a failure that may resolve by retrying (exit code 75).
-func TransientError(code, message, fix string) *Error {
-	return &Error{Code: code, Message: message, Fix: fix, Transient: true, exit: ExitTransient}
-}
-
-// ConfigError builds a configuration failure (exit code 78).
-func ConfigError(code, message, fix string) *Error {
-	return &Error{Code: code, Message: message, Fix: fix, exit: ExitConfig}
 }
 
 // Interrupted is returned when the user stops a command with Ctrl+C.

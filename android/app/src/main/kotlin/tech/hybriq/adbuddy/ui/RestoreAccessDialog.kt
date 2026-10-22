@@ -1,6 +1,5 @@
 package tech.hybriq.adbuddy.ui
 
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -10,11 +9,10 @@ import tech.hybriq.adbuddy.R
 /** Giving the PC its access back asks first and says what comes back (spec R5). Cutting never asks. */
 @Composable
 fun RestoreAccessDialog(onRestore: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
+    GuardedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.restore_confirm_title)) },
         text = {
-            ObscuredTouchGuard()
             Text(stringResource(R.string.restore_confirm_body))
         },
         confirmButton = { TextButton(onClick = onRestore) { Text(stringResource(R.string.restore_confirm_confirm)) } },

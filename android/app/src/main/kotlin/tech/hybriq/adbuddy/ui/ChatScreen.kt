@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -117,8 +116,8 @@ fun ChatScreen(
     var link by remember { mutableStateOf<Pair<String, String>?>(null) }
     var askNew by rememberSaveable { mutableStateOf(false) }
     var askRestore by rememberSaveable { mutableStateOf(false) }
-    val items = Timeline.of(state.chat, state.sessionState.conversation, outgoing)
-    val tools = ToolStrip.of(state.chat, state.sessionState.state)
+    val items = remember(state.chat, state.sessionState.conversation, outgoing) { Timeline.of(state.chat, state.sessionState.conversation, outgoing) }
+    val tools = remember(state.chat, state.sessionState.state) { ToolStrip.of(state.chat, state.sessionState.state) }
     val approvals = state.chat.yoloApprovals
     val listState = rememberLazyListState()
     // The strip is the last item: the list follows it too, so what the agent is doing is in view.
@@ -168,7 +167,7 @@ fun ChatScreen(
     // go straight to CONNECTING, and its banner would then say something that no longer holds.
     SideEffect { lastBanner = bannerStatus.takeIf { it == LinkStatus.WAITING || it == LinkStatus.NOT_SET_UP } }
 
-    val connected = state.connection == BridgeState.Connection.CONNECTED
+    val connected = state.isConnected
     Scaffold(
         topBar = {
             ChatHeader(
@@ -232,7 +231,7 @@ fun ChatScreen(
             }
             if (terminalOn) QuickKeysRow(enabled = connected) { terminal!!.input(it.bytes) }
             if (chat != null) {
-                PermissionCards(state.chat.permissions, state.connection == BridgeState.Connection.CONNECTED, hostNow, chat, agent = state.sessionState.agent)
+                PermissionCards(state.chat.permissions, state.isConnected, hostNow, chat, agent = state.sessionState.agent)
             }
             DraftChips(drafts, actions.removeDraft, actions.retryDraft)
             InputBar(
@@ -256,11 +255,10 @@ fun ChatScreen(
     }
     if (askRestore && status == LinkStatus.CUT) RestoreAccessDialog(onRestore = { askRestore = false; actions.restore() }, onDismiss = { askRestore = false })
     if (askNew) {
-        AlertDialog(
+        GuardedAlertDialog(
             onDismissRequest = { askNew = false },
             title = { Text(stringResource(R.string.new_conversation_title)) },
             text = {
-                ObscuredTouchGuard()
                 Text(stringResource(R.string.new_conversation_body))
             },
             confirmButton = { TextButton(onClick = { askNew = false; actions.newConversation() }) { Text(stringResource(R.string.new_conversation_confirm)) } },

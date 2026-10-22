@@ -9,6 +9,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
+	"github.com/hybriqtech/adbuddy/host/internal/session"
 )
 
 // The agent's own permission questions (spec M4 §5): Claude Code's
@@ -58,7 +59,7 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	now := time.Now()
 	timeout := permTimeout // read once: tests restore it when they end
 	req := bridge.PermissionRequest{
-		ID:          newID("p_"),
+		ID:          session.NewID("p_"),
 		Tool:        in.ToolName,
 		Summary:     claudecode.ToolSummaryIn(l.lang, in.ToolName, in.ToolInput),
 		Detail:      claudecode.ToolDetail(in.ToolName, in.ToolInput),
@@ -87,7 +88,7 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 	// YOLO may have begun between the check above and the card being pending:
 	// the observer did not see it. Nothing waits for a card under YOLO.
 	if y := l.yoloOf(); y != nil && y.Active() {
-		l.resolvePermWith(req.ID, claudecode.Allow, "yolo", "")
+		l.resolvePerm(req.ID, claudecode.Allow, "yolo")
 	}
 
 	timer := time.NewTimer(timeout)
@@ -106,13 +107,10 @@ func (l *phoneLink) permissionRequest(ctx context.Context, in claudecode.HookInp
 
 // resolvePerm ends a pending permission with the decision and tells the app.
 // It reports whether it was still pending: of two answers at once, one wins.
+// When YOLO approved it (by "yolo") the app is told the escaped summary and
+// there is no rule, whatever the card offered.
 func (l *phoneLink) resolvePerm(id string, d claudecode.Decision, by string) bool {
-	return l.resolvePermWith(id, d, by, "")
-}
-
-// resolvePermWith is resolvePerm with the summary the app is told when YOLO
-// approved it (by "yolo": escaped, and with no rule, whatever the card offered).
-func (l *phoneLink) resolvePermWith(id string, d claudecode.Decision, by, summary string) bool {
+	summary := ""
 	a := &l.adapter
 	a.mu.Lock()
 	p := a.perms[id]
@@ -240,7 +238,7 @@ func (l *phoneLink) resolveAllPermsAs(d claudecode.Decision, by string) {
 	ids := append([]string(nil), a.order...)
 	a.mu.Unlock()
 	for _, id := range ids {
-		l.resolvePermWith(id, d, by, "")
+		l.resolvePerm(id, d, by)
 	}
 }
 
@@ -327,6 +325,6 @@ func (l *phoneLink) yoloPermission(in claudecode.HookInput) []byte {
 	if l.log != nil {
 		fmt.Fprintln(l.log, l.lang.T("phone.yolo_approved", summary))
 	}
-	l.publishEvent(bridge.TypePermResolved, bridge.PermissionResolved{ID: newID("p_"), Decision: "allow", By: "yolo", Summary: summary})
+	l.publishEvent(bridge.TypePermResolved, bridge.PermissionResolved{ID: session.NewID("p_"), Decision: "allow", By: "yolo", Summary: summary})
 	return claudecode.PermissionOutput(claudecode.Allow, "")
 }

@@ -39,6 +39,19 @@ func newHelperCmds(app *App) []*cobra.Command {
 	return []*cobra.Command{newScreenCmd(app), newTapCmd(app), newTypeCmd(app), newForegroundCmd(app), newScreenshotCmd(app), newNotificationsCmd(app)}
 }
 
+// callHelperInto is callHelper plus the decoding of the daemon's answer as a T.
+func callHelperInto[T any](cmd *cobra.Command, app *App, op string, args any, screen bool, stdout io.Writer) (T, error) {
+	var v T
+	data, err := callHelper(cmd, app, op, args, screen, stdout)
+	if err != nil {
+		return v, err
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return v, NewError("UI_FAILED", "unreadable answer", "")
+	}
+	return v, nil
+}
+
 // callHelper runs a helper on the serve that runs and returns its data.
 // stdout gets what the helper streams (the screenshot's bytes). The daemon
 // writes the journal's command itself, from op and args. screen asks the
@@ -88,20 +101,17 @@ func newScreenCmd(app *App) *cobra.Command {
 		Example: "  adbuddy screen\n  adbuddy screen --settle\n  adbuddy screen --all --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			data, err := callHelper(cmd, app, bridge.UIOpDump, bridge.UIDumpArgs{All: all}, settle, app.Stderr)
-			if err != nil {
-				return err
-			}
 			// settled is a *bool: an old daemon does not say, and then there is
 			// nothing to warn about. changed too: absent means not known, and
 			// --json keeps it only when the daemon sent it.
-			var d struct {
+			type screenAnswer struct {
 				bridge.UIDump
 				Settled *bool `json:"settled"`
 				Changed *bool `json:"changed"`
 			}
-			if err := json.Unmarshal(data, &d); err != nil {
-				return NewError("UI_FAILED", "unreadable answer", "")
+			d, err := callHelperInto[screenAnswer](cmd, app, bridge.UIOpDump, bridge.UIDumpArgs{All: all}, settle, app.Stderr)
+			if err != nil {
+				return err
 			}
 			if app.JSON {
 				if d.Settled != nil {
@@ -358,13 +368,9 @@ func newForegroundCmd(app *App) *cobra.Command {
 		Example: "  adbuddy foreground\n  adbuddy foreground --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			data, err := callHelper(cmd, app, bridge.UIOpForeground, bridge.Empty{}, false, app.Stderr)
+			fg, err := callHelperInto[bridge.UIForeground](cmd, app, bridge.UIOpForeground, bridge.Empty{}, false, app.Stderr)
 			if err != nil {
 				return err
-			}
-			var fg bridge.UIForeground
-			if err := json.Unmarshal(data, &fg); err != nil {
-				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if app.JSON {
 				return WriteData(app.Stdout, fg)

@@ -8,7 +8,7 @@ enum class SessionLabel {
 
     companion object {
         fun of(state: BridgeState): SessionLabel = when {
-            state.connection != BridgeState.Connection.CONNECTED -> OFFLINE
+            !state.isConnected -> OFFLINE
             else -> when (state.sessionState.state) {
                 "working" -> WORKING
                 "waiting" -> WAITING

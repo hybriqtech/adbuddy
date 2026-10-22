@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 )
 
 // ClaudeConfigFile is where Claude Code keeps its per-folder settings:
@@ -79,24 +81,7 @@ func TrustFolder(configFile, dir string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	info, err := os.Stat(configFile)
-	if err != nil {
-		return false, err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(configFile), ".claude.json.adbuddy-*")
-	if err != nil {
-		return false, err
-	}
-	defer os.Remove(tmp.Name()) // after a successful rename it no longer exists
-	if _, err := tmp.Write(append(out, '\n')); err != nil {
-		tmp.Close()
-		return false, err
-	}
-	if err := tmp.Close(); err != nil {
-		return false, err
-	}
-	_ = os.Chmod(tmp.Name(), info.Mode().Perm())
-	if err := os.Rename(tmp.Name(), configFile); err != nil {
+	if err := safeio.WriteFileAtomic(configFile, append(out, '\n'), safeio.AtomicOpts{Pattern: ".claude.json.adbuddy-*", KeepMode: true}); err != nil {
 		return false, err
 	}
 	return true, nil

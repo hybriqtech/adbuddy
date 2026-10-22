@@ -136,6 +136,8 @@ open class ProtectedApps(private val prefs: SharedPreferences) {
         /** Whole words: too short or too common to look for inside others. */
         private val words = setOf("ing", "wise")
 
+        private val NON_WORD = Regex("[^\\p{L}\\p{N}]+")
+
         fun propose(apps: List<Pair<String, String>>): Set<String> = apps
             .filter { (pkg, label) -> pkg != Packages.ADBUDDY && UiLimits.validPackage(pkg) && looksProtected(pkg, label) }
             .map { it.first }
@@ -143,7 +145,7 @@ open class ProtectedApps(private val prefs: SharedPreferences) {
             .toSet()
 
         fun looksProtected(pkg: String, label: String): Boolean {
-            val words = (pkg.split('.', '_') + label.split(Regex("[^\\p{L}\\p{N}]+"))).map { it.lowercase() }.filter { it.isNotEmpty() }
+            val words = (pkg.split('.', '_') + label.split(NON_WORD)).map { it.lowercase() }.filter { it.isNotEmpty() }
             return words.any { w -> w in Heuristic.words || starts.any { w.startsWith(it) } || anywhere.any { it in w } }
         }
     }

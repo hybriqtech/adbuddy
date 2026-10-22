@@ -17,6 +17,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/hybriqtech/adbuddy/host/internal/agent"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 )
 
 // Config is the content of config.toml. Every field is optional.
@@ -99,7 +100,7 @@ func (c Config) Validate() error {
 	if c.ConfirmTimeout.Duration <= 0 || c.ConfirmTimeout.Duration > time.Hour {
 		return fmt.Errorf("confirm_timeout must be between 1s and 1h, got %s", c.ConfirmTimeout)
 	}
-	if c.Address != "" && !validAddress(c.Address) {
+	if c.Address != "" && !ValidAddress(c.Address) {
 		return fmt.Errorf("address must be an IP address and port (e.g. 100.64.0.5:41234), got %q", c.Address)
 	}
 	if c.ChatPort != 0 && (c.ChatPort < 1024 || c.ChatPort > 65535) {
@@ -142,23 +143,7 @@ func Save(path string, c Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return safeio.WriteFileAtomic(path, buf.Bytes(), safeio.AtomicOpts{Pattern: ".config-*.toml", Perm: 0o600})
 }
 
 // WorkspaceDir is the agent environment directory.
@@ -196,8 +181,8 @@ func ReadLanguage(path string) string {
 	return ""
 }
 
-// validAddress accepts only IP:port with a port in 1-65535.
-func validAddress(addr string) bool {
+// ValidAddress accepts only IP:port with a port in 1-65535.
+func ValidAddress(addr string) bool {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false

@@ -74,7 +74,7 @@ const (
 )
 
 // Message types (protocol spec docs/superpowers/specs/2026-10-01-adbuddy-protocolo-m3-m5-design.md).
-// HostPayloads and AppPayloads list each one with its payload.
+// HostPayloads and AppPayloads (fixtures_test.go) list each one with its payload.
 const (
 	// M2
 	TypeHello        = "hello"

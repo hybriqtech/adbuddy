@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -71,11 +70,10 @@ fun YoloActivationDialog(
         tick++
     }
     val armed = YoloUi.mayConfirm(choice, shownAt, elapsed() + tick * 0L, locked = false, connected = connected)
-    AlertDialog(
+    GuardedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.yolo_dialog_title)) },
         text = {
-            ObscuredTouchGuard()
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.yolo_dialog_intro))
                 for (id in listOf(R.string.yolo_skip_confirmations, R.string.yolo_skip_blocks, R.string.yolo_skip_journal, R.string.yolo_skip_protected, R.string.yolo_skip_permissions)) {

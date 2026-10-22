@@ -251,7 +251,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		return ipc.Exit{Code: f.exit, ErrorCode: f.code, Error: f.msg}
 	}
 	if data != nil {
-		if req.Screen && f == nil && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
+		if req.Screen && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
 			release() // the change is done: a question must not wait for the screen to settle
 			data = d.withScreen(ctx, req, data, base)
 			notes.tell(s.Stderr())
