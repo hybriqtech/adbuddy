@@ -187,8 +187,8 @@ func TestYoloFromTheAppToTheBandAndOffFromTheNotification(t *testing.T) {
 	l := openLink(t)
 	e := l.e
 	// The last step of the activation is the phone's lock screen credential: set a PIN (cleared at cleanup) and unlock.
-	// The lock screen has no notification here, and the swipe that used to be unlock's did not bring up the bouncer on it
-	// (swipeUpPoints says what does).
+	// The lock screen has no notification here, and a swipe up does not bring up the bouncer on it (bringUpBouncer says
+	// what does).
 	e.lockWithPIN(t)
 	e.unlock(t)
 	l.openChatPastOnboarding(t)
