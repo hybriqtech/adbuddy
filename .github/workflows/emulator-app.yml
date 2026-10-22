@@ -121,7 +121,9 @@ jobs:
           test -n "$ADBUDDY_EMULATOR_SERIAL"
           test -n "$ADBUDDY_EMULATOR_ADB"
           # A split that finds nothing is stale (a renamed test): fail, do not pass silently.
-          echo "TEMPORARY: guard tests skipped (audit/adbuddy-yolo)"
+          out=$(go test -list '^TestTheGuard' ./internal/emutest) || exit 1
+          grep -q '^TestTheGuard' <<<"$out" || { echo "no guard tests: the split of emutest is stale" >&2; exit 1; }
+          go test -timeout 20m -count=1 -v -run '^TestTheGuard' ./internal/emutest
       - name: Emulator memory after the guard tests
         if: always()
         run: scripts/emulator.sh mem || true
@@ -138,12 +140,7 @@ jobs:
         if: (success() || failure()) && steps.restart34.outcome == 'success'
         working-directory: host
         # Without the variables the tests would skip and the step would pass.
-        run: |
-          test -n "$ADBUDDY_EMULATOR_SERIAL" && test -n "$ADBUDDY_EMULATOR_ADB"
-          echo "=== TEMPORARY 1: the diagnostic alone"
-          go test -timeout 25m -count=6 -v -run '^TestDiagUnlockPaths$' ./internal/emutest || true
-          echo "=== TEMPORARY 2: after the test that fails in the full run"
-          go test -timeout 25m -count=3 -v -run '^(TestAnAllowedTapOnTheLockedShadeNeedsTheUnlockOfItsOwn|TestDiagUnlockPaths)$' ./internal/emutest || true
+        run: test -n "$ADBUDDY_EMULATOR_SERIAL" && test -n "$ADBUDDY_EMULATOR_ADB" && go test -timeout 55m -count=1 -v -skip '^TestTheGuard' ./internal/emutest
       - name: Emulator memory after the rest
         if: always()
         run: scripts/emulator.sh mem || true
