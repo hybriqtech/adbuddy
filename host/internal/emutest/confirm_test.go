@@ -542,12 +542,12 @@ func (e *emu) unlockOnBouncer(t *testing.T) {
 func (e *emu) unlock(t *testing.T) {
 	t.Helper()
 	w, h := e.screenSize(t)
-	x, y0, y1 := swipeUpPoints(w, h)
+	swipe := swipeUpCommand(w, h)
 	var nodes []uiNode
 	var swiped time.Time
 	if !poll(20*time.Second, func() bool {
 		if time.Since(swiped) >= 4*time.Second {
-			e.shell(t, fmt.Sprintf("input swipe %d %d %d %d 300", x, y0, x, y1))
+			e.shell(t, swipe)
 			swiped = time.Now()
 		}
 		nodes = e.screen(t)
@@ -584,8 +584,17 @@ func parseWMSize(out string) (w, h int, ok bool) {
 }
 
 // swipeUpPoints is the swipe up that brings up the bouncer, relative to the
-// screen: from three quarters of the height to a third, down the middle.
-func swipeUpPoints(w, h int) (x, y0, y1 int) { return w / 2, h * 3 / 4, h / 3 }
+// screen: a long, quick one down the middle, from 90 % of the height to 20 %
+// in 150 ms (ms). The previous one (75 % to a third in 300 ms) did not bring up
+// the bouncer on the lock screen of a PIN lock with no notification, which is
+// what TestYolo found after lockWithPIN; this one did, in 3 s (PR #103).
+func swipeUpPoints(w, h int) (x, y0, y1, ms int) { return w / 2, h * 9 / 10, h / 5, 150 }
+
+// swipeUpCommand is the adb shell command that does that swipe.
+func swipeUpCommand(w, h int) string {
+	x, y0, y1, ms := swipeUpPoints(w, h)
+	return fmt.Sprintf("input swipe %d %d %d %d %d", x, y0, x, y1, ms)
+}
 
 func TestSwipeUpPoints(t *testing.T) {
 	if w, h, ok := parseWMSize("Physical size: 720x1600\nOverride size: 1080x2400\n"); !ok || w != 1080 || h != 2400 {
@@ -594,8 +603,20 @@ func TestSwipeUpPoints(t *testing.T) {
 	if _, _, ok := parseWMSize("nope"); ok {
 		t.Error("parseWMSize accepted junk")
 	}
-	if x, y0, y1 := swipeUpPoints(720, 1600); x != 360 || y0 != 1200 || y1 != 533 {
-		t.Errorf("swipeUpPoints(720, 1600) = %d %d %d", x, y0, y1)
+	if got := swipeUpCommand(720, 1600); got != "input swipe 360 1440 360 320 150" {
+		t.Errorf("swipeUpCommand(720, 1600) = %q", got)
+	}
+	if got := swipeUpCommand(1080, 2400); got != "input swipe 540 2160 540 480 150" {
+		t.Errorf("swipeUpCommand(1080, 2400) = %q", got)
+	}
+	// Measured in CI (emulator-app, android-34, 1080x2400): from three quarters of the height to a third in 300 ms did
+	// not bring up the bouncer after a PIN lock with no notification (5 swipes in 20 s); this one did in 3 s.
+	// Whatever the screen, it starts in the bottom tenth and ends in the top fifth, and it is quick.
+	for _, c := range [][2]int{{720, 1600}, {1080, 2400}, {1440, 3120}} {
+		x, y0, y1, ms := swipeUpPoints(c[0], c[1])
+		if x != c[0]/2 || y0 < c[1]*85/100 || y1 > c[1]/4 || ms > 200 {
+			t.Errorf("swipeUpPoints(%d, %d) = %d %d %d %d: not a long quick swipe up the middle", c[0], c[1], x, y0, y1, ms)
+		}
 	}
 }
 
