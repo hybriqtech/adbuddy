@@ -587,7 +587,11 @@ func (e *emu) unlock(t *testing.T) {
 	var asked time.Time
 	if !poll(20*time.Second, func() bool {
 		if time.Since(asked) >= 4*time.Second {
-			e.shell(t, bringUpBouncer)
+			if os.Getenv("ADBUDDY_DIAG_MUTATE") == "swipe" { // TEMPORARY (mutation)
+				e.shell(t, "input swipe 540 1800 540 800 300")
+			} else {
+				e.shell(t, bringUpBouncer)
+			}
 			asked = time.Now()
 		}
 		nodes = e.screen(t)
