@@ -527,33 +527,11 @@ func (e *emu) locked(t *testing.T) bool {
 // unlockOnBouncer types the PIN on the bouncer on screen.
 func (e *emu) unlockOnBouncer(t *testing.T) {
 	t.Helper()
-	e.diagBouncer(t, "before typing")
 	e.shell(t, "input text "+testPIN)
-	e.diagBouncer(t, "after text")
 	e.shell(t, "input keyevent KEYCODE_ENTER")
 	if !poll(10*time.Second, func() bool { return !e.locked(t) }) {
-		e.diagBouncer(t, "still locked 10 s after ENTER")
-		e.logShell(t, "logcat -d -b all -t 800 | grep -iE 'keyguard|bouncer|lockscreen|pin|credential' | tail -60")
-		e.shell(t, "input text "+testPIN)
-		e.shell(t, "input keyevent KEYCODE_ENTER")
-		ok := poll(10*time.Second, func() bool { return !e.locked(t) })
-		t.Logf("DIAG RETRY: typing again unlocked=%v", ok)
-		e.diagBouncer(t, "after the retry")
 		t.Fatal("still locked 10 s after typing the PIN on the bouncer")
 	}
-}
-
-// diagBouncer logs the PIN field and the focus (TEMPORARY).
-func (e *emu) diagBouncer(t *testing.T, label string) {
-	t.Helper()
-	nodes := e.screen(t)
-	for _, n := range nodes {
-		if strings.Contains(n.ID, "pinEntry") || strings.Contains(n.ID, "keyguard_pin_view") || strings.Contains(n.ID, "bouncer") {
-			t.Logf("DIAG[%s] %s text=%q focused=%v enabled=%v", label, n.ID, n.Text, n.Focused, n.Enabled)
-		}
-	}
-	t.Logf("DIAG[%s] %d nodes, bouncer=%v, locked=%v at %s", label, len(nodes), bouncer(nodes), e.locked(t), time.Now().Format("15:04:05.000"))
-	e.logShell(t, "dumpsys window | grep -E 'mCurrentFocus|isKeyguardShowing|mInputMethodTarget' | head -6")
 }
 
 // unlock brings up the bouncer from the lock screen with a swipe up and types the PIN.
@@ -571,7 +549,6 @@ func (e *emu) unlock(t *testing.T) {
 		if time.Since(swiped) >= 4*time.Second {
 			e.shell(t, swipe)
 			swiped = time.Now()
-			t.Logf("DIAG swipe %q at %s", swipe, swiped.Format("15:04:05.000"))
 		}
 		nodes = e.screen(t)
 		return bouncer(nodes)
@@ -611,12 +588,7 @@ func parseWMSize(out string) (w, h int, ok bool) {
 // in 150 ms (ms). The previous one (75 % to a third in 300 ms) did not bring up
 // the bouncer on the lock screen of a PIN lock with no notification, which is
 // what TestYolo found after lockWithPIN; this one did, in 3 s (PR #103).
-func swipeUpPoints(w, h int) (x, y0, y1, ms int) {
-	if os.Getenv("ADBUDDY_DIAG_SWIPE") == "old" { // TEMPORARY (experiment)
-		return w / 2, h * 3 / 4, h / 3, 300
-	}
-	return w / 2, h * 9 / 10, h / 5, 150
-}
+func swipeUpPoints(w, h int) (x, y0, y1, ms int) { return w / 2, h * 9 / 10, h / 5, 150 }
 
 // swipeUpCommand is the adb shell command that does that swipe.
 func swipeUpCommand(w, h int) string {
