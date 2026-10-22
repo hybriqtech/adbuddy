@@ -571,69 +571,31 @@ func (e *emu) unlockOnBouncer(t *testing.T) {
 	}
 }
 
-// unlock brings up the bouncer from the lock screen with a swipe up and types the PIN.
-// The swipe is repeated every 4 s until the bouncer shows: with the shade still
-// open over the lock screen (it failed so on GitHub's runners, with the quick
-// settings and the notification stack in the dump) the first swipe up only
-// closes it.
+// bringUpBouncer is the command that makes the system show the PIN bouncer: it asks to dismiss the keyguard, as the
+// app's own Allow does. A swipe up did not do it reliably (measured on the CI emulator, android-34, PR #103): on the
+// lock screen of a PIN lock with no notification, 0 of 20 swipes of three quarters of the height to a third in 300 ms
+// brought it up, and 6 of 8 of 90 % to 20 % in 150 ms did; the bouncer that did come with a swipe sometimes had the PIN
+// field without the focus, and the PIN typed was lost. This one brought it up 14 of 14 times in about 3 s, the field
+// focused.
+const bringUpBouncer = "wm dismiss-keyguard"
+
+// unlock brings up the bouncer from the lock screen and types the PIN. The command is repeated every 4 s until the
+// bouncer shows.
 func (e *emu) unlock(t *testing.T) {
 	t.Helper()
-	w, h := e.screenSize(t)
-	x, y0, y1 := swipeUpPoints(w, h)
 	var nodes []uiNode
-	var swiped time.Time
+	var asked time.Time
 	if !poll(20*time.Second, func() bool {
-		if time.Since(swiped) >= 4*time.Second {
-			e.shell(t, fmt.Sprintf("input swipe %d %d %d %d 300", x, y0, x, y1))
-			swiped = time.Now()
+		if time.Since(asked) >= 4*time.Second {
+			e.shell(t, bringUpBouncer)
+			asked = time.Now()
 		}
 		nodes = e.screen(t)
 		return bouncer(nodes)
 	}) {
-		t.Fatalf("no bouncer after swiping up on the lock screen in 20 s: %+v", nodes)
+		t.Fatalf("no bouncer after %q on the lock screen in 20 s: %+v", bringUpBouncer, nodes)
 	}
 	e.unlockOnBouncer(t)
-}
-
-// screenSize reads the physical size from wm size ("Physical size: 720x1600").
-func (e *emu) screenSize(t *testing.T) (w, h int) {
-	t.Helper()
-	w, h, ok := parseWMSize(e.shell(t, "wm size"))
-	if !ok {
-		t.Fatal("wm size is not understood")
-	}
-	return w, h
-}
-
-var wmSizeRe = regexp.MustCompile(`(?:Override|Physical) size: (\d+)x(\d+)`)
-
-// parseWMSize reads the size from wm size: the override, if any, wins over the
-// physical size (it is printed last).
-func parseWMSize(out string) (w, h int, ok bool) {
-	ms := wmSizeRe.FindAllStringSubmatch(out, -1)
-	if len(ms) == 0 {
-		return 0, 0, false
-	}
-	m := ms[len(ms)-1]
-	w, _ = strconv.Atoi(m[1])
-	h, _ = strconv.Atoi(m[2])
-	return w, h, w > 0 && h > 0
-}
-
-// swipeUpPoints is the swipe up that brings up the bouncer, relative to the
-// screen: from three quarters of the height to a third, down the middle.
-func swipeUpPoints(w, h int) (x, y0, y1 int) { return w / 2, h * 3 / 4, h / 3 }
-
-func TestSwipeUpPoints(t *testing.T) {
-	if w, h, ok := parseWMSize("Physical size: 720x1600\nOverride size: 1080x2400\n"); !ok || w != 1080 || h != 2400 {
-		t.Errorf("parseWMSize: %d %d %v", w, h, ok)
-	}
-	if _, _, ok := parseWMSize("nope"); ok {
-		t.Error("parseWMSize accepted junk")
-	}
-	if x, y0, y1 := swipeUpPoints(720, 1600); x != 360 || y0 != 1200 || y1 != 533 {
-		t.Errorf("swipeUpPoints(720, 1600) = %d %d %d", x, y0, y1)
-	}
 }
 
 // waitNodes waits up to d for the screen to be as ok wants and returns its nodes, or fails.
