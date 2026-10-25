@@ -262,6 +262,7 @@ func newServeCmd(app *App) *cobra.Command {
 				OnNotice:  func(n string) { fmt.Fprintln(app.Stderr, "⏳ "+n) },
 			})
 			link.OnPause(d.CancelConfirmations)
+			link.useYolo(d.Yolo())
 			sess := newSession(app, ws, activeSerial, link.sessionInfo, model, effort)
 			defer sess.Stop()
 			link.useSession(sess)

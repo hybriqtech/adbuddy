@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
@@ -139,11 +138,10 @@ fun ProtectedAppsScreen(app: AdbuddyApp, step: OnboardingStep?, onBack: () -> Un
     )
 
     if (askDiscard) {
-        AlertDialog(
+        GuardedAlertDialog(
             onDismissRequest = { askDiscard = false },
             title = { Text(stringResource(R.string.protected_discard_title)) },
             text = {
-                ObscuredTouchGuard()
                 Text(stringResource(R.string.protected_discard_body))
             },
             confirmButton = { TextButton(onClick = { askDiscard = false; onBack() }) { Text(stringResource(R.string.protected_discard_confirm)) } },

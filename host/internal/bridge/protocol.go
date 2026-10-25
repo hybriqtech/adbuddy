@@ -74,7 +74,7 @@ const (
 )
 
 // Message types (protocol spec docs/superpowers/specs/2026-10-01-adbuddy-protocolo-m3-m5-design.md).
-// HostPayloads and AppPayloads list each one with its payload.
+// HostPayloads and AppPayloads (fixtures_test.go) list each one with its payload.
 const (
 	// M2
 	TypeHello        = "hello"
@@ -128,6 +128,10 @@ const (
 	TypeDeviceInfo  = "device.info"
 	TypeRemoteSet   = "remote.set"
 	TypeRemoteState = "remote.state"
+
+	// YOLO mode (spec 2026-10-18)
+	TypeYoloSet   = "yolo.set"
+	TypeYoloState = "yolo.state"
 )
 
 // Hello is the first message of the app.
@@ -188,6 +192,7 @@ type Snapshot struct {
 	Chat        []ChatMessage       `json:"chat"`        // the last 100 chat messages, oldest first (M3)
 	Permissions []PermissionRequest `json:"permissions"` // the agent's questions waiting for an answer (M4)
 	Remote      RemoteState         `json:"remote"`      // M5
+	Yolo        YoloState           `json:"yolo"`        // YOLO mode
 }
 
 // filled returns s with empty lists instead of nil ones: the app reads a

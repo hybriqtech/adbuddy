@@ -96,6 +96,8 @@ cd host && go test -timeout 15m -count=1 ./internal/emutest
 
 Without `ADBUDDY_EMULATOR_SERIAL` the tests skip; they refuse a serial that is not `emulator-*` and an `ANDROID_ADB_SERVER_PORT` that is unset or adb's default 5037. `TestInstrumentedSuite` also runs the app's instrumented tests (`TokenProviderTest`, `AdbWifiObserverTest`, `LocalesTest`) with `am instrument`, and fails on any failure, missing class or skipped test other than `CutAccessOnEmulatorTest`, which must be skipped there. They uninstall what they installed. The `emulator-app` workflow is meant to run them (first run pending).
 
+`TestYolo*` (`yolo_test.go`) is YOLO mode seen from the phone, with the host playing the bridge: the activation from the chat's menu with the arming wait and the phone's lock (a test PIN, always cleared), the band under the status bar and clear of the header, the ongoing notification turned off with one tap, the warning of a phone with no screen lock, and the band that outlives the link. Run it alone with `go test -count=1 -timeout 15m -v -run TestYolo ./internal/emutest`.
+
 ### Claude Code with a real agent
 
 This test runs the real Claude Code. It spends a few cents and never touches the phone or your `~/.claude` settings:
@@ -121,6 +123,8 @@ To add a skill: create its folder, add its name to `requiredSkills` in `internal
 ## Security invariants
 
 For anyone who contributes: the IPC socket between the shim and the host is reachable only by the user (mode 0600 on Linux and macOS; on Windows it inherits the permissions of the data folder) and needs a per-installation secret, and if the journal cannot be written the host blocks every yellow and red command (`internal/ipc/server.go`, `internal/daemon/daemon.go`).
+
+With YOLO mode on (`internal/daemon/yolo.go`) the daemon lifts its doors through `d.lift` only, and asks for the pause only through `d.paused()` (which turns YOLO off). No IPC request and no CLI command turns YOLO on: `adbuddy yolo` has only `off` and `status`, `Handle(KindYolo)` answers `YOLO_ONLY_FROM_THE_PHONE` to any other verb (and `YOLO_INVALID` to a wrong number of arguments), and only a `yolo.set` from the app's authenticated channel enables it (`internal/cli/phone_yolo.go`, guarded by `TestYoloIsOnlyTurnedOnByThePhoneLink`). The user-facing description is in `docs/safety.md#yolo-mode`; the design is in `docs/superpowers/specs/2026-10-18-adbuddy-modo-yolo-design.md`.
 
 ## Manual check with a real phone
 

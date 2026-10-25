@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -47,11 +47,8 @@ var (
 	qrHintDelay         = 10 * time.Second // when to say that no phone is visible while a QR code waits
 )
 
-// phoneGuide is the phone preparation text in English; step 3 depends on how
+// phoneGuideIn is the phone preparation text in lang; step 3 depends on how
 // it is paired.
-func phoneGuide(useCode bool) string { return phoneGuideIn(i18n.EN, useCode) }
-
-// phoneGuideIn is phoneGuide in lang.
 func phoneGuideIn(lang i18n.Lang, useCode bool) string {
 	network := lang.T("setup.guide.network")
 	if useCode {
@@ -97,7 +94,7 @@ func newSetupCmd(app *App) *cobra.Command {
 				if apkFlag != "" && noApp {
 					return UsageErrorT("err.setup.usage_apk_and_no_app_contradict")
 				}
-				if connectFlag != "" && !validPairAddr(connectFlag) {
+				if connectFlag != "" && !config.ValidAddress(connectFlag) {
 					return UsageErrorT("err.setup.usage_connect_is_not_an_ip", classify.Printable(connectFlag))
 				}
 				e, err := loadEnv(app)
@@ -243,7 +240,7 @@ func newSetupCmd(app *App) *cobra.Command {
 							if addr, err = ask(app.T("setup.prompt.connection_address")); err != nil {
 								return err
 							}
-							if !validPairAddr(addr) {
+							if !config.ValidAddress(addr) {
 								return UsageErrorT("err.setup.usage_is_not_an_ip_address", classify.Printable(addr))
 							}
 						}
@@ -399,7 +396,7 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode, vt bool, as
 		if err != nil {
 			return "", err
 		}
-		if !validPairAddr(addr) {
+		if !config.ValidAddress(addr) {
 			return "", UsageErrorT("err.setup.usage_is_not_an_ip_address_2", classify.Printable(addr))
 		}
 		code, err := ask(app.T("setup.prompt.pairing_code"))
@@ -487,12 +484,7 @@ func chooseAgent(app *App, flag, current string, yes bool, ask func(string) (str
 }
 
 func containsAgent(found []agent.Found, name string) bool {
-	for _, f := range found {
-		if f.Name == name {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(found, func(f agent.Found) bool { return f.Name == name })
 }
 
 // stableSerial is the serial to save for the phone: its mDNS name
@@ -532,19 +524,6 @@ func isAddress(serial string) bool {
 	}
 	_, err = netip.ParseAddr(host)
 	return err == nil
-}
-
-// validPairAddr accepts only IP:port with a port in 1-65535.
-func validPairAddr(addr string) bool {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
-	}
-	if _, err := netip.ParseAddr(host); err != nil {
-		return false
-	}
-	p, err := strconv.ParseUint(port, 10, 16)
-	return err == nil && p >= 1
 }
 
 // startServer starts ADBuddy's adb server, waiting at most startServerWait.
@@ -639,10 +618,7 @@ func qrHint(ctx context.Context, runner adb.Runner, say func(string, ...any)) (s
 	return func() { cancel(); <-done }
 }
 
-// workspaceHint is the guidance for a workspace.Init failure, in English.
-func workspaceHint(err error, ws string) string { return workspaceHintMsg(err, ws).String() }
-
-// workspaceHintMsg is workspaceHint as a message of its own, to be the fix of
+// workspaceHintMsg is the guidance for a workspace.Init failure, to be the fix of
 // an error: NewErrorT(code, "error.cause", "error.hint", cause, workspaceHintMsg(err, ws)).
 // An unsafe path is not a permissions problem.
 func workspaceHintMsg(err error, ws string) i18n.Msg {

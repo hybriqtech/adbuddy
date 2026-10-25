@@ -16,6 +16,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 )
 
 // uiWait is how long a helper's ui.request lives: the app drops it after
@@ -286,22 +287,5 @@ func writeProtected(file string, p protectedFile) error {
 	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(file), ".protected-*.json")
-	if err != nil {
-		return err
-	}
-	if _, err := tmp.Write(append(data, '\n')); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	if err := os.Rename(tmp.Name(), file); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return nil
+	return safeio.WriteFileAtomic(file, append(data, '\n'), safeio.AtomicOpts{Pattern: ".protected-*.json"})
 }

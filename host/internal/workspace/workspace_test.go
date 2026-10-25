@@ -36,7 +36,7 @@ func TestInitCreatesEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"AGENTS.md", "CLAUDE.md", "NOTES.md", filepath.Join(".claude", "settings.json"), filepath.Join(".adbuddy", "bin", exe("adb")), filepath.Join(".adbuddy", "bin", exe("adbuddy"))} {
+	for _, f := range []string{"AGENTS.md", "CLAUDE.md", "NOTES.md", filepath.Join(".claude", "settings.json"), filepath.Join(".adbuddy", "bin", Exe("adb")), filepath.Join(".adbuddy", "bin", Exe("adbuddy"))} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s: %v", f, err)
 		}
@@ -59,7 +59,7 @@ func TestInitCreatesEnvironment(t *testing.T) {
 	if !strings.HasPrefix(read(t, filepath.Join(dir, "CLAUDE.md")), "@AGENTS.md") {
 		t.Error("CLAUDE.md must import AGENTS.md")
 	}
-	if read(t, filepath.Join(BinDir(dir), exe("adb"))) != "v1" {
+	if read(t, filepath.Join(BinDir(dir), Exe("adb"))) != "v1" {
 		t.Error("shim content")
 	}
 	var s map[string]any
@@ -95,7 +95,7 @@ func TestInitIsIdempotentAndKeepsUserFiles(t *testing.T) {
 	if a := read(t, filepath.Join(dir, "AGENTS.md")); !strings.Contains(a, "- Model: Pixel") {
 		t.Fatal("force must rewrite AGENTS.md with the profile")
 	}
-	if read(t, filepath.Join(BinDir(dir), exe("adb"))) != "v2" {
+	if read(t, filepath.Join(BinDir(dir), Exe("adb"))) != "v2" {
 		t.Fatal("shim must be refreshed")
 	}
 	if len(res.Updated) != 3 { // AGENTS.md, adb, adbuddy
@@ -375,7 +375,7 @@ func TestInitInstallsTheHooks(t *testing.T) {
 			t.Fatalf("%s: %+v", ev, l)
 		}
 		h := l[0].Hooks[0]
-		want := `"` + filepath.ToSlash(filepath.Join(BinDir(dir), exe("adbuddy"))) + `" hook ` + ev
+		want := `"` + filepath.ToSlash(filepath.Join(BinDir(dir), Exe("adbuddy"))) + `" hook ` + ev
 		if h.Type != "command" || h.Command != want || h.Timeout != HookTimeout(ev) {
 			t.Errorf("%s: %+v, want command %s", ev, h, want)
 		}

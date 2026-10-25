@@ -681,6 +681,7 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
   - A5-4: `gradle/verification-metadata.xml` (`gradle --write-verification-metadata sha256 ...`), versionado y actualizado por una persona al cambiar `libs.versions.toml`; hoy `release.yml` firma con la clave real un APK construido sin verificación de dependencias.
   - A5-6 (lo pasa puffin): `concurrency` de `emulator-oracle.yml` y `emulator-app.yml` (una por workflow, por `github.ref`) con puertos y AVD fijos; con dos runners en la misma máquina una PR se validaría contra el emulador de otra. Un grupo por runner (`vars.CI_RUNNER_EMULATOR`) o un grupo fijo con `cancel-in-progress: false`; mientras tanto, un solo runner de emulador por máquina.
   - A5-8 (cerrado en la sección «Dependabot» más abajo): `dependabot.yml` solo para `github-actions` (las acciones fijadas por SHA no reciben correcciones) y mandar los PRs que no son del propietario a runners de GitHub: cerrado con una lista blanca por autor (`github.event.pull_request.user.login == github.repository_owner`), no con la lista negra `github.actor != 'dependabot[bot]'` que se propuso primero.
+- **Test de YOLO en emulador (resuelto en #103):** `TestYoloFromTheAppToTheBandAndOffFromTheNotification` estaba con `t.Skip` porque `e.unlock(t)` no hacía aparecer el bouncer justo tras `lockWithPIN`. Causa medida en la CI (run 39718279316): el swipe es poco fiable en una pantalla de bloqueo con PIN y sin notificaciones, sea cual sea su geometría (el de 3/4 a 1/3 en 300 ms, 0 de 20 intentos; el de 90 % a 20 % en 150 ms, 6 de 8), y a veces el bouncer salía con el campo del PIN sin foco. `unlock` usa ahora `wm dismiss-keyguard` (`bringUpBouncer`: 14 de 14, con foco) y el `t.Skip` ya no está.
 
 ## v1 · V44-V45 (plan `docs/superpowers/plans/2026-10-02-adbuddy-v44-v45.md`)
 
@@ -813,3 +814,65 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
   - (a) Con `screen --settle`, si la primera lectura quedó bloqueada y se adopta, `protectBare` se calculó con la partida desconocida. Se cierra recalculándolo al adoptar la partida (una línea).
   - (b) Si la partida se leyó por `uiautomator`, cuenta como «con ventana de app». Si después la app devuelve una lectura sin ventana (un juego), el toque espera el tope de 3 s. Muy raro.
 - **Límite aceptado:** el volcado no distingue una ventana de app con el árbol vacío (juego, cámara) del fotograma de una transición. Al navegar de una pantalla normal a una sin contenido accesible, el primer `--screen` tarda 3 s con `settled=false`. Acotarlo del todo pide un campo de protocolo («hay ventana de app»).
+
+## Aspecto visual y estado del acceso (UX1; rama `ux/visual`, PR #96, 2026-10-19; plan `2026-10-18-app-visual-y-acceso.md`)
+
+- **Hecho:** P4 (icono de la app: adaptativo y monocromo, con iconos propios por tipo de tarjeta). Filas UX1-1 a UX1-6 del inventario de validaciones.
+- **Hecho (2026-10-19, Pixel 9 Pro XL, Android 17):** V1 / UX1-1 (diagnóstico): la app leía `adb_enabled=raw:0` con el valor real 1 (shell); `adb_wifi_enabled` se lee bien. V2 rehecha / UX1-2 (cortar y reactivar, build de `ux/acceso-a17`): cortar, el PC perdió la conexión al instante, `cut.check=DONE` y la app dijo "Hecho"; reactivar, el teléfono volvió en 2 s con `adb_enabled=1` y `adb_wifi_enabled=1` reales. Observado: Android 17 mantiene la depuración inalámbrica con `adb_enabled=0` real, y reactivar enciende también la USB (coste aceptado en R16). Sigue pendiente V3 (UX1-3, icono monocromo).
+- **Pendiente:**
+
+| Id | Qué | Nota |
+|---|---|---|
+| Bug 17 | `Toast` del consentimiento | Aparcado por R13. |
+| UX-a | El nivel de cada entrada del diario solo se distingue por color en la barra (más su nombre para TalkBack) | En modo claro rojo/ámbar/verde tienen casi la misma luminancia. Mejora posible: texto o icono de nivel visible, o ancho de barra distinto. |
+| UX-b | Sanear `SessionState.agent` (caracteres bidi/control, longitud) | Se pinta en el título de la tarjeta y en la cabecera. |
+| UX-c | El bloque del comando del diálogo 🔴 en modo claro apenas se distingue del fondo (`surfaceContainerHighest`) | Subir contraste o añadir borde. |
+| UX-d | Falta captura de un error largo del host en los chips de borrador | |
+| UX-e | El recuento de `ConfirmDialogScreensTest` no detecta un bloque recortado sin scroll | Lo cubren `ConfirmDialogScrollTest`, `ConfirmDialogLayoutTest` y `ConfirmDialogButtonsTest`. |
+| UX-f | En Android 17 la lectura no confirma que `adb_enabled=0/1` se aplique | Adenda 2026-10-19 R18-R19 y R22 (comprobación por canal y 5555, que no ve una USB encendida sin modo tcpip). Observado en V2 (2026-10-19): Android 17 mantiene la depuración inalámbrica con `adb_enabled=0` real, y reactivar enciende también la USB (coste aceptado en R16). |
+| UX-g | Minors de `AccessDiag`: `doubt` hace `trim()` y el switch no; sin test unitario de `AccessDiag.log`; sin test de lectura con error | Una lectura con error no debería contar para la duda: falta test. |
+| UX-h | `CutConfirm.check`: `waited` no cuenta el tiempo del sondeo (hasta ~15 s en un caso patológico) y "Hecho" se decide con la primera muestra buena, sin estabilizar | Falla hacia avisar tarde. El "Hecho" sale con la primera muestra con el canal caído y 5555 cerrado; si el canal rebota (USB encendida sin aplicarse el 0, host que reconecta) puede reconectar después: caso (a) de R22. |
+| UX-j | El test estático `bothCutButtonsPassTheChannelAndCheckTheCut` no exige que la comprobación esté dentro de la rama de éxito | |
+| UX-k | `AccessSwitch`: el registro (3 commits de `SharedPreferences`) no es atómico | Falla seguro. |
+| UX-l | Minor de T1: ninguna mutación detecta que `cut()` con duda deje de borrar `ADB_DOUBTED` (`forget()` siempre la borra) | Falta un test que lo distinga. |
+| UX-m | Minor de T1: el `assertFalse(sw.isCut())` de `android17_aWriteAndroidRefusesIsNotDone` es vacuo | No falla con ninguna mutación. |
+
+- **Inventario (ficheros nuevos principales):**
+  - `control/AccessDiag` (diagnóstico `ADBuddyAccess`), `a11y/OverlayColors` (colores fijos de la superposición).
+  - `ui/theme/`: `Palette`, `Theme`, `AdbuddyColors`, `Type`, `Shapes`, `ThemePrefs`.
+  - `control/CutConfirm.kt` (+ `CutCheck`): comprobación posterior al corte. `control/CutAccess`: `confirm`, `probe`, `waitMs`, `channelUp`. `AdbuddyApp`: `confirmCut`, `cutCheck`, `cutCheckShown`. `AccessSwitch`: `adbZeroIsDoubtful`, `ADB_DOUBTED`. `AccessDiag.doubt`. String `cut_still_connected` (rama `ux/acceso-a17`, plan `2026-10-19-acceso-lecturas-falsas`).
+  - `ui/`: `HomeNotice`, `ActionCard` (+ `cardIconRes`), `StatusPill`, `RestoreAccessDialog`, `ChatHeaderBar` (en `ChatParts.kt`).
+  - Iconos: `ic_shield`, `ic_shield_off`, `ic_card_question`, `ic_card_pause`, `ic_card_update`, `ic_launcher_foreground`, `ic_launcher_monochrome`, `ic_stat_adbuddy`, `ic_stat_shield`.
+  - Capturas en `android/app/src/test/screenshots/` (`-Padbuddy.screens=record|verify`).
+
+## Modo YOLO (rama `feat/modo-yolo`, 2026-10-19; spec `2026-10-18-adbuddy-modo-yolo-design.md`, plan `2026-10-18-modo-yolo.md`; ledger `.superpowers/sdd/2026-10-18-modo-yolo/progress.md`)
+
+- **Fuera de la v1 de YOLO (decidido):**
+  - Activar YOLO desde el PC: solo se activa desde la app (con biometría fuerte o el bloqueo de pantalla), para que el agente no pueda hacerlo.
+  - YOLO persistente: vive en la memoria de `adbuddy serve` y no sobrevive a reiniciarlo; las duraciones son 15 min, 1 h o `session`.
+  - YOLO parcial (levantar solo algunas puertas): es todo salvo la pausa.
+- **Límites conocidos y aceptados por la persona usuaria** (escritos en `docs/safety.md#yolo-mode`):
+  - Un proceso o servicio de accesibilidad que el agente deje vivo bajo YOLO (`nohup &`, `install`, `settings put secure enabled_accessibility_services`, un script opaco o texto armado con fragmentos) puede pulsar los botones de confirmación o reescribir el enlace de la app cuando YOLO acaba. Consejo: revisar procesos y servicios de accesibilidad, o reiniciar el móvil. `TestYoloRunsOpaqueScriptsKnownLimit` lo fija.
+  - Con YOLO activo y la app conectada, una app protegida del usuario no se protege (la app deja de marcarla y el host deja de aplicar su lista); ADBuddy sí sigue protegida, igual que las ventanas que el móvil no deja leer. Cambiarlo es decidir qué marca la app (`YoloProtection`) y qué levanta `d.lift` en `appProtected`.
+  - `am force-stop`, `pm clear`, `pm disable-user`, `appops` y `reboot` de ADBuddy se ejecutan; el instalador y la ficha de ADBuddy en Ajustes no están protegidos. El canal de la app (`content`, `run-as`, `am` dinámico) sí está cerrado.
+  - PIN observable por un script del agente sin biometría fuerte; sin bloqueo de pantalla, un toque inyectado puede terminar la activación; el botón «Confirmar» del sistema con cara fuerte es del sistema.
+  - Con el aviso de la app imposible de pintar, `dump`, `tap` y `type` van sin la línea `⚠ YOLO`: la app no tiene cómo avisar al host sin un campo de protocolo nuevo.
+- **Aplazados con motivo (revisiones):**
+
+| Id | Qué | Nota |
+|---|---|---|
+| Y-a | `noticeInImage` se marca aunque con YOLO el aviso nunca llegó a pintarse | Cosmético. |
+| Y-b | `androidx.biometric:1.1.0` es de 2021 | Mirar si hay una estable más nueva cuando haya red. |
+| Y-c | Tras un `offFailed` en caliente el texto de fallo de la notificación se queda hasta el siguiente cambio de modo | El consejo (`adbuddy yolo off`) sigue siendo cierto. |
+| Y-d | En un proceso en frío el `Bridge` no está conectado: el Apagar de una notificación que sobrevivió a su proceso dice «usa `adbuddy yolo off`» | Arrancar el servicio desde el receptor sería la mejora. |
+| Y-e | `setSocketForTest` interno en `Bridge` en lugar de inyectar el socket por reflexión en un test de A3 | Opcional. |
+| Y-f | Test sensible a la carga: `TestServeRefusesTheAgentsTreeWhateverItDeclares` (`host/internal/cli`, `agentpeer_test.go`) | Con la máquina cargada falló una vez en el merge de main (60 s de espera sin las 4 respuestas, 63 s); suelto pasa en 4 s y la segunda corrida completa salió verde. Subir o hacer adaptable el plazo de 60 s. |
+| Y-g | Test sensible a la carga: `TestDisconnectCancelsHandlerThatIgnoresStdin` (`host/internal/ipc`) | Falló una vez en el mismo merge con la máquina cargada; suelto pasa en 0,7 s. Revisar el plazo o la sincronización. |
+
+- **Inventario (ficheros nuevos y clave):**
+  - Host: `daemon/yolo.go` (estado, caducidad, observadores), `cli/phone_yolo.go` (`yolo.set`/`yolo.state`, `adbuddy yolo off|status`), `classify` (`AppChannel`), `daemon.go`/`guard.go`/`ui.go`/`undo.go` (`d.paused()`, `d.lift`, `liftQuestion`), `cli/phone_perm.go` (permisos de Claude Code `allow` por YOLO).
+  - App: `yolo/` (`YoloUi`, `YoloAuth`, `YoloBiometric`, `YoloNotifier`, `YoloReceiver`), `a11y/YoloProtection`, banda y aviso de activación en `ui/`.
+  - Dependencias nuevas: `androidx.biometric:1.1.0`, `androidx.fragment:1.8.9` (explícita: biometric arrastra un fragment 1.2.5 incompatible con `activity-compose` 1.13 en una `FragmentActivity`).
+  - Protocolo (aditivo): `yolo.set`, `yolo.state`, `snapshot.yolo`, `permission.resolved.summary` y `by: "yolo"`, `journal.entry.yolo`.
+  - Pruebas de emulador: `host/internal/emutest/yolo_test.go` (`TestYolo*`).
+- **Validaciones manuales:** filas YOLO-1 a YOLO-13 del inventario de validaciones (`2026-10-03-validaciones-manuales.md`).

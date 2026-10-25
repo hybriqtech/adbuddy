@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -67,15 +66,21 @@ class ChatActions(
     val retryDraft: (String) -> Unit,
     val attachment: (Attachment) -> Unit,
     val pause: (Boolean) -> Unit,
-    val toggleCut: () -> Unit,
+    val cut: () -> Unit,
+    val restore: () -> Unit,
     val openActivity: () -> Unit,
     val openSettings: () -> Unit,
     val newConversation: () -> Unit,
     val interrupt: () -> Unit,
+    val openYolo: () -> Unit = {},
 ) {
     companion object {
-        val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+        val None = ChatActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
     }
+
+    /** Test seam: the same actions with another cut / restore. */
+    fun copyWith(cut: () -> Unit = this.cut, restore: () -> Unit = this.restore) =
+        ChatActions(send, retry, discard, pickPhotos, pickFile, capture, removeDraft, retryDraft, attachment, pause, cut, restore, openActivity, openSettings, newConversation, interrupt, openYolo)
 }
 
 /** The conversation, the agent's terminal folded above it, and the input (spec M3 section 7.2). */
@@ -94,7 +99,7 @@ fun ChatScreen(
     hostNow: () -> Long = { 0L },
     /** The host has handed this phone a link: without it (and without a channel) the banner says to run adbuddy setup. */
     configured: Boolean = true,
-    /** False in the chat bubble (about 600 dp tall): the terminal starts folded and opens with the arrow. */
+    /** False in the app (R15) and in the bubble; the default stays true for direct callers and previews. The terminal starts folded and opens with the arrow. */
     terminalOpenByDefault: Boolean = true,
     /** Notifications off or the confirm/ask channel silenced: the banner says so and opens the system settings. */
     notificationsBlocked: Boolean = false,
@@ -102,19 +107,21 @@ fun ChatScreen(
     /** Red questions the person closed and that can still be answered: the notice says so and "Show" reopens them. */
     pendingQuestions: Int = 0,
     onShowQuestions: () -> Unit = {},
-    /** The remote-mode switch (RemoteCard), shown above the conversation; a preview passes an empty one. */
-    remoteCard: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    // Read in composition (lint: configuration-aware), used by the "How to connect" button.
+    val guideUrl = stringResource(R.string.setup_guide_url)
     var terminalShown by rememberSaveable { mutableStateOf(terminalOpenByDefault) }
     var text by rememberSaveable { mutableStateOf("") }
     var link by remember { mutableStateOf<Pair<String, String>?>(null) }
     var askNew by rememberSaveable { mutableStateOf(false) }
-    val items = Timeline.of(state.chat, state.sessionState.conversation, outgoing)
-    val tools = ToolStrip.of(state.chat, state.sessionState.state)
+    var askRestore by rememberSaveable { mutableStateOf(false) }
+    val items = remember(state.chat, state.sessionState.conversation, outgoing) { Timeline.of(state.chat, state.sessionState.conversation, outgoing) }
+    val tools = remember(state.chat, state.sessionState.state) { ToolStrip.of(state.chat, state.sessionState.state) }
+    val approvals = state.chat.yoloApprovals
     val listState = rememberLazyListState()
     // The strip is the last item: the list follows it too, so what the agent is doing is in view.
-    val rows = items.size + if (tools.isEmpty()) 0 else 1
+    val rows = items.size + (if (tools.isEmpty()) 0 else 1) + (if (approvals.isEmpty()) 0 else 1)
     // Follows what arrives only while the reader is at the end. New rows go below and do not move the viewport, so "was at
     // the end" is "the row that was last is (at least partly) in the viewport": a last bubble that grew in place now
     // ends below it, and its reader was at the end all the same. A drop in rows (the tool strip going) is not news, and
@@ -146,6 +153,8 @@ fun ChatScreen(
     LaunchedEffect(listState) { snapshotFlow { !listState.canScrollForward }.collect { if (it) unseen = false } }
     val terminalOn = terminalShown && terminal != null
     val status = LinkStatus.of(state, cut, configured)
+    // The dialog only exists while the state is CUT: if the cut ends elsewhere (Settings, the notification) it closes.
+    LaunchedEffect(status) { if (status != LinkStatus.CUT) askRestore = false }
     // Reconnecting flips WAITING -> CONNECTING -> WAITING every retry: the banner keeps the last state that had one during
     // CONNECTING, so it neither leaves and returns (the list jumping, TalkBack announcing it again) nor shows on a cold start.
     var lastBanner by remember { mutableStateOf<LinkStatus?>(null) }
@@ -158,31 +167,42 @@ fun ChatScreen(
     // go straight to CONNECTING, and its banner would then say something that no longer holds.
     SideEffect { lastBanner = bannerStatus.takeIf { it == LinkStatus.WAITING || it == LinkStatus.NOT_SET_UP } }
 
-    val connected = state.connection == BridgeState.Connection.CONNECTED
+    val connected = state.isConnected
     Scaffold(
         topBar = {
             ChatHeader(
                 state, cut, terminalShown, onToggleTerminal = { terminalShown = !terminalShown }, onPause = actions.pause,
-                onToggleCut = actions.toggleCut, onActivity = actions.openActivity, onSettings = actions.openSettings,
+                onCut = actions.cut, onRestore = { askRestore = true }, onActivity = actions.openActivity, onSettings = actions.openSettings,
                 onNewConversation = { askNew = true }, configured = configured,
+                yoloOn = state.yolo?.active == true, onYolo = actions.openYolo,
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { inner ->
         Column(Modifier.padding(inner).consumeWindowInsets(inner).imePadding().fillMaxSize()) {
-            if (bannerStatus != null) LinkBanner(bannerStatus)
-            if (pendingQuestions > 0) PendingQuestionsBanner(pendingQuestions, onShowQuestions)
-            if (notificationsBlocked) NotificationsBanner(onOpenNotificationSettings)
-            remoteCard()
+            HomeNotice.of(bannerStatus, pendingQuestions, notificationsBlocked)?.let { notice ->
+                ActionCard(notice, pendingQuestions, onAction = {
+                    when (notice) {
+                        HomeNotice.QUESTIONS -> onShowQuestions()
+                        HomeNotice.CUT -> askRestore = true
+                        HomeNotice.NOTIFICATIONS -> onOpenNotificationSettings()
+                        HomeNotice.PAUSED -> actions.pause(false)
+                        HomeNotice.WAITING -> try {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, guideUrl.toUri()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        } catch (e: ActivityNotFoundException) { /* no browser */ }
+                        else -> {}
+                    }
+                })
+            }
             if (terminalOn) {
-                Box(Modifier.weight(0.45f).fillMaxSize()) {
+                Box(Modifier.weight(0.35f).fillMaxSize()) {
                     TerminalView(terminal!!, onLink = { u, d -> link = u to d }, Modifier.fillMaxSize())
                     if (!connected) TerminalOfflineNotice(Modifier.align(Alignment.TopCenter))
                 }
             }
-            val weight = if (terminalOn) 0.55f else 1f
-            if (items.isEmpty() && tools.isEmpty() && status == LinkStatus.CONNECTED) {
-                ChatEmptyState(Modifier.weight(weight).fillMaxSize())
+            val weight = if (terminalOn) 0.65f else 1f
+            if (items.isEmpty() && tools.isEmpty() && approvals.isEmpty() && (status == LinkStatus.CONNECTED || status == LinkStatus.PAUSED)) {
+                ChatEmptyState(paused = status == LinkStatus.PAUSED, onSuggestion = { text = it }, modifier = Modifier.weight(weight).fillMaxSize())
             } else {
                 Box(Modifier.weight(weight).fillMaxSize()) {
                     LazyColumn(
@@ -199,6 +219,7 @@ fun ChatScreen(
                             )
                         }
                         if (tools.isNotEmpty()) item(key = "tools") { ToolStripView(tools) }
+                        if (approvals.isNotEmpty()) item(key = "yolo_approvals") { YoloApprovals(approvals) }
                     }
                     if (unseen) {
                         FilledTonalButton(
@@ -210,7 +231,7 @@ fun ChatScreen(
             }
             if (terminalOn) QuickKeysRow(enabled = connected) { terminal!!.input(it.bytes) }
             if (chat != null) {
-                PermissionCards(state.chat.permissions, state.connection == BridgeState.Connection.CONNECTED, hostNow, chat)
+                PermissionCards(state.chat.permissions, state.isConnected, hostNow, chat, agent = state.sessionState.agent)
             }
             DraftChips(drafts, actions.removeDraft, actions.retryDraft)
             InputBar(
@@ -232,12 +253,12 @@ fun ChatScreen(
             onDismiss = { link = null },
         )
     }
+    if (askRestore && status == LinkStatus.CUT) RestoreAccessDialog(onRestore = { askRestore = false; actions.restore() }, onDismiss = { askRestore = false })
     if (askNew) {
-        AlertDialog(
+        GuardedAlertDialog(
             onDismissRequest = { askNew = false },
             title = { Text(stringResource(R.string.new_conversation_title)) },
             text = {
-                ObscuredTouchGuard()
                 Text(stringResource(R.string.new_conversation_body))
             },
             confirmButton = { TextButton(onClick = { askNew = false; actions.newConversation() }) { Text(stringResource(R.string.new_conversation_confirm)) } },
@@ -263,7 +284,6 @@ private fun ChatScreenPreview() {
             ),
             outgoing = emptyList(), drafts = emptyList(), downloads = emptyMap(), cut = false, terminal = null,
             snackbar = remember { SnackbarHostState() }, actions = ChatActions.None,
-            remoteCard = {},
         )
     }
 }

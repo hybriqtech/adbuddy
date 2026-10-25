@@ -81,12 +81,10 @@ var isTerminal = func(v any) bool {
 
 var notRunning = NewErrorT("DAEMON_NOT_RUNNING", "err.common.daemon_not_running", "err.common.daemon_not_running.fix")
 
-// formatEntry renders a journal entry on one line (plus its inverse), in English.
-func formatEntry(e journal.Entry) string { return formatEntryIn(i18n.EN, e) }
-
-// formatEntryIn is formatEntry in lang: the words around the entry (undone, the
-// labels of the reason and of the undo) are the catalog's; the status word of
-// the entry, its description and its command are data and are not translated.
+// formatEntryIn renders a journal entry on one line (plus its inverse) in
+// lang: the words around the entry (undone, the labels of the reason and of
+// the undo) are the catalog's; the status word of the entry, its description
+// and its command are data and are not translated.
 func formatEntryIn(lang i18n.Lang, e journal.Entry) string {
 	return formatEntryAt(lang, e, time.Now())
 }

@@ -33,6 +33,7 @@ Día a día:
   stop          Para el agente de adbuddy serve (serve sigue en marcha)
   undo          Deshace cambios del diario ejecutando sus inversos
   version       Muestra la versión de ADBuddy
+  yolo          Apaga el modo YOLO del agente, o mira si está activado
 
 Para el agente:
   foreground    Enseña la app y la actividad en primer plano del móvil

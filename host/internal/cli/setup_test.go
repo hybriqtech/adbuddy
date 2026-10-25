@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/config"
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/hybriqtech/adbuddy/host/internal/platformtools"
 	"github.com/hybriqtech/adbuddy/host/internal/testutil"
@@ -201,10 +202,10 @@ func TestSetupFailsCleanly(t *testing.T) {
 
 func TestPhoneGuideDependsOnTheMode(t *testing.T) {
 	const plain = "Keep the phone on the same Wi-Fi network as this PC."
-	if g := phoneGuide(false); !strings.Contains(g, plain+"\n") || strings.Contains(g, "Tailscale") {
+	if g := phoneGuideIn(i18n.EN, false); !strings.Contains(g, plain+"\n") || strings.Contains(g, "Tailscale") {
 		t.Fatalf("QR guide: %q", g)
 	}
-	if g := phoneGuide(true); !strings.Contains(g, "reachable over Tailscale") || strings.Contains(g, plain+"\n") {
+	if g := phoneGuideIn(i18n.EN, true); !strings.Contains(g, "reachable over Tailscale") || strings.Contains(g, plain+"\n") {
 		t.Fatalf("code guide: %q", g)
 	}
 	e := newSetupEnv(t, phoneRules())
@@ -714,10 +715,10 @@ func TestSetupWarnsWhenRemoteModeWasOnForAnotherPhone(t *testing.T) {
 
 func TestWorkspaceHintDistinguishesAnUnsafePath(t *testing.T) {
 	unsafe := fmt.Errorf("wrapped: %w", workspace.ErrUnsafeHookPath)
-	if h := workspaceHint(unsafe, "/w"); strings.Contains(h, "writable") || !strings.Contains(h, "another path") {
+	if h := workspaceHintMsg(unsafe, "/w").String(); strings.Contains(h, "writable") || !strings.Contains(h, "another path") {
 		t.Errorf("unsafe path: %q", h)
 	}
-	if h := workspaceHint(fmt.Errorf("disk full"), "/w"); h != "Check that /w is writable." {
+	if h := workspaceHintMsg(fmt.Errorf("disk full"), "/w").String(); h != "Check that /w is writable." {
 		t.Errorf("other error: %q", h)
 	}
 }

@@ -1,7 +1,6 @@
 package tech.hybriq.adbuddy.listener
 
 import android.app.NotificationManager
-import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -18,6 +17,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import tech.hybriq.adbuddy.util.startFirst
 
 /**
  * Binds NotificationAccess to the system: reads the list of enabled
@@ -73,18 +73,10 @@ object NotificationAccessStatus {
     /** Opens ADBuddy's own entry of the system's notification access; the list if the phone has no such entry. */
     fun openSystemSettings(context: Context) {
         val me = ComponentName(context, AgentNotificationListener::class.java)
-        val attempts = listOf(
+        context.startFirst(
             Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME, me.flattenToString()),
             Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
             Intent(Settings.ACTION_SETTINGS),
         )
-        for (intent in attempts) {
-            try {
-                context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                return
-            } catch (e: ActivityNotFoundException) {
-                // Try the next, more general, screen.
-            }
-        }
     }
 }

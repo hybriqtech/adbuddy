@@ -113,15 +113,17 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUser,
 		Argv: helperArgv(req.UIOp, req.UIArgs), Level: h.level.String(), Rule: h.rule,
 		Description: strings.ReplaceAll(h.title.In(d.o.Lang), "{target}", target),
+		Yolo:        d.o.Yolo.Active(),
 	}
 	if req.Env["ADBUDDY_SOURCE"] == journal.SourceAgent {
 		e.Source = journal.SourceAgent
 	}
-	if d.o.Paused() {
+	ctx, notes := withYoloNotes(ctx)
+	if d.paused() {
 		return d.blockUI(e, PausedMessage)
 	}
 	if h.change {
-		if err := d.o.Journal.Writable(); err != nil {
+		if err := d.o.Journal.Writable(); err != nil && !d.lift(ctx, noRecord) {
 			return d.blockUI(e, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
@@ -129,7 +131,10 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// counts in flight so the next question waits for it.
 	release, other := d.admit(e.Description, h.change)
 	if other != "" {
-		return d.blockUI(e, other)
+		if !d.liftQuestion(ctx, other) {
+			return d.blockUI(e, other)
+		}
+		release = d.flyAnyway(h.change, e.Description)
 	}
 	defer release()
 	// foreground is what the guard asks; notifications do not read the screen
@@ -153,11 +158,11 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// The notice of the on-screen frame goes before the last pause check, so a
 	// pause that arrives meanwhile blocks (after the guard: no notice for what it refuses).
 	if req.UIOp == OpScreenshot {
-		if why := d.showNotice(ctx); why != "" {
+		if why := d.showNotice(ctx); why != "" && !d.liftNotice(ctx, why) {
 			return d.stopUI(ctx, e, why)
 		}
 	}
-	if d.o.Paused() { // paused while the guard looked
+	if d.paused() { // paused while the guard looked
 		return d.blockUI(e, PausedMessage)
 	}
 	// An act with Screen: read the screen before it, the one the wait starts
@@ -173,7 +178,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if ctx.Err() != nil { // the agent or serve went away: no act
 			return d.abandonUI(ctx, e)
 		}
-		if d.o.Paused() { // paused while the start was read: no act
+		if d.paused() { // paused while the start was read: no act
 			return d.blockUI(e, PausedMessage)
 		}
 		if denied != nil { // the app says there is something protected in front: no act
@@ -186,7 +191,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 				}
 				return d.blockUI(e, why)
 			}
-			if d.o.Paused() {
+			if d.paused() {
 				return d.blockUI(e, PausedMessage)
 			}
 		}
@@ -194,11 +199,12 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if h.change {
 		running := e
 		running.Status = journal.StatusRunning
-		if err := d.o.Journal.Append(running); err != nil {
+		if err := d.o.Journal.Append(running); err != nil && !d.lift(ctx, noRecord) {
 			return d.blockUI(e, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
 
+	notes.tell(s.Stderr())
 	var data any
 	var via string
 	var f *uiFailure
@@ -228,6 +234,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			}
 		}
 	}
+	notes.tell(s.Stderr()) // what a later guard (the wait, the capture) let through
 	code := 0
 	if f != nil {
 		code = f.exit
@@ -244,9 +251,10 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		return ipc.Exit{Code: f.exit, ErrorCode: f.code, Error: f.msg}
 	}
 	if data != nil {
-		if req.Screen && f == nil && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
+		if req.Screen && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
 			release() // the change is done: a question must not wait for the screen to settle
 			data = d.withScreen(ctx, req, data, base)
+			notes.tell(s.Stderr())
 		}
 		if err := s.Data(data); err != nil {
 			return ipc.Exit{Code: 1, ErrorCode: "UI_FAILED", Error: err.Error()}
@@ -641,7 +649,7 @@ func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream, gua
 	if f != nil {
 		return nil, "", f
 	}
-	if d.o.Paused() { // paused while the notice came off: nothing is read, and a paused agent gets no notice back
+	if d.paused() { // paused while the notice came off: nothing is read, and a paused agent gets no notice back
 		return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+PausedMessage)
 	}
 	// The guard said yes before the notice. If taking the notice off was slow
@@ -652,13 +660,13 @@ func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream, gua
 			restore()
 			return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+why)
 		}
-		if d.o.Paused() {
+		if d.paused() {
 			return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+PausedMessage)
 		}
 	}
 	var buf, errb bytes.Buffer
 	code, err := d.o.ADB.Run(ctx, "", []string{"exec-out", "screencap", "-p"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
-	if !d.o.Paused() { // a paused session gets no notice back
+	if !d.paused() { // a paused session gets no notice back
 		restore()
 	}
 	if err != nil || code != 0 {

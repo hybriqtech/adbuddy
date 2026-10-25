@@ -29,11 +29,13 @@ import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.confirm.ConfirmNotifier
 import tech.hybriq.adbuddy.confirm.UnlockWait
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutCheck
 import tech.hybriq.adbuddy.notify.AskNotice
 import tech.hybriq.adbuddy.notify.ConversationNotifier
 import tech.hybriq.adbuddy.notify.ConversationView
 import tech.hybriq.adbuddy.notify.DoneDetector
 import tech.hybriq.adbuddy.notify.Notify
+import tech.hybriq.adbuddy.yolo.YoloNotifier
 
 /**
  * Keeps the channel with the host open (spec §6: foreground service of type
@@ -70,7 +72,7 @@ class BridgeService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         locales = resources.configuration.locales
-        val first = ConversationView.of(BridgeState(), CutAccess.isCut(contentResolver))
+        val first = ConversationView.of(BridgeState(), CutAccess.isCut(this))
         foreground = goForeground(conversationNotification(first))
         if (!foreground) {
             stopSelf()
@@ -80,12 +82,16 @@ class BridgeService : LifecycleService() {
         // Questions left by an earlier process: nobody can answer them now; the host sends them again.
         ConfirmNotifier.clear(this)
         ConversationNotifier.cancelAsk(this)
+        YoloNotifier.clear(this)
         // While the service lives (it posts the questions): a system broadcast, nobody else's to send.
         ContextCompat.registerReceiver(this, screenOn, IntentFilter(Intent.ACTION_SCREEN_ON), ContextCompat.RECEIVER_NOT_EXPORTED)
         listening = true
         val app = application as AdbuddyApp
         lifecycleScope.launch {
             app.bridge.state.collect { s -> ConfirmNotifier.sync(this@BridgeService, s) }
+        }
+        lifecycleScope.launch {
+            app.bridge.state.collect { s -> YoloNotifier.sync(this@BridgeService, s, app.clock) }
         }
         lifecycleScope.launch {
             var announced = emptySet<String>()
@@ -102,7 +108,7 @@ class BridgeService : LifecycleService() {
         lifecycleScope.launch {
             val detector = DoneDetector()
             app.bridge.state.collect { s ->
-                if (s.connection != BridgeState.Connection.CONNECTED) {
+                if (!s.isConnected) {
                     detector.reset()
                 } else if (Notify.shouldAnnounceDone(s, detector.onState(s.sessionState, SystemClock.elapsedRealtime()))) {
                     ConversationNotifier.done(this@BridgeService, Notify.doneLine(s.chat, s.sessionState.conversation))
@@ -158,7 +164,18 @@ class BridgeService : LifecycleService() {
                 }
             }
             // Cutting needs no unlock: it only narrows what the agent can do.
-            ACTION_CUT -> if (!CutAccess.cut(this)) toast(R.string.notif_cut_failed)
+            ACTION_CUT -> {
+                val up = CutAccess.channelUp(app.bridge.state.value)
+                if (!CutAccess.cut(this, up)) {
+                    toast(R.string.notif_cut_failed)
+                } else {
+                    lifecycleScope.launch {
+                        // R22: the channel and port 5555 say whether the cut really closed adb.
+                        val check = CutAccess.confirm(this@BridgeService, up) { CutAccess.channelUp(app.bridge.state.value) }
+                        if (check == CutCheck.STILL_CONNECTED) toast(R.string.cut_still_connected)
+                    }
+                }
+            }
             // Bridge.start is idempotent: the same link again (the app reopened, the
             // screen rotated) keeps the connection; a new one reconnects.
             else -> BridgePrefs(this).link?.let { app.bridge.start(it) } ?: stopSelf()

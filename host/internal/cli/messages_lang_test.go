@@ -30,10 +30,7 @@ func TestFormatEntryInSpanish(t *testing.T) {
 		Reason: "was asked", UndoneBy: &undoneBy, Tampered: true,
 		Inverse: &journal.Inverse{Argv: []string{"shell", "settings", "put", "global", "x", "0"}},
 	}
-	en, es := formatEntryIn(i18n.EN, e), formatEntryIn(i18n.ES, e)
-	if en != formatEntry(e) {
-		t.Fatalf("formatEntry is the English one:\n%s\n%s", formatEntry(e), en)
-	}
+	es := formatEntryIn(i18n.ES, e)
 	for _, want := range []string{", deshecho", ", ⚠ no escrito por ADBuddy"} {
 		if !strings.Contains(es, want) {
 			t.Errorf("the Spanish line lacks %q:\n%s", want, es)
@@ -117,9 +114,6 @@ func TestRemoteTextInSpanish(t *testing.T) {
 	for name, info := range infos {
 		for _, op := range []string{"on", "off", "status"} {
 			en, es := remoteTextIn(i18n.EN, op, info), remoteTextIn(i18n.ES, op, info)
-			if en != remoteText(op, info) {
-				t.Errorf("%s %s: remoteText is the English one", name, op)
-			}
 			i18ntest.NoEnglish(t, es)
 			if es == en || es == "" {
 				t.Errorf("%s %s: Spanish %q, English %q", name, op, es, en)
@@ -156,9 +150,6 @@ func TestRemoteTextInSpanish(t *testing.T) {
 	}
 	if got := stillOnNoticeIn(i18n.ES, s); !strings.Contains(got, "sigue activado") || !strings.Contains(got, "`adbuddy remote off`") {
 		t.Errorf("stop: %q", got)
-	}
-	if remoteOnNotice(s) != remoteOnNoticeIn(i18n.EN, s) || stillOnNotice(s) != stillOnNoticeIn(i18n.EN, s) {
-		t.Error("the plain ones are the English ones")
 	}
 }
 

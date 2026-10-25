@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 )
 
 // initWithin runs Init and fails the test if it does not return in time: a
@@ -136,3 +138,6 @@ func TestReadRegularDoesNotHangOnAFifo(t *testing.T) {
 		t.Fatalf("the FIFO changed: %v %v", st, err)
 	}
 }
+
+// openFlags opens without blocking on Unix (safeio.ReadFlags).
+const openFlags = safeio.ReadFlags

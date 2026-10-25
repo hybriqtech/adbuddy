@@ -130,3 +130,18 @@ func TestHomeScreenSkillSaysTheScreenCanBeProtectedForOtherReasons(t *testing.T)
 		t.Errorf("home-screen/SKILL.md lacks %q", want)
 	}
 }
+
+// SkillNames lists the embedded skills, sorted.
+func SkillNames() []string {
+	entries, err := fs.ReadDir(Skills(), ".")
+	if err != nil {
+		panic(err)
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}

@@ -27,21 +27,6 @@ func Skills() fs.FS {
 	return sub
 }
 
-// SkillNames lists the embedded skills, sorted.
-func SkillNames() []string {
-	entries, err := fs.ReadDir(Skills(), ".")
-	if err != nil {
-		panic(err)
-	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
-		}
-	}
-	return names
-}
-
 // UserMarker in a file tells Init not to rewrite it, not even with Force.
 const UserMarker = "<!-- adbuddy:user -->"
 

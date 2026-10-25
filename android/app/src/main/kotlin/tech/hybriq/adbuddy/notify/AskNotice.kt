@@ -11,7 +11,7 @@ import tech.hybriq.adbuddy.bridge.BridgeState
 object AskNotice {
     /** The ids of the agent's pending permission questions; none when the host is not connected (a lost link answers nothing). */
     fun pending(s: BridgeState): Set<String> =
-        if (s.connection == BridgeState.Connection.CONNECTED) s.chat.permissions.map { it.id }.toSet() else emptySet()
+        if (s.isConnected) s.chat.permissions.map { it.id }.toSet() else emptySet()
 
     /**
      * Applies what the state asks for and returns the ids announced now (the next call's [announced]).

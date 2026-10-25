@@ -10,6 +10,23 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 )
 
+// noticeFailed is what showNotice says when the app answers that it cannot put
+// its notice up. It is the block message; under YOLO the read goes on, so the
+// line the agent gets says liftedNoticeFailed instead (liftNotice).
+const noticeFailed = "ADBuddy can't show the on-screen notice, so it won't read the screen; ask the user to do this part"
+
+// liftedNoticeFailed is the YOLO line for noticeFailed: the read goes ahead.
+const liftedNoticeFailed = "the on-screen notice could not be shown"
+
+// liftNotice is lift for a showNotice refusal: whether YOLO lets the read go
+// on. The line it tells the agent must not say the read is refused.
+func (d *Daemon) liftNotice(ctx context.Context, why string) bool {
+	if why == noticeFailed {
+		why = liftedNoticeFailed
+	}
+	return d.lift(ctx, why)
+}
+
 // showNotice asks the app to put up its on-screen notice before the host reads
 // the screen by adb (screenshot, raw screencap/screenrecord/uiautomator,
 // dumpsys that dumps the view). Allowlist: only these let the read go on.
@@ -38,7 +55,7 @@ func (d *Daemon) showNotice(ctx context.Context) string {
 	case errors.Is(err, ErrUITimeout): // 10 s: the app hung; the overlay answers in 2 s at most
 		return "the ADBuddy app did not answer in time, so ADBuddy cannot show the on-screen notice; ask the user to open the ADBuddy app"
 	}
-	return "ADBuddy can't show the on-screen notice, so it won't read the screen; ask the user to do this part"
+	return noticeFailed
 }
 
 // readsScreen reports whether any command of res reads the screen.

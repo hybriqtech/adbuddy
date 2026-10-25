@@ -74,7 +74,7 @@ class UriSource private constructor(
                 throw e
             }
             val mime = resolver.getType(uri) ?: "application/octet-stream"
-            return UriSource(out, FileNames.clean(name), mime, total, digest.digest().joinToString("") { "%02x".format(it) })
+            return UriSource(out, FileNames.clean(name), mime, total, digest.digest().toHexString())
         }
 
         /** What a dead process left behind. */

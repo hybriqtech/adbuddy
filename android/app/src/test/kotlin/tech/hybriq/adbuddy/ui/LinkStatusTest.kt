@@ -27,10 +27,18 @@ class LinkStatusTest {
         assertEquals(LinkStatus.UPDATE_HOST, LinkStatus.of(s(BridgeState.Connection.INCOMPATIBLE, outdated = BridgeState.Outdated.HOST), cut = false))
     }
 
-    @Test fun aCutAccessSaysSoWhateverTheConnection() {
-        for (c in BridgeState.Connection.entries) {
+    @Test fun aLiveChannelBeatsCut_itProvesAdbIsUp() {
+        assertEquals(LinkStatus.CONNECTED, LinkStatus.of(s(BridgeState.Connection.CONNECTED), cut = true))
+        assertEquals(LinkStatus.PAUSED, LinkStatus.of(s(BridgeState.Connection.CONNECTED, p = true), cut = true))
+        assertEquals(LinkStatus.UPDATE_APP, LinkStatus.of(s(BridgeState.Connection.INCOMPATIBLE, outdated = BridgeState.Outdated.APP), cut = true))
+        assertEquals(LinkStatus.UPDATE_HOST, LinkStatus.of(s(BridgeState.Connection.INCOMPATIBLE, outdated = BridgeState.Outdated.HOST), cut = true))
+    }
+
+    @Test fun withoutAChannelACutSaysSo() {
+        for (c in listOf(BridgeState.Connection.WAITING, BridgeState.Connection.CONNECTING)) {
             assertEquals(c.name, LinkStatus.CUT, LinkStatus.of(s(c, p = true), cut = true))
         }
+        assertEquals(LinkStatus.CUT, LinkStatus.of(BridgeState(), cut = true, configured = false))
     }
 
     @Test fun pauseAndResumeOnlyWhileConnected() {
@@ -46,7 +54,9 @@ class LinkStatusTest {
         assertEquals(StatusView.of(a, cut = false), StatusView.of(b, cut = false))
         assertNotEquals(StatusView.of(a, cut = false), StatusView.of(a.copy(sessionState = paused), cut = false))
         assertNotEquals(StatusView.of(a, cut = false), StatusView.of(a.copy(hostName = "other"), cut = false))
-        assertNotEquals(StatusView.of(a, cut = false), StatusView.of(a, cut = true))
+        assertEquals("a live channel: cut changes nothing shown", StatusView.of(a, cut = false), StatusView.of(a, cut = true))
+        val lost = s(BridgeState.Connection.WAITING)
+        assertNotEquals(StatusView.of(lost, cut = false), StatusView.of(lost, cut = true))
     }
 
     @Test fun withoutALinkAndWithoutAChannelThePhoneIsNotSetUp() {

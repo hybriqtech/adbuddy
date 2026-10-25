@@ -29,8 +29,8 @@ func TestToolSummaryVerbInSpanishAndTheObjectUntouched(t *testing.T) {
 		if got := ToolSummaryIn(i18n.EN, c.tool, rawJSON(c.in)); got != c.en {
 			t.Errorf("%s en: %q, want %q", c.tool, got, c.en)
 		}
-		if got := ToolSummary(c.tool, rawJSON(c.in)); got != c.en {
-			t.Errorf("%s ToolSummary must stay English: %q", c.tool, got)
+		if got := ToolSummaryIn(i18n.EN, c.tool, rawJSON(c.in)); got != c.en {
+			t.Errorf("%s ToolSummaryIn(EN) must stay English: %q", c.tool, got)
 		}
 		if got := ToolSummaryIn(i18n.ES, c.tool, rawJSON(c.in)); got != c.es {
 			t.Errorf("%s es: %q, want %q", c.tool, got, c.es)

@@ -40,7 +40,7 @@ class ConversationViewTest {
     @Test fun withoutAConnectionTheLinkStatusSpeaks() {
         val v = ConversationView.of(state(conn = BridgeState.Connection.WAITING), cut = false)
         assertEquals(Headline(R.string.status_waiting), v.headline())
-        assertEquals(Headline(R.string.status_cut), ConversationView.of(state(), cut = true).headline())
+        assertEquals(Headline(R.string.status_cut), ConversationView.of(state(conn = BridgeState.Connection.WAITING), cut = true).headline())
     }
 
     @Test fun theLastMessageOfTheCurrentConversation() {
@@ -152,7 +152,15 @@ class ConversationViewTest {
         assertEquals(Headline(R.string.status_paused), v.headline())
         assertTrue(v.actions().contains(NotifAction.RESUME))
         assertTrue(!ConversationView.of(withPerm(state(conn = BridgeState.Connection.WAITING)), cut = false).asking)
-        assertTrue(!ConversationView.of(withPerm(state()), cut = true).asking)
+        assertTrue(!ConversationView.of(withPerm(state(conn = BridgeState.Connection.WAITING)), cut = true).asking)
+    }
+
+    @Test fun aLiveChannelNeverHeadlinesCut_theAgentStateDoes() {
+        assertEquals(Headline(R.string.notif_working_on, "Open Settings"), ConversationView.of(state(), cut = true).headline())
+        assertEquals(Headline(R.string.notif_waiting), ConversationView.of(state("waiting"), cut = true).headline())
+        val v = ConversationView.of(withPerm(state()), cut = true)
+        assertTrue("a question is still announced (generic)", v.asking)
+        assertEquals(listOf(NotifAction.CUT), v.actions())
     }
 
     @Test fun askingOffersOnlyCut_otherwiseTheM3Actions() {

@@ -48,14 +48,16 @@ object UiHelpers {
         val protected = ProtectedApps.of(app)
         val consent = NotificationConsent.of(app)
         val work = Executors.newSingleThreadExecutor { Thread(it, "adbuddy-helpers") }
+        val yolo = YoloProtection.predicates({ app.bridge.state.value }, app.clock, protected::isProtected, AgentAccessibilityService.notifications::active)
         val ui = UiExecutor(
             screen = { AgentAccessibilityService.current },
             send = { app.bridge.send(Protocol.UI_RESPONSE, UiExecutor.encode(it)) },
             now = app.clock::now,
-            isProtected = protected::isProtected,
+            isProtected = yolo.isProtected,
             questionWaiting = { app.bridge.state.value.pending.isNotEmpty() },
             paused = { app.bridge.state.value.sessionState.paused },
-            notificationOnScreen = AgentAccessibilityService.notifications::active,
+            notificationOnScreen = yolo.notificationOnScreen,
+            noticeOptional = yolo.noticeOptional,
             executor = work,
             notifications = {
                 NotificationGate.read(consent::confirmed, { NotificationAccessStatus.listed(app) }, consent::revoke, AgentNotificationListener::read)

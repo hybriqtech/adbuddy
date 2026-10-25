@@ -12,11 +12,8 @@ import (
 // before it gets the whole screen again instead (a variable for the tests).
 var attachBacklog = 256
 
-// AgentEnded is what an attached terminal shows when the agent's process
-// ends; it stays attached.
-const AgentEnded = "\r\n[ADBuddy] The agent ended. Start it again with adbuddy new, or detach with Ctrl+].\r\n"
-
-// agentEnded is AgentEnded in the language of the PC (catalog session.agent_ended).
+// agentEnded is what an attached terminal shows when the agent's process
+// ends, in the language of the PC (catalog session.agent_ended).
 func (m *Manager) agentEnded() string {
 	return "\r\n[ADBuddy] " + m.o.Lang.T("session.agent_ended") + "\r\n"
 }
@@ -28,7 +25,7 @@ var firstSize = 2 * time.Second
 // session until the terminal leaves (stdin ends) or ctx ends (spec M3 §3.4).
 // The terminal first gets the current screen, then the live output; what it
 // types goes to the agent, and its size rules while it is the last attached.
-// When the agent ends, the terminal gets AgentEnded and stays attached, what
+// When the agent ends, the terminal gets the agentEnded notice and stays attached, what
 // it types goes nowhere, and the next process's screen replaces the notice.
 func (m *Manager) ServeAttach(ctx context.Context, c *ipc.Conn, id string) ipc.Exit {
 	cols, rows := DefaultCols, DefaultRows

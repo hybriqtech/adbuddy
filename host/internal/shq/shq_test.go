@@ -74,3 +74,41 @@ func TestJoinAndArgs(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// FuzzQuoteUnquote: whatever Quote writes, Unquote reads back unchanged.
+// (The converse is false by design: Unquote also accepts words Quote would
+// never write, like 'a' for a.)
+func FuzzQuoteUnquote(f *testing.F) {
+	for _, s := range []string{"", "a", "a b", "it's", "'", "''", `\'`, "$(x);y", "é", "a\x00b", "/sdcard/x y"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		got, ok := Unquote(Quote(s))
+		if !ok || got != s {
+			t.Fatalf("Unquote(Quote(%q)) = %q, %v", s, got, ok)
+		}
+	})
+}
+
+func TestUnquoteAcceptsOnlyAlphabetBytes(t *testing.T) {
+	const alphabet = "_@%+=:,./-"
+	for i := 0; i < 256; i++ {
+		c := byte(i)
+		want := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte(alphabet, c) >= 0
+		got, ok := Unquote(string([]byte{c}))
+		if ok != want {
+			t.Errorf("Unquote(%q) ok = %v, want %v", string([]byte{c}), ok, want)
+		}
+		if ok && got != string([]byte{c}) {
+			t.Errorf("Unquote(%q) = %q", string([]byte{c}), got)
+		}
+	}
+}
+
+func TestUnquoteRejects(t *testing.T) {
+	for _, tok := range []string{"a$b", "'a'b c", "'abc", `a\b`, "a b", "a\nb", "a`b`", "a|b", "a;b"} {
+		if got, ok := Unquote(tok); ok {
+			t.Errorf("Unquote(%q) = %q, true; want refused", tok, got)
+		}
+	}
+}
