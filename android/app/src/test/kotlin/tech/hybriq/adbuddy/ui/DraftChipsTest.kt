@@ -1,6 +1,7 @@
 package tech.hybriq.adbuddy.ui
 
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasProgressBarRangeInfo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -62,6 +63,19 @@ class DraftChipsTest {
         assertTrue("height ${size.height / density} dp", size.height / density >= 48f - 0.5f)
         node.performClick()
         assertEquals(listOf("k"), removed)
+    }
+
+    // Bug 12: a failed chip keeps its name, and the error goes below it.
+    @Test fun aFailedDraftShowsItsNameAndItsError() {
+        show(Draft("k", "foto.jpg", "image/jpeg", 10, 0, DraftStatus.FAILED, error = "Host said no"))
+        compose.onNodeWithText("foto.jpg").assertIsDisplayed()
+        compose.onNodeWithText("Host said no").assertIsDisplayed()
+    }
+
+    @Test fun aFailedDraftWithoutErrorShowsItsNameAndTheGenericText() {
+        show(Draft("k", "foto.jpg", "image/jpeg", 10, 0, DraftStatus.FAILED))
+        compose.onNodeWithText("foto.jpg").assertIsDisplayed()
+        compose.onNodeWithText(s(R.string.draft_failed)).assertIsDisplayed()
     }
 
     @Test fun tappingAFailedChipRetriesButTheXOnlyRemoves() {

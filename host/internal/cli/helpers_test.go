@@ -17,6 +17,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // helperDaemon answers the helpers as serve would: answer gets each request
@@ -115,6 +116,48 @@ func TestScreenLocked(t *testing.T) {
 	})
 	if out, _, code := runHelper(t, "screen"); code != 0 || !strings.Contains(out, "locked: ask the user to unlock it") {
 		t.Fatalf("exit %d %q", code, out)
+	}
+}
+
+// An app that hides its content from accessibility services: the agent is told
+// what is known, what it can do, and nothing about getting round it.
+func TestScreenSaysWhenItCannotReadIt(t *testing.T) {
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(bridge.UIDump{Width: 1344, Height: 2992, Unreadable: true, Elements: []bridge.UIElement{}})
+		return ipc.Exit{}
+	})
+	out, _, code := runHelper(t, "screen")
+	lines := strings.Split(out, "\n")
+	if code != 0 || lines[0] != "unknown app · 1344×2992" || !strings.Contains(lines[1], "cannot read some or all of this screen") {
+		t.Fatalf("exit %d %q", code, out)
+	}
+	for _, want := range []string{"hides its content from accessibility services", "adbuddy screenshot", "ask the user to do this part"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	for _, never := range []string{"uiautomator", "enable", "disable", "bypass"} {
+		if strings.Contains(strings.ToLower(out), never) {
+			t.Errorf("the note mentions %q:\n%s", never, out)
+		}
+	}
+	out, _, code = runHelper(t, "screen", "--json")
+	if code != 0 || !strings.Contains(out, `"unreadable":true`) {
+		t.Fatalf("json: %d %q", code, out)
+	}
+}
+
+func TestAReadableScreenHasNoUnreadableNote(t *testing.T) {
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_ = c.Data(bridge.UIDump{Package: "com.android.settings", Width: 1, Height: 2, Elements: []bridge.UIElement{}})
+		return ipc.Exit{}
+	})
+	out, _, code := runHelper(t, "screen")
+	if code != 0 || strings.Contains(out, "cannot read") {
+		t.Fatalf("exit %d %q", code, out)
+	}
+	if out, _, _ = runHelper(t, "screen", "--json"); strings.Contains(out, "unreadable") {
+		t.Fatalf("json: %q", out)
 	}
 }
 
@@ -411,7 +454,7 @@ func screenOf(pkg string) bridge.UIDump {
 	}}
 }
 
-const wantStillChanging = "(the screen was still changing: run adbuddy screen again if you need it steady)"
+const wantStillChanging = "(the screen was still changing, or showed no app content to read: run adbuddy screen again if you need it steady)"
 
 func TestTapScreen(t *testing.T) {
 	var reply any
@@ -699,4 +742,62 @@ func TestTapTypeJSONWithoutScreenIsUnchanged(t *testing.T) {
 			t.Errorf("%v: exit %d %q, want data %s", c.args, code, out, want)
 		}
 	}
+}
+
+// The notice that could not be taken off the screen is in the image: the agent is told.
+func TestScreenshotSaysWhenTheNoticeIsInTheImage(t *testing.T) {
+	img := []byte("\x89PNG fake bytes")
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_, _ = c.Stdout().Write(img)
+		_ = c.Data(daemon.ScreenshotResult{Format: "png", Bytes: len(img), NoticeInImage: true})
+		return ipc.Exit{}
+	})
+	t.Chdir(t.TempDir())
+	out, errOut, code := runHelper(t, "screenshot")
+	if code != 0 || strings.Contains(out, "notice") || !strings.Contains(errOut, "on-screen notice") || !strings.Contains(errOut, "ignore it") {
+		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	out, _, code = runHelper(t, "screenshot", "-o", "s.png", "--json")
+	if code != 0 || !strings.Contains(out, `"noticeInImage":true`) {
+		t.Fatalf("json: %d %q", code, out)
+	}
+}
+
+func TestScreenshotWithoutNoticeInTheImageSaysNothing(t *testing.T) {
+	img := []byte("\x89PNG fake bytes")
+	helperDaemon(t, func(req ipc.Request, c *ipc.Conn) ipc.Exit {
+		_, _ = c.Stdout().Write(img)
+		_ = c.Data(daemon.ScreenshotResult{Format: "png", Bytes: len(img)})
+		return ipc.Exit{}
+	})
+	t.Chdir(t.TempDir())
+	out, errOut, code := runHelper(t, "screenshot")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d stdout %q stderr %q", code, out, errOut)
+	}
+	out, _, code = runHelper(t, "screenshot", "-o", "s.png", "--json")
+	if code != 0 || strings.Contains(out, "noticeInImage") {
+		t.Fatalf("json: %d %q", code, out)
+	}
+}
+
+// hideNotice is for screenshot only: no command of the CLI, nor any of their
+// subcommands or flags, exposes it to the agent.
+func TestNoCommandExposesHideNotice(t *testing.T) {
+	app := &App{Stdin: strings.NewReader(""), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}, Getenv: os.Getenv}
+	var walk func(c *cobra.Command)
+	walk = func(c *cobra.Command) {
+		names := []string{c.Name()}
+		names = append(names, c.Aliases...)
+		c.Flags().VisitAll(func(f *pflag.Flag) { names = append(names, f.Name) })
+		for _, n := range names {
+			if strings.Contains(strings.ToLower(n), "hidenotice") || strings.Contains(strings.ToLower(n), "hide-notice") {
+				t.Errorf("%s exposes %q", c.CommandPath(), n)
+			}
+		}
+		for _, s := range c.Commands() {
+			walk(s)
+		}
+	}
+	walk(NewRoot(app))
 }

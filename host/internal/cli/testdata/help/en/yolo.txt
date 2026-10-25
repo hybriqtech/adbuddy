@@ -1,0 +1,17 @@
+YOLO mode is turned on from the ADBuddy app on the phone, for 15 minutes, 1 hour
+or until the session ends: while it is on, the agent works without asking you to
+confirm anything, and nothing blocks it except the pause. `off` turns it off and
+`status` says whether it is on. There is no `on`: only the phone can turn it on.
+
+Usage:
+  adbuddy yolo off|status [flags]
+
+Examples:
+  adbuddy yolo status
+  adbuddy yolo off
+
+Flags:
+  -h, --help   help for yolo
+
+Global Flags:
+      --json   machine-readable JSON output, for the commands that support it

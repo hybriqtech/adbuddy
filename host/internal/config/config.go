@@ -17,6 +17,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/hybriqtech/adbuddy/host/internal/agent"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 )
 
 // Config is the content of config.toml. Every field is optional.
@@ -34,8 +35,8 @@ type Config struct {
 	TailscaleIP    string   `toml:"tailscale_ip"`    // the phone's Tailscale IPv4, as its app reported it; empty = unknown
 	TailscalePort  int      `toml:"tailscale_port"`  // wireless debugging port, from the host's connection to the phone (its ip:port or its mDNS service); 0 = unknown
 	RemoteUntil    string   `toml:"remote_until"`    // RFC 3339: remote mode (adb tcpip 5555) is on until then; empty = off
-	AgentModel     string   `toml:"agent_model"`     // model passed to Claude Code (--model) by `adbuddy serve` only (`adbuddy run` takes it after --); empty = the one the user configured in it
-	AgentEffort    string   `toml:"agent_effort"`    // effort passed to Claude Code (--effort) by `adbuddy serve` only; empty = the user's own
+	AgentModel     string   `toml:"agent_model"`     // model passed to Claude Code (--model) by `adbuddy serve` only (`adbuddy run` takes it after --); empty = ADBuddy's default (claude-haiku-5-5) for Claude Code; "inherit" = the one the user configured in it
+	AgentEffort    string   `toml:"agent_effort"`    // effort passed to Claude Code (--effort) by `adbuddy serve` only; empty = ADBuddy's default (low) for Claude Code; "inherit" = the user's own
 }
 
 // Duration is a time.Duration written as text ("2m") in TOML.
@@ -99,7 +100,7 @@ func (c Config) Validate() error {
 	if c.ConfirmTimeout.Duration <= 0 || c.ConfirmTimeout.Duration > time.Hour {
 		return fmt.Errorf("confirm_timeout must be between 1s and 1h, got %s", c.ConfirmTimeout)
 	}
-	if c.Address != "" && !validAddress(c.Address) {
+	if c.Address != "" && !ValidAddress(c.Address) {
 		return fmt.Errorf("address must be an IP address and port (e.g. 100.64.0.5:41234), got %q", c.Address)
 	}
 	if c.ChatPort != 0 && (c.ChatPort < 1024 || c.ChatPort > 65535) {
@@ -120,7 +121,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("agent_model is not a model name: %q", c.AgentModel)
 	}
 	if c.AgentEffort != "" && !agent.ValidEffort(c.AgentEffort) {
-		return fmt.Errorf("agent_effort must be one of low, medium, high, xhigh, max, got %q", c.AgentEffort)
+		return fmt.Errorf("agent_effort must be one of low, medium, high, xhigh, max, inherit, got %q", c.AgentEffort)
 	}
 	switch c.Language {
 	case "", "en", "es":
@@ -142,23 +143,7 @@ func Save(path string, c Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return safeio.WriteFileAtomic(path, buf.Bytes(), safeio.AtomicOpts{Pattern: ".config-*.toml", Perm: 0o600})
 }
 
 // WorkspaceDir is the agent environment directory.
@@ -196,8 +181,8 @@ func ReadLanguage(path string) string {
 	return ""
 }
 
-// validAddress accepts only IP:port with a port in 1-65535.
-func validAddress(addr string) bool {
+// ValidAddress accepts only IP:port with a port in 1-65535.
+func ValidAddress(addr string) bool {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false

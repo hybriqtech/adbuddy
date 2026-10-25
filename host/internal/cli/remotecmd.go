@@ -132,12 +132,9 @@ func newRemoteCmd(app *App) *cobra.Command {
 	}
 }
 
-// remoteText is what the person reads, in English.
-func remoteText(op string, i remoteInfo) string { return remoteTextIn(i18n.EN, op, i) }
-
-// remoteTextIn is remoteText in lang. A sentence that follows "serve is not
-// running; " keeps its first letter as the catalog has it (lower case); alone,
-// it starts with a capital.
+// remoteTextIn is what the person reads, in lang. A sentence that follows
+// "serve is not running; " keeps its first letter as the catalog has it (lower
+// case); alone, it starts with a capital.
 func remoteTextIn(lang i18n.Lang, op string, i remoteInfo) string {
 	prefix := ""
 	if !i.Serve {
@@ -385,6 +382,10 @@ func (l *phoneLink) confirmRemoteOn(ctx context.Context, d *daemon.Daemon) ipc.E
 		return remoteExit(1, "REMOTE_BUSY", "%s", classify.Printable(err.Error()))
 	case errors.Is(err, daemon.ErrAskPaused) || err != nil && l.Paused():
 		return denied("the agent was paused from the phone")
+	case errors.Is(err, daemon.ErrAskYolo):
+		// YOLO was turned on while it waited: the question was withdrawn (nothing
+		// answered after that counts) and the remote mode stays off; ask again.
+		return denied(daemon.YoloWithdrawnMessage)
 	case err != nil:
 		return denied("the question was abandoned before it was asked")
 	}

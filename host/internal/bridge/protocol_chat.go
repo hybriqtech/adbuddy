@@ -71,5 +71,8 @@ type PermissionReply struct {
 type PermissionResolved struct {
 	ID       string `json:"id"`
 	Decision string `json:"decision"` // allow, allow_always or deny
-	By       string `json:"by"`       // phone, terminal, timeout or agent
+	By       string `json:"by"`       // phone, terminal, timeout, agent or yolo
+	// Summary is what was approved, only when By is yolo (the app never saw a
+	// card for it): the verb and the target, as PermissionRequest.Summary.
+	Summary string `json:"summary,omitempty"`
 }

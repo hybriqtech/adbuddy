@@ -6,6 +6,7 @@
   "payload": {
     "id": "p_1",
     "decision": "allow_always",
-    "by": "terminal"
+    "by": "terminal",
+    "summary": "Run npm test"
   }
 }

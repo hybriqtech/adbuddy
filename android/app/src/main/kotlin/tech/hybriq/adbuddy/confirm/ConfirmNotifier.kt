@@ -6,12 +6,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import java.time.format.FormatStyle
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.MainActivity
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.BridgeState
 import tech.hybriq.adbuddy.bridge.Decision
+import tech.hybriq.adbuddy.notify.notificationManager
 import tech.hybriq.adbuddy.ui.Formats
 
 /**
@@ -34,7 +36,7 @@ object ConfirmNotifier {
 
     @Synchronized
     fun sync(context: Context, state: BridgeState) {
-        val nm = context.getSystemService(NotificationManager::class.java)
+        val nm = context.notificationManager
         val clock = (context.applicationContext as AdbuddyApp).clock
         val plan = ConfirmUi.plan(shown, state, clock.now())
         post(context, nm, plan, state, clock)
@@ -47,7 +49,7 @@ object ConfirmNotifier {
      */
     @Synchronized
     fun repaint(context: Context, state: BridgeState) {
-        val nm = context.getSystemService(NotificationManager::class.java)
+        val nm = context.notificationManager
         val clock = (context.applicationContext as AdbuddyApp).clock
         val plan = ConfirmUi.repaint(shown, state, clock.now())
         post(context, nm, plan, state, clock)
@@ -70,7 +72,7 @@ object ConfirmNotifier {
      */
     @Synchronized
     fun clear(context: Context) {
-        val nm = context.getSystemService(NotificationManager::class.java)
+        val nm = context.notificationManager
         for (n in nm.activeNotifications) if (n.id == NOTIFICATION_ID) nm.cancel(n.tag, n.id)
         shown = emptyMap()
         arming.clear()
@@ -106,7 +108,8 @@ object ConfirmNotifier {
             Intent(context, MainActivity::class.java).setData(uri("open", r.id)).putExtra(MainActivity.EXTRA_CONFIRM, r.id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val b = NotificationCompat.Builder(context, AdbuddyApp.CHANNEL_CONFIRM)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setSmallIcon(R.drawable.ic_stat_shield)
+            .setColor(ContextCompat.getColor(context, R.color.ic_launcher_background))
             .setContentTitle(context.getString(R.string.confirm_title, r.title))
             .setContentText(if (p.status == ConfirmUi.Status.OPEN) lines.first() else footer)
             .setStyle(NotificationCompat.BigTextStyle().bigText(lines.joinToString("\n")))

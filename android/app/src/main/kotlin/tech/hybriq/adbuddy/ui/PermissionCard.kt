@@ -31,7 +31,6 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDirection
 import androidx.lifecycle.Lifecycle
@@ -45,6 +44,7 @@ import tech.hybriq.adbuddy.bridge.PermissionRequest
 import tech.hybriq.adbuddy.chat.ChatController
 import tech.hybriq.adbuddy.chat.PermissionUi
 import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
+import tech.hybriq.adbuddy.ui.theme.AdbuddyType
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 
 /**
@@ -61,6 +61,8 @@ fun PermissionCards(
     connected: Boolean,
     hostNow: () -> Long,
     chat: ChatController,
+    /** The agent's own name (SessionState.agent); empty falls back to a generic one. */
+    agent: String = "",
     modifier: Modifier = Modifier,
 ) {
     // Back to the front (ON_START, ON_RESUME: the screen woke, the person came back), the first card waits its promote
@@ -95,7 +97,7 @@ fun PermissionCards(
             delay(PermissionUi.nextTickMs(permissions, now, guardLeft) ?: break)
         }
     }
-    PermissionCard(first, permissions.size - 1, connected, now, first.id in answeringIds, guardLeft, canAnswer, modifier) { p, d -> chat.answerPermission(p.id, d) }
+    PermissionCard(first, permissions.size - 1, connected, now, first.id in answeringIds, guardLeft, canAnswer, agent = agent, modifier = modifier) { p, d -> chat.answerPermission(p.id, d) }
 }
 
 /** The detail may be this tall on screen; taller, and the person must scroll to its end before any button works. */
@@ -111,6 +113,8 @@ fun PermissionCard(
     guardLeftMs: Long,
     /** ChatController.canAnswer(p.id): the first card, not answered, past its guard. The card does not work this out. */
     controllerCanAnswer: Boolean,
+    /** Whose question it is (SessionState.agent); empty falls back to a generic name. Right before [modifier]: the last parameter is the lambda. */
+    agent: String = "",
     modifier: Modifier = Modifier,
     onAnswer: (PermissionRequest, String) -> Unit,
 ) {
@@ -124,7 +128,11 @@ fun PermissionCard(
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             ObscuredTouchGuard()
             // Whose question it is outweighs what it says: the label is bold and larger, the agent's own words are marked as such.
-            Text(stringResource(R.string.perm_title), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.semantics { heading() })
+            Text(
+                stringResource(R.string.perm_title, agent.ifEmpty { stringResource(R.string.agent_fallback) }),
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.semantics { heading() },
+            )
             Text(stringResource(R.string.perm_summary, p.summary.ifEmpty { p.tool }), style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             // The scroll state starts "can scroll forward" until the text is measured: the buttons stay off until it is known there is no more to read.
             val scroll = key(p.id, p.detail) { rememberScrollState() }
@@ -136,8 +144,7 @@ fun PermissionCard(
                     Text(
                         p.detail,
                         Modifier.heightIn(max = DETAIL_MAX_HEIGHT).verticalScroll(scroll).padding(8.dp),
-                        style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr),
-                        fontFamily = FontFamily.Monospace,
+                        style = AdbuddyType.codeSmall.copy(textDirection = TextDirection.Ltr),
                         softWrap = true,
                     )
                 }

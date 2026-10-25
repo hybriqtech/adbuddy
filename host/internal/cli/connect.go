@@ -51,7 +51,7 @@ func newConnectCmd(app *App) *cobra.Command {
 					return NewErrorT("AGENT_SESSION", "err.connect.agent_session", "err.connect.agent_session.fix")
 				}
 				addr := args[0]
-				if !validPairAddr(addr) {
+				if !config.ValidAddress(addr) {
 					return UsageErrorT("err.connect.usage_is_not_an_ip_address", classify.Printable(addr))
 				}
 				e, err := loadEnv(app)

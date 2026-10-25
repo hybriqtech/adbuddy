@@ -46,21 +46,19 @@ object ConversationNotifier {
         if (last != null) style.addMessage(last.text, ts, if (last.fromUser) me else agent)
         else style.addMessage(headline, ts, agent)
 
-        val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val open = openAppIntent(ctx, 0)
         val bubbleIntent = PendingIntent.getActivity(ctx, 5, Intent(ctx, ChatBubbleActivity::class.java),
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val bubble = NotificationCompat.BubbleMetadata.Builder(bubbleIntent, IconCompat.createWithResource(ctx, android.R.drawable.sym_action_chat))
+        val bubble = NotificationCompat.BubbleMetadata.Builder(bubbleIntent, IconCompat.createWithResource(ctx, R.mipmap.ic_launcher))
             .setDesiredHeight(600)
             .build()
         // What the lock screen shows: the headline, never the text of the last message.
-        val public = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_CONVERSATION)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+        val public = baseBuilder(ctx, AdbuddyApp.CHANNEL_CONVERSATION)
             .setContentTitle(ctx.getString(R.string.app_name))
             .setContentText(publicLine)
             .build()
 
-        val b = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_CONVERSATION)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+        val b = baseBuilder(ctx, AdbuddyApp.CHANNEL_CONVERSATION)
             .setStyle(style)
             .setSubText(headline)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -98,20 +96,18 @@ object ConversationNotifier {
     /** "Done": the agent ended a stretch of work. Plain NotificationManager.notify (lint MissingPermission with the Compat one). */
     fun done(ctx: Context, line: String?) {
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
-        val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val n = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_DONE)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+        val open = openAppIntent(ctx, 0)
+        val n = baseBuilder(ctx, AdbuddyApp.CHANNEL_DONE)
             .setContentTitle(ctx.getString(R.string.notif_done_title))
             .setContentText(line ?: ctx.getString(R.string.notif_done_default))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .setPublicVersion(NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_DONE)
-                .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+            .setPublicVersion(baseBuilder(ctx, AdbuddyApp.CHANNEL_DONE)
                 .setContentTitle(ctx.getString(R.string.notif_done_title))
                 .build())
             .setAutoCancel(true)
             .setContentIntent(open)
             .build()
-        ctx.getSystemService(NotificationManager::class.java).notify(DONE_ID, n)
+        ctx.notificationManager.notify(DONE_ID, n)
     }
 
     /**
@@ -120,14 +116,12 @@ object ConversationNotifier {
      */
     fun ask(ctx: Context) {
         if (!NotificationManagerCompat.from(ctx).areNotificationsEnabled()) return
-        val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val public = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_ASK)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+        val open = openAppIntent(ctx, 0)
+        val public = baseBuilder(ctx, AdbuddyApp.CHANNEL_ASK)
             .setContentTitle(ctx.getString(R.string.app_name))
             .setContentText(ctx.getString(R.string.notif_ask_title))
             .build()
-        val n = NotificationCompat.Builder(ctx, AdbuddyApp.CHANNEL_ASK)
-            .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
+        val n = baseBuilder(ctx, AdbuddyApp.CHANNEL_ASK)
             .setContentTitle(ctx.getString(R.string.notif_ask_title))
             .setContentText(ctx.getString(R.string.notif_ask_text))
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
@@ -138,10 +132,10 @@ object ConversationNotifier {
             .setAutoCancel(true)
             .setContentIntent(open)
             .build()
-        ctx.getSystemService(NotificationManager::class.java).notify(ASK_ID, n)
+        ctx.notificationManager.notify(ASK_ID, n)
     }
 
-    fun cancelAsk(ctx: Context) = ctx.getSystemService(NotificationManager::class.java).cancel(ASK_ID)
+    fun cancelAsk(ctx: Context) = ctx.notificationManager.cancel(ASK_ID)
 
     private fun service(ctx: Context, code: Int, action: String, mutable: Boolean): PendingIntent =
         PendingIntent.getService(ctx, code, Intent(ctx, BridgeService::class.java).setAction(action),

@@ -2,8 +2,10 @@ package tech.hybriq.adbuddy.screens
 
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -84,6 +86,26 @@ class ActivityScreensTest(private val mode: ScreenMode) {
     private fun showsInList(text: String) {
         compose.onNode(hasScrollAction()).performScrollToNode(hasText(text))
         compose.onNodeWithText(text).assertIsDisplayed()
+    }
+
+    // Bug 16: the level is no longer a lone emoji; the bar carries its name, merged into the entry's one node for TalkBack.
+    @Test fun eachEntryCarriesItsLevelNameForTalkBack() {
+        show(BridgeState(journal = listOf(green, yellow, red)))
+        for (id in listOf(R.string.level_green, R.string.level_yellow, R.string.level_red)) {
+            showsDescribed(text(id))
+        }
+    }
+
+    private fun showsDescribed(description: String) {
+        compose.onNode(hasScrollAction()).performScrollToNode(hasContentDescription(description))
+        compose.onNodeWithContentDescription(description).assertExists()
+    }
+
+    // H1 of T13: bar and texts are ONE node for TalkBack (mergeDescendants on the row), not a lone described bar.
+    @Test fun theLevelAndTheEntryTextAreOneNode() {
+        show(BridgeState(journal = listOf(green)))
+        val level = text(R.string.level_green)
+        compose.onAllNodes(hasContentDescription(level) and hasText(green.description)).assertCountEquals(1)
     }
 
     @Test fun noEntriesAtAll() {

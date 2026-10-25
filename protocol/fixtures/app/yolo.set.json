@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "rid": "r_8",
+  "type": "yolo.set",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "minutes": 15,
+    "session": false,
+    "off": false
+  }
+}

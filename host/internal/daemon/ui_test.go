@@ -25,9 +25,13 @@ type fakeApp struct {
 	results map[string]any
 	errs    map[string]error
 	calls   []string
+	onCall  func(op string) // called, outside mu, when op arrives (before it answers)
 }
 
 func (a *fakeApp) ui(_ context.Context, op string, args json.RawMessage) (json.RawMessage, error) {
+	if a.onCall != nil {
+		a.onCall(op)
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.calls = append(a.calls, op+" "+string(args))
@@ -48,6 +52,8 @@ func (a *fakeApp) called() []string {
 func (e *env) withApp(protected ...string) *fakeApp {
 	a := &fakeApp{results: map[string]any{
 		bridge.UIOpForeground: bridge.UIForeground{Package: "com.android.settings", Activity: "com.android.settings.Settings"},
+		bridge.UIOpNotice:     bridge.Empty{}, // like the real app
+		bridge.UIOpHideNotice: bridge.Empty{}, // like the real app
 	}, errs: map[string]error{}}
 	e.d.o.UI = a.ui
 	e.d.o.Protected = func(pkg string) bool {
@@ -136,6 +142,21 @@ func TestScreenByADB(t *testing.T) {
 	}
 }
 
+func TestScreenByADBFailsClosedWhenTheServiceCannotBeChecked(t *testing.T) {
+	e := newEnv(t)                               // no app
+	delete(e.adb.shell, "dumpsys accessibility") // the fake exits 1
+	e.adb.out["exec-out uiautomator dump /dev/tty"] = `<hierarchy rotation="0"/>`
+	_, exit := e.helper(t, bridge.UIOpDump, bridge.UIDumpArgs{}, "adbuddy", "screen")
+	if exit.ErrorCode != "UI_UNAVAILABLE" || !strings.Contains(exit.Error, "could not check") {
+		t.Fatalf("exit %+v", exit)
+	}
+	for _, r := range e.adb.ran() {
+		if strings.Contains(r, "uiautomator") {
+			t.Fatalf("uiautomator ran without knowing the service state: %q", e.adb.ran())
+		}
+	}
+}
+
 func TestScreenFallsBackWhenTheServiceIsOff(t *testing.T) {
 	e := newEnv(t)
 	a := e.withApp()
@@ -144,6 +165,23 @@ func TestScreenFallsBackWhenTheServiceIsOff(t *testing.T) {
 	e.adb.out["exec-out uiautomator dump /dev/tty"] = `<hierarchy rotation="0"><node package="p.q" class="a.B" text="Hi" bounds="[0,0][10,10]"/></hierarchy>`
 	if _, exit := e.helper(t, bridge.UIOpDump, bridge.UIDumpArgs{}); exit.Code != 0 {
 		t.Fatalf("exit %+v", exit)
+	}
+}
+
+// A dump the app cannot announce (no notice drawn) fails closed: it must not fall back to uiautomator.
+func TestDumpThatTheAppCannotAnnounceDoesNotFallBackToADB(t *testing.T) {
+	e := newEnv(t)
+	a := e.withApp()
+	a.errs[bridge.UIOpDump] = &UIError{Code: bridge.CodeFailed, Text: "can't show the notice"}
+	e.adb.out["exec-out uiautomator dump /dev/tty"] = `<hierarchy rotation="0"><node package="p.q" class="a.B" text="Hi" bounds="[0,0][10,10]"/></hierarchy>`
+	_, exit := e.helper(t, bridge.UIOpDump, bridge.UIDumpArgs{})
+	if exit.ErrorCode != "UI_FAILED" {
+		t.Fatalf("exit %+v", exit)
+	}
+	for _, r := range e.adb.ran() {
+		if strings.Contains(r, "uiautomator") {
+			t.Fatalf("fell back to adb: %q", e.adb.ran())
+		}
 	}
 }
 

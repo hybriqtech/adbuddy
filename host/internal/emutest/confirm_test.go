@@ -36,7 +36,7 @@ const (
 	txtScroll       = "Scroll to the end to allow it"
 	txtTooLong      = "The command is too long to show whole: it can only be denied."
 	txtExpires      = "Expires at "
-	txtAsking       = "Claude Code needs an answer"
+	txtAsking       = "Your agent needs an answer" // notif_asking: generic, without the agent's name (R10)
 	txtCapture      = "Send screenshot"
 )
 
@@ -404,6 +404,39 @@ func (e *emu) noLock(ctx context.Context) (bool, string) {
 	return err == nil && strings.Contains(s, "verified successfully"), s
 }
 
+// pinMinBudget is what a test with a PIN needs before the test timeout: the
+// cleanup takes up to 2 min and the test itself some minutes.
+const pinMinBudget = 4 * time.Minute
+
+type pinVerdict int
+
+const (
+	pinOK    pinVerdict = iota // enough time (or no deadline): set the PIN
+	pinSkip                    // too little time, locally: skip, so the emulator is not left with a PIN
+	pinFatal                   // too little time, in CI: fail, a skip there would leave the job green without the test
+)
+
+// pinBudget decides what lockWithPIN does with the time left before the test
+// timeout (left, meaningful only when hasDeadline). ci is isCI().
+func pinBudget(left time.Duration, hasDeadline, ci bool) pinVerdict {
+	switch {
+	case !hasDeadline || left >= pinMinBudget:
+		return pinOK
+	case ci:
+		return pinFatal
+	default:
+		return pinSkip
+	}
+}
+
+func pinBudgetMsg(left time.Duration) string {
+	return fmt.Sprintf("only %s left before the test timeout and a test with a PIN needs at least %s (not setting a PIN that the cleanup might not get to clear); raise -timeout or split the suite", left.Round(time.Second), pinMinBudget)
+}
+
+// isCI reports whether the tests run in CI: GitHub Actions exports CI=true to
+// every step, so no workflow has to remember to set a variable of its own.
+func isCI() bool { return os.Getenv("CI") == "true" }
+
 // lockWithPIN sets testPIN and locks the screen. The PIN is cleared at
 // cleanup even when the test fails, with a context of its own, and checked:
 // an emulator left with a PIN would lock every later test out.
@@ -416,9 +449,13 @@ func (e *emu) lockWithPIN(t *testing.T) {
 			t.Fatalf("the emulator already has a lock credential (%s) that is not the test's PIN: clear it by hand before these tests", out)
 		}
 	}
-	// The cleanup needs up to 2 min and the test itself some minutes.
-	if d, ok := t.Deadline(); ok && time.Until(d) < 4*time.Minute {
-		t.Skipf("only %s left before the test timeout: not setting a PIN that the cleanup might not get to clear", time.Until(d).Round(time.Second))
+	d, hasDeadline := t.Deadline()
+	left := time.Until(d)
+	switch pinBudget(left, hasDeadline, isCI()) {
+	case pinSkip:
+		t.Skipf("%s", pinBudgetMsg(left))
+	case pinFatal:
+		t.Fatalf("%s", pinBudgetMsg(left))
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(e.ctx), 2*time.Minute)
@@ -534,55 +571,31 @@ func (e *emu) unlockOnBouncer(t *testing.T) {
 	}
 }
 
-// unlock brings up the bouncer from the lock screen with a swipe up and types the PIN.
+// bringUpBouncer is the command that makes the system show the PIN bouncer: it asks to dismiss the keyguard, as the
+// app's own Allow does. A swipe up did not do it reliably (measured on the CI emulator, android-34, PR #103): on the
+// lock screen of a PIN lock with no notification, 0 of 20 swipes of three quarters of the height to a third in 300 ms
+// brought it up, and 6 of 8 of 90 % to 20 % in 150 ms did; the bouncer that did come with a swipe sometimes had the PIN
+// field without the focus, and the PIN typed was lost. This one brought it up 14 of 14 times in about 3 s, the field
+// focused.
+const bringUpBouncer = "wm dismiss-keyguard"
+
+// unlock brings up the bouncer from the lock screen and types the PIN. The command is repeated every 4 s until the
+// bouncer shows.
 func (e *emu) unlock(t *testing.T) {
 	t.Helper()
-	w, h := e.screenSize(t)
-	x, y0, y1 := swipeUpPoints(w, h)
-	e.shell(t, fmt.Sprintf("input swipe %d %d %d %d 300", x, y0, x, y1))
-	e.waitNodes(t, "bouncer after swiping up on the lock screen", 10*time.Second, bouncer)
+	var nodes []uiNode
+	var asked time.Time
+	if !poll(20*time.Second, func() bool {
+		if time.Since(asked) >= 4*time.Second {
+			e.shell(t, bringUpBouncer)
+			asked = time.Now()
+		}
+		nodes = e.screen(t)
+		return bouncer(nodes)
+	}) {
+		t.Fatalf("no bouncer after %q on the lock screen in 20 s: %+v", bringUpBouncer, nodes)
+	}
 	e.unlockOnBouncer(t)
-}
-
-// screenSize reads the physical size from wm size ("Physical size: 720x1600").
-func (e *emu) screenSize(t *testing.T) (w, h int) {
-	t.Helper()
-	w, h, ok := parseWMSize(e.shell(t, "wm size"))
-	if !ok {
-		t.Fatal("wm size is not understood")
-	}
-	return w, h
-}
-
-var wmSizeRe = regexp.MustCompile(`(?:Override|Physical) size: (\d+)x(\d+)`)
-
-// parseWMSize reads the size from wm size: the override, if any, wins over the
-// physical size (it is printed last).
-func parseWMSize(out string) (w, h int, ok bool) {
-	ms := wmSizeRe.FindAllStringSubmatch(out, -1)
-	if len(ms) == 0 {
-		return 0, 0, false
-	}
-	m := ms[len(ms)-1]
-	w, _ = strconv.Atoi(m[1])
-	h, _ = strconv.Atoi(m[2])
-	return w, h, w > 0 && h > 0
-}
-
-// swipeUpPoints is the swipe up that brings up the bouncer, relative to the
-// screen: from three quarters of the height to a third, down the middle.
-func swipeUpPoints(w, h int) (x, y0, y1 int) { return w / 2, h * 3 / 4, h / 3 }
-
-func TestSwipeUpPoints(t *testing.T) {
-	if w, h, ok := parseWMSize("Physical size: 720x1600\nOverride size: 1080x2400\n"); !ok || w != 1080 || h != 2400 {
-		t.Errorf("parseWMSize: %d %d %v", w, h, ok)
-	}
-	if _, _, ok := parseWMSize("nope"); ok {
-		t.Error("parseWMSize accepted junk")
-	}
-	if x, y0, y1 := swipeUpPoints(720, 1600); x != 360 || y0 != 1200 || y1 != 533 {
-		t.Errorf("swipeUpPoints(720, 1600) = %d %d %d", x, y0, y1)
-	}
 }
 
 // waitNodes waits up to d for the screen to be as ok wants and returns its nodes, or fails.
@@ -613,7 +626,10 @@ func bouncer(nodes []uiNode) bool {
 // its nodes, or fails. Over the lock screen, and below another notification, a
 // notification shows collapsed (one line, and over the lock screen without its
 // buttons): until ready, the Expand button nearest the title is tapped, again
-// every 3 s (a tap during the shade's animation can be lost).
+// no sooner than 6 s later (a tap during the shade's animation can be lost, but
+// on a slow runner the buttons can take longer than 3 s to appear, and a second
+// tap would fold what the first one opened). It is never tapped when the button
+// nearest the title says Collapse: the row is open already.
 func (e *emu) shadeUntil(t *testing.T, title string, ready func([]uiNode) bool) []uiNode {
 	t.Helper()
 	var nodes []uiNode
@@ -624,17 +640,17 @@ func (e *emu) shadeUntil(t *testing.T, title string, ready func([]uiNode) bool) 
 			return true
 		}
 		row := slices.IndexFunc(nodes, func(n uiNode) bool { return n.Text == title })
-		if row < 0 || time.Since(expanded) < 3*time.Second {
+		if row < 0 || time.Since(expanded) < 6*time.Second {
 			return false
 		}
-		expand := -1
+		toggle := -1 // the Expand or Collapse button nearest the title
 		for i, n := range nodes {
-			if n.ID == "android:id/expand_button" && n.Desc == "Expand" && (expand < 0 || abs(n.Y-nodes[row].Y) < abs(nodes[expand].Y-nodes[row].Y)) {
-				expand = i
+			if n.ID == "android:id/expand_button" && (n.Desc == "Expand" || n.Desc == "Collapse") && (toggle < 0 || abs(n.Y-nodes[row].Y) < abs(nodes[toggle].Y-nodes[row].Y)) {
+				toggle = i
 			}
 		}
-		if expand >= 0 {
-			e.tap(t, nodes[expand])
+		if toggle >= 0 && nodes[toggle].Desc == "Expand" {
+			e.tap(t, nodes[toggle])
 			expanded = time.Now()
 		}
 		return false
@@ -684,25 +700,20 @@ func abs(n int) int {
 	return n
 }
 
-// authActionsMayBeDropped is a known defect of the app this test shows and T4
-// does not fix. On API 34 a notification button that asks to unlock
-// (setAuthenticationRequired) is delivered when the PIN is accepted, before
-// the keyguard has gone: the Allow that brought up the bouncer reached
-// ConfirmReceiver at 05:11:51.202 and the keyguard's going-away transition
-// started at 05:11:51.499. isDeviceLocked is still true then, so the app's own
-// second check (ConfirmReceiver for Allow, BridgeService for Send screenshot)
-// drops it silently: nothing reaches the host, the question stays open and has
-// to be allowed again. Measured: Allow dropped in 7 runs of 7, Send screenshot
-// in 1 of 2 (a race). Safe (nothing is allowed while locked), but M2-8 does not
-// work as specified. The test accepts the drop only while this is true, and
-// then checks that the same button, on the unlocked phone, works; once fixed,
-// set it to false and the drop fails the test.
-const authActionsMayBeDropped = true
+// authActionsMayBeDropped is false since M2-8. On API 34 a notification button
+// that asks to unlock (setAuthenticationRequired) is delivered when the PIN is
+// accepted, before the keyguard has gone, so isDeviceLocked was still true and
+// the app's own second check (ConfirmReceiver for Allow, BridgeService for Send
+// screenshot) dropped the tap silently (measured with a 300 ms wait: Allow
+// dropped in 7 runs of 7). Now the app waits up to 2 s for the unlock from the
+// moment of delivery, so the tap that brought up the bouncer reaches the host
+// without a second press. The drop fails the test.
+const authActionsMayBeDropped = false
 
 // M2-5 and M2-8, with a PIN (T1-7): on the locked phone, Deny in the shade
 // answers at once, without unlocking; Allow brings up the bouncer and sends
-// nothing while the device is locked; once the PIN is typed it should reach
-// the host as allow (see authActionsMayBeDropped). M3b-5, its locked
+// nothing while the device is locked; once the PIN is typed it reaches
+// the host as allow, without a second press (authActionsMayBeDropped). M3b-5, its locked
 // part: Send screenshot asks to unlock too. M4-d: the conversation's notice of
 // the agent's question is on the silent channel (LOW) and the lock screen
 // shows its line, never the question's words.
@@ -746,18 +757,7 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 			t.Errorf("Allow after the bouncer sent %+v", r)
 		}
 	} else {
-		if !authActionsMayBeDropped {
-			t.Fatal("no confirm.reply 15 s after unlocking on the bouncer that Allow brought up")
-		}
-		t.Log("known defect (authActionsMayBeDropped): the Allow that brought up the bouncer was dropped")
-		// The question is still open, and Allow, now unlocked, answers.
-		if got := recordActions(confirmRecord(e.shell(t, "dumpsys notification --noredact"), q2.ID)); !slices.Contains(got, txtAllow) {
-			t.Fatalf("after the dropped Allow the question has %q", got)
-		}
-		e.tapInShade(t, "The agent wants to: "+q2.Title, txtAllow)
-		if r := l.confirmReply(t, 10*time.Second); r.ID != q2.ID || r.Decision != "allow" {
-			t.Errorf("Allow on the unlocked shade sent %+v", r)
-		}
+		t.Fatal("no confirm.reply 15 s after unlocking on the bouncer that Allow brought up")
 	}
 	e.closeShade(t)
 	l.settle(t, q2.ID)
@@ -778,12 +778,7 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 	}
 	e.unlockOnBouncer(t)
 	if _, ok := l.take(bridge.TypeCaptureReq, 10*time.Second); !ok {
-		if !authActionsMayBeDropped {
-			t.Fatal("no capture.request 10 s after unlocking on the bouncer that Send screenshot brought up")
-		}
-		t.Log("known defect (authActionsMayBeDropped): the Send screenshot that brought up the bouncer was dropped")
-		e.tapInShade(t, "ADBuddy", txtCapture)
-		l.waitFor(t, bridge.TypeCaptureReq, 10*time.Second)
+		t.Fatal("no capture.request 10 s after unlocking on the bouncer that Send screenshot brought up")
 	}
 	e.closeShade(t)
 
@@ -845,6 +840,77 @@ func TestAllowFromTheLockedShadeAsksToUnlock(t *testing.T) {
 	if strings.Contains(lockScreen, secret) || strings.Contains(lockScreen, "rm -rf photos") {
 		t.Error("the lock screen shows the agent's question")
 	}
+}
+
+// M2-8: the Allow tap that brought up the bouncer is delivered only to an
+// unlock of its own. (i) With the bouncer dismissed by Back and the phone
+// unlocked by another route, nothing is allowed, the question stays open and
+// a fresh Allow answers. (ii) With the bouncer left open longer than the
+// app's wait (2 s), the PIN still lets the tap through: the wait starts at the
+// delivery, after the PIN, not at the tap.
+func TestAnAllowedTapOnTheLockedShadeNeedsTheUnlockOfItsOwn(t *testing.T) {
+	l := openLink(t)
+	e := l.e
+	e.lockWithPIN(t)
+
+	// (i) Negative: Back closes the bouncer without unlocking.
+	q1 := question("j_back", "Restart the phone", "adb shell reboot")
+	l.ask(t, q1)
+	l.drain()
+	e.tapInShade(t, "The agent wants to: "+q1.Title, txtAllow)
+	e.waitNodes(t, "bouncer after Allow on the locked shade", 10*time.Second, bouncer)
+	e.shell(t, "input keyevent KEYCODE_BACK")
+	nodes := e.waitNodes(t, "the bouncer to be gone after Back", 10*time.Second, func(nodes []uiNode) bool { return !bouncer(nodes) })
+	if !e.locked(t) {
+		t.Fatalf("the device is unlocked after Back on the bouncer: %+v", nodes)
+	}
+	if m, ok := l.take(bridge.TypeConfirmReply, 3*time.Second); ok {
+		t.Fatalf("Allow answered after the bouncer was dismissed: %s", m.Payload)
+	}
+	// After Back the lock screen keeps the shade open and a swipe up does not reach the bouncer: put the screen to
+	// sleep and wake it on a clean lock screen, as a person who gave up would find it later.
+	e.lock(t)
+	e.unlock(t)
+	if m, ok := l.take(bridge.TypeConfirmReply, 5*time.Second); ok {
+		t.Fatalf("an unlock by another route let the old Allow tap through: %s", m.Payload)
+	}
+	if got := recordActions(confirmRecord(e.shell(t, "dumpsys notification --noredact"), q1.ID)); !slices.Contains(got, txtAllow) {
+		t.Fatalf("the question has %q after the unlock: it should still be open", got)
+	}
+	// Positive control: unlocked, Allow answers.
+	e.tapInShade(t, "The agent wants to: "+q1.Title, txtAllow)
+	if r := l.confirmReply(t, 10*time.Second); r.ID != q1.ID || r.Decision != "allow" {
+		t.Errorf("Allow on the unlocked shade sent %+v", r)
+	}
+	e.closeShade(t)
+	l.settle(t, q1.ID)
+
+	// (ii) Positive: the bouncer open for longer than the app's wait.
+	e.lock(t)
+	q2 := question("j_slow", "Restart the phone", "adb shell reboot")
+	l.ask(t, q2)
+	l.drain()
+	e.tapInShade(t, "The agent wants to: "+q2.Title, txtAllow)
+	e.waitNodes(t, "bouncer after Allow on the locked shade", 10*time.Second, bouncer)
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		if !bouncer(e.screen(t)) {
+			t.Fatal("the bouncer went away by itself while waiting")
+		}
+		if m, ok := l.take(bridge.TypeConfirmReply, 500*time.Millisecond); ok {
+			t.Fatalf("Allow answered with the bouncer open: %s", m.Payload)
+		}
+	}
+	e.unlockOnBouncer(t)
+	m, ok := l.take(bridge.TypeConfirmReply, 15*time.Second)
+	if !ok {
+		t.Fatal("no confirm.reply 15 s after the PIN, typed on a bouncer open for longer than the app's wait")
+	}
+	if r := payload[bridge.ConfirmReply](t, m); r.ID != q2.ID || r.Decision != "allow" {
+		t.Errorf("Allow after the slow PIN sent %+v", r)
+	}
+	e.closeShade(t)
+	l.settle(t, q2.ID)
 }
 
 // lowImportanceRe anchors the channel's importance field (IMPORTANCE_LOW = 2)

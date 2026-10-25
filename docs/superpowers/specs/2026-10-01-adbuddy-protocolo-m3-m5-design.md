@@ -120,6 +120,7 @@ Un adjunto se descarga con `file.get` (§6.2). La app nunca ve ni manda rutas de
 | `chat` | M3 | Últimos 100 `chat.message`, de más antiguo a más reciente |
 | `permissions` | M4 | `permission.request` pendientes |
 | `remote` | M5 | `remote.state` |
+| `yolo` | YOLO | `yolo.state` |
 
 - **Mientras su hito no los rellena,** los campos nuevos son listas vacías u objetos por defecto (el servidor nunca manda `null`).
 - **Por área:** la app lee cada parte nueva por separado, en el reductor de su hito, para que una parte mal formada no deje ilegible el `snapshot` entero (y con él las preguntas 🔴 de `pending`).
@@ -224,11 +225,11 @@ La salida del PTY es un flujo con posición propia, fuera del búfer de eventos:
 | `ui.response` | app → host | – | `id`, `ok` y `result` (si `ok`) o `error {code, text}` (si no) |
 
 - **Es un flujo, no un evento:** una petición de la pantalla nunca se reenvía tras reconectar. La app descarta las que ya han caducado (`expiresAt`, juzgado con el reloj del host como en M2) y no ejecuta dos veces el mismo `id`.
-- **Operaciones de partida:** `dump`, `click`, `setText`, `foreground` y `notifications` (§6 de la v1). Esta spec fija solo el sobre de cada una:
+- **Operaciones de partida:** `dump`, `click`, `setText`, `foreground`, `notifications`, `notice` y `hideNotice` (§6 de la v1; `notice` solo muestra la superposición, la pide el host antes de leer la pantalla por adb; `hideNotice` la retira un instante durante `adbuddy screenshot`, p1-pantalla-oculta). Esta spec fija solo el sobre de cada una:
   - `click` admite `args` `{id}`, `{text}` o `{x, y}`;
   - `setText` admite `{text}`;
   - las demás van sin `args`;
-  - `dump` devuelve `{locked, package, elements[]}`.
+  - `dump` devuelve `{locked, package, elements[]}` y, aditivo, `unreadable` (p1-pantalla-oculta).
 
   Los campos de cada elemento, los gestos y las operaciones nuevas los fija la spec de M5. M5 puede ampliar `ui.*` (operaciones, `args`, `result`) añadiendo sus fixtures, sin tocar el resto del protocolo.
 
@@ -251,6 +252,15 @@ La salida del PTY es un flujo con posición propia, fuera del búfer de eventos:
 | `remote.state` | host → app | evento | `enabled`, `address` (`ip:puerto`, si está activo) y `expiresAt`. También va en el `snapshot` |
 
 `remote.set` responde con el `remote.state` nuevo (con su `rid`) o con `error`.
+
+### 8.3 Modo YOLO
+
+| Tipo | Dirección | Clase | Payload |
+|---|---|---|---|
+| `yolo.set` | app → host | con `rid` | `minutes` (15 o 60), `session` u `off`: exactamente uno. Cualquier otra cosa: `error` `invalid`. Con el agente en pausa: `error` `failed` |
+| `yolo.state` | host → app | evento | `active`, `until` (ms de época del reloj del host, 0 si apagado o `session`) y `session`. También va en el `snapshot` y tras el `welcome` |
+
+`yolo.set` responde con el `yolo.state` nuevo (con su `rid`) o con `error`. `permission.resolved` puede traer `by: "yolo"` y `summary` (lo aprobado), sin que haya habido tarjeta antes.
 
 ## 9. Límites
 

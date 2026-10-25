@@ -54,6 +54,9 @@ type ScreenshotArgs struct {
 type ScreenshotResult struct {
 	Format string `json:"format"`
 	Bytes  int    `json:"bytes"`
+	// NoticeInImage: ADBuddy's on-screen notice could not be taken off the
+	// screen for the capture and may be in the image.
+	NoticeInImage bool `json:"noticeInImage,omitempty"`
 }
 
 // Exit codes and error codes of the helpers (M5 spec §8).
@@ -110,15 +113,17 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUser,
 		Argv: helperArgv(req.UIOp, req.UIArgs), Level: h.level.String(), Rule: h.rule,
 		Description: strings.ReplaceAll(h.title.In(d.o.Lang), "{target}", target),
+		Yolo:        d.o.Yolo.Active(),
 	}
 	if req.Env["ADBUDDY_SOURCE"] == journal.SourceAgent {
 		e.Source = journal.SourceAgent
 	}
-	if d.o.Paused() {
+	ctx, notes := withYoloNotes(ctx)
+	if d.paused() {
 		return d.blockUI(e, PausedMessage)
 	}
 	if h.change {
-		if err := d.o.Journal.Writable(); err != nil {
+		if err := d.o.Journal.Writable(); err != nil && !d.lift(ctx, noRecord) {
 			return d.blockUI(e, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
@@ -126,7 +131,10 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	// counts in flight so the next question waits for it.
 	release, other := d.admit(e.Description, h.change)
 	if other != "" {
-		return d.blockUI(e, other)
+		if !d.liftQuestion(ctx, other) {
+			return d.blockUI(e, other)
+		}
+		release = d.flyAnyway(h.change, e.Description)
 	}
 	defer release()
 	// foreground is what the guard asks; notifications do not read the screen
@@ -146,8 +154,15 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			firstBlocked = true
 		}
 	}
-	guarded := time.Now() // right after the guard said yes
-	if d.o.Paused() {     // paused while the guard looked
+	guarded := time.Now() // right after the guard said yes: how old the guard is is measured from here, notice and veil included
+	// The notice of the on-screen frame goes before the last pause check, so a
+	// pause that arrives meanwhile blocks (after the guard: no notice for what it refuses).
+	if req.UIOp == OpScreenshot {
+		if why := d.showNotice(ctx); why != "" && !d.liftNotice(ctx, why) {
+			return d.stopUI(ctx, e, why)
+		}
+	}
+	if d.paused() { // paused while the guard looked
 		return d.blockUI(e, PausedMessage)
 	}
 	// An act with Screen: read the screen before it, the one the wait starts
@@ -163,7 +178,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if ctx.Err() != nil { // the agent or serve went away: no act
 			return d.abandonUI(ctx, e)
 		}
-		if d.o.Paused() { // paused while the start was read: no act
+		if d.paused() { // paused while the start was read: no act
 			return d.blockUI(e, PausedMessage)
 		}
 		if denied != nil { // the app says there is something protected in front: no act
@@ -176,7 +191,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 				}
 				return d.blockUI(e, why)
 			}
-			if d.o.Paused() {
+			if d.paused() {
 				return d.blockUI(e, PausedMessage)
 			}
 		}
@@ -184,11 +199,12 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if h.change {
 		running := e
 		running.Status = journal.StatusRunning
-		if err := d.o.Journal.Append(running); err != nil {
+		if err := d.o.Journal.Append(running); err != nil && !d.lift(ctx, noRecord) {
 			return d.blockUI(e, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
 
+	notes.tell(s.Stderr())
 	var data any
 	var via string
 	var f *uiFailure
@@ -199,7 +215,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			return *done
 		}
 	} else {
-		data, via, f = d.runUI(ctx, req.UIOp, req.UIArgs, s)
+		data, via, f = d.runUI(ctx, req.UIOp, req.UIArgs, s, guarded)
 		if req.Screen && req.UIOp == bridge.UIOpDump {
 			var done *ipc.Exit
 			switch first, ok := asDump(data); {
@@ -218,6 +234,7 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 			}
 		}
 	}
+	notes.tell(s.Stderr()) // what a later guard (the wait, the capture) let through
 	code := 0
 	if f != nil {
 		code = f.exit
@@ -234,9 +251,10 @@ func (d *Daemon) ui(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		return ipc.Exit{Code: f.exit, ErrorCode: f.code, Error: f.msg}
 	}
 	if data != nil {
-		if req.Screen && f == nil && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
+		if req.Screen && (req.UIOp == bridge.UIOpClick || req.UIOp == bridge.UIOpSetText) {
 			release() // the change is done: a question must not wait for the screen to settle
 			data = d.withScreen(ctx, req, data, base)
+			notes.tell(s.Stderr())
 		}
 		if err := s.Data(data); err != nil {
 			return ipc.Exit{Code: 1, ErrorCode: "UI_FAILED", Error: err.Error()}
@@ -466,12 +484,12 @@ func (d *Daemon) callApp(ctx context.Context, op string, args json.RawMessage) (
 
 // runUI does the helper, by the app or by adb, and returns the data for the
 // client and how it was done.
-func (d *Daemon) runUI(ctx context.Context, op string, raw json.RawMessage, s Stream) (any, string, *uiFailure) {
+func (d *Daemon) runUI(ctx context.Context, op string, raw json.RawMessage, s Stream, guarded time.Time) (any, string, *uiFailure) {
 	switch op {
 	case OpScreenshot:
 		var a ScreenshotArgs
 		_ = json.Unmarshal(raw, &a)
-		return d.screenshot(ctx, a, s)
+		return d.screenshot(ctx, a, s, guarded)
 	case bridge.UIOpForeground:
 		f, err := d.inFront(ctx)
 		if err != nil {
@@ -541,15 +559,15 @@ func checkResult(op string, raw json.RawMessage) (any, error) {
 // uiautomator dumps the screen by adb, unless ADBuddy's accessibility
 // service is on: uiautomator would disconnect it (M5 spec §5).
 func (d *Daemon) uiautomator(ctx context.Context) ([]byte, *uiFailure) {
-	out, code, err := d.o.ADB.Shell(ctx, "dumpsys accessibility")
-	if err != nil || code != 0 {
+	on, err := d.serviceOn(ctx)
+	if err != nil {
 		return nil, fail(exitTransient, "UI_UNAVAILABLE", "could not check ADBuddy's accessibility service on the phone")
 	}
-	if uidump.ServiceOn(out) {
+	if on {
 		return nil, fail(exitTransient, "UI_UNAVAILABLE", "ADBuddy's accessibility service is running but the app is not connected: open the ADBuddy app and try again")
 	}
 	var buf, errb bytes.Buffer
-	code, err = d.o.ADB.Run(ctx, "", []string{"exec-out", "uiautomator", "dump", "/dev/tty"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
+	code, err := d.o.ADB.Run(ctx, "", []string{"exec-out", "uiautomator", "dump", "/dev/tty"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
 	if err != nil || code != 0 {
 		return nil, fail(1, "UI_FAILED", "uiautomator dump failed: "+classify.Printable(strings.TrimSpace(errb.String())))
 	}
@@ -622,10 +640,35 @@ func (d *Daemon) shellRun(ctx context.Context, args []string) *uiFailure {
 	return nil
 }
 
-// screenshot takes the capture by adb, scales it and sends it on stdout.
-func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream) (any, string, *uiFailure) {
+// screenshot takes the capture by adb, scales it and sends it on stdout. The
+// app's on-screen notice was shown before (showNotice); it is taken off the
+// screen for the capture itself, so the frame and the pill do not cover the
+// image, and put back right after. guarded is when the guard said yes.
+func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream, guarded time.Time) (any, string, *uiFailure) {
+	restore, inImage, f := d.veilNotice(ctx)
+	if f != nil {
+		return nil, "", f
+	}
+	if d.paused() { // paused while the notice came off: nothing is read, and a paused agent gets no notice back
+		return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+PausedMessage)
+	}
+	// The guard said yes before the notice. If taking the notice off was slow
+	// (the app dwells so that the person can see it, or it hung), look at the
+	// foreground again, as an act does after a slow baseline.
+	if time.Since(guarded) > baselineSlack {
+		if why := d.guardForeground(ctx, nil); why != "" {
+			restore()
+			return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+why)
+		}
+		if d.paused() {
+			return nil, "", fail(ExitDenied, "UI_BLOCKED", "Blocked by ADBuddy: "+PausedMessage)
+		}
+	}
 	var buf, errb bytes.Buffer
 	code, err := d.o.ADB.Run(ctx, "", []string{"exec-out", "screencap", "-p"}, nil, &limited{w: &buf, n: maxCapture}, &errb)
+	if !d.paused() { // a paused session gets no notice back
+		restore()
+	}
 	if err != nil || code != 0 {
 		return nil, "", fail(1, "UI_FAILED", "screencap failed: "+classify.Printable(strings.TrimSpace(errb.String())))
 	}
@@ -636,7 +679,7 @@ func (d *Daemon) screenshot(ctx context.Context, a ScreenshotArgs, s Stream) (an
 	if _, err := s.Stdout().Write(img); err != nil {
 		return nil, "", fail(1, "UI_FAILED", err.Error())
 	}
-	return ScreenshotResult{Format: a.Format, Bytes: len(img)}, "adb", nil
+	return ScreenshotResult{Format: a.Format, Bytes: len(img), NoticeInImage: inImage}, "adb", nil
 }
 
 // limited fails a write past n bytes.
@@ -651,4 +694,30 @@ func (l *limited) Write(p []byte) (int, error) {
 	}
 	l.n -= len(p)
 	return l.w.Write(p)
+}
+
+// serviceOn reports whether ADBuddy's accessibility service is listed by
+// dumpsys accessibility (enabled or bound). An error when the phone cannot
+// say: the callers fail closed.
+func (d *Daemon) serviceOn(ctx context.Context) (bool, error) {
+	out, code, err := d.o.ADB.Shell(ctx, "dumpsys accessibility")
+	if err != nil {
+		return false, err
+	}
+	if code != 0 {
+		return false, fmt.Errorf("dumpsys accessibility exited with %d", code)
+	}
+	return uidump.ServiceOn(out), nil
+}
+
+// stopUI ends a helper that the guard or the notice refused: blocked, or
+// abandoned when the agent or serve went away meanwhile.
+func (d *Daemon) stopUI(ctx context.Context, e journal.Entry, why string) ipc.Exit {
+	if ctx.Err() != nil {
+		code := ExitDenied
+		e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it ran", "abandoned: ADBuddy stopped before it ran"), &code
+		d.record(e)
+		return ipc.Exit{Code: ExitDenied, ErrorCode: "UI_BLOCKED", Error: "stopped"}
+	}
+	return d.blockUI(e, why)
 }

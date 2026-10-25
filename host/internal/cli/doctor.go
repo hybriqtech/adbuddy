@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +56,13 @@ type check struct {
 
 	detail, guidance i18n.Msg
 }
+
+// The checks a doctor that cannot go on reports as skipped, in report order.
+var (
+	skipPhone      = []string{"phone", "identity", "network port", "phone app"}
+	skipAfterPhone = skipPhone[1:]
+	skipNoConfig   = slices.Concat([]string{"adb", "adb server", "serve"}, skipPhone, []string{"environment"})
+)
 
 // mk is a check whose detail is a message.
 func mk(name, status string, detail i18n.Msg) check {
@@ -169,7 +177,23 @@ func newDoctorCmd(app *App) *cobra.Command {
 			ctx, cancel := context.WithTimeout(stop, doctorTotalWait)
 			defer cancel()
 
-			rep := runDoctor(ctx, app)
+			// Each check is written as it ends, so a slow phone or a hung adb
+			// does not look like a frozen doctor. Not with --json (one
+			// envelope), nor with --fix (the report may be computed again
+			// and the notes rewrite checks), nor in the agent's session
+			// (askTheUser rewrites the report): those write it whole at the
+			// end. It looks at Ctrl+C, not at doctor's time limit: after
+			// Ctrl+C the checks left are cancellations that must not show.
+			var onCheck func(check)
+			streaming := !app.JSON && !fix && !agent
+			if streaming {
+				onCheck = func(c check) {
+					if stop.Err() == nil {
+						printCheck(app, c)
+					}
+				}
+			}
+			rep := runDoctor(ctx, app, onCheck)
 			if stop.Err() != nil {
 				return Interrupted()
 			}
@@ -179,7 +203,7 @@ func newDoctorCmd(app *App) *cobra.Command {
 					return Interrupted()
 				}
 				if out.restarted {
-					rep = runDoctor(ctx, app)
+					rep = runDoctor(ctx, app, nil)
 					if stop.Err() != nil {
 						return Interrupted()
 					}
@@ -202,7 +226,11 @@ func newDoctorCmd(app *App) *cobra.Command {
 				}
 				return WriteData(app.Stdout, rep)
 			}
-			printReport(app, rep)
+			if streaming {
+				printVerdict(app, rep)
+			} else {
+				printReport(app, rep)
+			}
 			if broken {
 				return ExitWith(1)
 			}
@@ -215,19 +243,31 @@ func newDoctorCmd(app *App) *cobra.Command {
 
 func printReport(app *App, rep doctorReport) {
 	lang := app.speaks()
-	icon := map[string]string{checkOK: "✓", checkWarn: "⚠", checkFail: "✗", checkSkip: "·"}
 	for _, f := range rep.fixed {
 		fmt.Fprintf(app.Stdout, "↻ %s\n", classify.Printable(f.In(lang)))
 	}
 	for _, c := range rep.Checks {
-		fmt.Fprintf(app.Stdout, "%s %s: %s\n", icon[c.Status], checkName(lang, c.Name), classify.Printable(c.detailMsg().In(lang)))
-		if c.Run != "" {
-			fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.run"), classify.Printable(c.Run))
-		}
-		if c.Guidance != "" {
-			fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.guidance"), classify.Printable(c.guidanceMsg().In(lang)))
-		}
+		printCheck(app, c)
 	}
+	printVerdict(app, rep)
+}
+
+// printCheck writes one check of the human report.
+func printCheck(app *App, c check) {
+	lang := app.speaks()
+	icon := map[string]string{checkOK: "✓", checkWarn: "⚠", checkFail: "✗", checkSkip: "·"}
+	fmt.Fprintf(app.Stdout, "%s %s: %s\n", icon[c.Status], checkName(lang, c.Name), classify.Printable(c.detailMsg().In(lang)))
+	if c.Run != "" {
+		fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.run"), classify.Printable(c.Run))
+	}
+	if c.Guidance != "" {
+		fmt.Fprintf(app.Stdout, "    %s %s\n", lang.T("doctor.label.guidance"), classify.Printable(c.guidanceMsg().In(lang)))
+	}
+}
+
+// printVerdict writes the last line of the human report.
+func printVerdict(app *App, rep doctorReport) {
+	lang := app.speaks()
 	switch rep.Verdict {
 	case "ready":
 		fmt.Fprintln(app.Stdout, lang.T("doctor.verdict.ready"))
@@ -242,9 +282,15 @@ func printReport(app *App, rep doctorReport) {
 // phone, identity, network port, phone app, environment. A check that
 // depends on one that failed is reported as skipped. It never changes
 // anything, on the PC or on the phone (starting ADBuddy's private adb server
-// aside, as any adb call does).
-func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
-	add := func(c check) { rep.Checks = append(rep.Checks, c) }
+// aside, as any adb call does). onCheck, if not nil, is called with each
+// check right after it is added, in report order.
+func runDoctor(ctx context.Context, app *App, onCheck func(check)) (rep doctorReport) {
+	add := func(c check) {
+		rep.Checks = append(rep.Checks, c)
+		if onCheck != nil {
+			onCheck(c)
+		}
+	}
 	skip := func(why i18n.Msg, names ...string) {
 		for _, n := range names {
 			add(mk(n, checkSkip, i18n.M("doctor.skipped", why)))
@@ -266,7 +312,7 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 			}
 		}
 		add(mk("config", checkFail, detail).withGuide(fix))
-		skip(i18n.M("doctor.skip.no_config"), "adb", "adb server", "serve", "phone", "identity", "network port", "phone app", "environment")
+		skip(i18n.M("doctor.skip.no_config"), skipNoConfig...)
 		return rep
 	}
 	configured := e.cfg.Serial != "" || e.cfg.Address != ""
@@ -288,7 +334,7 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 		paused := i18n.M("doctor.skip.paused")
 		skip(paused, "adb", "adb server")
 		add(checkServe(running, ping, perr, e.dirs.Data))
-		skip(paused, "phone", "identity", "network port", "phone app")
+		skip(paused, skipPhone...)
 		addPCChecks(add, e, running, ping)
 		return rep
 	}
@@ -320,16 +366,16 @@ func runDoctor(ctx context.Context, app *App) (rep doctorReport) {
 
 	switch active, guid := findConfiguredPhone(online, e.cfg.Serial, e.cfg.Address); {
 	case !serverUp:
-		skip(i18n.M("doctor.skip.server_down"), "phone", "identity", "network port", "phone app")
+		skip(i18n.M("doctor.skip.server_down"), skipPhone...)
 	case !configured:
-		skip(i18n.M("doctor.skip.no_phone"), "phone", "identity", "network port", "phone app")
+		skip(i18n.M("doctor.skip.no_phone"), skipPhone...)
 	case active == "":
 		how := i18n.M("doctor.phone.how_wifi")
 		if e.cfg.Address != "" {
 			how = i18n.M("doctor.phone.how_tailscale")
 		}
 		add(mk("phone", checkFail, i18n.M("doctor.phone.not_connected")).withGuide(how))
-		skip(i18n.M("doctor.skip.not_connected"), "identity", "network port", "phone app")
+		skip(i18n.M("doctor.skip.not_connected"), skipAfterPhone...)
 	default:
 		add(mk("phone", checkOK, i18n.M("doctor.plain", active)))
 		phone := runner
@@ -627,7 +673,7 @@ func batteryExempt(whitelist, pkg string) bool {
 
 func checkWorkspace(ws string) check {
 	var missing []string
-	for _, f := range []string{"AGENTS.md", filepath.Join(".adbuddy", "bin", exeName("adb"))} {
+	for _, f := range []string{"AGENTS.md", filepath.Join(".adbuddy", "bin", workspace.Exe("adb"))} {
 		if _, err := os.Stat(filepath.Join(ws, f)); err != nil {
 			missing = append(missing, f)
 		}
@@ -761,13 +807,6 @@ func isPersonOnly(run string) bool {
 		}
 	}
 	return false
-}
-
-func exeName(name string) string {
-	if runtime.GOOS == "windows" {
-		return name + ".exe"
-	}
-	return name
 }
 
 // quoteArg quotes a path for the Run: line when it has spaces.

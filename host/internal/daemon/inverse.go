@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/hybriqtech/adbuddy/host/internal/shq"
 )
 
 // validInverse accepts only the inverse shapes package precheck writes. The
@@ -26,7 +28,7 @@ func validInverse(argv []string, backupDir string) error {
 	case "shell":
 		words := make([]string, 0, len(argv)-1)
 		for _, tok := range argv[1:] {
-			w, ok := unquote(tok)
+			w, ok := shq.Unquote(tok)
 			if !ok {
 				return fmt.Errorf("unexpected word %q in an inverse", tok)
 			}
@@ -37,39 +39,6 @@ func validInverse(argv []string, backupDir string) error {
 		}
 	}
 	return fmt.Errorf("not an inverse ADBuddy writes: %q", argv)
-}
-
-// unquote reverses shq.Quote: safe characters, or single-quoted parts joined
-// by \'. Anything else (spaces outside quotes, $, ;…) is refused.
-func unquote(tok string) (string, bool) {
-	if tok == "" {
-		return "", false
-	}
-	var b strings.Builder
-	for i := 0; i < len(tok); {
-		switch {
-		case tok[i] == '\'':
-			j := strings.IndexByte(tok[i+1:], '\'')
-			if j < 0 {
-				return "", false
-			}
-			b.WriteString(tok[i+1 : i+1+j])
-			i += j + 2
-		case strings.HasPrefix(tok[i:], `\'`):
-			b.WriteByte('\'')
-			i += 2
-		case safeByte(tok[i]):
-			b.WriteByte(tok[i])
-			i++
-		default:
-			return "", false
-		}
-	}
-	return b.String(), true
-}
-
-func safeByte(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("_@%+=:,./-", c) >= 0
 }
 
 func packageName(s string) bool {
@@ -162,7 +131,7 @@ func inverseFitsKind(kind string, argv []string) bool {
 	}
 	w := make([]string, 0, len(argv)-1)
 	for _, tok := range argv[1:] {
-		x, ok := unquote(tok)
+		x, ok := shq.Unquote(tok)
 		if !ok {
 			return false
 		}

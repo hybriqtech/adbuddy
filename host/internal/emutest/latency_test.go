@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -223,25 +222,6 @@ func scenario(t *testing.T, rep *Report, p *probe, name string, warmup, n int, f
 			label = fmt.Sprintf("%s (x%d)", l, c)
 		}
 		rep.Add("&nbsp;&nbsp;↳ "+label, perStage[l])
-	}
-}
-
-// appUI is the daemon's Options.UI over the link, as serve's uiLink does it.
-func (l *link) appUI(t *testing.T) uiFunc {
-	var n atomic.Int64
-	return func(_ context.Context, op string, args json.RawMessage) (json.RawMessage, error) {
-		id := fmt.Sprintf("lat_%d", n.Add(1))
-		l.send(t, bridge.TypeUIRequest, bridge.UIRequest{ID: id, Op: op, Args: args, ExpiresAt: time.Now().Add(10 * time.Second).UTC()})
-		for {
-			r := payload[bridge.UIResponse](t, l.waitFor(t, bridge.TypeUIResponse, 15*time.Second))
-			if r.ID != id {
-				continue
-			}
-			if r.OK {
-				return r.Result, nil
-			}
-			return nil, &daemon.UIError{Code: r.Error.Code, Text: r.Error.Text}
-		}
 	}
 }
 

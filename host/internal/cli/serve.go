@@ -262,6 +262,7 @@ func newServeCmd(app *App) *cobra.Command {
 				OnNotice:  func(n string) { fmt.Fprintln(app.Stderr, "⏳ "+n) },
 			})
 			link.OnPause(d.CancelConfirmations)
+			link.useYolo(d.Yolo())
 			sess := newSession(app, ws, activeSerial, link.sessionInfo, model, effort)
 			defer sess.Stop()
 			link.useSession(sess)
@@ -276,18 +277,14 @@ func newServeCmd(app *App) *cobra.Command {
 			fmt.Fprintln(app.Stderr, confirmersNote(confirmMode, interactive).In(app.speaks()))
 			fmt.Fprintln(app.Stderr, app.T("serve.adbuddy_is_serving_session_journal", activeSerial, session, workspace.JournalDir(ws)))
 			if noAgent {
-				if model != "" || effort != "" {
+				if explicitSetting(model) || explicitSetting(effort) {
 					fmt.Fprintln(app.Stderr, app.T("serve.model_no_agent"))
 				}
 				fmt.Fprintln(app.Stderr, app.T("serve.in_another_terminal", agentName))
 				fmt.Fprintln(app.Stderr)
 			} else {
-				if model != "" || effort != "" {
-					if _, unused := agent.Args(agentName, model, effort); len(unused) > 0 {
-						fmt.Fprintln(app.Stderr, app.T("serve.model_not_applied", agentName))
-					} else {
-						fmt.Fprintln(app.Stderr, app.T("serve.model_applied", agent.Describe(model, effort)))
-					}
+				if note := startNote(agentName, model, effort); note.Key != "" {
+					fmt.Fprintln(app.Stderr, note.In(app.speaks()))
 				}
 				startAgent(app, sess, agentName)
 				fmt.Fprintln(app.Stderr)
@@ -432,3 +429,26 @@ func confirmersNote(mode string, interactive bool) i18n.Msg {
 		return i18n.M("serve.confirmations_deny")
 	}
 }
+
+// startNote is what serve says about the model and effort the agent starts
+// with; the zero Msg says nothing.
+func startNote(agentName, model, effort string) i18n.Msg {
+	if agentName != "claude" {
+		if explicitSetting(model) || explicitSetting(effort) {
+			return i18n.M("serve.model_not_applied", agentName)
+		}
+		return i18n.Msg{}
+	}
+	m, e := agent.Effective(agentName, model, effort)
+	switch {
+	case m == "" && e == "":
+		return i18n.M("serve.model_inherited")
+	case model == "" || effort == "":
+		return i18n.M("serve.model_default", agent.Describe(m, e))
+	}
+	return i18n.M("serve.model_applied", agent.Describe(m, e))
+}
+
+// explicitSetting reports whether the person chose a model or effort, as
+// opposed to leaving it unset or asking for Claude Code's own (inherit).
+func explicitSetting(s string) bool { return s != "" && s != agent.Inherit }

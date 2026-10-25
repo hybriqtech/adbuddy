@@ -1,10 +1,10 @@
 # Dependabot version updates. Weekly, grouped, one-week cooldown, NO auto-merge
 # (nothing here or in the workflows enables it; keep it that way).
 #
-# Pull requests opened by Dependabot run their CI on GitHub-hosted runners, never
-# on the self-hosted ones, and the emulator job is skipped: the owner reviews the
-# diff and runs `emulator` by hand (workflow_dispatch). The rule and the process
-# are in docs/ci-self-hosted.md section 6. Do not enable "Dependabot on
+# Pull requests opened by Dependabot run their CI on GitHub-hosted runners, like
+# all of this repository's CI (docs/ci-self-hosted.md), and the emulator jobs are
+# skipped: the owner reviews the diff and runs `emulator-app` or
+# `emulator-oracle` by hand (workflow_dispatch). Do not enable "Dependabot on
 # self-hosted runners" in the repository settings.
 #
 # Dependabot only raises versions of actions already used by the workflows, so
@@ -49,6 +49,12 @@ updates:
       go:
         patterns: ["*"]
         update-types: [minor, patch]
+    # Pinned by pseudo-version (v0.0.0-<date>-<commit>) in a monorepo: Dependabot lists the
+    # tags of the root module github.com/charmbracelet/x, tries x@v0.1.0, which does not
+    # contain vt, and the whole gomod job ends in an error (dependency_file_not_resolvable).
+    # A person moves it (go get github.com/charmbracelet/x/vt@<commit>).
+    ignore:
+      - dependency-name: "github.com/charmbracelet/x/vt"
     commit-message:
       prefix: "chore(deps)"
     labels: [dependencies, go]

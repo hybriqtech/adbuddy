@@ -1,16 +1,19 @@
 package tech.hybriq.adbuddy.control
 
-import android.content.ContentResolver
 import android.content.Context
 import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.annotation.VisibleForTesting
 import androidx.core.content.edit
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.withContext
+import tech.hybriq.adbuddy.bridge.BridgeState
 
 /**
  * "Cut access" (spec §4.6): turns off wireless debugging and then USB/adb
@@ -19,20 +22,16 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * Settings.Global and to the app's private preferences.
  */
 object CutAccess {
-    private fun switch(context: Context): AccessSwitch {
+    const val PREFS = "cut_access"
+
+    private fun switch(context: Context, channelUp: Boolean = false): AccessSwitch {
         val resolver = context.contentResolver
-        val prefs = context.getSharedPreferences("cut_access", Context.MODE_PRIVATE)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return AccessSwitch(
             object : AccessSwitch.Settings {
-                // Android 12+ may refuse to read a hidden setting to an app: then it counts as never written.
-                override fun get(name: String): Int? = try {
-                    Settings.Global.getString(resolver, name)?.toIntOrNull()
-                } catch (e: SecurityException) {
-                    null
-                }
-                override fun put(name: String, value: Int) {
-                    Settings.Global.putInt(resolver, name, value)
-                }
+                // Throws SecurityException when Android refuses the read: AccessSwitch treats it as unknown.
+                override fun get(name: String): Int? = Settings.Global.getString(resolver, name)?.toIntOrNull()
+                override fun put(name: String, value: Int): Boolean = Settings.Global.putInt(resolver, name, value)
             },
             object : AccessSwitch.Saved {
                 override fun get(name: String): Int? = if (prefs.contains(name)) prefs.getInt(name, 0) else null
@@ -40,17 +39,50 @@ object CutAccess {
                     if (value == null) remove(name) else putInt(name, value)
                 }
             },
+            channelUp,
         )
     }
 
-    /** Returns false when the permission is missing or the change did not stick. */
-    fun cut(context: Context): Boolean = switch(context).cut()
+    /**
+     * A live channel with the PC (addendum 2026-10-19, R20): the host welcomed the app through adb, paused included.
+     * INCOMPATIBLE is left out on purpose: the app stopped reconnecting there and the socket may be gone.
+     */
+    fun channelUp(state: BridgeState): Boolean = state.isConnected
+
+    /**
+     * Returns false when the permission is missing or the change did not stick. [channelUp] is channelUp() of the
+     * bridge at the tap: a live channel proves adb_enabled=1 when it reads 0 (R16), and nothing else (R20).
+     */
+    fun cut(context: Context, channelUp: Boolean = false): Boolean {
+        AccessDiag.log(context, "cut.before", channelUp)
+        return switch(context, channelUp).cut().also { AccessDiag.log(context, "cut.after ok=$it") }
+    }
+
+    /** The port check of confirm(); tests on a PC with an emulator on 5555 replace it. */
+    @VisibleForTesting internal var probe: () -> Boolean = CutConfirm::adbdListening
+
+    @VisibleForTesting internal var waitMs: Long = CutConfirm.WAIT_MS
+
+    /**
+     * After a cut() that said true (R22): DONE once the channel that was alive at the tap ([wasUp]) has fallen and
+     * nothing answers on 127.0.0.1:5555; STILL_CONNECTED after waitMs otherwise (the screen says to turn USB debugging
+     * off by hand). [channelUp] reads the bridge now. Runs on the IO dispatcher.
+     */
+    suspend fun confirm(context: Context, wasUp: Boolean, channelUp: () -> Boolean): CutCheck = withContext(Dispatchers.IO) {
+        CutConfirm.check(wasUp, channelUp, probe, waitMs).also { AccessDiag.log(context, "cut.check=$it") }
+    }
 
     /** Undoes cut(), with the values from before it. */
-    fun restore(context: Context): Boolean = switch(context).restore()
+    fun restore(context: Context): Boolean {
+        AccessDiag.log(context, "restore.before")
+        return switch(context).restore().also { AccessDiag.log(context, "restore.after ok=$it") }
+    }
 
-    fun isCut(resolver: ContentResolver): Boolean =
-        Settings.Global.getInt(resolver, Settings.Global.ADB_ENABLED, 1) == 0
+    /** Our cut, not contradicted by a readable setting (AccessSwitch.isCut). */
+    fun isCut(context: Context): Boolean = switch(context).isCut()
+
+    /** restore() will not guess (a record of both off): the person turns debugging on in Developer options. */
+    fun needsManualRestore(context: Context): Boolean = switch(context).needsManualRestore()
 
     /**
      * isCut, now and on every change of either setting (by ADBuddy, the
@@ -63,8 +95,9 @@ object CutAccess {
         val resolver = context.contentResolver
         val switch = switch(context)
         fun current(): Boolean {
+            AccessDiag.log(context, "observe")
             switch.forgetIfRestored()
-            return isCut(resolver)
+            return switch.isCut()
         }
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {

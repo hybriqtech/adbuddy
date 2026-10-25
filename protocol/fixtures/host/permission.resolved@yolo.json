@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "seq": 8,
+  "type": "permission.resolved",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "p_2",
+    "decision": "allow",
+    "by": "yolo",
+    "summary": "Run npm test"
+  }
+}

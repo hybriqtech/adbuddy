@@ -2,8 +2,6 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +14,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/claudecode"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/ipc"
+	"github.com/hybriqtech/adbuddy/host/internal/session"
 )
 
 // The Claude Code adapter (spec M4): hooks tell the daemon what the agent is
@@ -443,12 +442,6 @@ func (l *phoneLink) degrade(why i18n.Msg) {
 	l.publishState()
 }
 
-func newID(prefix string) string {
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return prefix + hex.EncodeToString(b[:])
-}
-
 // apply shows one event of the transcript.
 func (l *phoneLink) apply(e claudecode.Event) {
 	a := &l.adapter
@@ -460,7 +453,7 @@ func (l *phoneLink) apply(e claudecode.Event) {
 			if l.wasSent(e.Text) {
 				return
 			}
-			id := newID("t_")
+			id := session.NewID("t_")
 			if e.MessageID != "" {
 				id = "t_" + e.MessageID // the same on every read of the transcript (spec M4 §4.2)
 			}
@@ -536,7 +529,7 @@ func (l *phoneLink) afterStop(in claudecode.HookInput, delay time.Duration) {
 	a.mu.Unlock()
 	id := "last_" + in.PromptID
 	if !claudecode.ValidID(in.PromptID) {
-		id = newID("last_")
+		id = session.NewID("last_")
 	}
 	l.addMessage(bridge.ChatMessage{ID: id, Role: "assistant", Text: in.LastAssistantMessage, Conversation: l.currentConversation()})
 }

@@ -12,7 +12,11 @@ import (
 )
 
 func newEnvCmd(app *App) *cobra.Command {
-	env := &cobra.Command{Use: "env", Short: app.T("help.env.short")}
+	env := &cobra.Command{
+		Use:     "env",
+		Short:   app.T("help.env.short"),
+		Example: "  adbuddy env init\n  adbuddy env init --dir ~/ADBuddy/pixel",
+	}
 	var dir string
 	var force bool
 	initCmd := &cobra.Command{

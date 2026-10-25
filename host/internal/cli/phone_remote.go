@@ -363,10 +363,7 @@ func watchRemote(ctx context.Context, log io.Writer, ctl *remote.Controller, lin
 	}
 }
 
-// remoteOnNotice is what serve says at start when the remote mode is on, in English.
-func remoteOnNotice(s remote.State) string { return remoteOnNoticeIn(i18n.EN, s) }
-
-// remoteOnNoticeIn is remoteOnNotice in lang.
+// remoteOnNoticeIn is what serve says at start when the remote mode is on, in lang.
 func remoteOnNoticeIn(lang i18n.Lang, s remote.State) string {
 	if s.Closing {
 		return lang.T("remote.notice.closing")
@@ -374,10 +371,7 @@ func remoteOnNoticeIn(lang i18n.Lang, s remote.State) string {
 	return lang.T("remote.notice.on", s.ExpiresAt.Local().Format("15:04"))
 }
 
-// stillOnNotice is what serve says when it stops with the remote mode on, in English.
-func stillOnNotice(s remote.State) string { return stillOnNoticeIn(i18n.EN, s) }
-
-// stillOnNoticeIn is stillOnNotice in lang.
+// stillOnNoticeIn is what serve says when it stops with the remote mode on, in lang.
 func stillOnNoticeIn(lang i18n.Lang, s remote.State) string {
 	rest := lang.T("remote.notice.rest")
 	if s.Closing {

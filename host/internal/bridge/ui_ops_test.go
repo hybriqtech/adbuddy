@@ -186,6 +186,7 @@ func TestUILimits(t *testing.T) {
 		"maxSetText":          MaxSetText,
 		"maxProtectedApps":    MaxProtectedApps,
 		"maxPackage":          MaxPackage,
+		"maxHideNoticeMs":     MaxHideNoticeMs,
 	}
 	if c := readUIContract(t); !reflect.DeepEqual(got, c.Limits) {
 		t.Fatalf("constants %v, ui.json %v", got, c.Limits)

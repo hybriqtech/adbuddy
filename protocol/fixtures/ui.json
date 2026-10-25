@@ -4,17 +4,22 @@
     "click",
     "setText",
     "foreground",
-    "notifications"
+    "notifications",
+    "notice",
+    "hideNotice"
   ],
   "responses": {
     "ui.response": "click",
     "ui.response@clickgesture": "click",
     "ui.response@dump": "dump",
     "ui.response@dumplocked": "dump",
+    "ui.response@dumpunreadable": "dump",
     "ui.response@settext": "setText",
     "ui.response@foreground": "foreground",
     "ui.response@notifications": "notifications",
-    "ui.response@notificationsmany": "notifications"
+    "ui.response@notificationsmany": "notifications",
+    "ui.response@notice": "notice",
+    "ui.response@hidenotice": "hideNotice"
   },
   "errors": [
     "ui.response@error",
@@ -26,7 +31,8 @@
     "maxNotificationText": 1024,
     "maxSetText": 4096,
     "maxProtectedApps": 1000,
-    "maxPackage": 255
+    "maxPackage": 255,
+    "maxHideNoticeMs": 5000
   },
   "packages": {
     "valid": [

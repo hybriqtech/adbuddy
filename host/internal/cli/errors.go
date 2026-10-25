@@ -2,9 +2,14 @@ package cli
 
 import (
 	"errors"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // Exit codes. They are part of the CLI contract and are listed in `adbuddy --help`.
@@ -56,12 +61,12 @@ func NewErrorT(code, key, fixKey string, args ...any) *Error {
 	return errorT(ExitFailure, false, code, key, fixKey, args)
 }
 
-// TransientErrorT is TransientError with catalog keys (exit code 75).
+// TransientErrorT builds a failure that may resolve by retrying, with catalog keys (exit code 75).
 func TransientErrorT(code, key, fixKey string, args ...any) *Error {
 	return errorT(ExitTransient, true, code, key, fixKey, args)
 }
 
-// ConfigErrorT is ConfigError with catalog keys (exit code 78).
+// ConfigErrorT builds a configuration failure, with catalog keys (exit code 78).
 func ConfigErrorT(code, key, fixKey string, args ...any) *Error {
 	return errorT(ExitConfig, false, code, key, fixKey, args)
 }
@@ -110,16 +115,6 @@ func (e *Error) Error() string { return e.Code + ": " + e.Message }
 // NewError builds a domain failure (exit code 1).
 func NewError(code, message, fix string) *Error {
 	return &Error{Code: code, Message: message, Fix: fix, exit: ExitFailure}
-}
-
-// TransientError builds a failure that may resolve by retrying (exit code 75).
-func TransientError(code, message, fix string) *Error {
-	return &Error{Code: code, Message: message, Fix: fix, Transient: true, exit: ExitTransient}
-}
-
-// ConfigError builds a configuration failure (exit code 78).
-func ConfigError(code, message, fix string) *Error {
-	return &Error{Code: code, Message: message, Fix: fix, exit: ExitConfig}
 }
 
 // Interrupted is returned when the user stops a command with Ctrl+C.
@@ -193,4 +188,135 @@ func (e *Error) msgs() (message, fix i18n.Msg) {
 		fix = i18n.M(e.fixKey, e.fixArguments()...)
 	}
 	return message, fix
+}
+
+var (
+	unknownCommandRe = regexp.MustCompile(`(?s)^unknown command "(.*?)" for "([^"]*)"`)
+	argsExactRe      = regexp.MustCompile(`^accepts (\d+) arg\(s\), received (\d+)$`)
+	argsAtMostRe     = regexp.MustCompile(`^accepts at most (\d+) arg\(s\), received (\d+)$`)
+)
+
+// translateFlagError turns the typed errors of pflag into a usage error with
+// our own text, or nil when err is none of them.
+func translateFlagError(err error) *Error {
+	var notExist *pflag.NotExistError
+	var needsValue *pflag.ValueRequiredError
+	var badValue *pflag.InvalidValueError
+	var badSyntax *pflag.InvalidSyntaxError
+	switch {
+	case errors.As(err, &notExist):
+		name := "--" + notExist.GetSpecifiedName()
+		if notExist.GetSpecifiedShortnames() != "" {
+			name = "-" + notExist.GetSpecifiedName()[:1]
+		}
+		return UsageErrorT("err.usage.unknown_flag", name)
+	case errors.As(err, &needsValue):
+		name := "--" + needsValue.GetSpecifiedName()
+		if needsValue.GetSpecifiedShortnames() != "" {
+			name = "-" + needsValue.GetSpecifiedName()[:1]
+		}
+		return UsageErrorT("err.usage.flag_needs_value", name)
+	case errors.As(err, &badValue):
+		return UsageErrorT("err.usage.bad_value", badValue.GetValue(), "--"+badValue.GetFlag().Name)
+	case errors.As(err, &badSyntax):
+		return UsageErrorT("err.usage.bad_syntax", badSyntax.GetSpecifiedFlag())
+	}
+	return nil
+}
+
+// translateArgsError translates what cobra reports about commands and
+// arguments, which does not go through SetFlagErrorFunc. cmd is the command
+// that failed (its name is not in cobra's message for argument counts).
+// It returns nil for any other error.
+func translateArgsError(root, cmd *cobra.Command, err error) *Error {
+	msg := err.Error()
+	short := func(path string) string { return strings.TrimPrefix(path, root.CommandPath()+" ") }
+	if m := unknownCommandRe.FindStringSubmatch(msg); m != nil {
+		// cobra wrote the argument with %q; UsageErrorT quotes it again.
+		if u, err := strconv.Unquote(`"` + m[1] + `"`); err == nil {
+			m[1] = u
+		}
+		if m[2] == root.CommandPath() {
+			if s := suggestCommand(root, m[1]); s != "" {
+				return UsageErrorT("err.usage.unknown_command_suggest", m[1], s)
+			}
+			return UsageErrorT("err.usage.unknown_command", m[1])
+		}
+		return UsageErrorT("err.usage.no_args", short(m[2]), m[1])
+	}
+	name := root.Name()
+	if cmd != nil {
+		name = short(cmd.CommandPath())
+	}
+	if m := argsExactRe.FindStringSubmatch(msg); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		got, _ := strconv.Atoi(m[2])
+		if n == 1 {
+			return UsageErrorT("err.usage.args_exact.one", n, name, got)
+		}
+		return UsageErrorT("err.usage.args_exact.other", n, name, got)
+	}
+	if m := argsAtMostRe.FindStringSubmatch(msg); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		got, _ := strconv.Atoi(m[2])
+		if n == 1 {
+			return UsageErrorT("err.usage.args_at_most.one", n, name, got)
+		}
+		return UsageErrorT("err.usage.args_at_most.other", n, name, got)
+	}
+	return nil
+}
+
+// suggestCommand is the command of the root that name most likely meant, or "".
+// A prefix of two letters or more wins (the shortest, then the first
+// alphabetically); otherwise the closest by edit distance, at most 2.
+func suggestCommand(root *cobra.Command, name string) string {
+	name = strings.ToLower(name)
+	var names []string
+	for _, c := range root.Commands() {
+		if c.IsAvailableCommand() && c.Name() != "help" && c.Name() != "completion" {
+			names = append(names, strings.ToLower(c.Name()))
+		}
+	}
+	sort.Strings(names)
+	best := ""
+	if len([]rune(name)) >= 2 {
+		for _, n := range names {
+			if strings.HasPrefix(n, name) && (best == "" || len(n) < len(best)) {
+				best = n
+			}
+		}
+		if best != "" {
+			return best
+		}
+	}
+	bestDist := 3
+	for _, n := range names {
+		if d := editDistance(name, n); d < bestDist {
+			best, bestDist = n, d
+		}
+	}
+	return best
+}
+
+// editDistance is the Levenshtein distance between a and b.
+func editDistance(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur := make([]int, len(rb)+1)
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(rb)]
 }

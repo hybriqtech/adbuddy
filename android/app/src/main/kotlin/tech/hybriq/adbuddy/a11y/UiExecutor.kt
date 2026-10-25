@@ -16,6 +16,7 @@ import tech.hybriq.adbuddy.bridge.UiClickArgs
 import tech.hybriq.adbuddy.bridge.UiClicked
 import tech.hybriq.adbuddy.bridge.UiDumpArgs
 import tech.hybriq.adbuddy.bridge.UiForeground
+import tech.hybriq.adbuddy.bridge.UiHideNoticeArgs
 import tech.hybriq.adbuddy.bridge.UiLimits
 import tech.hybriq.adbuddy.bridge.UiNotifications
 import tech.hybriq.adbuddy.bridge.UiOp
@@ -50,6 +51,14 @@ interface Screen {
 
     /** The agent is acting: show the overlay, with a mark where it touches (null: no mark). false when the notice could not be shown: the agent must not act. */
     fun acting(mark: Box?): Boolean
+
+    /**
+     * The host is about to capture the screen by adb: take the overlay off the
+     * screen for ms at most and wait until it is gone from what is drawn. It
+     * comes back by itself (never while paused), or with the next acting().
+     * false when it could not be taken off.
+     */
+    fun hideNotice(ms: Long): Boolean
 }
 
 /**
@@ -71,6 +80,8 @@ class UiExecutor(
     private val executor: Executor,
     /** The active notifications from the listener, or why not (M5c): no access, or not confirmed by the user. */
     private val notifications: () -> NotificationRead = { NotificationRead.NoAccess },
+    /** YOLO is on: the app does not need to be able to draw its own notice to act or read (the host still sees pause and the guards). */
+    private val noticeOptional: () -> Boolean = { false },
 ) {
     private val seen = object : LinkedHashMap<String, Boolean>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?) = size > SEEN
@@ -137,11 +148,31 @@ class UiExecutor(
                 UiOp.CLICK -> click(r, s, args(r, UiClickArgs.serializer()) ?: return invalid(r))
                 UiOp.SET_TEXT -> setText(r, s, args(r, UiSetTextArgs.serializer()) ?: return invalid(r))
                 UiOp.FOREGROUND -> foreground(r, s)
+                UiOp.NOTICE -> if (args(r, Empty.serializer()) == null) invalid(r) else notice(r, s)
+                UiOp.HIDE_NOTICE -> hideNotice(r, s, args(r, UiHideNoticeArgs.serializer()) ?: return invalid(r))
                 else -> fail(r, ErrorCode.UNSUPPORTED, "This version of the ADBuddy app does not handle ${r.op.take(64)}.")
             }
         } catch (e: RuntimeException) {
             fail(r, ErrorCode.FAILED, "The app could not do it: ${e.javaClass.simpleName}.")
         }
+    }
+
+    /** The host is about to read the screen by adb (screencap, uiautomator): show the notice first. It reads nothing, so no heads-up check; the pause does count. */
+    private fun notice(r: UiRequest, s: Screen): UiResponse = when {
+        paused() -> pausedNow(r) // acting() is true without drawing while paused: the host must not read then
+        // Not acted(): the host, not the app, reads the screen after this. If the notice cannot be drawn the app says so (FAILED) and the host lifts it
+        // with its own YOLO state, telling the agent (`⚠ YOLO: …`). The other ops have no way to tell the host, so they use acted().
+        s.acting(null) -> ok(r, Empty, Empty.serializer())
+        else -> noNoticeToRead(r)
+    }
+
+    /** The host is about to capture the screen by adb: take the notice off the screen for the capture. It reads nothing, so no heads-up check; the pause does count. */
+    private fun hideNotice(r: UiRequest, s: Screen, a: UiHideNoticeArgs): UiResponse = when {
+        a.ms < 1 || a.ms > UiLimits.MAX_HIDE_NOTICE_MS -> invalid(r)
+        paused() -> pausedNow(r)
+        // The host, not the app, decides the pause for a capture: the app learns of a pause only from session.state, and the host re-checks it after hideNotice.
+        s.hideNotice(a.ms.toLong()) -> ok(r, Empty, Empty.serializer())
+        else -> fail(r, ErrorCode.FAILED, "ADBuddy could not take its notice off the screen for the capture.")
     }
 
     /**
@@ -181,7 +212,12 @@ class UiExecutor(
     private fun guardedOnScreen(windows: List<UiWindow>) =
         windows.any { (it.type == "app" || it.type == "dialog") && (it.pkg.isEmpty() || guarded(it.pkg)) }
 
+    /** Asks the screen to show the notice (it draws if it can); under YOLO a notice that could not be shown does not stop the operation. */
+    private fun acted(s: Screen, mark: Box?): Boolean = s.acting(mark) || noticeOptional()
+
     private fun noNotice(r: UiRequest) = fail(r, ErrorCode.FAILED, "ADBuddy can't show the on-screen notice, so it won't act. Ask the user to do this part.")
+
+    private fun noNoticeToRead(r: UiRequest) = fail(r, ErrorCode.FAILED, "ADBuddy can't show the on-screen notice, so it won't read the screen. Ask the user to do this part.")
 
     private fun pausedNow(r: UiRequest) = fail(r, ErrorCode.PROTECTED, "The agent is paused from the phone.")
 
@@ -191,7 +227,8 @@ class UiExecutor(
         // Locked: there is no active app window, so the "last app seen" would be stale.
         val (pkg, activity) = if (locked) "" to "" else s.foreground()
         if (!locked && guarded(pkg)) return protectedApp(r, pkg)
-        s.acting(null)
+        if (paused()) return pausedNow(r)
+        if (!acted(s, null)) return noNoticeToRead(r)
         val d = Dumper.dump(s.windows(), s.screen(), s.rotation(), pkg.takeUnless { it == Packages.ADBUDDY }.orEmpty(), activity, locked, a.all == true, ::guarded)
         // A heads-up may have appeared while the tree was read: drop what was read.
         if (notificationOnScreen()) return notificationBlocked(r)
@@ -210,7 +247,7 @@ class UiExecutor(
         if (a.x != null && a.y != null) {
             pointBlocked(r, windows, a.x, a.y)?.let { return it }
             lateBlock(r)?.let { return it }
-            if (!s.acting(Box(a.x, a.y, a.x + 1, a.y + 1))) return noNotice(r)
+            if (!acted(s, Box(a.x, a.y, a.x + 1, a.y + 1))) return noNotice(r)
             if (!s.tap(a.x, a.y)) return fail(r, ErrorCode.FAILED, "The tap did not happen.")
             return ok(r, UiClicked(true, listOf(a.x, a.y, a.x + 1, a.y + 1), "gesture"), UiClicked.serializer())
         }
@@ -226,7 +263,7 @@ class UiExecutor(
                 m.target.pkg == Packages.SYSTEM_UI && questionWaiting() -> fail(r, ErrorCode.PROTECTED, "A question of ADBuddy is waiting on the phone: the system UI cannot be touched now.")
                 else -> {
                     lateBlock(r)?.let { return it }
-                    if (!s.acting(m.bounds)) return noNotice(r)
+                    if (!acted(s, m.bounds)) return noNotice(r)
                     if (s.click(m.target)) {
                         ok(r, UiClicked(true, m.bounds.list(), "action"), UiClicked.serializer())
                     } else {
@@ -265,7 +302,7 @@ class UiExecutor(
         if (guarded(field.pkg)) return protectedApp(r, field.pkg)
         if (field.password) return fail(r, ErrorCode.PROTECTED, "ADBuddy does not type into password fields: ask the user to type it.")
         lateBlock(r)?.let { return it }
-        if (!s.acting(field.bounds)) return noNotice(r)
+        if (!acted(s, field.bounds)) return noNotice(r)
         if (!s.setText(field, a.text)) return fail(r, ErrorCode.FAILED, "The field did not take the text.")
         return ok(r, UiTextSet(true), UiTextSet.serializer())
     }

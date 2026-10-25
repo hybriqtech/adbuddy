@@ -66,6 +66,10 @@ const (
 	// KindHook carries a Claude Code hook (adbuddy hook <event>, M4): Argv is
 	// the event, stdin its payload, stdout the decision, if any.
 	KindHook = "hook"
+	// KindYolo turns the YOLO mode off or reads it (adbuddy yolo): Argv is
+	// "off" or "status". There is no "on": only the phone app turns it on.
+	// Anyone may ask, the agent included: off is always safe.
+	KindYolo = "yolo"
 )
 
 // Request is the first frame of every connection.
@@ -94,6 +98,13 @@ type Exit struct {
 	Code      int    `json:"code"`
 	ErrorCode string `json:"errorCode,omitempty"`
 	Error     string `json:"error,omitempty"`
+}
+
+// YoloStatus is the data answered to KindYolo.
+type YoloStatus struct {
+	Active  bool  `json:"active"`
+	Until   int64 `json:"until"` // epoch milliseconds; 0 when off or until the session ends
+	Session bool  `json:"session"`
 }
 
 // Ping is the data answered to KindPing.

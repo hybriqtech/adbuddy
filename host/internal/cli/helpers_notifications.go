@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -23,13 +22,9 @@ func newNotificationsCmd(app *App) *cobra.Command {
 		Example: "  adbuddy notifications\n  adbuddy notifications --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			data, err := callHelper(cmd, app, bridge.UIOpNotifications, bridge.Empty{}, false, app.Stderr)
+			n, err := callHelperInto[bridge.UINotifications](cmd, app, bridge.UIOpNotifications, bridge.Empty{}, false, app.Stderr)
 			if err != nil {
 				return err
-			}
-			var n bridge.UINotifications
-			if err := json.Unmarshal(data, &n); err != nil {
-				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if n.Notifications == nil {
 				n.Notifications = []bridge.UINotification{}

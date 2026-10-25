@@ -78,8 +78,8 @@ func TestExitCodes(t *testing.T) {
 	}{
 		{nil, 0},
 		{NewError("X", "m", ""), 1},
-		{TransientError("X", "m", ""), 75},
-		{ConfigError("X", "m", ""), 78},
+		{TransientErrorT("X", "error.cause", "", "m"), 75},
+		{ConfigErrorT("X", "error.cause", "", "m"), 78},
 		{UsageError("m"), 2},
 		{errors.New("boom"), 1},
 		{ExitWith(3), 3},

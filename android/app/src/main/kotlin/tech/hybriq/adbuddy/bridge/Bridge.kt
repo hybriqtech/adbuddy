@@ -217,7 +217,7 @@ class Bridge internal constructor(
             if (frameListeners.isEmpty()) return
             val chunk = Frame.decode(bytes.toByteArray()) ?: return
             synchronized(lock) {
-                if (webSocket !== socket || _state.value.connection != BridgeState.Connection.CONNECTED) return
+                if (webSocket !== socket || !_state.value.isConnected) return
             }
             frameListeners.forEach { l -> safely { l(chunk) } }
         }
@@ -255,7 +255,7 @@ class Bridge internal constructor(
      * Call it holding the lock.
      */
     private fun welcomedSocket(): WebSocket? =
-        if (_state.value.connection == BridgeState.Connection.CONNECTED) socket else null
+        if (_state.value.isConnected) socket else null
 
     /**
      * Sends the answer to a 🔴 question. Returns false when the host is not

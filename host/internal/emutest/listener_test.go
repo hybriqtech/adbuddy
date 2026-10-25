@@ -642,12 +642,16 @@ func TestTheListenerContent(t *testing.T) {
 	if tests, _, _, failed := parseInstrument(out); failed || tests != 1 {
 		t.Fatalf("%s did not pass (%d tests ran):\n%s", listenerContentTest, tests, out)
 	}
-	if list := e.shell(t, "cmd notification list"); strings.Contains(list, "|"+phoneapp.Package+"|74") {
-		t.Errorf("notifications of the test are still posted after it:\n%s", list)
+	list := func() string { return e.shell(t, "cmd notification list") }
+	if last, ok := notificationsGone(list, func(l string) bool { return !strings.Contains(l, "|"+phoneapp.Package+"|74") }); !ok {
+		t.Errorf("notifications of the test are still posted 30 s after it:\n%s", last)
 	}
+	// am force-stop returns before the notification service has cancelled the
+	// package's notifications: it does so when it handles the package-restart
+	// broadcast (see notificationsGone), so the fillers are waited for.
 	e.shell(t, "am force-stop com.android.shell")
-	if list := e.shell(t, "cmd notification list"); strings.Contains(list, "t6fill") {
-		t.Errorf("the host's fillers are still posted after force-stop of com.android.shell:\n%s", list)
+	if last, ok := notificationsGone(list, func(l string) bool { return !strings.Contains(l, "t6fill") }); !ok {
+		t.Errorf("the host's fillers are still posted 30 s after force-stop of com.android.shell:\n%s", last)
 	}
 }
 

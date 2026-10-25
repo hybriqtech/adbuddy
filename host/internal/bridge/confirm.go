@@ -38,9 +38,19 @@ type Confirmer struct {
 	// English if empty.
 	RTLNote string
 
+	// Lock order (YOLO, spec 2026-10-18): daemon.Yolo calls its observers under
+	// its notifyMu, and they call YoloStarted/YoloEnded (mu) and the daemon's
+	// withdrawal (askMu). So notifyMu comes before mu, and mu comes before
+	// the yolo.Active callback's own lock: nothing here is held while calling
+	// Enable, EnableSession or Off, which would take notifyMu the other way.
 	mu      sync.Mutex
 	pending map[string]*pendingReq
-	session map[string]bool // keys allowed for the rest of the session
+	session map[string]uint64 // keys allowed for the rest of the session -> number of the grant (seq)
+
+	seq        uint64      // grants so far, under mu
+	yoloActive func() bool // nil: YOLO is off; under mu
+	yoloOn     bool        // between YoloStarted and YoloEnded
+	yoloMark   uint64      // seq when the run of YOLO began: the grants above it die with it
 }
 
 type pendingReq struct {
@@ -54,7 +64,45 @@ type pendingReq struct {
 
 // NewConfirmer returns a Confirmer that asks on app, or fallback.
 func NewConfirmer(app Publisher, fallback confirm.Confirmer) *Confirmer {
-	return &Confirmer{App: app, Fallback: fallback, pending: map[string]*pendingReq{}, session: map[string]bool{}}
+	return &Confirmer{App: app, Fallback: fallback, pending: map[string]*pendingReq{}, session: map[string]uint64{}}
+}
+
+// SetYoloActive gives the Confirmer the question "is YOLO on?" (nil: it is
+// not). While it is on, an allow_session is only an allow: a tap injected on a
+// question that was waiting when YOLO began must not leave a permit that
+// outlives it. f is called with c.mu held, so it must not call back into c.
+func (c *Confirmer) SetYoloActive(f func() bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.yoloActive = f
+}
+
+// YoloStarted notes where YOLO began, so YoloEnded can drop what was granted
+// since. Called again while it is already on (the time was renewed) it keeps
+// the first mark: a renewal must not let the grants made in between stay.
+func (c *Confirmer) YoloStarted() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.yoloOn {
+		c.yoloOn, c.yoloMark = true, c.seq
+	}
+}
+
+// YoloEnded drops the session grants made since YOLO began, however it ended
+// (app, CLI, expiry, pause, end of session). What was granted before it began
+// stays. Called with no YOLO run open it does nothing.
+func (c *Confirmer) YoloEnded() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.yoloOn {
+		return
+	}
+	for k, n := range c.session {
+		if n > c.yoloMark {
+			delete(c.session, k)
+		}
+	}
+	c.yoloOn = false
 }
 
 // Confirm implements confirm.Confirmer.
@@ -78,7 +126,7 @@ func (c *Confirmer) Confirm(ctx context.Context, r confirm.Request) confirm.Deci
 	// the notification does not show whole (M1: whatever the app offers).
 	allowSession := r.Key != "" && !r.Special && !r.Stdin && units <= MaxSessionCommand
 	c.mu.Lock()
-	if allowSession && c.session[r.Key] {
+	if _, granted := c.session[r.Key]; allowSession && granted {
 		c.mu.Unlock()
 		return confirm.Allow
 	}
@@ -240,8 +288,14 @@ func (c *Confirmer) Reply(raw json.RawMessage) {
 		d = confirm.Allow
 	case rep.Decision == "allow_session":
 		d = confirm.Allow
-		if p.req.AllowSession && !c.session[p.key] {
-			c.session[p.key] = true
+		// While YOLO is on, nothing is kept: a question that was waiting when
+		// it began could be answered by a tap the agent injected, and the
+		// permit would outlive YOLO. Read under c.mu, so a grant is either
+		// refused here or numbered above YoloStarted's mark and dropped by
+		// YoloEnded: there is no gap between the state and the observers.
+		if _, had := c.session[p.key]; p.req.AllowSession && !had && !(c.yoloActive != nil && c.yoloActive()) {
+			c.seq++
+			c.session[p.key] = c.seq
 			p.granted = true
 		}
 	}

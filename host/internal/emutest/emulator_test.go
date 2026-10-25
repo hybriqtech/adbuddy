@@ -124,6 +124,22 @@ func (e *emu) shell(t *testing.T, command string) string {
 	return e.run(t, "shell", command)
 }
 
+// notificationsGone waits up to 30 s for list, a read of `cmd notification
+// list`, to stop showing what gone says it should not: a notification is
+// cancelled by the notification service on its own handler, after the call
+// that asked for it returned (am force-stop, or the app's cancel when its
+// instrumented test ends), so a single read right after can still see it
+// (measured: up to 1 s on the emulator, more on a loaded runner). It returns
+// the last listing and whether it came clean.
+func notificationsGone(list func() string, gone func(listing string) bool) (string, bool) {
+	var last string
+	ok := poll(30*time.Second, func() bool {
+		last = list()
+		return gone(last)
+	})
+	return last, ok
+}
+
 // state is the emulator's state in `adb devices` ("device", "offline"…), or
 // "gone" when its adb server does not list it.
 func (e *emu) state() string {

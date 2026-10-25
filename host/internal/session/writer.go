@@ -234,7 +234,7 @@ func (m *Manager) Paste(text string, guard func() string) error {
 	if pr == nil {
 		return ErrNoAgent
 	}
-	j := &writeJob{gen: pr.gen, paste: true, text: clean(text), guard: guard, done: make(chan error, 1)}
+	j := &writeJob{gen: pr.gen, paste: true, text: Clean(text), guard: guard, done: make(chan error, 1)}
 	if _, err := pr.enqueue(j); err != nil {
 		return err
 	}

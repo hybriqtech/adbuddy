@@ -15,7 +15,7 @@ func TestHelpGroupsRoot(t *testing.T) {
 		commands []string
 	}{
 		{map[i18n.Lang]string{i18n.EN: "Getting started:", i18n.ES: "Primeros pasos:"}, []string{"doctor", "serve", "setup"}},
-		{map[i18n.Lang]string{i18n.EN: "Day to day:", i18n.ES: "Día a día:"}, []string{"attach", "connect", "env", "journal", "new", "remote", "run", "stop", "undo", "version"}},
+		{map[i18n.Lang]string{i18n.EN: "Day to day:", i18n.ES: "Día a día:"}, []string{"attach", "connect", "env", "journal", "new", "remote", "run", "stop", "undo", "version", "yolo"}},
 		{map[i18n.Lang]string{i18n.EN: "For the agent:", i18n.ES: "Para el agente:"}, []string{"foreground", "notifications", "screen", "screenshot", "send", "tap", "type"}},
 	}
 	for _, lang := range []i18n.Lang{i18n.EN, i18n.ES} {
@@ -94,6 +94,36 @@ func TestHelpShortsFit(t *testing.T) {
 			}
 			if n := utf8.RuneCountInString(c.Short); n > 60 {
 				t.Errorf("[%s] %q: Short has %d characters (max 60): %q", lang, name, n, c.Short)
+			}
+		}
+	}
+}
+
+// H6: every command has an example, and each line of it runs a real command.
+func TestHelpExamples(t *testing.T) {
+	root := NewRoot(&App{Getenv: func(string) string { return "" }, Lang: i18n.EN})
+	for _, path := range helpPaths(root) {
+		if len(path) == 0 || path[0] == "help" || path[0] == "completion" {
+			continue
+		}
+		name := strings.Join(path, " ")
+		c, _, err := root.Find(path)
+		if err != nil || c == nil {
+			t.Fatalf("%v: %v", path, err)
+		}
+		if c.Example == "" {
+			t.Errorf("%q: no Example", name)
+			continue
+		}
+		for _, line := range strings.Split(c.Example, "\n") {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "adbuddy ") {
+				t.Errorf("%q: example line %q does not start with \"adbuddy \"", name, line)
+				continue
+			}
+			first := strings.Fields(strings.TrimPrefix(line, "adbuddy "))[0]
+			if found, _, err := root.Find([]string{first}); err != nil || found == nil || found == root {
+				t.Errorf("%q: example line %q: %q is not a command", name, line, first)
 			}
 		}
 	}

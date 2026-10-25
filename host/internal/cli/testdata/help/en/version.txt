@@ -3,6 +3,10 @@ Print the ADBuddy version
 Usage:
   adbuddy version [flags]
 
+Examples:
+  adbuddy version
+  adbuddy version --json
+
 Flags:
   -h, --help   help for version
 

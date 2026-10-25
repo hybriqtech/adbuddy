@@ -92,6 +92,8 @@ type Options struct {
 	// concurrently.
 	Protected func(pkg string) bool
 	Now       func() time.Time
+	// Yolo is the state of the YOLO mode. Nil: New creates one (off).
+	Yolo *Yolo
 }
 
 // Daemon handles IPC requests.
@@ -117,6 +119,9 @@ type Daemon struct {
 
 	// beforeRun, in tests, runs right before a command is admitted to adb.
 	beforeRun func(argv []string)
+
+	// beforeAsk, in tests, runs between the YOLO lift of a 🔴 and the registration of its question.
+	beforeAsk func()
 }
 
 // question is a 🔴 confirmation in progress.
@@ -124,6 +129,10 @@ type question struct {
 	title    string
 	withdraw context.CancelCauseFunc
 	shown    bool // asked on the phone or in the terminal; guarded by askMu
+	// own: asked through AskUser: serve's own questions (`adbuddy remote on`, the person's) and the 🔴 inverse of an undo
+	// (the agent's). liftQuestion keeps the doors closed for both while they wait: it fails closed, and a question
+	// of an undo asked before YOLO was turned on stays the person's to answer.
+	own bool
 }
 
 // blocks is why other commands are refused while q waits, in the shim's
@@ -137,6 +146,20 @@ func (q *question) blocks() string {
 
 // errWithdrawn is why a question is withdrawn when the agent is paused.
 var errWithdrawn = i18n.M("confirm.cause.paused").Err()
+
+// errWithdrawnYolo is why a question is withdrawn when YOLO is turned on.
+var errWithdrawnYolo = i18n.M("confirm.cause.yolo").Err()
+
+// YoloWithdrawnMessage is what the agent is told when the 🔴 question of its
+// command was withdrawn because YOLO was turned on while it waited. The command
+// did not run: whoever answered it with YOLO off is not who turned YOLO on.
+const YoloWithdrawnMessage = "the confirmation was withdrawn because YOLO was turned on: run it again"
+
+// YoloAppChannelMessage is what the agent is told when a command reaches the
+// ADBuddy app's own channel or private files while YOLO is on: YOLO does not
+// lift it, and it is not asked either (the answer would come from a mode that
+// was meant to skip the question).
+const YoloAppChannelMessage = "this touches the ADBuddy app's own channel or private files; not run under YOLO, and not asked (turn YOLO off from the phone to be asked)"
 
 // flight is a change admitted to adb.
 type flight struct{ title string }
@@ -258,11 +281,32 @@ func (d *Daemon) waitingFor() string {
 // Call it after the person pauses from the phone (once Paused reports true):
 // the command then ends blocked as paused at once, instead of when the
 // question expires.
-func (d *Daemon) CancelConfirmations() {
+func (d *Daemon) CancelConfirmations() { d.withdrawAsking(errWithdrawn) }
+
+// withdrawAsking withdraws the question waiting for an answer, if any, for
+// cause (the question's context is cancelled with it: the Confirmer takes the
+// card away and the command ends blocked for that cause).
+//
+// Lock order: Yolo.notifyMu comes first and this runs under it (as a YOLO
+// observer, yoloWithdraw), so it takes askMu and nothing else. Nothing holds
+// askMu while it calls Yolo.Enable, EnableSession or Off (which would take
+// notifyMu the other way): paused() is never called under askMu. Cancelling a
+// context takes no lock of ours.
+func (d *Daemon) withdrawAsking(cause error) {
 	d.askMu.Lock()
 	defer d.askMu.Unlock()
 	if d.asking != nil {
-		d.asking.withdraw(errWithdrawn)
+		d.asking.withdraw(cause)
+	}
+}
+
+// yoloWithdraw is a YOLO observer: turning YOLO on takes away the question
+// that was waiting for an answer. A tap injected on its card, after YOLO began,
+// must not approve it (nor leave a permit: bridge.Confirmer). It runs without
+// the Yolo's mu and never turns YOLO on or off.
+func (d *Daemon) yoloWithdraw(c YoloChange) {
+	if c.State.Active {
+		d.withdrawAsking(errWithdrawnYolo)
 	}
 }
 
@@ -274,6 +318,10 @@ var ErrAskBusy = errors.New("another question is open")
 // before the question or while it was asked: whatever the answer, it counts
 // for nothing.
 var ErrAskPaused = errors.New(PausedMessage)
+
+// ErrAskYolo is AskUser's error when YOLO was turned on while the question
+// waited: it was withdrawn, whatever the answer, and counts for nothing.
+var ErrAskYolo = errors.New(YoloWithdrawnMessage)
 
 // AskUser asks the user a question of serve's own (`adbuddy remote on`)
 // through the same door as a 🔴 one: while it waits for its answer, and
@@ -290,20 +338,23 @@ func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Du
 	}
 	qctx, withdraw := context.WithCancelCause(ctx)
 	defer withdraw(nil)
-	q := &question{title: r.Title, withdraw: withdraw}
+	q := &question{title: r.Title, withdraw: withdraw, own: true}
 	if busy := d.ask(q); busy != "" {
 		return confirm.Deny, fmt.Errorf("%w: %s", ErrAskBusy, busy)
 	}
 	// A pause that came before the question was registered did not
 	// withdraw it: look again now that it is.
-	if d.o.Paused() {
+	if d.paused() {
 		d.answered(q, false)
 		return confirm.Deny, ErrAskPaused
 	}
 	if err := d.waitChanges(qctx, q); err != nil {
 		d.answered(q, false)
-		if d.o.Paused() || withdrawnByPause(qctx) {
+		if d.paused() || withdrawnByPause(qctx) {
 			return confirm.Deny, ErrAskPaused
+		}
+		if withdrawnByYolo(qctx) {
+			return confirm.Deny, ErrAskYolo
 		}
 		return confirm.Deny, err
 	}
@@ -315,8 +366,11 @@ func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Du
 	// Nothing of serve's own runs as a change in flight: the caller acts
 	// after this returns.
 	d.answered(q, false)
-	if d.o.Paused() || withdrawnByPause(qctx) {
+	if d.paused() || withdrawnByPause(qctx) {
 		return confirm.Deny, ErrAskPaused
+	}
+	if withdrawnByYolo(qctx) {
+		return confirm.Deny, ErrAskYolo
 	}
 	return decision, nil
 }
@@ -325,6 +379,12 @@ func (d *Daemon) AskUser(ctx context.Context, r confirm.Request, timeout time.Du
 // (see CancelConfirmations).
 func withdrawnByPause(qctx context.Context) bool {
 	return errors.Is(context.Cause(qctx), errWithdrawn)
+}
+
+// withdrawnByYolo reports whether turning YOLO on withdrew the question of qctx
+// (see yoloWithdraw).
+func withdrawnByYolo(qctx context.Context) bool {
+	return errors.Is(context.Cause(qctx), errWithdrawnYolo)
 }
 
 // abandoned picks the journal's reason for a 🔴 that ends because its
@@ -357,11 +417,32 @@ func New(o Options) *Daemon {
 	if o.ConfirmTimeout <= 0 {
 		o.ConfirmTimeout = 2 * time.Minute
 	}
-	return &Daemon{o: o}
+	if o.Yolo == nil {
+		o.Yolo = NewYolo(o.Now, nil)
+	}
+	d := &Daemon{o: o}
+	o.Yolo.Subscribe(d.yoloEvent)
+	o.Yolo.Subscribe(d.yoloWithdraw)
+	return d
 }
 
 // lang is the language of what serve tells the person (Options.Lang).
 func (d *Daemon) lang() i18n.Lang { return i18n.Lang(d.o.Lang) }
+
+// Yolo is the state of the YOLO mode, for the parts of serve that turn it off
+// or tell the phone (the daemon is created after the phone link).
+func (d *Daemon) Yolo() *Yolo { return d.o.Yolo }
+
+// paused reports whether the person paused the agent from the phone (Options.Paused).
+// A pause also turns YOLO off, for good: resuming does not bring it back. It is
+// the only way the daemon asks about the pause.
+func (d *Daemon) paused() bool {
+	if !d.o.Paused() {
+		return false
+	}
+	d.o.Yolo.Off(YoloOffPause)
+	return true
+}
 
 // identity is the name the journal and undo know the phone by.
 func (d *Daemon) identity() string {
@@ -404,8 +485,10 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 		return d.undo(ctx, req, s)
 	case ipc.KindUI:
 		return d.ui(ctx, req, s)
+	case ipc.KindYolo:
+		return d.yoloCmd(req, s)
 	case ipc.KindPing:
-		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.currentSerial(), Identity: d.identity(), Journal: d.o.Journal.Dir(), Paused: d.o.Paused()})
+		_ = s.Data(ipc.Ping{Version: d.o.Version, Session: d.o.Session, Serial: d.currentSerial(), Identity: d.identity(), Journal: d.o.Journal.Dir(), Paused: d.paused()})
 		return ipc.Exit{}
 	}
 	return ipc.Exit{Code: 1, ErrorCode: "UNKNOWN_REQUEST", Error: "unknown request " + req.Kind}
@@ -413,10 +496,12 @@ func (d *Daemon) Handle(ctx context.Context, req ipc.Request, s Stream) ipc.Exit
 
 func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	now := d.o.Now().UTC()
-	e := journal.Entry{ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUser, Argv: req.Argv}
+	e := journal.Entry{ID: journal.NewID("j_", now), TS: now, Session: d.o.Session, Serial: d.identity(), Source: journal.SourceUser, Argv: req.Argv, Yolo: d.o.Yolo.Active()}
 	if req.Env["ADBUDDY_SOURCE"] == journal.SourceAgent {
 		e.Source = journal.SourceAgent
 	}
+	// What YOLO lets through is noted here and told to the agent right before adb runs.
+	ctx, notes := withYoloNotes(ctx)
 
 	// release ends this command's time in flight (see admit).
 	var release func()
@@ -427,23 +512,25 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}()
 	g, args := classify.SplitGlobal(req.Argv)
 	res := d.o.Classifier.Classify(args) // pure: nothing reaches adb yet
-	if d.o.Paused() {
+	if d.paused() {
 		p := e // say what was attempted, at its level
 		p.Level, p.Rule, p.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
 		return d.block(p, s, PausedMessage)
 	}
-	if t := d.waitingFor(); t != "" {
+	if t := d.waitingFor(); t != "" && !d.liftQuestion(ctx, t) {
 		p := e
 		p.Level, p.Rule, p.Description = res.Level.String(), res.Primary.Rule, res.Description(d.o.Lang)
 		return d.block(p, s, t)
 	}
-	if len(g.Forbidden) > 0 {
+	// Options that reach another adb server are never passed on (see classify.SplitGlobal): under YOLO the command runs through ADBuddy's own.
+	if len(g.Forbidden) > 0 && !d.lift(ctx, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed and was dropped: it ran through ADBuddy's own adb server") {
 		return d.block(e, s, "the adb option "+classify.Printable(g.Forbidden[0])+" is not allowed: ADBuddy only talks to the active phone through its own adb server")
 	}
 	// The phone may be named by this session's serial or by its identity;
-	// either way adb runs with -s Serial (the -s given is not passed on).
+	// either way adb runs with -s Serial (the -s given is not passed on). Under
+	// YOLO another phone named runs on the active one: the host's adb only reaches that.
 	for _, serial := range []string{g.Serial, req.Env["ANDROID_SERIAL"]} {
-		if serial != "" && !d.knownSerial(serial) {
+		if serial != "" && !d.knownSerial(serial) && !d.lift(ctx, "it named "+classify.Printable(serial)+", which is not the active phone ("+d.identity()+"): it ran on the active phone") {
 			return d.block(e, s, "only the active phone can be used ("+d.identity()+")")
 		}
 	}
@@ -460,7 +547,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 
 	if level >= classify.Yellow {
-		if err := d.o.Journal.Writable(); err != nil {
+		if err := d.o.Journal.Writable(); err != nil && !d.lift(ctx, noRecord) {
 			return d.block(e, s, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
@@ -468,7 +555,7 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if res.Op != nil {
 		d.changes.Lock()
 		defer d.changes.Unlock()
-		if d.o.Paused() { // paused while waiting for the lock
+		if d.paused() { // paused while waiting for the lock
 			return d.block(e, s, PausedMessage)
 		}
 		prep = precheck.Prepare(ctx, d.o.ADB, res.Op, level, precheck.Env{Cwd: req.Cwd, BackupDir: d.o.Journal.BackupDir(e.ID),
@@ -482,7 +569,17 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		e.Backups = prep.Backups
 	}
 
-	if level == classify.Red {
+	redWhy := "this asked for your confirmation (" + classify.Printable(e.Description) + ") and ran without it"
+	if !reason.Empty() {
+		redWhy += "; " + classify.Printable(reason.In(d.o.Lang))
+	}
+	// The app's own channel is never lifted: rewriting the handshake would point the app's link at a server of the
+	// agent's, and the phone's Pause and Off would stop reaching the host.
+	if level == classify.Red && res.AppChannel && d.o.Yolo.Active() {
+		return d.block(e, s, YoloAppChannelMessage)
+	}
+	redLifted := level == classify.Red && d.lift(ctx, redWhy)
+	if level == classify.Red && !redLifted {
 		detail := res.Detail(d.o.Lang)
 		if !reason.Empty() {
 			detail = strings.TrimSpace(detail + "\n" + classify.Printable(reason.In(d.o.Lang)))
@@ -502,12 +599,23 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		qctx, withdraw := context.WithCancelCause(ctx)
 		defer withdraw(nil)
 		q := &question{title: e.Description, withdraw: withdraw}
+		if d.beforeAsk != nil {
+			d.beforeAsk()
+		}
 		if busy := d.ask(q); busy != "" {
 			return d.block(e, s, busy)
 		}
+		// YOLO turned on after the lift looked, and before this question was
+		// registered: yoloWithdraw did not see it. Withdraw it here, like the
+		// pause below, or it would wait on the phone with YOLO on (and an
+		// allow_session could outlive YOLO). The command can be repeated.
+		if d.o.Yolo.Active() {
+			d.answered(q, false)
+			return d.block(e, s, YoloWithdrawnMessage)
+		}
 		// A pause that came before the question was registered did not
 		// withdraw it: look again now that it is.
-		if d.o.Paused() {
+		if d.paused() {
 			d.answered(q, false)
 			return d.block(e, s, PausedMessage)
 		}
@@ -516,8 +624,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		if err := d.waitChanges(qctx, q); err != nil {
 			d.answered(q, false)
 			// Withdrawn by a pause, even one already resumed.
-			if d.o.Paused() || withdrawnByPause(qctx) {
+			if d.paused() || withdrawnByPause(qctx) {
 				return d.block(e, s, PausedMessage)
+			}
+			if withdrawnByYolo(qctx) {
+				return d.block(e, s, YoloWithdrawnMessage)
 			}
 			code := ExitDenied
 			e.Status, e.Reason, e.ExitCode = journal.StatusDenied, abandoned(ctx, "abandoned by the agent before it was asked", "abandoned: ADBuddy stopped before asking"), &code
@@ -537,8 +648,11 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 		release = d.answered(q, decision == confirm.Allow)
 		// Paused while it was asked: whatever the answer (or none, if the
 		// pause withdrew it, even if it was resumed since), it ends blocked.
-		if d.o.Paused() || withdrawnByPause(qctx) {
+		if d.paused() || withdrawnByPause(qctx) {
 			return d.block(e, s, PausedMessage)
+		}
+		if withdrawnByYolo(qctx) {
+			return d.block(e, s, YoloWithdrawnMessage)
 		}
 		if decision != confirm.Allow {
 			e.Status, e.Reason = journal.StatusDenied, "denied by user"
@@ -575,15 +689,18 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	}
 	// Paused during the confirmation (an Allow may come after the pause) or
 	// the prechecks: refuse before any running record and before adb.
-	if d.o.Paused() {
+	if d.paused() {
 		return d.block(e, s, PausedMessage)
 	}
 	// Admitted to adb, unless a question started after this command got
 	// past the door. A 🔴 was admitted with its Allow.
-	if level != classify.Red {
+	if level != classify.Red || redLifted {
 		r, other := d.admit(e.Description, level >= classify.Yellow)
 		if other != "" {
-			return d.block(e, s, other)
+			if !d.liftQuestion(ctx, other) {
+				return d.block(e, s, other)
+			}
+			r = d.flyAnyway(level >= classify.Yellow, e.Description)
 		}
 		release = r
 	}
@@ -592,17 +709,25 @@ func (d *Daemon) exec(ctx context.Context, req ipc.Request, s Stream) ipc.Exit {
 	if why := d.guard(ctx, res, args); why != "" {
 		return d.refuse(ctx, e, s, why)
 	}
-	if d.o.Paused() { // paused while the guard looked
+	// The notice of the on-screen frame, before the last pause check (a pause
+	// that arrives meanwhile blocks) and after the guard (no notice for what it refuses).
+	if readsScreen(res) {
+		if why := d.showNotice(ctx); why != "" && !d.liftNotice(ctx, why) {
+			return d.refuse(ctx, e, s, why)
+		}
+	}
+	if d.paused() { // paused while the guard looked
 		return d.block(e, s, PausedMessage)
 	}
 	if level >= classify.Yellow {
 		running := e
 		running.Status = journal.StatusRunning
-		if err := d.o.Journal.Append(running); err != nil {
+		if err := d.o.Journal.Append(running); err != nil && !d.lift(ctx, noRecord) {
 			return d.block(e, s, "the journal cannot be written ("+err.Error()+"); without a journal no changes are allowed")
 		}
 	}
 
+	notes.tell(s.Stderr())
 	runArgs := append(append([]string{}, g.Pass...), args...)
 	code, err := d.o.ADB.Run(ctx, req.Cwd, runArgs, s.Stdin(), s.Stdout(), s.Stderr())
 	switch {

@@ -47,3 +47,39 @@ func isSafe(s string) bool {
 	}
 	return true
 }
+
+// Unquote reverses Quote: safe characters, or single-quoted parts joined by
+// \'. It accepts only the subset of shell words that Quote produces, plus
+// harmless variants (such as a safe word wrapped in quotes); anything else
+// (spaces outside quotes, $, ;…) is refused, as is the empty word. It works
+// byte by byte, so a multibyte character outside quotes is refused.
+func Unquote(tok string) (string, bool) {
+	if tok == "" {
+		return "", false
+	}
+	var b strings.Builder
+	for i := 0; i < len(tok); {
+		switch {
+		case tok[i] == '\'':
+			j := strings.IndexByte(tok[i+1:], '\'')
+			if j < 0 {
+				return "", false
+			}
+			b.WriteString(tok[i+1 : i+1+j])
+			i += j + 2
+		case strings.HasPrefix(tok[i:], `\'`):
+			b.WriteByte('\'')
+			i += 2
+		case safeByte(tok[i]):
+			b.WriteByte(tok[i])
+			i++
+		default:
+			return "", false
+		}
+	}
+	return b.String(), true
+}
+
+func safeByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("_@%+=:,./-", c) >= 0
+}

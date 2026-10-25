@@ -928,10 +928,9 @@ func (l *phoneLink) capture() (bridge.Attachment, string) {
 		root.Remove(final)
 		return bridge.Attachment{}, "Could not make an id."
 	}
-	sum := sha256.Sum256(img)
 	att := bridge.Attachment{
 		ID: bridge.FrameID(idb).String(), Name: "captura.png", MIME: "image/png", Size: int64(len(img)),
-		SHA256: hex.EncodeToString(sum[:]),
+		SHA256: phoneapp.DigestOf(img),
 	}
 	if inboxPlain(inbox) { // as for an upload: no thumbnail read through a link
 		att.Thumb = thumbnailOf(filepath.Join(inbox, final))

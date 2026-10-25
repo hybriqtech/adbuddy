@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -23,11 +25,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,7 +38,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,8 +51,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -85,9 +85,27 @@ import tech.hybriq.adbuddy.files.DraftStatus
 import tech.hybriq.adbuddy.term.QuickKey
 import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
+import tech.hybriq.adbuddy.ui.theme.BubbleShapes
 
-/** Header: the agent, what it is doing, the link; terminal toggle and the menu. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * The chat's bar: Material 3's TopAppBar has a fixed height and does not clip its title, so a title and a pill that wrap at
+ * large text stick out of it. This one is at least as tall as the standard bar and grows with its content; the status bar's
+ * inset goes on top as in TopAppBar. TOP_BAR_TAG marks it for the screen tests.
+ */
+@Composable
+private fun ChatHeaderBar(title: @Composable () -> Unit, actions: @Composable RowScope.() -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().testTag(TOP_BAR_TAG)) {
+        Row(
+            Modifier.windowInsetsPadding(TopAppBarDefaults.windowInsets).heightIn(min = AdbuddyTopBarSpec.NORMAL).padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f).padding(end = 4.dp)) { title() }
+            actions()
+        }
+    }
+}
+
+/** Header: the agent (and what it does, only on a live, unpaused link), the link's pill; the shield (always), terminal, menu. */
 @Composable
 fun ChatHeader(
     state: BridgeState,
@@ -95,46 +113,46 @@ fun ChatHeader(
     terminalShown: Boolean,
     onToggleTerminal: () -> Unit,
     onPause: (Boolean) -> Unit,
-    onToggleCut: () -> Unit,
+    onCut: () -> Unit,
+    onRestore: () -> Unit,
     onActivity: () -> Unit,
     onSettings: () -> Unit,
     onNewConversation: () -> Unit,
     configured: Boolean = true,
+    yoloOn: Boolean = false,
+    onYolo: () -> Unit = {},
 ) {
     var menu by remember { mutableStateOf(false) }
-    val label = SessionLabel.of(state)
     val status = LinkStatus.of(state, cut, configured)
-    val titleLine = with(LocalDensity.current) { MaterialTheme.typography.titleMedium.lineHeight.toDp() + MaterialTheme.typography.bodySmall.lineHeight.toDp() }
-    TopAppBar(
+    val agent = state.sessionState.agent.ifEmpty { stringResource(R.string.app_name) }
+    // The agent's state only on a live, unpaused link: never "Ready" beside a pause or a cut (bug 9).
+    val agentState = when (SessionLabel.of(state).takeIf { status == LinkStatus.CONNECTED }) {
+        SessionLabel.WORKING -> R.string.session_working
+        SessionLabel.WAITING -> R.string.session_waiting
+        SessionLabel.IDLE -> R.string.session_idle
+        SessionLabel.STOPPED -> R.string.session_stopped
+        else -> null
+    }
+    val title = if (agentState == null) agent else stringResource(R.string.title_agent_state, agent, stringResource(agentState))
+    ChatHeaderBar(
         title = {
-            Column {
-                Text(
-                    state.sessionState.agent.ifEmpty { stringResource(R.string.app_name) },
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    stringResource(
-                        when (label) {
-                            SessionLabel.WORKING -> R.string.session_working
-                            SessionLabel.WAITING -> R.string.session_waiting
-                            SessionLabel.IDLE -> R.string.session_idle
-                            SessionLabel.STOPPED -> R.string.session_stopped
-                            // Not connected: the short state; what to do about it is in the banner under the bar.
-                            SessionLabel.OFFLINE -> status.shortText
-                        },
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            // Wraps (title up to 3 lines, the pill freely) instead of cutting: at 200 % text the room beside three buttons is narrow.
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                StatusPill(status, state.hostName, remote = RemoteUi.treatAsRemote(state.remote))
             }
         },
-        modifier = Modifier.testTag(TOP_BAR_TAG),
-        expandedHeight = AdbuddyTopBarSpec.height(titleLine),
         actions = {
+            // Always here (spec §5): cutting is the real guarantee and never hides in a menu. Two actions, never a toggle.
+            val isCut = status == LinkStatus.CUT
+            // No covered-touch filter here: a cut forced by a covered tap is harmless; restoring goes through a dialog with its guard.
+            IconButton(onClick = if (isCut) onRestore else onCut) {
+                Icon(
+                    painterResource(if (isCut) R.drawable.ic_shield_off else R.drawable.ic_shield),
+                    contentDescription = stringResource(if (isCut) R.string.action_restore else R.string.action_cut),
+                    tint = if (isCut) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                )
+            }
             IconButton(onClick = onToggleTerminal) {
                 Icon(
                     if (terminalShown) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -148,21 +166,17 @@ fun ChatHeader(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     ObscuredTouchGuard()
                     PauseButton.of(state)?.let { button ->
-                        DropdownMenuItem(
-                            text = { Text(stringResource(button.text)) },
-                            onClick = { menu = false; onPause(button == PauseButton.PAUSE) },
-                        )
+                        DropdownMenuItem(text = { Text(stringResource(button.text)) }, onClick = { menu = false; onPause(button == PauseButton.PAUSE) })
                     }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(if (cut) R.string.action_restore else R.string.action_cut)) },
-                        onClick = { menu = false; onToggleCut() },
-                    )
+                    // Always, and it only cuts (cut() is idempotent): the safe way out never changes meaning.
+                    DropdownMenuItem(text = { Text(stringResource(R.string.action_cut)) }, onClick = { menu = false; onCut() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_activity)) }, onClick = { menu = false; onActivity() })
                     DropdownMenuItem(text = { Text(stringResource(R.string.menu_settings)) }, onClick = { menu = false; onSettings() })
                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.menu_new_conversation)) },
-                        onClick = { menu = false; onNewConversation() },
+                        text = { Text(stringResource(if (yoloOn) R.string.yolo_menu_off else R.string.yolo_menu_on)) },
+                        onClick = { menu = false; onYolo() },
                     )
+                    DropdownMenuItem(text = { Text(stringResource(R.string.menu_new_conversation)) }, onClick = { menu = false; onNewConversation() })
                 }
             }
         },
@@ -218,15 +232,15 @@ private fun Bubble(
     val container = when {
         failed -> MaterialTheme.colorScheme.errorContainer
         mine -> MaterialTheme.colorScheme.primaryContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
     }
     val content = when {
         failed -> MaterialTheme.colorScheme.onErrorContainer
         mine -> MaterialTheme.colorScheme.onPrimaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
-        Surface(color = container, contentColor = content, shape = MaterialTheme.shapes.large, modifier = modifier.widthIn(max = 340.dp)) {
+        Surface(color = container, contentColor = content, shape = if (mine) BubbleShapes.mine else BubbleShapes.agent, modifier = modifier.widthIn(max = 340.dp)) {
             Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (text.isNotEmpty()) if (markdown) MarkdownText(text, onLink) else LinkedText(text, onLink)
                 for (a in attachments) AttachmentCard(a, downloads[a.id]) { onAttachment(a) }
@@ -327,14 +341,18 @@ fun DraftChips(drafts: List<Draft>, onRemove: (String) -> Unit, onRetry: (String
                             .then(if (failed) Modifier.clickable(role = Role.Button, onClick = { onRetry(d.key) }) else Modifier)
                             .padding(vertical = 8.dp),
                     ) {
-                        Text(
-                            if (failed) d.error.ifEmpty { stringResource(R.string.draft_failed) } else d.name,
-                            style = MaterialTheme.typography.labelLarge, maxLines = if (failed) 4 else 1, overflow = TextOverflow.Ellipsis,
-                        )
+                        Text(d.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (failed) {
+                            Text(
+                                d.error.ifEmpty { stringResource(R.string.draft_failed) },
+                                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error,
+                                maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         if (d.status == DraftStatus.UPLOADING) {
                             // Size 0 is a file still being prepared (or a screenshot being taken): an unknown amount, not an empty one.
-                            if (d.size > 0) LinearProgressIndicator(progress = { (d.progress.toFloat() / d.size).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                            else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            if (d.size > 0) LinearProgressIndicator(progress = { (d.progress.toFloat() / d.size).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.surface)
+                            else LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.surface)
                         }
                     }
                     IconButton(onClick = { onRemove(d.key) }, modifier = Modifier.size(48.dp)) {
@@ -429,11 +447,10 @@ fun TerminalOfflineNotice(modifier: Modifier = Modifier) {
 /** "Open <domain>?": the domain in bold and the full URL under it, Open and Cancel. */
 @Composable
 fun LinkDialog(url: String, domain: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
+    GuardedAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.link_open_title, domain), fontWeight = FontWeight.Bold) },
         text = {
-            ObscuredTouchGuard()
             Text(url, style = MaterialTheme.typography.bodySmall, maxLines = 6, overflow = TextOverflow.Ellipsis)
         },
         confirmButton = { TextButton(onClick = onOpen) { Text(stringResource(R.string.link_open)) } },
@@ -449,7 +466,7 @@ private fun ChatHeaderPreview() {
     AdbuddyTheme(dynamic = false) {
         ChatHeader(
             BridgeState(connection = BridgeState.Connection.CONNECTED, hostName = "my-pc"), cut = false, terminalShown = true,
-            onToggleTerminal = {}, onPause = {}, onToggleCut = {}, onActivity = {}, onSettings = {}, onNewConversation = {},
+            onToggleTerminal = {}, onPause = {}, onCut = {}, onRestore = {}, onActivity = {}, onSettings = {}, onNewConversation = {},
         )
     }
 }

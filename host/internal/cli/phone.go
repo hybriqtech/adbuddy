@@ -16,6 +16,7 @@ import (
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
 	"github.com/hybriqtech/adbuddy/host/internal/config"
 	"github.com/hybriqtech/adbuddy/host/internal/confirm"
+	"github.com/hybriqtech/adbuddy/host/internal/daemon"
 	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 	"github.com/hybriqtech/adbuddy/host/internal/journal"
 	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
@@ -56,6 +57,8 @@ type phoneLink struct {
 	// remote keeps the Tailscale address the app reports (phone_remote.go);
 	// always set by startPhoneLink, with no server when the app is off.
 	remote *remoteLink
+	// yolo is the YOLO mode's state (phone_yolo.go); serve gives it with useYolo, under mu.
+	yolo *daemon.Yolo
 
 	mu       sync.Mutex
 	paused   bool
@@ -203,7 +206,7 @@ func startPhoneLink(ctx context.Context, app *App, e *env, store *cfgStore, ctl 
 	l.conf.StaleText = l.lang.T("notice.stale_reply")
 	l.conf.RTLNote = l.lang.T("confirm.rtl_escaped")
 	l.remote.setServer(l.srv)
-	l.setAreas(l.confirmArea(), l.chatArea(), l.agentArea(), l.uiArea(), l.remote.area())
+	l.setAreas(l.confirmArea(), l.chatArea(), l.agentArea(), l.uiArea(), l.remote.area(), l.yoloArea())
 	l.conf.Notify = func(title string, moved bool) {
 		if moved {
 			fmt.Fprintln(app.Stderr, app.T("phone.the_phone_app_disconnected_before", classify.Printable(title)))
@@ -469,6 +472,10 @@ func (l *phoneLink) onPauseMessage(m bridge.Message) {
 	l.mu.Unlock()
 	if pause {
 		fmt.Fprintln(l.log, l.lang.T("phone.paused_from_the_phone_every"))
+		// The pause stops YOLO for good (spec): off before the question is withdrawn.
+		if y := l.yoloOf(); y != nil {
+			y.Off(daemon.YoloOffPause)
+		}
 		// After Paused reports true: the command whose question is
 		// withdrawn then ends blocked as paused.
 		if withdraw != nil {
