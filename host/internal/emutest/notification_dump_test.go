@@ -334,8 +334,8 @@ func TestNotificationReadsAndTheCodes(t *testing.T) {
 	if tests, _, _, failed := parseInstrument(ended.out); failed || tests != 1 {
 		t.Fatalf("%s did not pass (%d tests ran):\n%s", tickerTest, tests, ended.out)
 	}
-	if strings.Contains(e.shell(t, "cmd notification list"), tickerKey) {
-		t.Errorf("the notification %s is still posted after the test", tickerKey)
+	if _, ok := notificationsGone(func() string { return e.shell(t, "cmd notification list") }, func(l string) bool { return !strings.Contains(l, tickerKey) }); !ok {
+		t.Errorf("the notification %s is still posted 30 s after the test", tickerKey)
 	}
 	// Canceled, no service was measured to keep a mark; whichever does must
 	// be 🔴 too.

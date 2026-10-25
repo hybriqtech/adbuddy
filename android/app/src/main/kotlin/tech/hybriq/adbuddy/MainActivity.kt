@@ -3,20 +3,21 @@ package tech.hybriq.adbuddy
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import tech.hybriq.adbuddy.bridge.BridgePrefs
 import tech.hybriq.adbuddy.bridge.BridgeService
 import tech.hybriq.adbuddy.ui.ConsentScreen
 import tech.hybriq.adbuddy.ui.Onboarding
 import tech.hybriq.adbuddy.ui.ChatRoot
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private var showConsent by mutableStateOf(false)
     private var focusConfirm by mutableStateOf<String?>(null)
 
@@ -41,7 +42,8 @@ class MainActivity : ComponentActivity() {
         // Bridge.start ignores the same link, so the connection is kept.
         if (prefs.link != null) BridgeService.start(this)
         setContent {
-            AdbuddyTheme {
+            val dynamic by app.dynamicColor.collectAsStateWithLifecycle()
+            AdbuddyTheme(dynamic = dynamic) {
                 if (showConsent) {
                     ConsentScreen(
                         host = prefs.consentHost,

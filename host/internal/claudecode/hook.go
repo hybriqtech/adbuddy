@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -31,12 +32,7 @@ var Events = []string{
 
 // IsEvent reports whether name is one of Events.
 func IsEvent(name string) bool {
-	for _, e := range Events {
-		if e == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Events, name)
 }
 
 // MaxHookInput bounds what a hook reads from stdin and the daemon accepts.

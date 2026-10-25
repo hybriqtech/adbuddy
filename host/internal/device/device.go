@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hybriqtech/adbuddy/host/internal/classify"
+	"github.com/hybriqtech/adbuddy/host/internal/safeio"
 )
 
 // ADB runs adb against the active phone (implemented by adb.Runner with Serial set).
@@ -195,23 +196,7 @@ func WriteJSON(dir string, p Profile) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".device-*.json")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(append(b, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), filepath.Join(dir, "device.json"))
+	return safeio.WriteFileAtomic(filepath.Join(dir, "device.json"), append(b, '\n'), safeio.AtomicOpts{Pattern: ".device-*.json", Perm: 0o600})
 }
 
 // TCP is adbd's TCP port as its properties read (spec §3.3, VB-41). Both

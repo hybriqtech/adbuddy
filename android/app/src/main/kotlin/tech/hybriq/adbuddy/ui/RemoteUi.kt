@@ -27,7 +27,7 @@ object RemoteUi {
      * so what the reducer kept is stale until the next remote.state or snapshot.
      */
     fun view(state: BridgeState, pending: Boolean, unknownSince: Boolean, now: Instant): RemoteView {
-        if (state.connection != BridgeState.Connection.CONNECTED) return RemoteView(Kind.DISCONNECTED, "", null, false)
+        if (!state.isConnected) return RemoteView(Kind.DISCONNECTED, "", null, false)
         if (pending) return RemoteView(Kind.PENDING, "", null, false)
         val remote = state.remote
         if (remote == null || unknownSince) return RemoteView(Kind.UNKNOWN, "", null, false)

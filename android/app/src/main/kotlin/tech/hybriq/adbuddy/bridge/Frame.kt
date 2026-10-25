@@ -22,7 +22,7 @@ object Frame {
         return ByteArray(ID_LEN) { i -> s.substring(2 * i, 2 * i + 2).toInt(16).toByte() }
     }
 
-    fun idString(id: ByteArray): String = id.joinToString("") { "%02x".format(it) }
+    fun idString(id: ByteArray): String = id.toHexString()
 
     /** The frame of data at offset in id, or null for a bad id, a negative offset or a size outside 1 B to 256 KiB. */
     fun encode(id: String, offset: Long, data: ByteArray): ByteArray? {

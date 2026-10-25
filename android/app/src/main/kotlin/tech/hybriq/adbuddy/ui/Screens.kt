@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import tech.hybriq.adbuddy.bridge.Inverse
 import tech.hybriq.adbuddy.ui.theme.AdbuddyPreviews
+import tech.hybriq.adbuddy.ui.theme.AdbuddyType
 import tech.hybriq.adbuddy.ui.theme.AdbuddyTheme
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,7 +40,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -169,7 +169,7 @@ fun ConfirmDialog(
     // The scroll state starts "can scroll forward" until the text is measured: Allow stays off until it is known there is no more to read.
     val scroll = key(r.id, r.detail, r.rawCommand) { rememberScrollState() }
     val unread = scroll.canScrollForward
-    AlertDialog(
+    GuardedAlertDialog(
         onDismissRequest = onClose,
         // Back closes it; a tap outside does not (the chat's notice reopens it, but a stray tap hides nothing).
         properties = DialogProperties(dismissOnClickOutside = false),
@@ -182,7 +182,6 @@ fun ConfirmDialog(
             }
         },
         text = {
-            ObscuredTouchGuard()
             Column {
                 Column(Modifier.weight(1f, fill = false).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (shown.warning) {
@@ -193,7 +192,11 @@ fun ConfirmDialog(
                     for (line in shown.detail) {
                         Text(line, style = MaterialTheme.typography.bodyMedium.copy(textDirection = TextDirection.Ltr))
                     }
-                    Text(shown.command, style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr))
+                    // The command is what will run: monospaced, on a block of its own, INSIDE the same watched scroll
+                    // (no scroll of its own: "read to the end" must cover it, spec §8.2).
+                    Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                        Text(shown.command, style = AdbuddyType.code.copy(textDirection = TextDirection.Ltr), modifier = Modifier.padding(12.dp))
+                    }
                     if (shown.hidden > 0) {
                         // H3: what is not shown cannot have been read: only Deny (ConfirmUi.decisions), and it says so.
                         Text(

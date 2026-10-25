@@ -17,8 +17,40 @@ var modelRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,63}$`)
 // ValidModel reports whether s is acceptable as a model name for the agent.
 func ValidModel(s string) bool { return modelRE.MatchString(s) }
 
-// ValidEffort reports whether s is one of Efforts.
-func ValidEffort(s string) bool { return slices.Contains(Efforts, s) }
+const (
+	// DefaultModel and DefaultEffort are what Claude Code gets when the
+	// person set nothing: a small, fast model to keep the agent's latency low.
+	DefaultModel  = "claude-haiku-5-5"
+	DefaultEffort = "low"
+	// Inherit as a model or effort means "pass nothing": the agent keeps
+	// what the person configured in it.
+	Inherit = "inherit"
+)
+
+// ValidEffort reports whether s is one of Efforts or Inherit.
+func ValidEffort(s string) bool { return s == Inherit || slices.Contains(Efforts, s) }
+
+// Effective is the model and effort to pass to the agent called name, given
+// what the person set (flag or config; "" = not set). Claude Code gets the
+// defaults for what is not set; Inherit becomes "" (nothing is passed). Other
+// agents get nothing unless a value was set, so Args can say it was not applied.
+func Effective(name, model, effort string) (string, string) {
+	if name == "claude" {
+		if model == "" {
+			model = DefaultModel
+		}
+		if effort == "" {
+			effort = DefaultEffort
+		}
+	}
+	if model == Inherit {
+		model = ""
+	}
+	if effort == Inherit {
+		effort = ""
+	}
+	return model, effort
+}
 
 // Args returns the command-line arguments that make agent use model and
 // effort, and the names of the settings that agent does not take (so serve can

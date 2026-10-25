@@ -1,13 +1,9 @@
 name: release-check
-# Trust rule: a pull request opened by anyone but the repository owner
-# (Dependabot, other bots, collaborators) never reaches a self-hosted runner;
-# it runs on GitHub-hosted runners whatever the CI_* variables say. See
-# docs/ci-self-hosted.md section 6.
+# All jobs run on GitHub-hosted runners (docs/ci-self-hosted.md).
 
 # Builds everything the release workflow builds, without publishing and
 # without secrets (spec M6a §9). pull_request only, never
-# pull_request_target. Runners come from repository variables
-# (docs/ci-self-hosted.md); with none set, ubuntu-latest is used.
+# pull_request_target.
 on:
   pull_request:
     paths:
@@ -50,9 +46,7 @@ env:
 # ANDROID_HOME (apksigner and zipalign are Linux scripts here).
 jobs:
   scripts:
-    # Fork pull requests never reach a self-hosted runner.
-    if: ${{ vars.CI_RUNNER_RELEASE != '"none"' && (vars.CI_RUNNER_RELEASE == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && vars.CI_RUNNER_RELEASE || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,9 +57,7 @@ jobs:
       - run: sh scripts/install_test.sh
 
   goreleaser:
-    # Fork pull requests never reach a self-hosted runner.
-    if: ${{ vars.CI_RUNNER_RELEASE != '"none"' && (vars.CI_RUNNER_RELEASE == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && vars.CI_RUNNER_RELEASE || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -75,14 +67,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: host/go.mod
-          cache: ${{ runner.environment == 'github-hosted' }}
+          cache: true
           cache-dependency-path: host/go.sum
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: "v2.18.2"
           args: check
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: "v2.18.2"
@@ -99,9 +91,7 @@ jobs:
           "$RUNNER_TEMP/bin/adbuddy" --version | grep -q '^adbuddy .*-snapshot'
 
   sign:
-    # Fork pull requests never reach a self-hosted runner.
-    if: ${{ vars.CI_RUNNER_SIGN != '"none"' && (vars.CI_RUNNER_SIGN == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && vars.CI_RUNNER_SIGN || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,7 +104,6 @@ jobs:
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           gradle-version: "9.8.0"
-          cache-disabled: ${{ runner.environment != 'github-hosted' }}
       - name: Install Android SDK platform and build-tools
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;$BUILD_TOOLS"
       - name: Build a release APK with a test version
@@ -135,7 +124,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: host/go.mod
-          cache: ${{ runner.environment == 'github-hosted' }}
+          cache: true
           cache-dependency-path: host/go.sum
       - name: The host reads the same certificate as apksigner
         run: APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" sh scripts/release-cert.sh "$RUNNER_TEMP/adbuddy.apk"

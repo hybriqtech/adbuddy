@@ -110,6 +110,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.service)
     implementation(libs.androidx.webkit)
+    // biometric 1.1.0 drags in fragment 1.2.5, which breaks activity-compose 1.13 launchers (requestCode > 16 bits) on a FragmentActivity.
+    implementation(libs.androidx.fragment)
+    implementation(libs.androidx.biometric)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.core)

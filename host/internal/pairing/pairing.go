@@ -240,17 +240,6 @@ func waitServices(ctx context.Context, a ADB, name, typ string, timeout, every t
 	return found, nil
 }
 
-// WaitService polls until a service with that name (or "name (N)", as mDNS
-// renames clashes) and type appears. It gives up with ErrTimeout after
-// timeout, even if adb hangs.
-func WaitService(ctx context.Context, a ADB, name, typ string, timeout, every time.Duration) (Service, error) {
-	ss, err := waitServices(ctx, a, name, typ, timeout, every)
-	if err != nil {
-		return Service{}, err
-	}
-	return ss[0], nil
-}
-
 // QR is a pairing QR code: the phone scans it in
 // Wireless debugging → Pair device with QR code.
 type QR struct {

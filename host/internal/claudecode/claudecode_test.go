@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hybriqtech/adbuddy/host/internal/i18n"
 )
 
 const rec = "testdata/cc-2.1.286/"
@@ -191,11 +193,11 @@ func TestToolSummary(t *testing.T) {
 		{"TodoWrite", `{"todos":[1]}`, "TodoWrite"},
 		{"Bash", `garbage`, ""},
 	} {
-		if got := ToolSummary(c.tool, j(c.in)); got != c.want {
+		if got := ToolSummaryIn(i18n.EN, c.tool, j(c.in)); got != c.want {
 			t.Errorf("%s %s: %q, want %q", c.tool, c.in, got, c.want)
 		}
 	}
-	long := ToolSummary("Bash", bash(strings.Repeat("é", 500)))
+	long := ToolSummaryIn(i18n.EN, "Bash", bash(strings.Repeat("é", 500)))
 	if r := []rune(long); len(r) != maxSummary || r[len(r)-1] != '…' {
 		t.Errorf("long summary: %d runes", len(r))
 	}

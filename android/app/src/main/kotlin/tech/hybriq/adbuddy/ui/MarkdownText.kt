@@ -46,25 +46,29 @@ import tech.hybriq.adbuddy.chat.Markdown
 @Composable
 fun MarkdownText(text: String, onLink: (String) -> Unit, modifier: Modifier = Modifier) {
     val blocks = remember(text) { Markdown.parse(text) }
-    val link = TextLinkStyles(SpanStyle(color = MaterialTheme.colorScheme.primary, textDecoration = TextDecoration.Underline))
+    val primary = MaterialTheme.colorScheme.primary
+    val link = remember(primary) { TextLinkStyles(SpanStyle(color = primary, textDecoration = TextDecoration.Underline)) }
     val codeBg = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+    // Built once per (blocks, onLink, styles): a new onLink rebuilds them, so a link never calls an old callback.
+    val texts = remember(blocks, onLink, link, codeBg) { blocks.map { b -> annotate(inlinesOf(b), onLink, link, codeBg) } }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (b in blocks) {
+        for ((n, b) in blocks.withIndex()) {
+            val t = texts[n]
             when (b) {
-                is Block.Paragraph -> Text(annotate(b.inlines, onLink, link, codeBg), style = MaterialTheme.typography.bodyLarge)
+                is Block.Paragraph -> Text(t, style = MaterialTheme.typography.bodyLarge)
                 is Block.Heading -> Text(
-                    annotate(b.inlines, onLink, link, codeBg),
+                    t,
                     style = if (b.level <= 1) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
                 is Block.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                     Box(Modifier.width(3.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outline))
                     Spacer(Modifier.width(8.dp))
-                    Text(annotate(b.inlines, onLink, link, codeBg), style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
+                    Text(t, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic)
                 }
                 is Block.Item -> Row(Modifier.padding(start = (b.indent * 16).dp)) {
                     Text(b.marker + " ", style = MaterialTheme.typography.bodyLarge)
-                    Text(annotate(b.inlines, onLink, link, codeBg), style = MaterialTheme.typography.bodyLarge)
+                    Text(t, style = MaterialTheme.typography.bodyLarge)
                 }
                 is Block.CodeBlock -> Surface(color = codeBg, shape = MaterialTheme.shapes.small) {
                     Text(
@@ -78,6 +82,15 @@ fun MarkdownText(text: String, onLink: (String) -> Unit, modifier: Modifier = Mo
             }
         }
     }
+}
+
+/** A code block has no inlines: it is drawn from its raw text. */
+private fun inlinesOf(b: Block): List<Inline> = when (b) {
+    is Block.Paragraph -> b.inlines
+    is Block.Heading -> b.inlines
+    is Block.Quote -> b.inlines
+    is Block.Item -> b.inlines
+    is Block.CodeBlock -> emptyList()
 }
 
 private fun annotate(inlines: List<Inline>, onLink: (String) -> Unit, link: TextLinkStyles, codeBg: Color): AnnotatedString = buildAnnotatedString {

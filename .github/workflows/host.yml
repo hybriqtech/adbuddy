@@ -1,20 +1,17 @@
 name: host
-# Trust rule: a pull request opened by anyone but the repository owner
-# (Dependabot, other bots, collaborators) never reaches a self-hosted runner;
-# it runs on GitHub-hosted runners whatever the CI_* variables say. See
-# docs/ci-self-hosted.md section 6.
-# Runners come from repository variables (docs/ci-self-hosted.md); with none
-# set, GitHub-hosted runners are used.
+# Every job runs on GitHub-hosted runners (docs/ci-self-hosted.md). A pull request
+# opened by anyone but the repository owner (Dependabot, other bots,
+# collaborators) gets only the ubuntu-latest entry of the matrix.
 
 # docs/superpowers/** (specs, plans, validation notes) is design material that no test reads
 # (the Pages test excludes it); a change that touches only it runs no CI. host.yml is not a
-# required check (no branch protection on a private free repository), so skipping is safe.
+# required check, so skipping is safe.
 on:
   pull_request:
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/**"]
   push:
     branches: [main]
-    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/host.yml", ".github/workflows/emulator-app.yml"]
+    paths: ["host/**", "protocol/**", "README.md", "README.es.md", "docs/**", "!docs/superpowers/**", ".github/workflows/**"]
 
 permissions:
   contents: read
@@ -29,54 +26,33 @@ concurrency:
 jobs:
   test:
     name: go test (${{ matrix.name }})
-    # With CI_HOST_MATRIX set, fork pull requests never reach a self-hosted runner.
-    if: ${{ vars.CI_HOST_MATRIX == '' || github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(!(github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && '[{"name":"ubuntu-latest","runner":"ubuntu-latest"}]' || vars.CI_HOST_MATRIX || '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":"windows-latest"},{"name":"macos-latest","runner":"macos-latest"}]') }}
+        include: ${{ fromJSON(!(github.event_name != 'pull_request' || github.event.pull_request.user.login == github.repository_owner) && '[{"name":"ubuntu-latest","runner":"ubuntu-latest"}]' || '[{"name":"ubuntu-latest","runner":"ubuntu-latest"},{"name":"windows-latest","runner":"windows-latest"},{"name":"macos-latest","runner":"macos-latest"}]') }}
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
         working-directory: host
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Cheap mitigation, not a barrier: the tests of a branch run as the PC's
-      # Windows user; with its own home, ssh, gh, git and agent configuration
-      # are not found by the usual paths. adb on Windows still loads the real
-      # %USERPROFILE%\.android\adbkey (measured), and a malicious process can
-      # read the real home by absolute path: the real barrier is a dedicated
-      # Windows account (docs/ci-self-hosted.md section 6). Not needed on the
-      # Linux runner (WSL2 cannot see Windows files).
-      - name: Give the job its own home (self-hosted runners)
-        if: runner.environment == 'self-hosted' && runner.os == 'Windows'
-        shell: bash
-        working-directory: .
-        run: |
-          home="$RUNNER_TEMP/job-home"
-          mkdir -p "$home/.android" "$home/AppData/Roaming" "$home/AppData/Local"
-          win="$(cygpath -w "$home")"
-          {
-            echo "HOME=$win"
-            echo "USERPROFILE=$win"
-            echo "ANDROID_USER_HOME=$win\\.android"
-            echo "APPDATA=$win\\AppData\\Roaming"
-            echo "LOCALAPPDATA=$win\\AppData\\Local"
-            echo "ADB_VENDOR_KEYS="
-          } >> "$GITHUB_ENV"
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: host/go.mod
-          cache: ${{ runner.environment == 'github-hosted' }}
+          cache: true
           cache-dependency-path: host/go.sum
       - name: gofmt
         if: runner.os == 'Linux'
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
-      - run: go test ./...
+      # Linux runs the suite once, with -race (same packages, no other flag); a second pass without it
+      # would only repeat the same tests. Windows and macOS keep the plain run (docs/hooks.md: -race is Linux only here).
+      - name: go test
+        if: runner.os != 'Linux'
+        run: go test ./...
       - name: go test -race
         if: runner.os == 'Linux'
         run: go test -race ./...

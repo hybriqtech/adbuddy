@@ -66,7 +66,8 @@ type Entry struct {
 	UndoneBy    *string   `json:"undoneBy"`
 	Undoes      string    `json:"undoes,omitempty"`
 	Reason      string    `json:"reason,omitempty"`
-	MAC         string    `json:"mac,omitempty"` // HMAC-SHA256 of the record, with the installation key
+	Yolo        bool      `json:"yolo,omitempty"` // YOLO mode was on when it started
+	MAC         string    `json:"mac,omitempty"`  // HMAC-SHA256 of the record, with the installation key
 
 	// Tampered is set by Load when a signing store finds a record whose MAC
 	// does not match: someone else wrote it, so undo must not trust it.

@@ -20,3 +20,7 @@ func TestAgentEndedInTheLanguageOfThePC(t *testing.T) {
 		t.Fatalf("es: %q", got)
 	}
 }
+
+// AgentEnded is what an attached terminal shows when the agent's process
+// ends; it stays attached.
+const AgentEnded = "\r\n[ADBuddy] The agent ended. Start it again with adbuddy new, or detach with Ctrl+].\r\n"

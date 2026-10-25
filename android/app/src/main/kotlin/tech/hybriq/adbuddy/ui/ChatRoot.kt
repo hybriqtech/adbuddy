@@ -3,6 +3,8 @@ package tech.hybriq.adbuddy.ui
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.Manifest
+import android.app.Activity
+import android.app.KeyguardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,6 +15,12 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
@@ -26,14 +34,18 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.fragment.app.FragmentActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.bridge.Attachment
@@ -43,12 +55,16 @@ import tech.hybriq.adbuddy.bridge.Protocol
 import tech.hybriq.adbuddy.chat.Composer
 import tech.hybriq.adbuddy.confirm.ConfirmUi
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutCheck
 import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.DownloadState
 import tech.hybriq.adbuddy.files.FileIntents
 import tech.hybriq.adbuddy.notify.NotificationPermission
 import tech.hybriq.adbuddy.notify.NotificationsStatus
 import tech.hybriq.adbuddy.notify.openNotificationSettings
+import tech.hybriq.adbuddy.yolo.YoloAuth
+import tech.hybriq.adbuddy.yolo.YoloBiometric
+import tech.hybriq.adbuddy.yolo.YoloUi
 
 /**
  * The app's screens: the first-run steps until they are done (only when firstRun: the chat bubble passes
@@ -56,7 +72,7 @@ import tech.hybriq.adbuddy.notify.openNotificationSettings
  * the notification access under it), and the red questions over all of them.
  */
 @Composable
-fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = true, askForNotifications: Boolean = true, onReopen: (String) -> Unit = {}, onClose: (String) -> Unit) {
+fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstRun: Boolean = true, terminalOpenByDefault: Boolean = false, askForNotifications: Boolean = true, onReopen: (String) -> Unit = {}, onClose: (String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val state by app.bridge.state.collectAsStateWithLifecycle()
@@ -65,16 +81,73 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val downloads by app.downloads.states.collectAsStateWithLifecycle()
     // Follows both settings, whoever changes them (this screen, the Settings app, adb).
     val cut by remember(context) { CutAccess.observe(context) }
-        .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context.contentResolver))
+        .collectAsStateWithLifecycle(initialValue = CutAccess.isCut(context))
     val snackbar = remember { SnackbarHostState() }
     val onboarding = remember(context) { Onboarding.of(context) }
     var step by rememberSaveable { mutableStateOf<OnboardingStep?>(OnboardingStep.initial(firstRun, onboarding.done())) }
     var route by rememberSaveable { mutableStateOf(Route.CHAT) }
+    var yoloAsk by rememberSaveable { mutableStateOf(false) }
+    var noLockAsk by remember { mutableStateOf(false) } // the no-screen-lock warning (not saved: a recreated activity forgets the choice anyway)
+    val yoloFailed = stringResource(R.string.yolo_failed)
+    val yoloOffFailed = stringResource(R.string.yolo_off_failed)
+    // Every change of YOLO goes by yolo.set; the answer is the host's yolo.state, which BridgeState already takes.
+    // A refusal is a Toast, not the chat's snackbar: the switch is also reached from Settings and from the band.
+    fun sendYolo(payload: JsonElement, failed: String) {
+        val tell = { scope.launch { Toast.makeText(context, failed, Toast.LENGTH_LONG).show() } }
+        val sent = app.bridge.request(Protocol.YOLO_SET, payload) { reply ->
+            if (reply == null || reply.type == Protocol.ERROR) tell()
+        }
+        if (sent == null) tell()
+    }
+    val yoloActive by rememberUpdatedState(state.yolo?.active == true)
+    val keyguard = remember(context) { context.getSystemService(KeyguardManager::class.java) }
+    // BiometricPrompt needs a FragmentActivity (MainActivity and ChatBubbleActivity are, see task A2, step 5b).
+    val activity = context as? FragmentActivity
+    // The YoloAuth lives across recompositions (it holds the choice while the system's screen is up), so what it
+    // calls is read through rememberUpdatedState: the texts (a change of language) and sendYolo are not frozen at
+    // the first composition. If the activity is recreated while that screen is up the choice is lost and nothing is
+    // sent (it fails safe: the person turns it on again).
+    val credentialTitle by rememberUpdatedState(stringResource(R.string.yolo_auth_title))
+    val credentialBody by rememberUpdatedState(stringResource(R.string.yolo_auth_body))
+    val biometricSubtitle by rememberUpdatedState(stringResource(R.string.yolo_bio_subtitle))
+    val cancelText by rememberUpdatedState(stringResource(R.string.action_cancel))
+    val sendChoice by rememberUpdatedState<(YoloUi.Choice) -> Unit> { choice -> sendYolo(YoloUi.request(choice), yoloFailed) }
+    val yoloAuth = remember(keyguard, activity) {
+        YoloAuth(
+            strongBiometric = { activity != null && YoloBiometric.strongAvailable(activity) },
+            credentialIntent = { keyguard.createConfirmDeviceCredentialIntent(credentialTitle, credentialBody) },
+            send = { choice -> sendChoice(choice) },
+            noLock = { noLockAsk = true }, // the warning of a phone with no secure lock (R20); its answer goes to yoloAuth.onResult
+        )
+    }
+    val credential = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        yoloAuth.onResult(result.resultCode == Activity.RESULT_OK)
+    }
+    // The dialog's OK starts this: the biometric prompt if the phone has strong biometrics, else the credential screen.
+    val authenticate: (YoloUi.Choice) -> Unit = { choice ->
+        yoloAuth.start(
+            choice,
+            promptBiometric = { YoloBiometric.prompt(activity!!, credentialTitle, biometricSubtitle, cancelText, yoloAuth::onResult) },
+            launchCredential = { intent -> credential.launch(intent) },
+        )
+    }
+    val yoloUnknown = stringResource(R.string.yolo_unknown)
+    // An unknown state (the PC has not said) opens no dialog whose button could never be enabled: a Toast says why.
+    val yoloKnown by rememberUpdatedState(state.yolo != null)
+    val openYolo = {
+        when {
+            yoloActive -> sendYolo(YoloUi.offRequest(), yoloOffFailed)
+            !yoloKnown -> Toast.makeText(context, yoloUnknown, Toast.LENGTH_LONG).show()
+            else -> yoloAsk = true
+        }
+    }
     val attachFailed = stringResource(R.string.attach_failed)
     val cutFailed = stringResource(R.string.cut_failed)
     val restoreFailed = stringResource(R.string.restore_failed)
     val cutRestored = stringResource(R.string.cut_restored)
     val cutDone = stringResource(R.string.cut_done)
+    val restoreManual = stringResource(R.string.restore_manual)
+    val cutStillConnected = stringResource(R.string.cut_still_connected)
     val developerOptions = stringResource(R.string.action_developer_options)
 
     // What the host says (notice) and what it refuses (chat, uploads), as the host wrote it.
@@ -100,6 +173,38 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
         }
     }
 
+    fun noticeFor(ok: Boolean, restoring: Boolean, stillConnected: Boolean): String = when {
+        stillConnected -> cutStillConnected
+        !ok && restoring && CutAccess.needsManualRestore(context) -> restoreManual
+        !ok && restoring -> restoreFailed
+        !ok -> cutFailed
+        restoring -> cutRestored
+        else -> cutDone
+    }
+
+    // Suspends until the notice is closed. Without the permission (or if the change did not stick), the person does it by hand.
+    suspend fun show(message: String, withWayOut: Boolean) {
+        val r = snackbar.notify(message, actionLabel = if (withWayOut) developerOptions else null)
+        if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
+    }
+
+    fun report(ok: Boolean, restoring: Boolean) {
+        scope.launch { show(noticeFor(ok, restoring, stillConnected = false), withWayOut = !ok) }
+    }
+
+    // The result of the check after a cut (R22) lives in the app, so it reaches the screen even if it was recreated meanwhile.
+    // It is consumed only once shown: if the screen is recreated with the notice up, this effect is cancelled before
+    // cutCheckShown() and the next ChatRoot shows it again.
+    LaunchedEffect(app) {
+        // collectLatest: giving access back (null) closes an old notice that is up, and a new result replaces it. The initial null shows nothing.
+        app.cutCheck.collectLatest { r ->
+            if (r == null) return@collectLatest
+            val stillConnected = r == CutCheck.STILL_CONNECTED
+            show(noticeFor(ok = true, restoring = false, stillConnected = stillConnected), withWayOut = stillConnected)
+            app.cutCheckShown()
+        }
+    }
+
     val actions = remember(app) {
         ChatActions(
             send = { text ->
@@ -117,22 +222,21 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             retryDraft = app.drafts::retry,
             attachment = { a -> onAttachment(context, app, a) },
             pause = app.bridge::pause,
-            toggleCut = {
-                val wasCut = CutAccess.isCut(context.contentResolver)
-                val ok = if (wasCut) CutAccess.restore(context) else CutAccess.cut(context)
-                val message = when {
-                    !ok && wasCut -> restoreFailed
-                    !ok -> cutFailed
-                    wasCut -> cutRestored
-                    else -> cutDone
-                }
-                scope.launch {
-                    // Without the permission (or if the change did not stick), the person does it by hand.
-                    val r = snackbar.notify(message, actionLabel = if (ok) null else developerOptions)
-                    if (r == SnackbarResult.ActionPerformed) openDeveloperOptions(context)
+            cut = {
+                val up = CutAccess.channelUp(app.bridge.state.value)
+                if (!CutAccess.cut(context, up)) {
+                    report(ok = false, restoring = false)
+                } else {
+                    // R22: the app (not this screen) checks that the channel and port 5555 went quiet, so turning the phone does not lose the notice.
+                    app.confirmCut(up)
                 }
             },
+            restore = {
+                app.cutCheckShown() // an old result of a cut must not appear after giving access back
+                report(ok = CutAccess.restore(context), restoring = true)
+            },
             openActivity = { route = Route.ACTIVITY },
+            openYolo = openYolo,
             openSettings = { route = Route.SETTINGS },
             newConversation = app.chat::newConversation,
             interrupt = { app.bridge.send(Protocol.AGENT_INTERRUPT, Protocol.json.encodeToJsonElement(Empty.serializer(), Empty)) },
@@ -158,37 +262,47 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
     val waiting = ConfirmUi.closedWaiting(state, closed, now).size
     val back = { route = route.parent ?: Route.CHAT }
     val first = step
-    if (first != null) {
-        val finish = { onboarding.finish(); step = null }
-        when (first) {
-            OnboardingStep.PROTECTED_APPS ->
-                ProtectedAppsScreen(app, first, onBack = { step = first.previous() }, onDone = { step = first.next() }, onSkip = { step = first.next() })
-            OnboardingStep.NOTIFICATION_ACCESS ->
-                NotificationAccessScreen(first, onBack = { step = first.previous() }, onDone = finish, onSkip = finish)
-        }
-    } else {
-        when (route) {
-            // The chat leaves the composition under Settings and Activity: its state (the text being written,
-            // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
-            Route.CHAT -> holder.SaveableStateProvider("chat") {
-                ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured, terminalOpenByDefault = terminalOpenByDefault,
-                    notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) },
-                    pendingQuestions = waiting,
-                    // The clock of the tap, not of the composition: a question that has just expired is not reopened.
-                    onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } }) {
-                    RemoteCard(state, app.bridge, app.clock, onMessage = { text -> scope.launch { snackbar.notify(text) } })
+    // Cheap and without the clock: the countdown ticks inside the band, not here (UNKNOWN and OFF both read false).
+    val yoloOn = state.yolo?.active == true
+    Column(Modifier.fillMaxSize()) {
+        // On every screen, the first-run steps included: the mode is never out of sight.
+        YoloBand(state, app.clock, onOff = { sendYolo(YoloUi.offRequest(), yoloOffFailed) })
+        // The band took the status bar: the screens below do not leave room for it again.
+        Box(Modifier.weight(1f).then(if (yoloOn) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier)) {
+            if (first != null) {
+                val finish = { onboarding.finish(); step = null }
+                when (first) {
+                    OnboardingStep.PROTECTED_APPS ->
+                        ProtectedAppsScreen(app, first, onBack = { step = first.previous() }, onDone = { step = first.next() }, onSkip = { step = first.next() })
+                    OnboardingStep.NOTIFICATION_ACCESS ->
+                        NotificationAccessScreen(first, onBack = { step = first.previous() }, onDone = finish, onSkip = finish)
+                }
+            } else {
+                when (route) {
+                    // The chat leaves the composition under Settings and Activity: its state (the text being written,
+                    // the terminal, the scroll) is kept aside and given back. Attachments and the session live in app.drafts/app.chat.
+                    Route.CHAT -> holder.SaveableStateProvider("chat") {
+                        ChatScreen(state, outgoing, drafts, downloads, cut, app.terminal, snackbar, actions, app.chat, app.clock::now, configured = configured, terminalOpenByDefault = terminalOpenByDefault,
+                            notificationsBlocked = notifications.blocked, onOpenNotificationSettings = { openNotificationSettings(context) },
+                            pendingQuestions = waiting,
+                            // The clock of the tap, not of the composition: a question that has just expired is not reopened.
+                            onShowQuestions = { ConfirmUi.closedWaiting(state, closed, app.clock.now()).forEach { onReopen(it.id) } })
+                    }
+                    Route.ACTIVITY -> {
+                        BackHandler(onBack = back)
+                        ActivityScreen(state, onBack = back)
+                    }
+                    Route.SETTINGS -> {
+                        BackHandler(onBack = back)
+                        SettingsScreen(
+                            app, state, onOpen = { route = it }, onBack = back, onMessage = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() },
+                            onYolo = { on -> if (on) yoloAsk = true else sendYolo(YoloUi.offRequest(), yoloOffFailed) },
+                        )
+                    }
+                    Route.PROTECTED_APPS -> ProtectedAppsScreen(app, null, onBack = back, onDone = back, onSkip = back)
+                    Route.NOTIFICATION_ACCESS -> NotificationAccessScreen(null, onBack = back, onDone = back, onSkip = back)
                 }
             }
-            Route.ACTIVITY -> {
-                BackHandler(onBack = back)
-                ActivityScreen(state, onBack = back)
-            }
-            Route.SETTINGS -> {
-                BackHandler(onBack = back)
-                SettingsScreen(app, state, onOpen = { route = it }, onBack = back, onMessage = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() })
-            }
-            Route.PROTECTED_APPS -> ProtectedAppsScreen(app, null, onBack = back, onDone = back, onSkip = back)
-            Route.NOTIFICATION_ACCESS -> NotificationAccessScreen(null, onBack = back, onDone = back, onSkip = back)
         }
     }
     val prefs = remember(context) { BridgePrefs(context) }
@@ -203,7 +317,24 @@ fun ChatRoot(app: AdbuddyApp, focusConfirm: String?, closed: Set<String>, firstR
             onSkip = { prefs.notificationsAsked = true; asked = true },
         )
     }
-    // After both screens, so a question shows wherever the person is.
+    if (yoloAsk) {
+        YoloActivationDialog(
+            // An unknown YOLO state (the PC has not said) is not a known off: nothing is turned on over it.
+            connected = state.isConnected && state.yolo != null,
+            // A reading that fails counts as locked.
+            isLocked = { try { keyguard.isDeviceLocked } catch (e: RuntimeException) { true } },
+            // The dialog is not the last step: the phone's own lock is (YoloAuth), and only its OK sends yolo.set.
+            onConfirm = { choice -> yoloAsk = false; authenticate(choice) },
+            onDismiss = { yoloAsk = false },
+        )
+    }
+    if (noLockAsk) {
+        YoloNoLockDialog(
+            onConfirm = { noLockAsk = false; yoloAuth.onResult(true) },
+            onDismiss = { noLockAsk = false; yoloAuth.onResult(false) },
+        )
+    }
+    // After both screens (and under the YOLO dialogs, which are not questions), so a question shows wherever the person is.
     ConfirmHost(state, app.bridge, app.clock, focusConfirm, closed, onClose)
 }
 

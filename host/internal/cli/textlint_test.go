@@ -21,7 +21,7 @@ import (
 //
 //	cobra   the Short or Long of a cobra.Command
 //	flag    the help of a flag
-//	error   the message or the fix of NewError, ConfigError, TransientError, UsageError
+//	error   the message or the fix of NewError, UsageError
 //	print   the text of fmt.Fprint, Fprintf or Fprintln, and of the say and warn helpers of setup
 //	check   the Detail or Guidance of a doctor check
 //
@@ -121,7 +121,7 @@ func lintFile(fset *token.FileSet, name string, f *ast.File) []lintHit {
 				fname, recv = fn.Sel.Name, fn.X
 			}
 			switch {
-			case fname == "NewError" || fname == "ConfigError" || fname == "TransientError":
+			case fname == "NewError":
 				if len(v.Args) == 3 && (hasText(v.Args[1]) || hasText(v.Args[2])) {
 					add("error", v.Pos())
 				}

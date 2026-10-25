@@ -27,12 +27,15 @@ import kotlinx.coroutines.launch
 import tech.hybriq.adbuddy.AdbuddyApp
 import tech.hybriq.adbuddy.R
 import tech.hybriq.adbuddy.confirm.ConfirmNotifier
+import tech.hybriq.adbuddy.confirm.UnlockWait
 import tech.hybriq.adbuddy.control.CutAccess
+import tech.hybriq.adbuddy.control.CutCheck
 import tech.hybriq.adbuddy.notify.AskNotice
 import tech.hybriq.adbuddy.notify.ConversationNotifier
 import tech.hybriq.adbuddy.notify.ConversationView
 import tech.hybriq.adbuddy.notify.DoneDetector
 import tech.hybriq.adbuddy.notify.Notify
+import tech.hybriq.adbuddy.yolo.YoloNotifier
 
 /**
  * Keeps the channel with the host open (spec §6: foreground service of type
@@ -48,6 +51,10 @@ class BridgeService : LifecycleService() {
     private var lastId: String? = null
     private var lastTs = 0L
     private val main = Handler(Looper.getMainLooper())
+
+    /** Tags the polls of UnlockWait, so onDestroy removes them (and only them). */
+    private val token = Any()
+    private var destroyed = false
     private var locales: LocaleList? = null
 
     /**
@@ -65,7 +72,7 @@ class BridgeService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         locales = resources.configuration.locales
-        val first = ConversationView.of(BridgeState(), CutAccess.isCut(contentResolver))
+        val first = ConversationView.of(BridgeState(), CutAccess.isCut(this))
         foreground = goForeground(conversationNotification(first))
         if (!foreground) {
             stopSelf()
@@ -75,12 +82,16 @@ class BridgeService : LifecycleService() {
         // Questions left by an earlier process: nobody can answer them now; the host sends them again.
         ConfirmNotifier.clear(this)
         ConversationNotifier.cancelAsk(this)
+        YoloNotifier.clear(this)
         // While the service lives (it posts the questions): a system broadcast, nobody else's to send.
         ContextCompat.registerReceiver(this, screenOn, IntentFilter(Intent.ACTION_SCREEN_ON), ContextCompat.RECEIVER_NOT_EXPORTED)
         listening = true
         val app = application as AdbuddyApp
         lifecycleScope.launch {
             app.bridge.state.collect { s -> ConfirmNotifier.sync(this@BridgeService, s) }
+        }
+        lifecycleScope.launch {
+            app.bridge.state.collect { s -> YoloNotifier.sync(this@BridgeService, s, app.clock) }
         }
         lifecycleScope.launch {
             var announced = emptySet<String>()
@@ -97,7 +108,7 @@ class BridgeService : LifecycleService() {
         lifecycleScope.launch {
             val detector = DoneDetector()
             app.bridge.state.collect { s ->
-                if (s.connection != BridgeState.Connection.CONNECTED) {
+                if (!s.isConnected) {
                     detector.reset()
                 } else if (Notify.shouldAnnounceDone(s, detector.onState(s.sessionState, SystemClock.elapsedRealtime()))) {
                     ConversationNotifier.done(this@BridgeService, Notify.doneLine(s.chat, s.sessionState.conversation))
@@ -135,22 +146,36 @@ class BridgeService : LifecycleService() {
             ACTION_PAUSE -> app.bridge.pause(true)
             ACTION_RESUME -> app.bridge.pause(false)
             // Reply and capture put something in the agent's hands: never with the phone locked (API 30 has no
-            // setAuthenticationRequired, and the lock screen must not be a way in on any version).
+            // setAuthenticationRequired, and the lock screen must not be a way in on any version). Delivered locked on
+            // API 31+ (the system holds them for the PIN, and delivers about 300 ms before isDeviceLocked turns false)
+            // they wait for the app to read it unlocked (UnlockWait, M2-8); otherwise they are dropped.
             ACTION_REPLY -> {
-                if (!locked()) {
-                    val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(ConversationNotifier.KEY_REPLY)?.toString()
-                    if (!text.isNullOrBlank()) app.chat.send(text)
+                // The text is read now, from this intent: START_STICKY would redeliver a null intent, never this one.
+                val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(ConversationNotifier.KEY_REPLY)?.toString()
+                whenUnlocked { unlocked ->
+                    if (unlocked && !locked() && !text.isNullOrBlank()) app.chat.send(text)
+                    // The "sending" wheel of the direct reply stays until the notification is posted again (also when it was ignored).
+                    shown?.let { post(it) }
                 }
-                // The "sending" wheel of the direct reply stays until the notification is posted again (also when it was ignored).
-                shown?.let { post(it) }
             }
-            ACTION_CAPTURE -> if (!locked()) {
-                app.captures.take { a, text ->
+            ACTION_CAPTURE -> whenUnlocked { unlocked ->
+                if (unlocked && !locked()) app.captures.take { a, text ->
                     if (a != null) app.chat.send("", listOf(a)) else toast(text)
                 }
             }
             // Cutting needs no unlock: it only narrows what the agent can do.
-            ACTION_CUT -> if (!CutAccess.cut(this)) toast(R.string.notif_cut_failed)
+            ACTION_CUT -> {
+                val up = CutAccess.channelUp(app.bridge.state.value)
+                if (!CutAccess.cut(this, up)) {
+                    toast(R.string.notif_cut_failed)
+                } else {
+                    lifecycleScope.launch {
+                        // R22: the channel and port 5555 say whether the cut really closed adb.
+                        val check = CutAccess.confirm(this@BridgeService, up) { CutAccess.channelUp(app.bridge.state.value) }
+                        if (check == CutCheck.STILL_CONNECTED) toast(R.string.cut_still_connected)
+                    }
+                }
+            }
             // Bridge.start is idempotent: the same link again (the app reopened, the
             // screen rotated) keeps the connection; a new one reconnects.
             else -> BridgePrefs(this).link?.let { app.bridge.start(it) } ?: stopSelf()
@@ -176,6 +201,8 @@ class BridgeService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        destroyed = true
+        main.removeCallbacksAndMessages(token)
         if (listening) {
             unregisterReceiver(screenOn)
             listening = false
@@ -189,7 +216,17 @@ class BridgeService : LifecycleService() {
         super.onDestroy()
     }
 
-    private fun locked() = getSystemService(KeyguardManager::class.java).isDeviceLocked
+    /**
+     * Runs [act] with what UnlockWait says: at once when the phone was not locked at delivery, after the PIN when it
+     * was, false when it never unlocked. Nothing runs once the service is destroyed (or never went foreground).
+     */
+    private fun whenUnlocked(act: (unlocked: Boolean) -> Unit) = UnlockWait.afterUnlock(
+        locked(), Build.VERSION.SDK_INT, ::locked, SystemClock::elapsedRealtime,
+        { d, step -> main.postDelayed(step, token, d) },
+    ) { unlocked -> if (foreground && !destroyed) act(unlocked) }
+
+    /** A reading that fails counts as locked. */
+    private fun locked() = try { getSystemService(KeyguardManager::class.java).isDeviceLocked } catch (e: RuntimeException) { true }
 
     private fun toast(@StringRes res: Int) = toast(getString(res))
 

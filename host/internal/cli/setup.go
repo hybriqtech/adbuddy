@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -47,11 +47,8 @@ var (
 	qrHintDelay         = 10 * time.Second // when to say that no phone is visible while a QR code waits
 )
 
-// phoneGuide is the phone preparation text in English; step 3 depends on how
+// phoneGuideIn is the phone preparation text in lang; step 3 depends on how
 // it is paired.
-func phoneGuide(useCode bool) string { return phoneGuideIn(i18n.EN, useCode) }
-
-// phoneGuideIn is phoneGuide in lang.
 func phoneGuideIn(lang i18n.Lang, useCode bool) string {
 	network := lang.T("setup.guide.network")
 	if useCode {
@@ -87,6 +84,9 @@ func newSetupCmd(app *App) *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			go func() { <-ctx.Done(); stop() }()
+			// Before drawing anything: the QR code needs escape sequences.
+			restoreVT, vt := enableVTOK(asFile(app.Stderr))
+			defer restoreVT()
 			err := func() error {
 				if app.Getenv("ADBUDDY_SOURCE") == "agent" {
 					return NewErrorT("AGENT_SESSION", "err.setup.agent_session", "err.setup.agent_session.fix")
@@ -94,7 +94,7 @@ func newSetupCmd(app *App) *cobra.Command {
 				if apkFlag != "" && noApp {
 					return UsageErrorT("err.setup.usage_apk_and_no_app_contradict")
 				}
-				if connectFlag != "" && !validPairAddr(connectFlag) {
+				if connectFlag != "" && !config.ValidAddress(connectFlag) {
 					return UsageErrorT("err.setup.usage_connect_is_not_an_ip", classify.Printable(connectFlag))
 				}
 				e, err := loadEnv(app)
@@ -207,7 +207,7 @@ func newSetupCmd(app *App) *cobra.Command {
 
 				// 3-4. Guide and pairing.
 				if serial == "" {
-					guid, err = pair(ctx, app, runner, useCode, ask, say)
+					guid, err = pair(ctx, app, runner, useCode, vt, ask, say)
 					if err != nil {
 						return err
 					}
@@ -240,7 +240,7 @@ func newSetupCmd(app *App) *cobra.Command {
 							if addr, err = ask(app.T("setup.prompt.connection_address")); err != nil {
 								return err
 							}
-							if !validPairAddr(addr) {
+							if !config.ValidAddress(addr) {
 								return UsageErrorT("err.setup.usage_is_not_an_ip_address", classify.Printable(addr))
 							}
 						}
@@ -373,17 +373,21 @@ func repositoryURL(app *App) string {
 	return platformtools.RepositoryURL
 }
 
-func colorOK(app *App) bool {
-	return app.Getenv("NO_COLOR") == "" && app.Getenv("TERM") != "dumb"
+// qrStyle says whether the QR code is drawn with escape sequences (white
+// background, black modules): only on a terminal that processes them. The QR
+// is functional, so NO_COLOR does not turn it off. vt is false when the
+// Windows console could not be switched to virtual terminal mode.
+func qrStyle(app *App, vt bool) bool {
+	return isTerminal(app.Stderr) && app.Getenv("TERM") != "dumb" && vt
 }
 
 // pairingCodeRe is the code the phone shows in "Pair device with pairing code".
 var pairingCodeRe = regexp.MustCompile(`^[0-9]{6}$`)
 
 // pair shows the guide and pairs by QR code or by code.
-func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask func(string) (string, error), say func(string, ...any)) (string, error) {
+func pair(ctx context.Context, app *App, runner adb.Runner, useCode, vt bool, ask func(string) (string, error), say func(string, ...any)) (string, error) {
 	fmt.Fprint(app.Stderr, phoneGuideIn(app.speaks(), useCode))
-	if art, err := pairing.RenderQR(HelpURL, colorOK(app)); err == nil {
+	if art, err := pairing.RenderQR(HelpURL, qrStyle(app, vt)); err == nil {
 		fmt.Fprint(app.Stderr, art)
 	}
 	fmt.Fprintf(app.Stderr, "%s\n\n", HelpURL)
@@ -392,7 +396,7 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 		if err != nil {
 			return "", err
 		}
-		if !validPairAddr(addr) {
+		if !config.ValidAddress(addr) {
 			return "", UsageErrorT("err.setup.usage_is_not_an_ip_address_2", classify.Printable(addr))
 		}
 		code, err := ask(app.T("setup.prompt.pairing_code"))
@@ -412,7 +416,7 @@ func pair(ctx context.Context, app *App, runner adb.Runner, useCode bool, ask fu
 	if err != nil {
 		return "", NewError("PAIRING_FAILED", err.Error(), "")
 	}
-	art, err := pairing.RenderQR(q.Payload(), colorOK(app))
+	art, err := pairing.RenderQR(q.Payload(), qrStyle(app, vt))
 	if err != nil {
 		return "", NewError("PAIRING_FAILED", err.Error(), "")
 	}
@@ -480,12 +484,7 @@ func chooseAgent(app *App, flag, current string, yes bool, ask func(string) (str
 }
 
 func containsAgent(found []agent.Found, name string) bool {
-	for _, f := range found {
-		if f.Name == name {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(found, func(f agent.Found) bool { return f.Name == name })
 }
 
 // stableSerial is the serial to save for the phone: its mDNS name
@@ -525,19 +524,6 @@ func isAddress(serial string) bool {
 	}
 	_, err = netip.ParseAddr(host)
 	return err == nil
-}
-
-// validPairAddr accepts only IP:port with a port in 1-65535.
-func validPairAddr(addr string) bool {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
-	}
-	if _, err := netip.ParseAddr(host); err != nil {
-		return false
-	}
-	p, err := strconv.ParseUint(port, 10, 16)
-	return err == nil && p >= 1
 }
 
 // startServer starts ADBuddy's adb server, waiting at most startServerWait.
@@ -632,10 +618,7 @@ func qrHint(ctx context.Context, runner adb.Runner, say func(string, ...any)) (s
 	return func() { cancel(); <-done }
 }
 
-// workspaceHint is the guidance for a workspace.Init failure, in English.
-func workspaceHint(err error, ws string) string { return workspaceHintMsg(err, ws).String() }
-
-// workspaceHintMsg is workspaceHint as a message of its own, to be the fix of
+// workspaceHintMsg is the guidance for a workspace.Init failure, to be the fix of
 // an error: NewErrorT(code, "error.cause", "error.hint", cause, workspaceHintMsg(err, ws)).
 // An unsafe path is not a permissions problem.
 func workspaceHintMsg(err error, ws string) i18n.Msg {

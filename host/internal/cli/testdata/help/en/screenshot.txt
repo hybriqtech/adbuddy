@@ -1,6 +1,7 @@
 Save a screenshot of the phone's screen as a PNG or JPEG file, scaled by
 --scale (0.5 by default; 0.5 and JPEG while the remote mode is on). Without -o
 it goes to screenshots/ in this folder.
+While it captures, ADBuddy takes its on-screen notice (the frame and the pill) off the screen for a moment so it does not cover the image.
 
 Usage:
   adbuddy screenshot [flags]

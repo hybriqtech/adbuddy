@@ -3,6 +3,8 @@ package emutest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,6 +71,26 @@ func (e *emu) restoreAnimationScaleAtCleanup(t *testing.T, key string) {
 	e.restoreAtCleanup(t, "global", key, "1.0")  // runs first: back to the default
 }
 
+// describeScreen is what a log line says of the screen a wait ended with:
+// whether it settled, whether it changed, and how many elements are outside the
+// system windows (none: only the system's bars, a transition between two screens).
+func describeScreen(s *daemon.ScreenSettled) string {
+	if s == nil {
+		return ", no screen"
+	}
+	changed := "unknown"
+	if s.Changed != nil {
+		changed = strconv.FormatBool(*s.Changed)
+	}
+	inApp := 0
+	for _, e := range s.Elements {
+		if e.Window != "system" {
+			inApp++
+		}
+	}
+	return fmt.Sprintf(", settled %v, changed %s, %d elements (%d outside the system windows)", s.Settled, changed, len(s.Elements), inApp)
+}
+
 func screenHas(d bridge.UIDump, text string) bool {
 	for _, e := range d.Elements {
 		if strings.Contains(e.Text, text) || strings.Contains(e.Desc, text) {
@@ -105,7 +127,7 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 				t.Fatalf("tap --screen data %q: %v", data, err)
 			}
 		}
-		t.Logf("tap --screen %+v: exit %d, %d ms", args, exit.Code, took.Milliseconds())
+		t.Logf("tap --screen %+v: exit %d, %d ms%s", args, exit.Code, took.Milliseconds(), describeScreen(c.Screen))
 		return exit, c, took
 	}
 	dumpSettle := func(t *testing.T, h *latencyHost) (ipc.Exit, daemon.ScreenSettled, time.Duration) {
@@ -134,6 +156,8 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 		if c.Screen.Changed == nil || !*c.Screen.Changed {
 			t.Errorf("changed = %v, want true", c.Screen.Changed)
 		}
+		// Settled is not required: on GitHub's runners Settings fills its summaries late and the
+		// screen is often still changing at the 3 s cap (settled=false in 2 to 11 taps of 20, before bareApp too).
 		if !screenHas(c.Screen.UIDump, "Internet") {
 			t.Errorf("the screen after the tap is not the sub page (no \"Internet\"): %+v", c.Screen.UIDump.Elements)
 		}
@@ -146,6 +170,18 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 	// the tap leaves is on show long after the tap, so a wait that took the old
 	// screen as settled, or ended before the new one, would fail here. At normal
 	// speed the emulator changes screen before the first read and this cannot fail.
+	//
+	// What it checks is that the wait never says "settled" on a screen that is
+	// not the new one, and that the tap happens once. At 8x the transition
+	// (about 2.4 s here, longer on GitHub's runners) lasts as long as the wait's
+	// cap (settleMax, 3 s) or longer, so the wait can end in three documented
+	// ways: settled=false with whichever frame of the transition the cap fell on
+	// (the old screen, or one with no app window yet); no screen, because the
+	// guard blocked the window of the transition for longer than settleBlockWait,
+	// with the note that the tap was done; or, once the new screen is drawn and
+	// quiet, settled=true. A read with no app window never settles (bareApp).
+	// Only a settled=true read is held to being the new screen, and a missing
+	// screen to carrying the note that says the tap happened.
 	t.Run("a slow transition never settles on the old screen nor taps twice", func(t *testing.T) {
 		for _, k := range []string{"window_animation_scale", "transition_animation_scale", "animator_duration_scale"} {
 			e.restoreAnimationScaleAtCleanup(t, k)
@@ -156,11 +192,15 @@ func TestScreenAfterOnTheEmulator(t *testing.T) {
 		h := newLatencyHost(t, e, ui)
 		for i := range 3 {
 			exit, c, _ := tapScreen(t, h, tapNet)
-			if exit.Code != 0 || c.Screen == nil {
+			if exit.Code != 0 {
 				t.Fatalf("run %d: exit %+v, note %q", i, exit, c.Note)
 			}
-			if c.Screen.Changed == nil || !*c.Screen.Changed || !screenHas(c.Screen.UIDump, "Internet") {
-				t.Errorf("run %d: settled on the old screen (changed %v): %+v", i, c.Screen.Changed, c.Screen.UIDump.Elements)
+			if c.Screen == nil {
+				if !strings.HasPrefix(c.Note, "The action was done; do not repeat it") || !strings.Contains(c.Note, "Blocked by ADBuddy") {
+					t.Errorf("run %d: no screen and no note that the tap was done: %q", i, c.Note)
+				}
+			} else if c.Screen.Settled && (c.Screen.Changed == nil || !*c.Screen.Changed || !screenHas(c.Screen.UIDump, "Internet")) {
+				t.Errorf("run %d: settled on a screen that is not the new one (changed %v): %+v", i, c.Screen.Changed, c.Screen.UIDump.Elements)
 			}
 			e.shell(t, "input keyevent 4")
 			time.Sleep(4 * time.Second)

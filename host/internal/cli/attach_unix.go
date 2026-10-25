@@ -26,3 +26,7 @@ func sizeChanges(ctx context.Context, _ *os.File, send func()) {
 		}
 	}
 }
+
+// enableVTOK is enableVT that also says whether escape sequences work: always
+// on Unix.
+func enableVTOK(*os.File) (func(), bool) { return func() {}, true }

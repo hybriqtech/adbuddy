@@ -102,6 +102,18 @@ once the cache has it; the tests never download anything.
 - **Privacy:** neither the chat nor the terminal text is written to any log, and the
   lock screen shows no message text, no activity and no PC name.
 
+**Cut access state.** The app says "access cut" only after a cut it made itself and read back (its saved values in the
+`cut_access` preferences), and while no readable setting says USB or wireless debugging is on again. It never infers a
+cut from what it reads alone: on Android 17 an app may read `adb_enabled=0` while adb works. `adb logcat -s ADBuddyAccess`
+shows what the app reads and how.
+
+**False readings (Android 17).** An app reads `adb_enabled=0` there while adb works; `adb_wifi_enabled` reads right.
+ADBuddy believes a 1 always and a 0 only when nothing contradicts it: with wireless debugging at 1 or a live channel
+with the PC, it saves USB debugging as on before a cut (marked `adb_enabled_doubted` in the record) and restores it so.
+A cut is confirmed by `putInt` and by wireless debugging reading 0, and then checked: the channel must fall and nothing
+may answer on 127.0.0.1:5555 within 5 s, or the app says the PC is still connected (the check survives rotating or
+leaving the screen). The log line ends with `doubtful=adb_enabled(…)` when a 0 was not believed.
+
 ## Claude Code (M4)
 
 When the agent is Claude Code, the host reads its transcript and hooks and sends
@@ -131,7 +143,7 @@ agents keep the terminal view.
   the host says `permission.resolved`) and only the host removes it. A command the
   card cannot show whole is left to the terminal by the host.
 - **Notice:** with a request pending and the app in the background, a generic
-  notice ("Claude Code needs an answer") opens the chat. It has no command, no
+  notice ("Your agent needs an answer") opens the chat. It has no command, no
   text and no buttons except Cut access, and it is silent (same channel as the
   conversation). It is not shown while the link is paused or disconnected. The
   "Done" notice shows the first words of the agent's last message, cleaned of

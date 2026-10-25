@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "type": "ui.request",
+  "ts": "2026-10-01T10:00:00Z",
+  "payload": {
+    "id": "u_7",
+    "op": "notice",
+    "args": {},
+    "expiresAt": "2026-10-01T10:00:10Z"
+  }
+}

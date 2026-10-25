@@ -812,9 +812,12 @@ func (e *emu) guardPost(t *testing.T, kind, id string) (release func()) {
 		case <-time.After(2 * time.Minute):
 			t.Errorf("am instrument did not end 2 min after %s", guardDone)
 		}
-		out, _, _, _ := e.adb.Output(ctx, "shell", "cmd notification list")
-		if strings.Contains(out, key) {
-			t.Errorf("the notification %s is still posted after the test", key)
+		list := func() string {
+			out, _, _, _ := e.adb.Output(ctx, "shell", "cmd notification list")
+			return out
+		}
+		if _, ok := notificationsGone(list, func(l string) bool { return !strings.Contains(l, key) }); !ok {
+			t.Errorf("the notification %s is still posted 30 s after the test", key)
 		}
 	}
 	t.Cleanup(release)

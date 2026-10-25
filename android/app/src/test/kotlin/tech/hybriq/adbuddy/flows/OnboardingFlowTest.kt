@@ -62,8 +62,9 @@ class OnboardingFlowTest {
         step(2).assertIsDisplayed()
         compose.onNodeWithText(text(R.string.onboarding_skip)).performClick()
         compose.onNodeWithContentDescription(text(R.string.action_menu)).assertIsDisplayed()
-        // The full-screen chat (not the bubble) starts with the terminal unfolded: guards ChatRoot's default.
-        compose.onNodeWithContentDescription(text(R.string.chat_terminal_hide)).assertIsDisplayed()
+        // R15: the full-screen chat starts with the terminal folded too (it was unfolded before): guards ChatRoot's default.
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_show)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.chat_terminal_hide)).assertDoesNotExist()
         step(1).assertDoesNotExist()
         step(2).assertDoesNotExist()
         assertTrue(Onboarding.of(app).done())
@@ -168,7 +169,7 @@ class NotificationsRationaleFlowTest {
         val q = PermissionRequest("a", "Bash", "Clean the build folder", "detail", "2099-01-01T00:00:00Z", true)
         setBridgeState(connected(chat = ChatState(permissions = listOf(q))))
         title.assertDoesNotExist()
-        compose.onNodeWithText(text(R.string.perm_title)).assertIsDisplayed()
+        compose.onNodeWithText(text(R.string.perm_title, text(R.string.agent_fallback))).assertIsDisplayed()
         assertFalse(BridgePrefs(app).notificationsAsked)
     }
 

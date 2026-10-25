@@ -332,6 +332,10 @@ The commands the host prints are:
 
 Install it, open a new terminal so that your `PATH` is refreshed, and start the agent session again: `adbuddy new` with serve running, or `adbuddy run`. To use another agent, `adbuddy setup --agent <name>`.
 
+### The agent does not start after an update
+
+`adbuddy serve` starts Claude Code with `--model claude-haiku-5-5 --effort low` unless you chose otherwise. Claude Code takes that, and the flag wins over `ANTHROPIC_MODEL` and over the model in Claude Code's own settings. If you use Bedrock or Vertex, which have their own model ids, that id may not exist for you. Start serve with the settings you have in Claude Code instead: `adbuddy serve --model inherit --effort inherit`. To make it permanent, set `agent_model = "inherit"` and `agent_effort = "inherit"` in `config.toml`.
+
 ### Another `adb` in the `PATH`
 
 ADBuddy does not use the `adb` in your `PATH`. It uses its own copy of Android's platform-tools and its own adb server, on port 5038 (adb's own default is 5037), so your own adb server usually does not collide with it. The `adb` the agent runs is ADBuddy's shim: when ADBuddy starts the agent, the shim's folder is first in the agent's `PATH`.

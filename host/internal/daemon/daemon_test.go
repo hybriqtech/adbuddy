@@ -116,6 +116,8 @@ func newEnv(t *testing.T) *env {
 			// And the shade (M5b Task 10): an app in focus, no system window on screen.
 			fixedFocusCmd:   focusApp,
 			fixedWindowsCmd: windowsQuiet,
+			// ADBuddy's service is not bound: with no app nobody is stuck (notice, plan screen-overlay-frame).
+			"dumpsys accessibility": "",
 		}, exits: map[string]int{}, out: map[string]string{}},
 		conf:  &fakeConfirmer{decision: confirm.Allow},
 		store: journal.OpenSigned(filepath.Join(ws, "journal"), []byte("test key")),

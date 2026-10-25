@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/adb"
@@ -116,10 +117,5 @@ func waitDropped(ctx context.Context, runner adb.Runner, timeout time.Duration) 
 }
 
 func hasSerial(ds []adb.Device, serial string) bool {
-	for _, d := range ds {
-		if d.Serial == serial {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(ds, func(d adb.Device) bool { return d.Serial == serial })
 }

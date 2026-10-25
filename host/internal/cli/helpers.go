@@ -39,6 +39,19 @@ func newHelperCmds(app *App) []*cobra.Command {
 	return []*cobra.Command{newScreenCmd(app), newTapCmd(app), newTypeCmd(app), newForegroundCmd(app), newScreenshotCmd(app), newNotificationsCmd(app)}
 }
 
+// callHelperInto is callHelper plus the decoding of the daemon's answer as a T.
+func callHelperInto[T any](cmd *cobra.Command, app *App, op string, args any, screen bool, stdout io.Writer) (T, error) {
+	var v T
+	data, err := callHelper(cmd, app, op, args, screen, stdout)
+	if err != nil {
+		return v, err
+	}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return v, NewError("UI_FAILED", "unreadable answer", "")
+	}
+	return v, nil
+}
+
 // callHelper runs a helper on the serve that runs and returns its data.
 // stdout gets what the helper streams (the screenshot's bytes). The daemon
 // writes the journal's command itself, from op and args. screen asks the
@@ -88,20 +101,17 @@ func newScreenCmd(app *App) *cobra.Command {
 		Example: "  adbuddy screen\n  adbuddy screen --settle\n  adbuddy screen --all --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			data, err := callHelper(cmd, app, bridge.UIOpDump, bridge.UIDumpArgs{All: all}, settle, app.Stderr)
-			if err != nil {
-				return err
-			}
 			// settled is a *bool: an old daemon does not say, and then there is
 			// nothing to warn about. changed too: absent means not known, and
 			// --json keeps it only when the daemon sent it.
-			var d struct {
+			type screenAnswer struct {
 				bridge.UIDump
 				Settled *bool `json:"settled"`
 				Changed *bool `json:"changed"`
 			}
-			if err := json.Unmarshal(data, &d); err != nil {
-				return NewError("UI_FAILED", "unreadable answer", "")
+			d, err := callHelperInto[screenAnswer](cmd, app, bridge.UIOpDump, bridge.UIDumpArgs{All: all}, settle, app.Stderr)
+			if err != nil {
+				return err
 			}
 			if app.JSON {
 				if d.Settled != nil {
@@ -121,8 +131,13 @@ func newScreenCmd(app *App) *cobra.Command {
 	return cmd
 }
 
+// noticeInImage is what the agent reads on stderr when ADBuddy's on-screen
+// notice could not be taken off the screen for a screenshot. Fixed English,
+// for the agent.
+const noticeInImage = "(ADBuddy's on-screen notice, a thin frame round the screen and a pill near the top, may be in this image because it could not be taken off the screen for the capture: ignore it)"
+
 // stillChanging is what the agent reads when the screen did not settle in time.
-const stillChanging = "(the screen was still changing: run adbuddy screen again if you need it steady)"
+const stillChanging = "(the screen was still changing, or showed no app content to read: run adbuddy screen again if you need it steady)"
 
 // noChange is what the agent reads after tap or type --screen when the screen
 // settled and is the one from before the act: the act did nothing visible.
@@ -165,6 +180,13 @@ func undecodedAfterAct(app *App, done string) error {
 	return nil
 }
 
+// unreadableScreen is what the agent reads when the app could not read part or
+// all of the screen. The cause is not known (an app may hide its content from
+// accessibility services, or the screen may be changing), so the note states
+// only that and what the agent can do, never how to get round it. Fixed
+// English, for the agent.
+const unreadableScreen = "(ADBuddy cannot read some or all of this screen, possibly because the app hides its content from accessibility services, or because the screen is still changing, so try once more. `adbuddy screenshot` may still show it, unless the app blocks screenshots. `adbuddy tap` refuses to touch what ADBuddy cannot read: ask the user to do this part.)"
+
 // printScreen writes a dump for the agent, one element per line. Everything
 // comes from the phone: escaped and cut.
 func printScreen(w io.Writer, d bridge.UIDump) {
@@ -177,6 +199,9 @@ func printScreen(w io.Writer, d bridge.UIDump) {
 		head = "unknown app"
 	}
 	fmt.Fprintf(w, "%s · %d×%d\n", head, d.Width, d.Height)
+	if d.Unreadable {
+		fmt.Fprintln(w, unreadableScreen)
+	}
 	for _, e := range d.Elements {
 		var b strings.Builder
 		if e.ID != "" {
@@ -343,13 +368,9 @@ func newForegroundCmd(app *App) *cobra.Command {
 		Example: "  adbuddy foreground\n  adbuddy foreground --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			data, err := callHelper(cmd, app, bridge.UIOpForeground, bridge.Empty{}, false, app.Stderr)
+			fg, err := callHelperInto[bridge.UIForeground](cmd, app, bridge.UIOpForeground, bridge.Empty{}, false, app.Stderr)
 			if err != nil {
 				return err
-			}
-			var fg bridge.UIForeground
-			if err := json.Unmarshal(data, &fg); err != nil {
-				return NewError("UI_FAILED", "unreadable answer", "")
 			}
 			if app.JSON {
 				return WriteData(app.Stdout, fg)
@@ -459,8 +480,15 @@ func newScreenshotCmd(app *App) *cobra.Command {
 					return NewError("WRITE_FAILED", err.Error(), "")
 				}
 			}
+			if r.NoticeInImage && !app.JSON {
+				fmt.Fprintln(app.Stderr, noticeInImage)
+			}
 			if app.JSON {
-				return WriteData(app.Stdout, map[string]any{"path": out, "format": r.Format, "bytes": img.Len()})
+				data := map[string]any{"path": out, "format": r.Format, "bytes": img.Len()}
+				if r.NoticeInImage {
+					data["noticeInImage"] = true
+				}
+				return WriteData(app.Stdout, data)
 			}
 			fmt.Fprintln(app.Stdout, out)
 			return nil

@@ -91,6 +91,7 @@ M3.0 dejó `args` y `result` como JSON libre (`json.RawMessage` y `JsonElement`)
 - **Qué ventanas:** todas las interactivas (`flagRetrieveInteractiveWindows`), ordenadas por capa de mayor a menor: la app, sus diálogos, el teclado y la interfaz del sistema. Es la idea de `HierarchyDumper` de ARTEMIS (Apache-2.0; la atribución va en `NOTICE` y en la cabecera del fichero si se copia código). Las ventanas de `tech.hybriq.adbuddy`, incluida la superposición, no salen nunca.
 - **Qué nodos:** los visibles para el usuario, con los límites recortados a la pantalla, a su ventana y a sus antepasados desplazables (paridad con UIAutomator). Entre ellos, solo los informativos (texto, descripción o pista) o los que se pueden usar (pulsar, editar, desplazar o marcar). Las capas sin nada de eso desaparecen. `--all` (`args: {"all": true}`) incluye todos los nodos visibles.
 - **Topes:** 2000 elementos, profundidad 75. Más que eso pone `truncated: true`. Si el JSON del resultado pasa de 512 KiB (bytes UTF-8 ya codificados, `MaxUIResult`), se recortan los textos largos a 200 caracteres y, si aún no cabe, los últimos elementos.
+- **`unreadable`:** `true` cuando alguna ventana de aplicación o diálogo no entrega contenido (o no hay ventanas); el host lo dice al agente con una nota que no promete la causa. Ausente si no (Go `omitempty`).
 - **Contraseñas:** de un nodo con `isPassword` sale `password: true`, y `text` y `hint` salen vacíos.
 - **Bloqueado:** con el móvil bloqueado (`KeyguardManager.isKeyguardLocked`), `locked: true` y `elements` vacío. El agente no debe intentar desbloquear (la regla 14 de `AGENTS.md`).
 - **App protegida en primer plano:** `error` `protected` (§4.3).
@@ -107,7 +108,7 @@ com.android.settings · 1344×2992
 - "Wi-Fi" Switch (980,700)-(1302,780) click checked=false
 ```
 
-`--settle` (latencia, 2026-10-03; pantalla de partida, 2026-10-04) pide al daemon que espere a que la pantalla se asiente antes de devolverla, cada lectura con la guarda: sirve tras una orden `adb` en bruto (`am start`, `input`). La primera lectura es la **partida** y no se devuelve, salvo si se llega al tope (`settleMax` o `settleReads`) sin más lecturas: entonces sale ella, con `settled` falso (pasó la guarda antes de leerse). La pantalla se da por asentada cuando ha **cambiado** respecto a la partida y sigue igual al menos `settleQuiet` (600 ms); si nunca cambia, a los `settleIdle` (2 s): `screen --settle` sobre una pantalla quieta tarda unos 2 s (hasta settle2, 2026-10-04, unos 0,4 s); como mucho `settleMax` (3 s) más lo que tarde una lectura que ya empezó. Una lectura que llega por otra vía que la partida (`uiautomator` porque la app dejó de contestar) no se compara con ella, porque los formatos difieren: no cuenta como cambio (por ella solo `settleIdle` cierra la espera) y, si sale, `changed` va ausente. Para comparar no cuenta qué elemento tiene el foco, y no tener elementos es lo mismo que una lista vacía; un interruptor que cambia (`checked`) sí cuenta. Si la guarda, o la propia app con `UI_PROTECTED`, bloquea una lectura, se reintenta tras `settleGap` hasta `settleBlockWait` (2 s) desde el inicio: durante una transición la app enseña un momento una ventana sin contenido y la da por protegida. Cada intento pasa la guarda completa y solo sale una lectura hecha después de pasarla; si el último intento fue un bloqueo, sale el bloqueo y nada leído antes. La guarda propia de `screen` también reintenta: si bloquea, o si la app contesta `UI_PROTECTED` a la primera lectura, se entra en la espera sin lectura y la primera lectura válida es la partida; un bloqueo que dura hasta `settleBlockWait` sale como bloqueo, sin datos. La pausa y una pregunta 🔴 pendiente no se reintentan. La respuesta añade `settled` y `changed`, que habla de la lectura que sale (`false`: es igual a la partida, porque no cambió o porque cambió y volvió; ausente: no se sabe); si `settled` es `false`, la CLI avisa de que la pantalla seguía cambiando; un `changed` falso en `screen --settle` no se avisa (es una pantalla quieta). Sin la bandera, la salida es la de siempre.
+`--settle` (latencia, 2026-10-03; pantalla de partida, 2026-10-04) pide al daemon que espere a que la pantalla se asiente antes de devolverla, cada lectura con la guarda: sirve tras una orden `adb` en bruto (`am start`, `input`). La primera lectura es la **partida** y no se devuelve, salvo si se llega al tope (`settleMax` o `settleReads`) sin más lecturas: entonces sale ella, con `settled` falso (pasó la guarda antes de leerse). La pantalla se da por asentada cuando ha **cambiado** respecto a la partida y sigue igual al menos `settleQuiet` (600 ms); si nunca cambia, a los `settleIdle` (2 s): `screen --settle` sobre una pantalla quieta tarda unos 2 s (hasta settle2, 2026-10-04, unos 0,4 s); como mucho `settleMax` (3 s) más lo que tarde una lectura que ya empezó. Una lectura que llega por otra vía que la partida (`uiautomator` porque la app dejó de contestar) no se compara con ella, porque los formatos difieren: no cuenta como cambio (por ella solo `settleIdle` cierra la espera) y, si sale, `changed` va ausente. Para comparar no cuenta qué elemento tiene el foco, y no tener elementos es lo mismo que una lista vacía; un interruptor que cambia (`checked`) sí cuenta. Si la guarda, o la propia app con `UI_PROTECTED`, bloquea una lectura, se reintenta tras `settleGap` hasta `settleBlockWait` (2 s) desde el inicio: durante una transición la app enseña un momento una ventana sin contenido y la da por protegida. Cada intento pasa la guarda completa y solo sale una lectura hecha después de pasarla; si el último intento fue un bloqueo, sale el bloqueo y nada leído antes. La guarda propia de `screen` también reintenta: si bloquea, o si la app contesta `UI_PROTECTED` a la primera lectura, se entra en la espera sin lectura y la primera lectura válida es la partida; un bloqueo que dura hasta `settleBlockWait` sale como bloqueo, sin datos. La pausa y una pregunta 🔴 pendiente no se reintentan. La respuesta añade `settled` y `changed`, que habla de la lectura que sale (`false`: es igual a la partida, porque no cambió o porque cambió y volvió; ausente: no se sabe); si `settled` es `false`, la CLI avisa de que la pantalla seguía cambiando o no enseñaba contenido; si la pantalla de partida tenía alguna ventana de aplicación (`app` o `dialog`), una lectura de la app sin ninguna (solo la barra de estado, o nada: una transición cuya ventana aún no tiene contenido) con el móvil desbloqueado nunca se da por asentada, aunque lleve quieta más de `settleQuiet`, y sale con `settled` falso si llega el tope (consecuencia: navegar desde una pantalla normal a una sin contenido accesible, como un juego o un visor de cámara, tarda los 3 s una vez; si la partida ya no tenía ventana de aplicación, o se desconoce, esa lectura se asienta como antes, sin penalización en cada toque); un `changed` falso en `screen --settle` no se avisa (es una pantalla quieta). Sin la bandera, la salida es la de siempre.
 
 `[id]` sale si hay `id`, y si no, un `-`. Los textos van entre comillas, recortados a 120 caracteres y escapados con `classify.Printable`: un texto de la pantalla no puede meter secuencias de control en la terminal del agente.
 
@@ -155,12 +156,27 @@ La app lo sabe por los `TYPE_WINDOW_STATE_CHANGED` de la ventana de aplicación 
 
 ### 3.6 `adbuddy screenshot [--scale 0.5] [--format png|jpeg] [-o fichero]`
 
-La hace el host, nunca la app: `exec-out screencap -p` por el adb del host. Antes pasa por la guarda (§4.3).
+La hace el host, nunca la app: `exec-out screencap -p` por el adb del host. Antes pasa por la guarda (§4.3) y pide el aviso de la superposición a la app (§6, «Cuándo»). Entre el aviso y `screencap` pide `hideNotice`; si no puede retirarlo, la captura sale con el aviso dentro y `ScreenshotResult.noticeInImage` lo dice.
 
 - **Escala:** por defecto 0,5; `--scale 1` deja el tamaño original. El reescalado es un filtro de caja con la biblioteca estándar de Go (`image`, `image/png`, `image/jpeg`), sin dependencias nuevas.
 - **Formato:** PNG por defecto, o JPEG con calidad 80.
 - **Fichero:** `-o` relativo a la carpeta del agente. Por defecto, `screenshots/<AAAAMMDD-hhmmss>.png` dentro del entorno. Lo escribe la CLI, en el proceso del agente: el daemon le manda los bytes por el flujo de datos del IPC, en tramas de 1 MiB.
 - Con el modo remoto activo, el valor por defecto pasa a 0,5 en JPEG (M5b, §3.3 de la v1; lo decide el daemon, §13).
+
+### 3.7 `notice` (sin comando de CLI)
+
+Pide a la app que muestre la superposición (§6) sin hacer nada más. La usa el host antes de `screenshot` y de las lecturas crudas por adb (§6, «Cuándo»). `args` y `result` son `{}` (`bridge.Empty`).
+
+- Respuestas: `ok`; `failed` si la app no puede dibujar la superposición; `protected` con la sesión en pausa; `unavailable` con el servicio apagado; `unsupported` en una app anterior.
+- El host solo deja leer sin aviso con `ErrNoApp`, `unavailable` (con el servicio no vinculado) y `unsupported`; cualquier otra respuesta bloquea.
+- No lleva guarda de app protegida: no lee nada. El nombre es el mismo que el del tipo de mensaje `notice`, pero son espacios de nombres distintos (op de `ui.request`).
+
+### 3.8 `hideNotice` (sin comando de CLI)
+
+Pide a la app que retire la superposición (marco y píldora) un instante, para que `adbuddy screenshot` no la lleve en la imagen. `args` `{ms: 1..5000}` (`MaxHideNoticeMs`), `result` `{}`. La app quita las vistas, espera 3 fotogramas y se restaura sola a los `ms` salvo pausa (nunca la repone en pausa; `show()` y `remove()` cancelan el temporizador).
+
+- Respuestas: `ok`; `invalid` si `ms` está fuera de 1..5000; `protected` con la sesión en pausa; `failed` si no puede retirarla.
+- No es un helper del agente: solo la pide el host dentro de `screenshot`.
 
 ## 4. Seguridad
 
@@ -240,7 +256,11 @@ Las órdenes del respaldo las ejecuta el daemon con el adb del host, ya admitida
 
 `AgentAccessibilityService` dibuja una ventana `TYPE_ACCESSIBILITY_OVERLAY`, que no necesita `SYSTEM_ALERT_WINDOW`:
 
-- **Cuándo:** al empezar cualquier `ui.request` de acción (`click` y `setText`), y también con `dump`. Se oculta 4 s después de la última operación. Con la sesión en pausa no se muestra nunca.
+- **Cuándo:** al empezar cualquier `ui.request` de acción (`click` y `setText`), y también con `dump`, que falla como `click` y `setText` si la app no puede mostrarla. Se oculta 4 s después de la última operación. Con la sesión en pausa no se muestra nunca (la app lo comprueba también en `dump` y `notice`, por si la pausa llega tras las puertas del host). En `adbuddy screenshot` el aviso lleva en pantalla 400 ms como mínimo antes de retirarse y se retira unos 0,3 s durante la propia captura (`hideNotice`, con restauración automática a los 2 s como mucho y nunca en pausa) para que el marco y la píldora no tapen la imagen; vuelve justo después. Las lecturas en bruto del agente no lo retiran.
+  - **Lecturas por adb:** antes de `screenshot` y de los `screencap`, `screenrecord`, `uiautomator` y `dumpsys` que vuelque la vista (crudos), el host pide el aviso a la app con la op `notice` (§3.7). Va después de la guarda y de la confirmación (si el comando es 🔴), y antes de la última comprobación de pausa: una pausa que llegue durante el aviso bloquea la lectura.
+  - **Sin aviso posible:** sin app conectada o con el servicio de accesibilidad apagado no hay aviso, y la lectura sigue (el agente conserva su experiencia normal). Una app anterior que contesta `unsupported` también deja leer, sin consultar el servicio.
+  - **Se bloquea** (`UI_BLOCKED`, `Blocked by ADBuddy: …`, sin ejecutar nada por adb) cuando la accesibilidad está activa y la app no está conectada o no contesta a tiempo, cuando no se puede comprobar si lo está (`dumpsys accessibility` falla), cuando la app no puede dibujar el aviso (`failed`) y cuando está en pausa (`protected`).
+  - `screenrecord` solo avisa al empezar: el overlay se oculta a los 4 s aunque la grabación siga. Es 🔴 y la persona la confirma.
 - **Qué:** un marco fino del color de acento del tema y una píldora arriba: "Agent using the screen · Pause" / "Agente usando la pantalla · Pausar". Tocar la píldora envía `pause` (el tipo de M2) con `Bridge.send`.
 - **Marca del toque:** un círculo de 48 dp que se desvanece en 600 ms, centrado en el punto o en el centro de los límites del nodo.
 - **Toques:** toda la ventana es `FLAG_NOT_TOUCHABLE` salvo la píldora, que es una ventana aparte, pequeña y tocable. La superposición nunca tapa la interfaz: no intercepta el toque de `dispatchGesture` ni los del usuario.
@@ -372,8 +392,11 @@ Todos aditivos (§11 del protocolo: sigue siendo `v1`):
    - los límites: `MaxUIResult` 512 KiB, `MaxNotifications` 50, `MaxNotificationText` 1024, `MaxSetText` 4096 code points, `MaxProtectedApps` 1000 y `MaxPackage` 255;
    - los casos de `ValidPackage`.
    - `notifications` gana `truncated`.
+5. **La op `notice` de `ui.request`** (screen-overlay-frame): `args` y `result` vacíos (`Empty`). Go: `UIOpNotice` en `UIOps`; Kotlin: `UiOp.NOTICE` en `UiOp.ALL`. Fixtures `host/ui.request@notice.json` y `app/ui.response@notice.json`, y entrada en `protocol/fixtures/ui.json`. Aditivo; un commit con Go, Kotlin y fixtures.
+6. **La op `hideNotice` de `ui.request`** (p1-pantalla-oculta): `args {ms}`, `result` vacío; `MaxHideNoticeMs` 5000. Go: `UIOpHideNotice` en `UIOps` y `UIHideNoticeArgs`; Kotlin: `UiOp.HIDE_NOTICE` y `UiHideNoticeArgs`. Fixtures de petición y respuesta, y entrada en `protocol/fixtures/ui.json`. Aditivo; un commit con Go, Kotlin y fixtures.
+7. **El campo `unreadable` de `UiDump`** (p1-pantalla-oculta): `bool` con `omitempty` en Go, `Boolean?` sin emitir `false` en Kotlin; fixture `app/ui.response@dumpunreadable.json`. Aditivo.
 
-Van en un solo commit (Go, Kotlin y fixtures), como pide §10 del protocolo, y se avisa a tern-51 y a skimmer-32 al integrar.
+Cada cambio fue en su propio commit (Go, Kotlin y fixtures; los de los puntos 6 y 7 en dos commits, uno por cambio), como pide §10 del protocolo, y se avisa a tern-51 y a skimmer-32 al integrar.
 
 ## 13. Decisiones
 

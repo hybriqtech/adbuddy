@@ -734,7 +734,7 @@ func TestDoctorSerialNumberUnreadable(t *testing.T) {
 }
 
 func TestDoctorEnvironmentIncomplete(t *testing.T) {
-	for name, f := range map[string]string{"AGENTS.md": "AGENTS.md", "shim": filepath.Join(".adbuddy", "bin", exeName("adb"))} {
+	for name, f := range map[string]string{"AGENTS.md": "AGENTS.md", "shim": filepath.Join(".adbuddy", "bin", workspace.Exe("adb"))} {
 		t.Run(name, func(t *testing.T) {
 			e := doctorEnv(t, doctorRules())
 			if err := os.Remove(filepath.Join(e.ws, f)); err != nil {

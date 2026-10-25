@@ -3,6 +3,9 @@ Stop the agent that adbuddy serve runs (serve keeps running)
 Usage:
   adbuddy stop [flags]
 
+Examples:
+  adbuddy stop
+
 Flags:
   -h, --help   help for stop
 

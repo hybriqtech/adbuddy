@@ -18,6 +18,8 @@ const (
 	UIOpSetText       = "setText"
 	UIOpForeground    = "foreground"
 	UIOpNotifications = "notifications"
+	UIOpNotice        = "notice"
+	UIOpHideNotice    = "hideNotice"
 )
 
 // UIOp makes new values of an operation's args and result.
@@ -33,6 +35,8 @@ var UIOps = map[string]UIOp{
 	UIOpSetText:       {func() any { return new(UISetTextArgs) }, func() any { return new(UITextSet) }},
 	UIOpForeground:    {func() any { return new(Empty) }, func() any { return new(UIForeground) }},
 	UIOpNotifications: {func() any { return new(Empty) }, func() any { return new(UINotifications) }},
+	UIOpNotice:        {func() any { return new(Empty) }, func() any { return new(Empty) }},
+	UIOpHideNotice:    {func() any { return new(UIHideNoticeArgs) }, func() any { return new(Empty) }},
 }
 
 // Limits of the helpers (M5 spec §3, §4.3 and protocol spec §9). Text is
@@ -44,6 +48,7 @@ const (
 	MaxSetText          = 4096      // code points of setText's text
 	MaxProtectedApps    = 1000      // packages in device.info's protectedApps
 	MaxPackage          = 255       // characters of a package name
+	MaxHideNoticeMs     = 5000      // milliseconds hideNotice may keep the app's notice off the screen
 )
 
 var packageRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$`)
@@ -75,8 +80,17 @@ type UISetTextArgs struct {
 	Text string `json:"text"`
 }
 
+// UIHideNoticeArgs are hideNotice's args: how long, from 1 to MaxHideNoticeMs
+// milliseconds, the app keeps its on-screen notice (frame and pill) off the
+// screen so that a capture by adb does not carry it. The app puts it back by
+// itself when the time is up, unless the agent was paused meanwhile.
+type UIHideNoticeArgs struct {
+	Ms int `json:"ms"`
+}
+
 // UIDump is dump's result: the screen as the agent may see it. Elements is
-// empty while the phone is locked. Package is empty when unknown.
+// empty while the phone is locked. Package is empty when unknown. Unreadable
+// says the screen could not be read.
 type UIDump struct {
 	Locked    bool        `json:"locked"`
 	Package   string      `json:"package"`
@@ -86,6 +100,9 @@ type UIDump struct {
 	Rotation  int         `json:"rotation"`
 	Truncated bool        `json:"truncated"`
 	Elements  []UIElement `json:"elements"`
+	// Unreadable: an app window gave the app no content (Android or the app
+	// hides it from accessibility services) or there is no window at all.
+	Unreadable bool `json:"unreadable,omitempty"`
 }
 
 // UIElement is one element of a dump. Bounds are left, top, right, bottom

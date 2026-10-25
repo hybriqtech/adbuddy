@@ -81,6 +81,7 @@ func (c *Classifier) evalWords(ws []Word, e *evaluator) []Finding {
 		if len(ws) > 1 && (ws[1].Dynamic || strings.Contains(strings.ToLower(ws[1].Value), ADBuddyPackage)) {
 			f := redFinding("run-as.adbuddy", reason("reads or changes the ADBuddy app's private files"), vals, textRunAsADBuddy)
 			f.Special = true
+			f.AppChannel = true
 			return []Finding{f}
 		}
 	case "setsid", "daemonize", "start-stop-daemon", "disown":

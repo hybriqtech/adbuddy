@@ -3,6 +3,7 @@ package claudecode
 import (
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -41,15 +42,13 @@ func oneLine(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// ToolSummary is ToolSummaryIn in English.
-func ToolSummary(tool string, raw json.RawMessage) string { return ToolSummaryIn(i18n.EN, tool, raw) }
-
 // ToolSummaryIn is the one line the phone shows of a tool use (spec M4 §4.2):
 // the verb, in the language of the PC, and what it works on, which is the
 // agent's and is never translated; never the whole input, never a path with
 // folders. At most 120 characters.
 func ToolSummaryIn(lang i18n.Lang, tool string, raw json.RawMessage) string {
 	in := input(raw)
+	var s string
 	base := func(key string) string {
 		p := str(in, key)
 		if p == "" {
@@ -60,31 +59,35 @@ func ToolSummaryIn(lang i18n.Lang, tool string, raw json.RawMessage) string {
 	switch tool {
 	case "Bash":
 		if d := str(in, "description"); strings.TrimSpace(d) != "" {
-			return oneLine(d, maxSummary)
+			s = d
+		} else {
+			s = str(in, "command")
 		}
-		return oneLine(str(in, "command"), maxSummary)
 	case "Read":
-		return oneLine(lang.T("tool.read", base("file_path")), maxSummary)
+		s = lang.T("tool.read", base("file_path"))
 	case "Edit", "MultiEdit":
-		return oneLine(lang.T("tool.edit", base("file_path")), maxSummary)
+		s = lang.T("tool.edit", base("file_path"))
 	case "Write":
-		return oneLine(lang.T("tool.write", base("file_path")), maxSummary)
+		s = lang.T("tool.write", base("file_path"))
 	case "NotebookEdit":
-		return oneLine(lang.T("tool.edit", base("notebook_path")), maxSummary)
+		s = lang.T("tool.edit", base("notebook_path"))
 	case "Grep":
-		return oneLine(lang.T("tool.search", str(in, "pattern")), maxSummary)
+		s = lang.T("tool.search", str(in, "pattern"))
 	case "Glob":
-		return oneLine(lang.T("tool.find", str(in, "pattern")), maxSummary)
+		s = lang.T("tool.find", str(in, "pattern"))
 	case "WebFetch":
-		return oneLine(lang.T("tool.fetch", domainOf(str(in, "url"))), maxSummary)
+		s = lang.T("tool.fetch", domainOf(str(in, "url")))
 	case "WebSearch":
-		return oneLine(lang.T("tool.web_search", str(in, "query")), maxSummary)
+		s = lang.T("tool.web_search", str(in, "query"))
+	default:
+		if rest, ok := strings.CutPrefix(tool, "mcp__"); ok {
+			server, name, _ := strings.Cut(rest, "__")
+			s = server + ": " + name
+		} else {
+			s = tool
+		}
 	}
-	if rest, ok := strings.CutPrefix(tool, "mcp__"); ok {
-		server, name, _ := strings.Cut(rest, "__")
-		return oneLine(server+": "+name, maxSummary)
-	}
-	return oneLine(tool, maxSummary)
+	return oneLine(s, maxSummary)
 }
 
 // domainOf is the host of a URL as written, or "" when it has none.
@@ -304,10 +307,8 @@ func mentionsPhone(cmd string) bool {
 	}
 	words := strings.FieldsFunc(low, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') })
 	for _, w := range words {
-		for _, p := range phoneWords {
-			if w == p {
-				return true
-			}
+		if slices.Contains(phoneWords, w) {
+			return true
 		}
 	}
 	return false
