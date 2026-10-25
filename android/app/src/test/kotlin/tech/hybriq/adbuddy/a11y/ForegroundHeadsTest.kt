@@ -28,6 +28,7 @@ class ForegroundHeadsTest {
         override fun focusedInput(): UiNode? = null
         override fun setText(node: UiNode, text: String) = false
         override fun acting(mark: Box?) = true
+        override fun hideNotice(ms: Long) = true
     }
 
     private val now = Instant.parse("2026-10-01T10:00:00Z").toEpochMilli()
