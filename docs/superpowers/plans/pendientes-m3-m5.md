@@ -763,10 +763,10 @@ Informe: `.superpowers/sdd/2026-10-03-revision-seguridad-v1/area-5-informe.md`.
 - **Pendiente con dispositivo (emulador y móvil real con permiso):**
   - medir el arnés de dispositivo (etapas de la guarda);
   - P4, consultas de la guarda en paralelo;
-  - P5, `foreground` ligero en la app (`Screen.windows()` copia todo el árbol de todas las ventanas): solo hay plan, `2026-10-11-latencia-p5-foreground-ligero.md`; no se implementa sin el OK del líder;
   - P6, cliente del protocolo adb sin proceso por orden;
   - ajustar `settleFirst/Gap/Min/Max` con transiciones reales (hoy cada `--screen` cuesta ≥ 0,5 s aunque se asiente al instante);
   - comprobar la nota de bloqueo con una notificación entrante tras abrir una app.
+- **P5 `foreground` ligero: hecho** (rama `perf/foreground-ligero`, plan `2026-10-11-latencia-p5-foreground-ligero.md`): la operación `foreground` de la app lee solo tipo y paquete de cada ventana (`Screen.windowHeads()`), sin copiar el árbol. En el emulador baja de ~33 a ~4,5 ms con 2000 vistas y de ~50 a ~4,5 ms con 8000 (~5-11 veces); en Ajustes (73 nodos) no hay ganancia apreciable. Equivalencia con `windows()` comprobada en emulador (`TestHeadsMatchWindowsOnTheEmulator`). Cifras en `2026-10-03-latencia.md`.
 - **Imagen API 37 local:** `system-images;android-37.0;google_apis;x86_64` hace caer `surfaceflinger` en bucle en este PC con `swiftshader_indirect` y con `swangle_indirect` (el script de arranque sale con «not stable»). La validación de S2 (2026-10-11) se hizo con API 34 (`ADBUDDY_EMU_IMAGE=system-images;android-34;google_apis;x86_64` y un `ADBUDDY_EMU_AVD` propio).
 - **No hacer:** captura en flujo (`screenrecord`/scrcpy) para el agente; caché de primer plano (abre un hueco de la guarda).
 

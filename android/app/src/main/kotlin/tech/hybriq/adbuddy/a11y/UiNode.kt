@@ -70,6 +70,9 @@ data class UiWindow(
     val pkg: String get() = root?.pkg.orEmpty()
 }
 
+/** A window's type and its root's package ("" without content: it counts as protected). */
+data class UiWindowHead(val type: String, val pkg: String)
+
 /** Packages the helpers care about. */
 object Packages {
     const val ADBUDDY = "tech.hybriq.adbuddy"

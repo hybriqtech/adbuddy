@@ -103,12 +103,7 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
         val list = windows.map { w ->
             val root = w.root
             val r = Rect().also { w.getBoundsInScreen(it) }
-            val type = when (w.type) {
-                AccessibilityWindowInfo.TYPE_APPLICATION -> if (w.isActive || w.isFocused) "app" else "dialog"
-                AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "ime"
-                AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split"
-                else -> "system"
-            }
+            val type = typeOf(w)
             UiWindow(type, w.layer, Box(r.left, r.top, r.right, r.bottom), root?.let { copy(it, 0) })
         }
         // For a phone where the system does not hand over the content (Android 17 on a Pixel, plan 2026-10-12-p1-pantalla-oculta): once per change, no content in the line.
@@ -122,6 +117,11 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
         }
         return list
     }
+
+    override fun windowHeads(): List<UiWindowHead> =
+        windows.map { w -> UiWindowHead(typeOf(w), w.root?.packageName?.toString().orEmpty()) }
+
+    private fun typeOf(w: AccessibilityWindowInfo): String = typeOf(w.type, w.isActive, w.isFocused)
 
     override fun screen(): Box {
         val b = getSystemService(android.view.WindowManager::class.java).maximumWindowMetrics.bounds
@@ -200,6 +200,13 @@ class AgentAccessibilityService : AccessibilityService(), Screen {
         private const val TAG = "ADBuddyA11y"
         private const val MAX_NODES = 8000
         private const val TAP_MS = 50L
+
+        internal fun typeOf(type: Int, active: Boolean, focused: Boolean): String = when (type) {
+            AccessibilityWindowInfo.TYPE_APPLICATION -> if (active || focused) "app" else "dialog"
+            AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "ime"
+            AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split"
+            else -> "system"
+        }
 
         /** Heads-up window shared with UiHelpers: a fresh service starts with none (the host covers that gap with the shade). */
         val notifications = NotificationWindow(SystemClock::elapsedRealtime)

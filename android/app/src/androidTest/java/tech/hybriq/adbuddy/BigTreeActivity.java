@@ -1,0 +1,60 @@
+package tech.hybriq.adbuddy;
+
+import android.app.Activity;
+import android.os.Bundle;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+/**
+ * Only for ForegroundHeadsOnEmulatorTest: a window with a tree of about "views" nested views (extra, default 2000),
+ * each one important for accessibility, so the accessibility tree has them all (a RecyclerView or a Settings list
+ * exposes only the visible rows). Fan-out 4, so the depth stays near 7 for 2000 and 9 for 9000.
+ *
+ * Java and exported for the same reasons as TapjackOverlayActivity: it runs in the tests' own package and
+ * process, which carries no Kotlin stdlib, and the test starts it with `am start` (extras: views, floating, edit).
+ */
+public class BigTreeActivity extends Activity {
+    private static final int FANOUT = 4;
+
+    @Override protected void onCreate(Bundle b) {
+        // P5 task 3: floating dialog theme, so the activity beneath (Settings) stays visible as a second application window.
+        if (getIntent().getBooleanExtra("floating", false)) setTheme(android.R.style.Theme_DeviceDefault_Dialog);
+        super.onCreate(b);
+        int views = getIntent().getIntExtra("views", 2000);
+        setContentView(build(views), new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        if (getIntent().getBooleanExtra("edit", false)) {
+            // P5 task 3: a field with focus and the soft keyboard, so an input-method window exists.
+            final android.widget.EditText e = new android.widget.EditText(this);
+            addContentView(e, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            e.requestFocus();
+            getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            e.postDelayed(new Runnable() { public void run() {
+                getSystemService(android.view.inputmethod.InputMethodManager.class).showSoftInput(e, 0);
+            } }, 500);
+        }
+    }
+
+    /** A subtree of exactly n views (n >= 1). */
+    private View build(int n) {
+        if (n <= 1) {
+            TextView t = new TextView(this);
+            t.setText("x");
+            t.setTextSize(4);
+            t.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+            return t;
+        }
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        int rest = n - 1;
+        int kids = Math.min(FANOUT, rest);
+        for (int i = 0; i < kids; i++) {
+            int share = rest / kids + (i < rest % kids ? 1 : 0);
+            box.addView(build(share));
+        }
+        return box;
+    }
+}
