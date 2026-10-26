@@ -26,6 +26,11 @@ Rama `perf/latencia`, worktree `<worktree>`.
 - Medidas antes/después en `2026-10-03-latencia.md`: turnos 6,4 → 3,8; total 11,8 → 10,0 s (teléfono falso; ruido ±3 s).
 - Pendiente: dispositivo (P4 guarda en paralelo, P5 foreground ligero, ajuste de settle*) cuando haya cupo de emulador; fila para pendientes en `docs/superpowers/fragmentos/perf-latencia.md`.
 
+## P4 guarda en paralelo (rama `perf/guarda-paralela`, desde `perf/latencia`)
+
+- Plan `docs/superpowers/plans/2026-10-04-guarda-paralela.md`. Revisión opus del plan: 1 🔴 (la edad de la lectura de la sombra no estaba acotada: con la app lenta hasta 3 s) y 5 🟠 (esperar a las gorrutinas, propiedad 3 falsa, tests con ejecutor propio, multiconjunto en `waiting_test`, medición con solo totales); todo aplicado.
+- Ruling: la guarda lanza `mCurrentFocus` (y `dumpsys window windows` sin app) a la vez que `inFront`, con las dos respuestas obligatorias y la lectura que tenga más de `focusSlack` (150 ms) al usarla se vuelve a hacer en serie — ahorra el menor de los dos tiempos por orden con pantalla — cuesta: a lo sumo 150 ms más de edad para la sombra respecto a hoy; si no se acepta, `focusSlack` = 0 (sin ahorro) o no integrar.
+- bc677c1 (T1) + 68ba533 (menores: test de relectura determinista, comentario). Revisión opus del diff: conforme, 3 menores (2 arreglados, 1 sin acción). Falta T2: medir en el emulador (totales, mediana y IQR; más `TestTheGuardOnRealScreens`, `…HeadsUp`, `…Bubble`, `…FallbackWithoutTheApp`); si el ahorro no supera el ruido, no se integra.
 ## settle2 (perf/latencia): la espera de `--screen` con pantalla de partida
 
 - Motivo (medido en emulador, `TestLatencySettle`): primer cambio de pantalla a 520-1100 ms (máx. 1,7 s) y la app dice «protegida» en el 39 % de las lecturas tras Atrás. `settleMin` 400 ms daba por asentada la pantalla vieja (riesgo de tap repetido) y los bloqueos transitorios salían como bloqueo.

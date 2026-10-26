@@ -7,6 +7,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hybriqtech/adbuddy/host/internal/bridge"
@@ -29,6 +30,16 @@ import (
 // foregroundWait is how long the guard waits for the app to say what is in
 // front before asking adb (a variable so tests can shorten it).
 var foregroundWait = 3 * time.Second
+
+// focusSlack is how old a read of the system UI (the shade, the system windows)
+// may be when the guard uses it. The age is measured from when the read
+// STARTED, not from when it ended: what a dumpsys shows is the state of its
+// start, and a read lasts about half a second. The reads start together with
+// inFront; if more than this went by since they started (a slow or silent app,
+// or a read that by itself lasts longer than this: it is then always repeated,
+// which is the strict side), they are made again, in series, after inFront, as
+// the guard did before it ran them in parallel. A variable for the tests.
+var focusSlack = 150 * time.Millisecond
 
 // screenReads are the commands that read the screen; the classifier marks
 // the ones that act on it (Finding.UI: input, am start, monkey).
@@ -306,11 +317,69 @@ const (
 	powerCmd   = "dumpsys power"
 )
 
+// readResult is the answer of one of the guard's own dumpsys reads, and when it
+// started (the state it shows is that of the start, not of the end).
+type readResult struct {
+	out     string
+	code    int
+	err     error
+	started time.Time // just before the read was asked of adb
+}
+
+// guardReads are the reads the guard started in the background. The guard
+// cancels them and waits on wg for all of them (cancelled or finished) before
+// it answers, so nothing it started outlives it.
+type guardReads struct {
+	wg sync.WaitGroup
+}
+
+// start runs the shell command cmd on the phone in the background and returns
+// where its answer will be (one answer; the buffer lets the goroutine end even
+// if nobody reads it).
+func (g *guardReads) start(ctx context.Context, adb Executor, cmd string) <-chan readResult {
+	ch := make(chan readResult, 1)
+	g.wg.Add(1)
+	go func() {
+		defer g.wg.Done()
+		started := time.Now()
+		out, code, err := adb.Shell(ctx, cmd)
+		ch <- readResult{out, code, err, started}
+	}()
+	return ch
+}
+
 // guardForeground returns why nothing may touch or read the screen now, or "".
 // words are those of the one command that asks (nil for a helper): the exact
 // key that closes the shade (closesShade) skips the shade rule, and the exact
 // key that wakes the screen (wakesScreen) is let through while it is off.
+//
+// The reads of the system UI (the shade and, without the app, the system
+// windows) do not depend on what is in front, so they start together with
+// inFront: the guard takes as long as the slower one, not the sum. What is in
+// front is still decided first, with the same reasons in the same order; both
+// answers are still required (systemUIReason waits for them, and makes them
+// again when they are older than focusSlack); and every read still running
+// when the guard answers is cancelled and waited for. With the app configured
+// but not answering (inFront falls back to dumpsys and viaApp is false), the
+// system windows were not started before and are read afterwards, in series,
+// as before P4: it is not an oversight.
 func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
+	// Nothing is started for a context that is already over (as before: the reads would fail).
+	if err := ctx.Err(); err != nil {
+		return "could not tell which app is in the foreground (" + err.Error() + "); ADBuddy does not touch or read the screen without knowing"
+	}
+	// The reads of the system UI do not depend on what is in front: they start
+	// together with it. Both answers are still required (systemUIReason waits
+	// for them and makes them again if they are older than focusSlack); what
+	// is still running when the guard answers is stopped and waited for.
+	rctx, stop := context.WithCancel(ctx)
+	var reads guardReads
+	defer func() { stop(); reads.wg.Wait() }()
+	focusCh := reads.start(rctx, d.o.ADB, focusCmd)
+	var windowsCh <-chan readResult
+	if d.o.UI == nil { // without the app viaApp is always false: that read is always needed
+		windowsCh = reads.start(rctx, d.o.ADB, windowsCmd)
+	}
 	f, err := d.inFront(ctx)
 	if err != nil {
 		return "could not tell which app is in the foreground (" + err.Error() + "); ADBuddy does not touch or read the screen without knowing"
@@ -354,7 +423,7 @@ func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
 		return screenProtectedReason(f.first())
 	}
 	// YOLO lifts a shade or a system window that is KNOWN to be there; not knowing what is in front (R1) still blocks.
-	if why, unknown := d.systemUIReason(ctx, f.viaApp, closesShade(words)); why != "" && !(wakesScreen(words) && d.screenOff(ctx)) && (unknown || !d.lift(ctx, why)) {
+	if why, unknown := d.systemUIReason(ctx, f.viaApp, closesShade(words), focusCh, windowsCh); why != "" && !(wakesScreen(words) && d.screenOff(ctx)) && (unknown || !d.lift(ctx, why)) {
 		return why
 	}
 	return ""
@@ -366,11 +435,15 @@ func (d *Daemon) guardForeground(ctx context.Context, words []string) string {
 // of systemui that is not a fixed one (a heads-up notification, with no app
 // name here). It fails closed: what it cannot read blocks, and says so with unknown (YOLO never lifts that). The caller lifts
 // the block only for a wake key with the screen off (the lock screen is the shade then).
-func (d *Daemon) systemUIReason(ctx context.Context, viaApp, closing bool) (why string, unknown bool) {
+// The reads began before, together with inFront (focusCh, windowsCh; nil:
+// not started): it waits for each answer it uses and, when one is older than
+// focusSlack, reads it again now (freshRead). An answer that did not come,
+// failed or was cancelled blocks as any read that fails.
+func (d *Daemon) systemUIReason(ctx context.Context, viaApp, closing bool, focusCh, windowsCh <-chan readResult) (why string, unknown bool) {
 	const unreadable = "; ADBuddy does not touch or read the screen without knowing"
-	out, code, err := d.o.ADB.Shell(ctx, focusCmd)
-	focus, ok := uidump.ParseFocus(out)
-	if err != nil || code != 0 || !ok {
+	r := d.freshRead(ctx, focusCh, focusCmd)
+	focus, ok := uidump.ParseFocus(r.out)
+	if r.err != nil || r.code != 0 || !ok {
 		return "could not tell whether the notification shade is open" + unreadable, true
 	}
 	if closing {
@@ -384,9 +457,9 @@ func (d *Daemon) systemUIReason(ctx context.Context, viaApp, closing bool) (why 
 	if viaApp {
 		return "", false // the app's foreground says if a notification is on screen
 	}
-	out, code, err = d.o.ADB.Shell(ctx, windowsCmd)
-	windows, ok := uidump.ParseSystemUIWindows(out)
-	if err != nil || code != 0 || !ok {
+	r = d.freshRead(ctx, windowsCh, windowsCmd)
+	windows, ok := uidump.ParseSystemUIWindows(r.out)
+	if r.err != nil || r.code != 0 || !ok {
 		return "could not tell whether a system window is on screen" + unreadable, true
 	}
 	if len(windows) > 0 {
@@ -396,6 +469,23 @@ func (d *Daemon) systemUIReason(ctx context.Context, viaApp, closing bool) (why 
 		return "a system window is on screen (" + strings.Join(windows, ", ") + "), maybe a notification; wait for it to go away or ask the user to do this part", false
 	}
 	return "", false
+}
+
+// freshRead is the answer of a read started in the background (ch; nil: none
+// was started), or a new read made now when it started more than focusSlack
+// ago: the guard never decides on a state that is older than it would have been
+// before the reads ran in parallel by more than that.
+func (d *Daemon) freshRead(ctx context.Context, ch <-chan readResult, cmd string) readResult {
+	slack := focusSlack
+	if ch != nil {
+		r := <-ch
+		if time.Since(r.started) <= slack {
+			return r
+		}
+	}
+	started := time.Now()
+	out, code, err := d.o.ADB.Shell(ctx, cmd)
+	return readResult{out, code, err, started}
 }
 
 // screenOff reports whether dumpsys power says the screen is off.
