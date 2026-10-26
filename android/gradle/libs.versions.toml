@@ -12,7 +12,7 @@ androidxTestRunner = "1.7.0"
 androidxTestExt = "1.3.0"
 webkit = "1.14.0"
 biometric = "1.1.0"
-fragment = "1.8.9"
+fragment = "1.9.1"
 # Tests of the screens in the JVM (plan tests-ui-jvm). robolectricAndroidAll is the Android 14 jar that this Robolectric
 # runs (SDK 34, src/test/resources/robolectric.properties): it changes with robolectric.
 robolectric = "4.17"
