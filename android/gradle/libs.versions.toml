@@ -5,19 +5,19 @@ composeBom = "2026.09.00"
 activityCompose = "1.13.0"
 coreKtx = "1.19.1"
 lifecycle = "2.11.0"
-okhttp = "5.5.0"
-serialization = "1.11.0"
+okhttp = "5.5.1"
+serialization = "1.12.0"
 junit = "4.13.2"
 androidxTestRunner = "1.7.0"
 androidxTestExt = "1.3.0"
 webkit = "1.14.0"
 biometric = "1.1.0"
-fragment = "1.8.9"
+fragment = "1.9.1"
 # Tests of the screens in the JVM (plan tests-ui-jvm). robolectricAndroidAll is the Android 14 jar that this Robolectric
 # runs (SDK 34, src/test/resources/robolectric.properties): it changes with robolectric.
 robolectric = "4.17"
 robolectricAndroidAll = "14-robolectric-10818077-i7"
-roborazzi = "1.76.0"
+roborazzi = "1.77.0"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
