@@ -1,0 +1,36 @@
+name: security
+# Runs on GitHub-hosted runners (docs/ci-self-hosted.md). The same checks as the
+# pre-push hooks (docs/hooks.md, "Seguridad"), for pull requests whose author
+# has no hooks installed: Semgrep on what the pull request adds, gitleaks on its
+# commits. No tokens, no accounts: Semgrep runs with metrics off and gitleaks in
+# a container pinned by digest (scripts/gitleaks.sh). pull_request only, never
+# pull_request_target.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: semgrep and gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # Findings already on the base branch do not count: only what this pull request adds.
+      - name: semgrep
+        run: pipx run --spec semgrep==1.185.0 semgrep scan --config p/default --config p/secrets --metrics=off --error --baseline-commit "$BASE_SHA"
+      # Every commit of the pull request, including files a later commit deleted.
+      - name: gitleaks
+        run: bash scripts/gitleaks.sh --log-opts="$BASE_SHA..$HEAD_SHA"

@@ -23,7 +23,7 @@ Hoja de ruta: §13 de la spec. Pendientes y notas para hitos futuros: `docs/supe
 
 ## Hooks de git (prek)
 
-Los hooks de commit (gofmt, builtins) y de push (`go vet`, `go test` sin `internal/cli`) están descritos en `docs/hooks.md`. Si un hook para el commit, arregla y repite; no uses `--no-verify`. La CI no cambia.
+Los hooks de commit (gofmt, builtins, Semgrep de secretos) y de push (`go vet`, `go test` sin `internal/cli`, Semgrep y gitleaks) están descritos en `docs/hooks.md`. Si un hook para el commit, arregla y repite; no uses `--no-verify`. Un aviso de seguridad se arregla o, si es un falso positivo, se marca en su línea (`docs/hooks.md`, «Seguridad»).
 
 ## Compactación
 

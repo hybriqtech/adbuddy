@@ -1,0 +1,18 @@
+# Falsos positivos de gitleaks ya revisados (docs/hooks.md, «Seguridad»). Una huella por línea:
+# commit:fichero:regla:línea. Todos son valores de prueba: tokens de relleno de los tests y fixtures del
+# protocolo (en Go, Kotlin y en los planes que los copian), un comentario de un test y xterm.js minificado.
+# Una clave de verdad no se apunta aquí: se rota y se avisa.
+01a3f8bc722550ed370cbba05d1739a56927c3f2:docs/superpowers/plans/2026-09-30-adbuddy-m2-app-base.md:generic-api-key:116
+01a3f8bc722550ed370cbba05d1739a56927c3f2:docs/superpowers/plans/2026-09-30-adbuddy-m2-app-base.md:generic-api-key:3205
+01a3f8bc722550ed370cbba05d1739a56927c3f2:docs/superpowers/plans/2026-09-30-adbuddy-m2-app-base.md:generic-api-key:4139
+04feb9e597ab05f9b2e682ded036d847bdc40422:android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/BridgeTest.kt:generic-api-key:29
+04feb9e597ab05f9b2e682ded036d847bdc40422:android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/ProtocolTest.kt:generic-api-key:48
+0763e4f0e38779d877f67277fd51975c90785935:host/internal/bridge/bridge_test.go:generic-api-key:16
+2c99bd427afd072da06baee9d44a3d695de10f13:host/cmd/adbuddy/latency_agent_test.go:generic-api-key:27
+4fec7565ffd45104a31edc07d5050fbb95acca36:docs/superpowers/plans/2026-10-01-adbuddy-m3.0-protocolo-comun.md:generic-api-key:123
+4fec7565ffd45104a31edc07d5050fbb95acca36:docs/superpowers/plans/2026-10-01-adbuddy-m3.0-protocolo-comun.md:generic-api-key:147
+8d6e25ac430f517beeec9efce0ade286a6d5d49f:protocol/fixtures/app/hello.json:generic-api-key:7
+8d6e25ac430f517beeec9efce0ade286a6d5d49f:protocol/fixtures/app/hello@m2.json:generic-api-key:7
+d2e08f3f4c7d2e39534ec5c54438132f97da944f:android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/HandshakeTest.kt:generic-api-key:11
+dad0f921aa1f543caf9eaf9d1dd387b59fde01b0:android/app/src/main/assets/term/xterm.js:generic-api-key:1
+f2951486e1c8079069ab42259cc9bb2e40139865:android/app/src/test/kotlin/tech/hybriq/adbuddy/bridge/BridgeTest.kt:generic-api-key:27
