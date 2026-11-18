@@ -390,7 +390,9 @@ func TestSlowClientOverTheNetwork(t *testing.T) {
 	recv(t, c)
 	waitConnected(t, h.srv, true)
 	big := strings.Repeat("x", 16<<10)
-	for i := 0; i < 20000 && h.srv.Connected(); i++ { // the app stops reading
+	// 2000 x 16 KiB is several times what sendQueue plus the socket buffers
+	// hold, so a client that is never dropped fails here without a huge send.
+	for i := 0; i < 2000 && h.srv.Connected(); i++ { // the app stops reading
 		h.srv.Publish(TypeNotice, Notice{Text: big})
 	}
 	if h.srv.Connected() {

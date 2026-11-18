@@ -868,9 +868,12 @@ func (r *filesRig) bigStored(t *testing.T, id string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chunk := testBytes(1 << 20)
-	for range 64 {
-		f.Write(chunk)
+	// The size is tied to the production queue (bridge.sendQueue, 256 frames
+	// of MaxFrameData = 64 MiB, a constant): the file has to be bigger than the
+	// queue for the download to wait. The content does not matter, so the file
+	// is sparse and nothing is written to disk.
+	if err := f.Truncate(64 << 20); err != nil {
+		t.Fatal(err)
 	}
 	f.Close()
 	r.l.chat.attachments.put(bridge.Attachment{ID: id, Name: "big.bin", Size: 64 << 20}, "outbox/big.bin")
