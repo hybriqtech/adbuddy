@@ -1,6 +1,7 @@
 package emutest
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -25,7 +26,12 @@ const cacheCap = 4 << 20
 func (e *emu) setCacheCap(t *testing.T, n int64) {
 	t.Helper()
 	e.runAs(t, fmt.Sprintf(`sh -c 'mkdir -p files && echo %d > files/debug-cache-cap'`, n))
-	t.Cleanup(func() { e.shell(t, "run-as "+phoneapp.Package+" rm -f files/debug-cache-cap; true") })
+	t.Cleanup(func() {
+		// e.ctx comes from t.Context(), which is canceled before cleanups run.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(e.ctx), time.Minute)
+		defer cancel()
+		_, _, _, _ = e.adb.Output(ctx, "shell", "run-as "+phoneapp.Package+" rm -f files/debug-cache-cap")
+	})
 }
 
 // fillCache creates cache/downloads/name of mib MiB of zeros dated date (as
