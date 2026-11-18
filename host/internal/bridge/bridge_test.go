@@ -385,14 +385,17 @@ func TestSlowClientIsDropped(t *testing.T) {
 
 func TestSlowClientOverTheNetwork(t *testing.T) {
 	var got calls
-	h := start(t, Options{OnConnect: got.add})
+	// A smaller queue than production's 256: what has to fill is the socket
+	// buffers and then it. (Much smaller and a burst alone overflows it.)
+	h := start(t, Options{OnConnect: got.add, SendQueue: 64})
 	c := h.dial(token, 0)
 	recv(t, c)
 	waitConnected(t, h.srv, true)
 	big := strings.Repeat("x", 16<<10)
-	// 2000 x 16 KiB is several times what sendQueue plus the socket buffers
-	// hold, so a client that is never dropped fails here without a huge send.
-	for i := 0; i < 2000 && h.srv.Connected(); i++ { // the app stops reading
+	// 1000 x 16 KiB is more than the socket buffers plus the queue hold, so
+	// a client that is never dropped fails here; the loop ends as soon as
+	// the client is dropped.
+	for i := 0; i < 1000 && h.srv.Connected(); i++ { // the app stops reading
 		h.srv.Publish(TypeNotice, Notice{Text: big})
 	}
 	if h.srv.Connected() {
@@ -843,5 +846,14 @@ func TestPublishSnapshotIsAnEvent(t *testing.T) {
 	recv(t, c) // welcome
 	if m := recv(t, c); m.Type != TypeSnapshot || m.Seq != 3 || json.Unmarshal(m.Payload, &snap) != nil || snap.State.State != "working" {
 		t.Fatalf("resumed: %+v", m)
+	}
+}
+
+func TestSendQueueDefaultsToProduction(t *testing.T) {
+	if got := New(Options{}).sendQueue; got != sendQueue || sendQueue != 256 {
+		t.Fatalf("default queue %d (const %d), want 256", got, sendQueue)
+	}
+	if got := New(Options{SendQueue: 8}).sendQueue; got != 8 {
+		t.Fatalf("queue %d, want 8", got)
 	}
 }

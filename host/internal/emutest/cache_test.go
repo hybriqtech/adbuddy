@@ -2,32 +2,30 @@ package emutest
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hybriqtech/adbuddy/host/internal/phoneapp"
 )
 
 // The cache of the downloads (validation 3 of M3b, e). The app keeps
-// cache/downloads under 500 MiB = 524 288 000 bytes (FileCache.kt): after a
-// download completes it trims in the background, oldest modification time
-// first, and a .part (a download in progress or one to resume) is neither
-// counted nor ever deleted. There is no "file in use" (T1).
-const cacheCap = 500 << 20
+// cache/downloads under 500 MiB (FileCache.kt): after a download completes it
+// trims in the background, oldest modification time first, and a .part (a
+// download in progress or one to resume) is neither counted nor ever deleted.
+// There is no "file in use" (T1).
+//
+// The test does not fill 500 MiB of the emulator's disk: the debug app (the
+// one installed here) takes another cap from the file files/debug-cache-cap
+// (DebugOverrides.kt, read at each trim and ignored by a release), and the
+// test writes this one.
+const cacheCap = 4 << 20
 
-// freeKB is the free space of the emulator's /data in KB.
-func (e *emu) freeKB(t *testing.T) int64 {
+// setCacheCap makes the app's cache cap n bytes until the test ends.
+func (e *emu) setCacheCap(t *testing.T, n int64) {
 	t.Helper()
-	lines := strings.Split(e.shell(t, "df -k /data"), "\n")
-	f := strings.Fields(lines[len(lines)-1])
-	if len(f) < 4 {
-		t.Fatalf("df -k /data: %q", lines)
-	}
-	n, err := strconv.ParseInt(f[3], 10, 64)
-	if err != nil {
-		t.Fatalf("df -k /data: %q: %v", lines, err)
-	}
-	return n
+	e.runAs(t, fmt.Sprintf(`sh -c 'mkdir -p files && echo %d > files/debug-cache-cap'`, n))
+	t.Cleanup(func() { e.shell(t, "run-as "+phoneapp.Package+" rm -f files/debug-cache-cap; true") })
 }
 
 // fillCache creates cache/downloads/name of mib MiB of zeros dated date (as
@@ -62,8 +60,8 @@ func TestCacheBytes(t *testing.T) {
 	}
 }
 
-// The cache is filled with four files of 125 MiB (exactly the cap) dated 2020
-// and a .part of 150 MiB dated 2019 (the oldest of all, which a trim that
+// The cache is filled with four files of 1 MiB (exactly the cap) dated 2020
+// and a .part of 2 MiB dated 2019 (the oldest of all, which a trim that
 // counted .part files would delete first); a small PDF comes by the channel
 // and the app trims by itself, asynchronously, so it is polled. Checked: the
 // oldest finished file went, the others and the new one stayed, what is left
@@ -81,9 +79,7 @@ func TestCacheTrimsTheOldestAndKeepsTheParts(t *testing.T) {
 	l := openLink(t)
 	e := l.e
 	l.openChat(t)
-	if free := e.freeKB(t); free < 2<<20 {
-		t.Fatalf("/data has %d KB free: the fill (650 MiB) and the rest do not fit", free)
-	}
+	e.setCacheCap(t, cacheCap)
 	e.runAs(t, "mkdir -p cache/downloads")
 
 	// In order of modification time, oldest first. The names, the order of
@@ -99,10 +95,10 @@ func TestCacheTrimsTheOldestAndKeepsTheParts(t *testing.T) {
 		id("c") + "-fourth.bin", // 2020-04
 	}
 	for _, i := range []int{1, 2, 3, 0} { // creation order = name order
-		e.fillCache(t, olds[i], 125, fmt.Sprintf("2020-0%d-01 00:00:00", i+1))
+		e.fillCache(t, olds[i], 1, fmt.Sprintf("2020-0%d-01 00:00:00", i+1))
 	}
 	part := strings.Repeat("b", 32) + ".part"
-	e.fillCache(t, part, 150, "2019-01-01 00:00:00")
+	e.fillCache(t, part, 2, "2019-01-01 00:00:00")
 	if mutate == "reverse-age" {
 		e.runAs(t, `touch -d "2025-01-01 00:00:00" cache/downloads/`+olds[0])
 	}
@@ -144,8 +140,8 @@ func TestCacheTrimsTheOldestAndKeepsTheParts(t *testing.T) {
 			t.Errorf("the new download %s is not in the cache: %v", newName, mapKeys(after))
 		}
 	}
-	if got, ok := after[part]; !ok || got != 150<<20 {
-		t.Errorf("the .part is %d bytes (present %v), want %d: the trim must not touch it", got, ok, int64(150)<<20)
+	if got, ok := after[part]; !ok || got != 2<<20 {
+		t.Errorf("the .part is %d bytes (present %v), want %d: the trim must not touch it", got, ok, int64(2)<<20)
 	}
 	counted := mutate == "count-part"
 	if total := cacheBytes(after, counted); total > cacheCap {
