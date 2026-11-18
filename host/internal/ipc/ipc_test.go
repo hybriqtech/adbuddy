@@ -251,6 +251,10 @@ func TestDisconnectCancelsHandlerThatIgnoresStdin(t *testing.T) {
 }
 
 func TestStdinTooLargeCancels(t *testing.T) {
+	// A tiny limit instead of sending more than the real 16 MiB.
+	old := maxStdin
+	maxStdin = 4 << 10
+	t.Cleanup(func() { maxStdin = old })
 	dir := shortDir(t)
 	cancelled := make(chan struct{})
 	startServer(t, dir, func(ctx context.Context, req Request, c *Conn) Exit {
@@ -264,7 +268,7 @@ func TestStdinTooLargeCancels(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		Call(context.Background(), dir, Request{Kind: KindExec}, bytes.NewReader(make([]byte, 17<<20)), io.Discard, io.Discard, nil)
+		Call(context.Background(), dir, Request{Kind: KindExec}, bytes.NewReader(make([]byte, maxStdin+1)), io.Discard, io.Discard, nil)
 	}()
 	select {
 	case <-cancelled:

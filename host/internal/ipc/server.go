@@ -16,8 +16,9 @@ import (
 	"time"
 )
 
-// maxStdin bounds the stdin a request may send.
-const maxStdin = 16 << 20
+// maxStdin bounds the stdin a request may send. It is a variable only so a
+// test can inject a small limit; nothing else changes it.
+var maxStdin = 16 << 20
 
 var errStdinTooLarge = fmt.Errorf("stdin exceeds %d bytes", maxStdin)
 
