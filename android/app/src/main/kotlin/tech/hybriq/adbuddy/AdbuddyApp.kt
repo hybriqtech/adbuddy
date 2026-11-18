@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import android.content.res.Configuration
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -36,6 +37,7 @@ import tech.hybriq.adbuddy.control.CutCheck
 import tech.hybriq.adbuddy.files.Captures
 import tech.hybriq.adbuddy.files.Downloads
 import tech.hybriq.adbuddy.files.Drafts
+import tech.hybriq.adbuddy.files.DebugOverrides
 import tech.hybriq.adbuddy.files.FileCache
 import tech.hybriq.adbuddy.files.UploadFailed
 import tech.hybriq.adbuddy.files.Uploader
@@ -140,7 +142,11 @@ class AdbuddyApp : Application() {
         UriSource.clearCache(this)
         captures = Captures(channel, errorTexts)
         drafts = Drafts(scope, Uploader(channel), captures, errorTexts)
-        downloads = Downloads(channel, FileCache(File(cacheDir, "downloads")), scope, errorText = errorTexts)
+        val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        val cache = FileCache(File(cacheDir, "downloads"), capOverride = {
+            DebugOverrides.cacheCap(debuggable, File(filesDir, DebugOverrides.CACHE_CAP_FILE))
+        })
+        downloads = Downloads(channel, cache, scope, errorText = errorTexts)
         terminal = TerminalFeed(channel)
         scope.launch { channel.connected.collect { terminal.onConnectedChanged(it) } }
         createNotificationChannels()

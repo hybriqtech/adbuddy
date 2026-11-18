@@ -32,7 +32,7 @@ var beforeFrame = func() {}
 const (
 	helloLimit = 4 << 10 // read limit until the token is checked
 	maxMessage = 1 << 20 // text messages and binary frames (FrameHeaderLen+MaxFrameData fits)
-	sendQueue  = 256
+	sendQueue  = 256     // items queued per connection unless Options.SendQueue says otherwise
 	pingEvery  = 20 * time.Second
 )
 
@@ -83,7 +83,12 @@ type Options struct {
 	// and OnFrame). It comes after OnConnect(true), in order with it, and may
 	// call Publish and Send.
 	OnAttach func()
-	Now      func() time.Time
+	// SendQueue is how many items (messages and frames) wait to be written
+	// to a connection before a client that does not read is dropped. 0
+	// means the production value; only tests set it, to keep what they have
+	// to fill small.
+	SendQueue int
+	Now       func() time.Time
 }
 
 // Server is the WebSocket server of the app channel. It serves one app at a
@@ -93,6 +98,7 @@ type Server struct {
 	helloTimeout   time.Duration
 	beforeDispatch func(Message)
 	beforeFrame    func()
+	sendQueue      int
 
 	// connMu orders attach and detach together with their OnConnect calls,
 	// which run outside mu.
@@ -179,7 +185,11 @@ func New(o Options) *Server {
 	if o.Snapshot == nil {
 		o.Snapshot = func() Snapshot { return Snapshot{} }
 	}
-	return &Server{o: o, helloTimeout: helloTimeout, beforeDispatch: beforeDispatch, beforeFrame: beforeFrame, token: o.Token}
+	queue := o.SendQueue
+	if queue <= 0 {
+		queue = sendQueue
+	}
+	return &Server{o: o, sendQueue: queue, helloTimeout: helloTimeout, beforeDispatch: beforeDispatch, beforeFrame: beforeFrame, token: o.Token}
 }
 
 // SetToken makes tok the only token accepted from now on, and closes the
@@ -506,7 +516,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cl := &client{send: make(chan outItem, sendQueue), cancel: cancel, done: ctx.Done(), token: hello.Token, conn: c}
+	cl := &client{send: make(chan outItem, s.sendQueue), cancel: cancel, done: ctx.Done(), token: hello.Token, conn: c}
 	backlog, first, ok := s.attach(cl, hello)
 	if !ok { // the token changed since it was checked
 		c.Close(websocket.StatusPolicyViolation, "unauthorized")

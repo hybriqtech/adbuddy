@@ -6,9 +6,14 @@ import tech.hybriq.adbuddy.bridge.Attachment
 /**
  * The downloaded files, in the app's cache (spec M3 §6.4). The name is the
  * attachment's id plus its cleaned name: nothing the host or the agent says
- * can place a file outside the folder. Past maxBytes the oldest go first.
+ * can place a file outside the folder. Past maxBytes the oldest go first;
+ * capOverride, asked at each trim, can say another cap (null: maxBytes).
  */
-class FileCache(private val dir: File, private val maxBytes: Long = 500L * 1024 * 1024) {
+class FileCache(
+    private val dir: File,
+    private val maxBytes: Long = 500L * 1024 * 1024,
+    private val capOverride: () -> Long? = { null },
+) {
     init { dir.mkdirs() }
 
     fun finalFile(a: Attachment) = File(dir, a.id + "-" + FileNames.clean(a.name))
@@ -22,9 +27,10 @@ class FileCache(private val dir: File, private val maxBytes: Long = 500L * 1024 
     fun trim() {
         // A .part is a download in progress (or one to resume): never trimmed from under it.
         val files = dir.listFiles()?.filter { it.isFile && !it.name.endsWith(".part") } ?: return
+        val cap = capOverride() ?: maxBytes
         var total = files.sumOf { it.length() }
         for (f in files.sortedBy { it.lastModified() }) {
-            if (total <= maxBytes) break
+            if (total <= cap) break
             total -= f.length()
             f.delete()
         }

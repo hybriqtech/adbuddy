@@ -54,4 +54,16 @@ class FileCacheTest {
         c.trim()
         assertTrue(f.exists())
     }
+
+    @Test fun theOverrideIsAskedAtEachTrim() {
+        var cap: Long? = null
+        val c = FileCache(tmp.root, maxBytes = 100, capOverride = { cap })
+        val old = File(tmp.root, "old").apply { writeBytes(ByteArray(6)); setLastModified(1_000_000L) }
+        val new = File(tmp.root, "new").apply { writeBytes(ByteArray(6)); setLastModified(2_000_000L) }
+        c.trim()
+        assertTrue(old.exists() && new.exists())
+        cap = 10
+        c.trim()
+        assertFalse(old.exists()); assertTrue(new.exists())
+    }
 }

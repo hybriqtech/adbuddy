@@ -858,6 +858,12 @@ func TestDownloadErrors(t *testing.T) {
 	wantFileError(t, readApp(t, r.c), "r_6", bridge.CodeFailed)
 }
 
+// bigFrames is the size of bigStored's file in frames, and bigSize in bytes.
+const (
+	bigFrames = 128
+	bigSize   = bigFrames * bridge.MaxFrameData
+)
+
 // bigStored makes a file of many frames that the test then does not read, so
 // the download stays waiting for room in the queue.
 func (r *filesRig) bigStored(t *testing.T, id string) {
@@ -868,15 +874,16 @@ func (r *filesRig) bigStored(t *testing.T, id string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The size is tied to the production queue (bridge.sendQueue, 256 frames
-	// of MaxFrameData = 64 MiB, a constant): the file has to be bigger than the
-	// queue for the download to wait. The content does not matter, so the file
-	// is sparse and nothing is written to disk.
-	if err := f.Truncate(64 << 20); err != nil {
+	// What lets a download wait is the socket: a frame waits behind at most
+	// frameBacklog queued items, and the app's socket buffers (about 20
+	// frames on loopback, 30 to 40 at the most) hold the rest. The file has
+	// to be several times that, not as big as the queue. The content does not
+	// matter, so the file is sparse and nothing is written to disk.
+	if err := f.Truncate(bigSize); err != nil {
 		t.Fatal(err)
 	}
 	f.Close()
-	r.l.chat.attachments.put(bridge.Attachment{ID: id, Name: "big.bin", Size: 64 << 20}, "outbox/big.bin")
+	r.l.chat.attachments.put(bridge.Attachment{ID: id, Name: "big.bin", Size: bigSize}, "outbox/big.bin")
 }
 
 func (r *filesRig) downloadsRunning() int {
@@ -907,7 +914,7 @@ func TestDownloadCancel(t *testing.T) {
 		}
 		frames++
 	}
-	if frames >= 256 {
+	if frames >= bigFrames {
 		t.Fatalf("%d frames: the whole file was sent", frames)
 	}
 	// (A read that times out closes the socket.) On a new connection a file
@@ -925,7 +932,7 @@ func TestADownloadReplacesTheOneOfTheSameID(t *testing.T) {
 	r.bigStored(t, id)
 	sendApp(t, r.c, bridge.TypeFileGet, "r_1", bridge.FileGet{ID: id})
 	waitUntil(t, "the download", func() bool { return r.downloadsRunning() == 1 })
-	last := int64(64<<20 - 1000)
+	last := int64(bigSize - 1000)
 	sendApp(t, r.c, bridge.TypeFileGet, "r_2", bridge.FileGet{ID: id, Offset: last})
 	// Read everything until the end: the first download sent frames from 0,
 	// then the second sends the last 1000 bytes and ends, once.

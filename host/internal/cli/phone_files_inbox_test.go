@@ -343,7 +343,7 @@ func TestDownloadsAreCapped(t *testing.T) {
 	r := newFilesRig(t, nil)
 	r.bigStored(t, fileID(1))
 	for i := 2; i <= maxPendingDownloads+1; i++ {
-		r.l.chat.attachments.put(bridge.Attachment{ID: fileID(i), Name: "big.bin", Size: 64 << 20}, "outbox/big.bin")
+		r.l.chat.attachments.put(bridge.Attachment{ID: fileID(i), Name: "big.bin", Size: bigSize}, "outbox/big.bin")
 	}
 	for i := 1; i <= maxPendingDownloads; i++ {
 		sendApp(t, r.c, bridge.TypeFileGet, fmt.Sprintf("r_%d", i), bridge.FileGet{ID: fileID(i)})
@@ -352,7 +352,9 @@ func TestDownloadsAreCapped(t *testing.T) {
 	sendApp(t, r.c, bridge.TypeFileGet, "r_over", bridge.FileGet{ID: fileID(maxPendingDownloads + 1)})
 	ids := map[string]bool{}
 	busy := false
-	for frames := 0; frames < 300; {
+	// Enough frames to see every download that sends, far less than the
+	// bigFrames of any of them (a finished one would free its slot).
+	for frames := 0; frames < 40; {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		typ, data, err := r.c.Read(ctx)
 		cancel()
